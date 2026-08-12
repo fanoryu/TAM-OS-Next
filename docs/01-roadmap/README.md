@@ -6,7 +6,15 @@ truth; the [Governance](../00-governance/README.md) layer above it is timeless a
 
 ## Authoritative roadmap state
 
-Current as of `main` after the **v2.10.0 official release** (release commit `335d53ed`).
+Current as of `main` in the canonical repository **`fanoryu/TAM-OS-Next`**, after the **v2.10.0 official
+release**.
+
+> **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
+> — the UX-006, Readiness and release work all landed in
+> [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) before the clean migration. They do **not** resolve
+> in this repository, which starts from a fresh history. This repository also has **no tags or Releases**
+> of its own; it begins its release lineage at the next separately authorized version. See
+> [`PROVENANCE.md`](../../PROVENANCE.md).
 
 | # | Item | Status |
 |---|---|---|
@@ -15,7 +23,7 @@ Current as of `main` after the **v2.10.0 official release** (release commit `335
 | 3 | Readiness-2 — End-to-End User Journey Acceptance | **MERGED / FROZEN** (`580d8999`) |
 | 4 | Readiness-3 — Release Candidate & Pilot Package | **MERGED / FROZEN** (`61ddd939`) |
 | 5 | Controlled Pilot Sign-off | **APPROVED** (`df76ec20`) |
-| 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST** — annotated tag `v2.10.0` on release commit `335d53ed`; asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical to `dist/` |
+| 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST — in the predecessor repository** — annotated tag `v2.10.0` on predecessor release commit `335d53ed`; asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical to `dist/` here. Not re-tagged or re-published in this repository |
 | 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12). **Implementation NOT authorized** |
 | 8 | **Controlled Pilot** | **NEXT — approved to start, NOT YET LAUNCHED** |
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |

@@ -76,8 +76,20 @@ carried forward as documents, which is the durable form, while the commit graph 
 
 This repository uses **owner-only Git authorship**. Commits are authored by the repository owner; AI
 agents that assist with implementation are never recorded as authors or co-authors, and AI-attribution
-trailers are prohibited and mechanically rejected by
-[`tools/check-commit-attribution.js`](tools/check-commit-attribution.js) (`CLAUDE.md` §15.7).
+trailers are prohibited (`CLAUDE.md` §15.7).
+
+The policy is enforced in **two layers, from one implementation** —
+[`tools/check-commit-attribution.js`](tools/check-commit-attribution.js) is the single source of the
+rules, and neither layer restates them, so local and CI enforcement cannot drift apart:
+
+| Layer | Runs | Catches |
+|---|---|---|
+| [`.githooks/commit-msg`](.githooks/commit-msg) (tracked) | locally, at commit time | the violation before the commit exists — in clones that have run `node tools/install-hooks.js` |
+| [`verify-attribution`](.github/workflows/attribution.yml) | on every pull request and push to `main` | anything the local layer missed; **cannot be skipped** |
+
+Because `.git/hooks/` is not version-controlled, a fresh clone has no local enforcement until
+`node tools/install-hooks.js` points Git at the tracked `.githooks/` directory (repository-local; it
+never writes global Git configuration). CI is the layer that does not depend on anyone remembering.
 
 Removing accumulated AI co-authorship from the canonical repository was one of the reasons for the
 clean-history migration. No commit trailers from the source repository were copied into this document

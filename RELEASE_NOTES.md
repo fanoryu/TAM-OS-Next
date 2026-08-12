@@ -1,11 +1,17 @@
 # TAM OS v2.10.0 — Governed Workspace
 
 **Release Name:** Governed Workspace
-**Status:** v2.10.0 is **published** and **marked Latest**, from annotated tag `v2.10.0`. The published
+**Status:** v2.10.0 is **published** and **marked Latest** in the predecessor repository
+[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` there. The published
 asset is `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
 `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`), byte-identical to the repository
-artifact `dist/tam-os-v2.10.0.html`. `SCHEMA_VERSION` **remains 6** — this release carries **no data
-migration**, so Complete Backups taken on v2.9.0 restore unchanged.
+artifact `dist/tam-os-v2.10.0.html` tracked here. `SCHEMA_VERSION` **remains 6** — this release carries
+**no data migration**, so Complete Backups taken on v2.9.0 restore unchanged.
+
+> **Release lineage.** All tags and Releases up to v2.10.0 belong to the predecessor repository, which is
+> retained as a read-only archive. The canonical repository `fanoryu/TAM-OS-Next` currently has **no tags
+> and no Releases**, and begins its own lineage at the next separately authorized version. v2.10.0 is not
+> re-tagged or re-published here. See [`PROVENANCE.md`](PROVENANCE.md).
 **v2.9.0** remains **published** and immutable (asset `tam-os-v2.9.0.html`, 1,049,018 bytes) and is
 simply no longer marked Latest; v2.10.0 supersedes it as Latest without moving, replacing, re-labelling
 or rewriting it.
