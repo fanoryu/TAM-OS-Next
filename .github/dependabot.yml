@@ -1,0 +1,39 @@
+# Dependabot configuration for TAM Intelligence OS — PR-3 "The Guardian".
+#
+# Scope (approved Engineering Decision Package, Season 2 / Sprint 3):
+#   - ONLY the github-actions ecosystem. No npm/pip/docker/etc. — no dependency
+#     manifests for those exist in this repository, so they are deliberately absent.
+#   - The application ships zero runtime dependencies (CLAUDE.md §4.2/§6.2) and the
+#     tools/ Node scripts import only the Node standard library, so there is nothing
+#     for an npm updater to scan.
+#   - The SheetJS CDN <script> is NOT covered here (Dependabot does not monitor CDN
+#     script tags); its integrity is guarded by the SRI pin (SDR-0001 / PR-2.2) and
+#     version bumps remain a manual, SRI-rehashed change.
+#
+# Policy: security + version updates (patch/minor/major), weekly, all GitHub Actions
+# grouped into a single PR, open-PR limit 5, reviewer @fanoryu, no auto-merge
+# (human review required; major updates always reviewed manually).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      # Predictable low-traffic window: Monday 09:00 Asia/Jakarta (PT Total Asset
+      # Manajemen's timezone), so a grouped PR is waiting at the start of the week.
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Jakarta"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    reviewers:
+      - "fanoryu"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "dependabot"
+    commit-message:
+      prefix: "chore(deps)"

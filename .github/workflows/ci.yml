@@ -1,0 +1,64 @@
+name: CI
+
+# Build + verify the portable release on every change to main and on demand.
+# The app needs no dependencies — Node is used only for the build/verify tooling,
+# so there is no `npm install` step.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js (LTS)
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Print Node version
+        run: node --version
+
+      - name: Build portable single file
+        run: node tools/build-single-file.js
+
+      - name: Verify build
+        run: node tools/verify-build.js
+
+      - name: Resolve expected dist filename from APP_VERSION
+        id: meta
+        run: |
+          VERSION="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().version)")"
+          DISTNAME="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().distName)")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "distname=$DISTNAME" >> "$GITHUB_OUTPUT"
+          echo "dist=dist/$DISTNAME" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm expected dist file exists
+        run: |
+          DIST="${{ steps.meta.outputs.dist }}"
+          if [ ! -f "$DIST" ]; then
+            echo "::error::Expected portable build not found: $DIST"
+            exit 1
+          fi
+          echo "Found $DIST ($(wc -c < "$DIST") bytes)"
+
+      - name: Upload portable HTML artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.meta.outputs.distname }}
+          path: ${{ steps.meta.outputs.dist }}
+          if-no-files-found: error

@@ -1,0 +1,9 @@
+refs/heads/main
+refs/tags/v2.6.6
+refs/tags/v2.6.7
+refs/tags/v2.6.8
+refs/tags/v2.6.9
+refs/tags/v2.7.0
+refs/tags/v2.7.1
+refs/tags/v2.7.2
+refs/tags/v2.7.3

@@ -1,0 +1,76 @@
+name: Feature request
+description: Propose a new capability or workflow improvement
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the outcome you need, not just a UI idea. Do not include real payroll,
+        employee, contract, bank, or backup data in examples — use placeholder values.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem or gap are you experiencing today?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Requested workflow
+      description: How should the app behave end-to-end to solve this?
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Affected role
+      options:
+        - Director
+        - Finance
+        - HR
+        - Payroll Administrator
+        - Employee
+        - Auditor / Reviewer
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: Business value
+      description: Why does this matter? What does it save or unlock?
+    validations:
+      required: true
+  - type: textarea
+    id: ui
+    attributes:
+      label: Suggested UI (optional)
+      description: Where might this live in the app? Sketches or references welcome (sanitized).
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Low — nice to have
+        - Medium — improves efficiency
+        - High — blocks an important workflow
+        - Critical — compliance / month-end blocker
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Confirmation
+      options:
+        - label: This request contains no real payroll, employee, contract, bank, or backup data.
+          required: true

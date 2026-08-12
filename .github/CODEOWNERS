@@ -1,0 +1,31 @@
+# TAM Intelligence OS — code ownership
+# @fanoryu owns the repository. The last matching pattern wins, so the catch-all
+# below is reinforced by explicit rules for the highest-risk areas.
+
+# Everything (source, docs, artifacts) defaults to the repository owner.
+*                       @fanoryu
+
+# Application source
+/index.html             @fanoryu
+/js/                    @fanoryu
+/css/                   @fanoryu
+
+# Build / verify tooling (single source of truth for load order + version)
+/tools/                 @fanoryu
+
+# GitHub automation and governance
+/.github/               @fanoryu
+/.github/workflows/     @fanoryu
+
+# Security & governance files
+/SECURITY.md            @fanoryu
+/LICENSE                @fanoryu
+/PROPRIETARY-LICENSE-NOTICE.md  @fanoryu
+/CONTRIBUTING.md        @fanoryu
+
+# Documentation
+/docs/                  @fanoryu
+/*.md                   @fanoryu
+
+# Portable release artifact
+/dist/                  @fanoryu

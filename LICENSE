@@ -1,0 +1,45 @@
+TAM Intelligence OS — Proprietary License
+Copyright (c) PT Total Asset Manajemen. All rights reserved.
+
+This software is proprietary and confidential. It is NOT open source, and no
+open-source license (MIT, Apache, GPL, BSD, or any other) is granted.
+
+1. Ownership
+   TAM Intelligence OS — including its source code, build and verification
+   tooling, documentation, and the generated portable single-file builds — is
+   owned by PT Total Asset Manajemen. Access to this repository does not
+   transfer any ownership or license rights.
+
+2. Permitted use
+   Use is limited to PT Total Asset Manajemen and its authorized collaborators,
+   for the company's internal business purposes only.
+
+3. Restrictions
+   Without prior explicit written permission from PT Total Asset Manajemen, you
+   may NOT:
+     - copy, reproduce, or distribute the source code or any build;
+     - modify the software or create derivative works;
+     - use the software or any part of it outside PT Total Asset Manajemen's
+       authorized internal use;
+     - publish, sublicense, sell, rent, or otherwise transfer it to any third
+       party.
+
+4. Confidential data
+   This software processes finance, payroll, employee, and contract
+   information. Treat the code and any associated data as confidential. Do not
+   commit, share, or export real company or personal data. See SECURITY.md and
+   docs/DATA-SAFETY.md.
+
+5. No warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, TO THE EXTENT PERMITTED BY APPLICABLE LAW.
+
+6. Not formal legal advice
+   This file states the project's proprietary intent in plain terms. It is not
+   a substitute for a formal license or confidentiality agreement. PT Total
+   Asset Manajemen should obtain formal legal review to put enforceable
+   licensing, confidentiality, and data-protection terms in place. Extended
+   terms are described in PROPRIETARY-LICENSE-NOTICE.md.
+
+For permissions or questions, contact PT Total Asset Manajemen through the
+repository owner.

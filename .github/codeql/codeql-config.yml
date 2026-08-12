@@ -1,0 +1,15 @@
+# CodeQL configuration for TAM Intelligence OS (PR-2 — see EDR-PR-2).
+#
+# Query suite: the DEFAULT "security" suite only. security-extended is deliberately
+# NOT enabled (approved decision) — no `queries:` override is added here, so CodeQL
+# runs its standard security queries and nothing more.
+#
+# Path exclusions (critical): the entire application is inlined into the tracked
+# portable build and the frozen golden-master reference. Analyzing those would report
+# every finding two or three times. Exclude them so alerts reflect the modular source
+# (js/, tools/) and the workflows only.
+name: "TAM Intelligence OS — CodeQL config"
+
+paths-ignore:
+  - "dist/**"
+  - "tam-intelligence-os-v2.5.2.html"

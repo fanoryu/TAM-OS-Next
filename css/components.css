@@ -1,0 +1,231 @@
+/* ===== Cards / grid =====
+   UX-002B token note: padding / margin / gap / border-radius / font-size resolve
+   from tokens. Documented exceptions, applied consistently throughout:
+     (a) values below 4px (1px / 1.5px / 2px / 3px) — hairlines and optical
+         adjustments finer than the smallest spacing step;
+     (b) td / th padding — frozen by the table density invariant;
+     (c) fixed component geometry (width / height / max-width / min-width) —
+         layout arithmetic, not spacing. */
+.grid{display:grid;gap:var(--space-3);}
+.grid-4{grid-template-columns:repeat(4,1fr);}
+.grid-2{grid-template-columns:1.3fr 1fr;}
+.grid-3{grid-template-columns:repeat(3,1fr);}
+@media(max-width:1050px){.grid-4{grid-template-columns:repeat(2,1fr);} .grid-2{grid-template-columns:1fr;} .grid-3{grid-template-columns:1fr;}}
+/* A `1fr` track is minmax(auto,1fr), so its floor is the content's min-content
+   width — a wide table or chart then forces the track past its container and the
+   page scrolls horizontally, with .table-wrap's overflow-x:auto powerless because
+   the track already blew out. Letting grid children shrink restores containment
+   and hands scrolling back to the inner .table-wrap where it belongs. */
+.grid > *, .two-col > *{min-width:0;}
+/* UX-005C — canonical vertical section rhythm. Replaces the off-grid inline
+   `margin-bottom:14px` drift (was between --space-3 and --space-4) with one tokened
+   separator for stacked sections/cards/blocks. Presentation only. */
+.stack-section{margin-bottom:var(--space-4);}
+
+.card{background:var(--surface);border:1px solid var(--border-soft);border-radius:var(--radius-lg);padding:var(--space-4);}
+.card h3{font-family:var(--sans);font-weight:650;font-size:var(--fs-4);letter-spacing:-.1px;margin:0 0 var(--space-3) 0;color:var(--text);}
+.card h3 .tag{font-family:var(--sans);font-size:var(--fs-1);color:var(--text-faint);font-weight:500;margin-left:var(--space-2);text-transform:uppercase;letter-spacing:.4px;}
+
+/* UX-002B: a stat card holds one number — it does not need 16/18px of chrome. */
+.stat-card{padding:var(--space-3) var(--space-4);}
+.stat-label{font-size:var(--fs-1);color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px;margin-bottom:var(--space-2);}
+/* UX-004D — Numeric Typography Standard. Business numbers use the primary UI font
+   (--sans) with tabular-nums so digits share a fixed advance width: KPI values,
+   currency, salaries, totals and metrics align in columns and never jitter as their
+   values change. Presentation only — no formatter, precision, locale or export
+   behaviour is affected. Monospace (--mono) is retained for technical/developer
+   inputs (e.g. textarea.input), not as the default business-number font. */
+.stat-value{font-family:var(--sans);font-variant-numeric:tabular-nums;font-size:var(--fs-5);font-weight:600;letter-spacing:-.3px;}
+.stat-sub{font-size:var(--fs-2);margin-top:var(--space-1);color:var(--text-dim);}
+.stat-sub.pos{color:var(--green);}
+.stat-sub.neg{color:var(--brick);}
+
+/* ===== Tables =====
+   DENSITY INVARIANT (UX-002B): td and th padding are frozen at 9px / 8px 10px.
+   Table density is information density; this refresh must not reduce it. */
+.table-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:var(--fs-3);}
+th{
+  text-align:left;font-size:var(--fs-1);text-transform:uppercase;letter-spacing:.4px;color:var(--text-faint);
+  padding:8px 10px;border-bottom:1px solid var(--border);font-weight:600;white-space:nowrap;position:sticky;top:0;background:var(--surface);
+}
+td{padding:9px 10px;border-bottom:1px solid var(--border-soft);color:var(--text);vertical-align:middle;}
+tr:hover td{background:var(--surface-2);}
+td.num, th.num{text-align:right;font-family:var(--sans);font-variant-numeric:tabular-nums;}
+.mono{font-family:var(--sans);font-variant-numeric:tabular-nums;}
+.dim{color:var(--text-dim);}
+.faint{color:var(--text-faint);}
+
+.pill{display:inline-flex;align-items:center;gap:var(--space-1);padding:3px var(--space-2);border-radius:var(--radius-full);font-size:var(--fs-2);font-weight:600;white-space:nowrap;}
+.pill-gaji{background:var(--accent-soft);color:var(--accent);}
+.pill-rutin{background:var(--blue-soft);color:var(--blue);}
+.pill-kegiatan{background:var(--brick-soft);color:var(--brick);}
+.pill-income{background:var(--green-soft);color:var(--green);}
+.pill-other{background:var(--surface-3);color:var(--text-dim);}
+.pill-over{background:var(--brick-soft);color:var(--brick);}
+.pill-under{background:var(--green-soft);color:var(--green);}
+.pill-onbudget{background:var(--surface-3);color:var(--text-dim);}
+.pill-status-planned{background:rgba(201,161,92,0.16);color:#C9A15C;}
+.pill-status-scheduled{background:rgba(111,163,216,0.16);color:#6FA3D8;}
+/* UX-002B: the only status pill that changes — it now resolves from the new
+   --warn tokens in BOTH themes, so the base.css light override is gone.
+   Values are identical to the two literals it replaces: dark #D98A3D on
+   rgba(217,138,61,.16); light #8A5410 on rgba(196,120,40,.16). */
+.pill-status-partial{background:var(--warn-soft);color:var(--warn);}
+.pill-status-completed{background:rgba(79,174,124,0.16);color:#4FAE7C;}
+.pill-status-cancelled{background:rgba(193,84,63,0.16);color:#C1543F;}
+.pill-status-archived{background:var(--surface-3);color:#96A1BA;}
+
+.linklike{background:none;border:none;color:var(--text);font:inherit;cursor:pointer;padding:0;text-align:left;}
+.linklike:hover{color:var(--interactive);text-decoration:underline;}
+
+.actions-menu{position:relative;display:inline-block;}
+.actions-dropdown{position:absolute;right:0;top:calc(100% + 4px);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-1);z-index:20;min-width:170px;box-shadow:0 8px 28px rgba(0,0,0,.45);}
+/* v2.6.3b — floating layer: portaled to #menu-root and positioned with position:fixed
+   via JS (getBoundingClientRect), so it is never clipped by a table's overflow. */
+.actions-dropdown.floating{position:fixed;right:auto;z-index:990;}
+.actions-item{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text);font-size:var(--fs-2);padding:var(--space-2);border-radius:var(--radius-sm);cursor:pointer;}
+.actions-item:hover{background:var(--surface-3);}
+.actions-item.danger{color:var(--brick);}
+
+.exec-timeline{display:flex;align-items:center;gap:0;margin:var(--space-2) 0;}
+.exec-stage{display:flex;flex-direction:column;align-items:center;gap:var(--space-2);flex:none;width:70px;text-align:center;}
+.exec-connector{flex:1;height:2px;background:var(--border);margin-top:calc(var(--space-4) * -1);}
+.exec-dot{width:14px;height:14px;border-radius:var(--radius-full);background:var(--surface-3);border:2px solid var(--border);}
+.exec-stage.reached .exec-dot{background:var(--interactive);border-color:var(--interactive);}
+.exec-stage.cancelled .exec-dot{background:var(--brick);border-color:var(--brick);}
+.exec-stage-label{font-size:var(--fs-1);color:var(--text-dim);}
+.exec-stage.reached .exec-stage-label{color:var(--text);}
+
+.hist-list{display:flex;flex-direction:column;gap:var(--space-1);}
+.hist-row{display:grid;grid-template-columns:90px 1fr auto;gap:var(--space-2);font-size:var(--fs-2);align-items:baseline;}
+.hist-event{font-weight:600;color:var(--interactive);}
+.hist-note{color:var(--text-dim);}
+.hist-ts{font-size:var(--fs-1);}
+.pill-dup{background:var(--brick-soft);color:var(--brick);}
+
+.bar-track{width:100%;height:6px;background:var(--surface-3);border-radius:var(--radius-sm);overflow:hidden;}
+.bar-fill{height:100%;border-radius:var(--radius-sm);}
+
+/* ===== Forms ===== */
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3);}
+.field{display:flex;flex-direction:column;gap:var(--space-1);}
+.field label{font-size:var(--fs-2);color:var(--text-dim);font-weight:500;}
+.field select, .field input{width:100%;}
+.hint{font-size:var(--fs-2);color:var(--text-faint);margin-top:var(--space-1);}
+
+.dropzone{
+  border:1.5px dashed var(--border);border-radius:var(--radius-lg);padding:var(--space-6) var(--space-5);text-align:center;
+  color:var(--text-dim);font-size:var(--fs-3);cursor:pointer;transition:border-color .12s,background .12s;
+}
+.dropzone:hover, .dropzone.drag{border-color:var(--interactive);background:var(--interactive-soft);}
+.dropzone .big{font-size:var(--fs-5);margin-bottom:var(--space-2);}
+
+.tabs{display:flex;gap:var(--space-1);border-bottom:1px solid var(--border-soft);margin-bottom:var(--space-4);}
+.tab{padding:var(--space-2) var(--space-3);font-size:var(--fs-3);color:var(--text-dim);border:none;background:transparent;border-bottom:2px solid transparent;font-weight:500;}
+.tab.active{color:var(--interactive);border-bottom-color:var(--interactive);}
+
+.section-title{font-family:var(--sans);font-size:var(--fs-4);font-weight:650;letter-spacing:-.1px;margin:var(--space-5) 0 var(--space-2) 0;}
+.divider{height:1px;background:var(--border-soft);margin:var(--space-4) 0;}
+
+.insight-list{display:flex;flex-direction:column;gap:var(--space-2);}
+.insight-item{display:flex;gap:var(--space-2);font-size:var(--fs-3);line-height:1.5;padding:var(--space-2) var(--space-3);background:var(--surface-2);border-radius:var(--radius-md);border-left:3px solid var(--interactive);}
+.insight-item.warn{border-left-color:var(--warn);}
+.insight-item.good{border-left-color:var(--green);}
+/* UX-005A — Action Center navigable row. An .insight-item rendered as a <button>:
+   normalize the control to the row layout and add a clear interactive affordance
+   (hover + focus). Severity stays on the left border AND an icon, never colour alone. */
+.action-item{width:100%;text-align:left;font:inherit;color:var(--text);cursor:pointer;border-top:none;border-right:none;border-bottom:none;align-items:flex-start;}
+.action-item:hover{background:var(--surface-3);}
+.action-item .ac-ic{flex:none;}
+/* UX-006D2 — Action Center navigability affordance. A navigable row (<button
+   data-ac-nav>) and a non-navigable note (<div role="note">) were distinguishable
+   only on hover, which never arrives on touch. A persistent chevron marks the rows
+   that actually go somewhere. Decorative and CSS-only: the generated markup, the
+   destinations and the accessible names are untouched, and the chevron is not
+   exposed to assistive tech (the row already announces "navigate to …"). */
+.action-item .ac-text{flex:1;min-width:0;}
+.action-item::after{content:"›";flex:none;color:var(--text-faint);font-size:var(--fs-4);line-height:1.2;margin-left:var(--space-1);}
+.action-item:hover::after{color:var(--text);}
+
+/* UX-006D2 — Quick Actions are NAVIGATION, but they render in .head-controls beside
+   operational buttons (Generate Payroll, Reset All Data) with identical styling, so
+   "go somewhere" and "do something" were visually the same act. A quieter surface
+   plus a trailing arrow separates the two. Presentation only — the frozen UX-006C3
+   destinations, labels and handlers are unchanged, and this never disables or hides
+   a Quick Action for any principal. */
+.btn.quick-action{background:transparent;border-color:var(--border-soft);color:var(--text-dim);font-weight:500;}
+.btn.quick-action:hover{background:var(--surface-2);border-color:var(--text-faint);color:var(--text);}
+.btn.quick-action::after{content:"→";margin-left:var(--space-1);color:var(--text-faint);}
+.btn.quick-action:hover::after{color:var(--text);}
+
+/* UX-005B — data grid controls (sortable headers, pager, result count). Additive;
+   every value resolves from an existing token. */
+.grid-sort{background:none;border:none;color:var(--text-faint);font:inherit;font-size:var(--fs-1);text-transform:uppercase;letter-spacing:.4px;font-weight:600;cursor:pointer;padding:0;display:inline-flex;align-items:center;gap:2px;}
+.grid-sort:hover{color:var(--text-dim);}
+.grid-sort.active{color:var(--text);}
+.grid-sort-ind{font-size:var(--fs-1);}
+.grid-pager{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-3);}
+.grid-page-ind{font-size:var(--fs-2);color:var(--text-dim);}
+.grid-page-size{width:auto;}
+.grid-count{font-variant-numeric:tabular-nums;}
+
+/* UX-005D — Global Search palette (Ctrl/Cmd+K). Reuses existing overlay/surface/
+   type/spacing tokens; navigation-only. Additive; no new colors or tokens. */
+.gsearch-overlay{position:fixed;inset:0;background:rgba(6,9,16,.6);display:flex;align-items:flex-start;justify-content:center;z-index:1000;padding:var(--space-6) var(--space-4);}
+.gsearch-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);width:100%;max-width:600px;margin-top:6vh;box-shadow:0 12px 40px rgba(0,0,0,.5);overflow:hidden;display:flex;flex-direction:column;max-height:70vh;}
+.gsearch-input{border:none;border-bottom:1px solid var(--border-soft);border-radius:0;font-size:var(--fs-4);padding:var(--space-4);width:100%;background:var(--surface);}
+.gsearch-input:focus{border-color:var(--interactive);}
+.gsearch-count{font-size:var(--fs-1);color:var(--text-faint);padding:var(--space-1) var(--space-4);}
+.gsearch-results{overflow-y:auto;padding:var(--space-2);}
+.gsearch-group{font-size:var(--fs-1);text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint);font-weight:700;padding:var(--space-2) var(--space-2) var(--space-1);}
+.gsearch-item{display:flex;align-items:baseline;gap:var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);cursor:pointer;}
+.gsearch-item:hover{background:var(--surface-2);}
+.gsearch-item.active{background:var(--interactive-soft);}
+.gsearch-item-label{color:var(--text);font-size:var(--fs-3);font-weight:500;}
+.gsearch-item-meta{color:var(--text-dim);font-size:var(--fs-2);}
+.gsearch-item-type{margin-left:auto;color:var(--text-faint);font-size:var(--fs-1);text-transform:uppercase;letter-spacing:.4px;}
+.gsearch-empty{padding:var(--space-5) var(--space-4);text-align:center;color:var(--text-faint);font-size:var(--fs-3);}
+
+.badge-count{background:var(--brick);color:#fff;font-size:var(--fs-1);font-weight:700;border-radius:var(--radius-full);padding:1px var(--space-1);margin-left:auto;}
+
+.empty{padding:var(--space-6) var(--space-5);text-align:center;color:var(--text-faint);font-size:var(--fs-3);}
+.empty .big{font-size:var(--fs-5);margin-bottom:var(--space-2);opacity:.6;}
+
+.toast{
+  position:fixed;bottom:var(--space-5);right:var(--space-5);background:var(--surface-3);border:1px solid var(--border);
+  color:var(--text);padding:var(--space-3) var(--space-4);border-radius:var(--radius-lg);font-size:var(--fs-3);box-shadow:0 8px 30px rgba(0,0,0,.4);
+  z-index:999;max-width:340px;
+}
+
+.checkbox-row{display:flex;align-items:center;gap:var(--space-2);}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(6,9,16,.6);display:flex;align-items:center;justify-content:center;z-index:998;padding:var(--space-5);}
+/* UX-005E — modal viewport containment. The shared modal primitive stays inside
+   the viewport and scrolls internally when its content is taller than the space
+   available (short/mobile viewports). Normalizes the proven people-helper pattern
+   (max-height:88vh; overflow-y:auto) onto the shared class, so the finance
+   Transaction Execute / Edit / Detail modals — which render the raw .modal — inherit
+   containment instead of each carrying a view-specific workaround. Presentation only. */
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5);max-width:480px;width:100%;max-height:88vh;overflow-y:auto;}
+.modal h3{font-family:var(--sans);font-weight:650;letter-spacing:-.1px;margin:0 0 var(--space-2) 0;}
+.modal p{color:var(--text-dim);font-size:var(--fs-3);line-height:1.6;}
+.modal-actions{display:flex;gap:var(--space-2);justify-content:flex-end;margin-top:var(--space-4);}
+
+.kpi-chip{display:flex;align-items:center;gap:var(--space-1);font-size:var(--fs-2);color:var(--text-dim);}
+.dot{width:8px;height:8px;border-radius:var(--radius-full);display:inline-block;}
+
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);}
+@media(max-width:900px){.two-col{grid-template-columns:1fr;} .form-grid{grid-template-columns:1fr 1fr;}}
+
+.upload-preview-cat{margin-bottom:var(--space-4);}
+.upload-preview-cat h4{font-size:var(--fs-2);text-transform:uppercase;letter-spacing:.4px;color:var(--text-faint);margin:0 0 var(--space-2) 0;}
+
+.small-btn-row{display:flex;gap:var(--space-1);}
+
+/* UX-006D3 — narrow-viewport text containment. Long unbreakable tokens in card
+   prose (storage keys, identifiers, version strings) pushed the whole page into
+   horizontal scroll below ~480px: Release Notes overflowed the 375px viewport by
+   80px. `break-word` only engages when a word would otherwise overflow, so wider
+   viewports and normal copy are visually unchanged. Presentation only. */
+.card li, .card p, .card .desc{overflow-wrap:break-word;}

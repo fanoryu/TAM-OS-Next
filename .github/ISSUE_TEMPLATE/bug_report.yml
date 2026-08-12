@@ -1,0 +1,126 @@
+name: Bug report
+description: Report a defect in TAM Intelligence OS
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        **Do not paste real payroll, employee, contract, bank, credential, or backup data
+        into this issue.** Redact names and amounts, and attach only sanitized screenshots.
+        For anything security-sensitive, follow `SECURITY.md` instead of opening a public issue.
+  - type: input
+    id: app-version
+    attributes:
+      label: Application version
+      description: Shown in Settings → About, or the sidebar footer (e.g. 2.6.8).
+      placeholder: "2.6.8"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      placeholder: "Chrome 127, Edge 127, Firefox 128, Safari 17…"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11, macOS 14, …"
+    validations:
+      required: true
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      description: Where does the problem occur?
+      options:
+        - Executive Dashboard
+        - Finance Overview
+        - Execution Center
+        - Transactions
+        - Cash Flow
+        - Budget Center
+        - Employees
+        - Contracts
+        - Payroll Workspace
+        - Overtime
+        - Monthly Plan Generator
+        - Smart Import
+        - Activity Log
+        - Reports
+        - Settings
+        - Backup / Restore
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps that reliably trigger the problem.
+      placeholder: |
+        1. Go to …
+        2. Click …
+        3. Observe …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Sanitized screenshots only (redact real names/amounts). Drag-and-drop to attach.
+    validations:
+      required: false
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console errors
+      description: Open DevTools (F12) → Console and paste any red errors. Redact any data values.
+      render: text
+    validations:
+      required: false
+  - type: dropdown
+    id: data-loss
+    attributes:
+      label: Did data loss occur?
+      options:
+        - "No"
+        - "Yes — data appears lost or corrupted"
+        - "Not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: backup
+    attributes:
+      label: Do you have a recent backup?
+      description: Settings → Data Portability → Export Complete Backup.
+      options:
+        - "Yes — a recent Complete Backup exists"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Confirmation
+      options:
+        - label: This issue contains no real payroll, employee, contract, bank, credential, or backup data.
+          required: true

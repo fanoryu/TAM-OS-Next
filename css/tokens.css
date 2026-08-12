@@ -1,0 +1,130 @@
+:root, :root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0E1420;
+  --surface:#161D2C;
+  --surface-2:#1D2740;
+  --surface-3:#242F4C;
+  --border:#2A3550;
+  --border-soft:#1F2942;
+  --text:#E8EAF0;
+  --text-dim:#96A1BA;
+  /* UX-002B: raised from #5E6A87 (3.12:1) to meet WCAG AA at the 10-12px sizes
+     it is used at — 5.25:1 on --surface, 4.62:1 on --surface-2. */
+  --text-faint:#828FB4;
+  --accent:#C9A15C;
+  --accent-soft:rgba(201,161,92,0.14);
+  /* UX-002B (PD-C): --brand is identity ONLY (the wordmark). --interactive is the
+     single selection / primary-action colour. Neither is a substitute for the
+     other, and neither carries semantic state. */
+  --brand:#C9A15C;
+  --brand-soft:rgba(201,161,92,0.14);
+  --interactive:#6E9BEA;
+  --interactive-soft:rgba(110,155,234,0.16);
+  --interactive-ink:#0B1220;
+  --blue:#6FA3D8;
+  --blue-soft:rgba(111,163,216,0.14);
+  --brick:#C1543F;
+  --brick-soft:rgba(193,84,63,0.14);
+  --green:#4FAE7C;
+  --green-soft:rgba(79,174,124,0.14);
+  /* UX-002B: the warning semantic finally has a token. It was previously two
+     different hardcoded oranges (components.css and the base.css light override). */
+  --warn:#D98A3D;
+  --warn-soft:rgba(217,138,61,0.16);
+  /* semantic chart tokens (theme-aware; charts read these live) */
+  --chart-grid:#26314c;
+  --chart-axis:#8592AD;
+  --chart-tip-bg:#1D2740;
+  --chart-tip-border:#2A3550;
+  --chart-hollow:#161D2C;
+  /* UX-002B: chart series tokens — theme-aware replacements for the hex literals
+     that callers used to pass in. Consumed via themeVar() in Phase 2. */
+  --chart-planned:#96A1BA;
+  --chart-actual:#C9A15C;
+  --chart-positive:#4FAE7C;
+  --chart-negative:#C1543F;
+  --chart-neutral:#6FA3D8;
+  --chart-muted:#5E6A87;
+  --serif:'Source Serif 4', Georgia, serif;
+  --sans:'Inter', -apple-system, sans-serif;
+  --mono:'JetBrains Mono', ui-monospace, monospace;
+  /* ===== UX-002B type scale — 6 steps, no fractional values ===== */
+  --fs-1:10px;
+  --fs-2:12px;
+  --fs-3:13px;
+  --fs-4:15px;
+  --fs-5:19px;
+  --fs-6:24px;
+  /* ===== UX-002B spacing scale — 4px base, 6 steps ===== */
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:24px;
+  --space-6:32px;
+  /* ===== UX-002B radius scale — 4 steps ===== */
+  --radius-sm:6px;
+  --radius-md:8px;
+  --radius-lg:12px;
+  --radius-full:999px;
+}
+/* Professional light theme (Part 15): off-white bg, white cards, navy text,
+   gold accent — no pure-white glare, WCAG-readable contrast. */
+:root[data-theme="light"]{
+  color-scheme: light;
+  --bg:#F3F5F8;
+  --surface:#FFFFFF;
+  --surface-2:#EDF1F6;
+  --surface-3:#E1E7F0;
+  --border:#CDD5E1;
+  --border-soft:#E3E8F0;
+  --text:#1B2740;
+  --text-dim:#4E5D78;
+  /* UX-002B: raised from #7A879E (3.63:1) — 5.38:1 on --surface, 4.75:1 on --surface-2. */
+  --text-faint:#5F6B80;
+  --accent:#9C6B1E;
+  --accent-soft:rgba(156,107,30,0.13);
+  --brand:#9C6B1E;
+  --brand-soft:rgba(156,107,30,0.13);
+  --interactive:#2456A6;
+  --interactive-soft:rgba(36,86,166,0.12);
+  --interactive-ink:#FFFFFF;
+  --blue:#2E6CB0;
+  --blue-soft:rgba(46,108,176,0.12);
+  --brick:#B0402A;
+  --brick-soft:rgba(176,64,42,0.11);
+  --green:#2C8358;
+  --green-soft:rgba(44,131,88,0.12);
+  --warn:#8A5410;
+  --warn-soft:rgba(196,120,40,0.16);
+  --chart-grid:#D2DAE6;
+  --chart-axis:#5A6884;
+  --chart-tip-bg:#1B2740;
+  --chart-tip-border:#33405C;
+  --chart-hollow:#FFFFFF;
+  --chart-planned:#5A6884;
+  --chart-actual:#9C6B1E;
+  --chart-positive:#2C8358;
+  --chart-negative:#B0402A;
+  --chart-neutral:#2E6CB0;
+  --chart-muted:#7A879E;
+  --serif:'Source Serif 4', Georgia, serif;
+  --sans:'Inter', -apple-system, sans-serif;
+  --mono:'JetBrains Mono', ui-monospace, monospace;
+  --fs-1:10px;
+  --fs-2:12px;
+  --fs-3:13px;
+  --fs-4:15px;
+  --fs-5:19px;
+  --fs-6:24px;
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:24px;
+  --space-6:32px;
+  --radius-sm:6px;
+  --radius-md:8px;
+  --radius-lg:12px;
+  --radius-full:999px;
+}

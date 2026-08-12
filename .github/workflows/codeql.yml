@@ -1,0 +1,66 @@
+name: CodeQL
+
+# Static analysis (SAST) for TAM Intelligence OS — see EDR-PR-2.
+# Independent, reporting-only workflow: it never gates merges (branch protection is a
+# separate future change) and never interacts with the CI or Release workflows.
+# Query suite is the default "security" suite (NOT security-extended); the inlined
+# portable build and golden-master reference are excluded via the config file.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so unchanged code is re-scanned against newly published CodeQL queries.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+# Least privilege: only what CodeQL needs to read the code and upload results.
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    # PRIVATE-REPO COMPATIBILITY: CodeQL's SARIF upload requires GitHub code
+    # scanning, which on a PRIVATE repository needs GitHub Advanced Security /
+    # Code Security. When that is unavailable the upload step fails with
+    # "Code scanning is not enabled for this repository." This is a repository
+    # visibility/licensing condition, not an application defect, so the job is
+    # skipped while the repo is private (a skipped job reports a neutral/success
+    # conclusion and never blocks). If the repository becomes PUBLIC again,
+    # github.event.repository.private is false and CodeQL resumes automatically
+    # with no further workflow change. The substantive TAM OS gate (CI
+    # build-and-verify) is unaffected and remains authoritative.
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Interpreted / non-compiled targets: CodeQL performs no build.
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.37.6
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4.37.6
+        with:
+          category: "/language:${{ matrix.language }}"

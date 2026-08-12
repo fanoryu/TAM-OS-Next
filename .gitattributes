@@ -1,0 +1,20 @@
+# Normalize all text to LF in the repo and on checkout. The build concatenates source
+# files and compares byte-for-byte, so consistent LF endings keep the build reproducible
+# across Windows/macOS/Linux.
+* text=auto eol=lf
+
+# Binary assets — never touch line endings.
+*.xlsx binary
+*.xlsm binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary
+*.ico  binary
+
+# Generated / frozen large HTML artifacts: still tracked, but marked generated so GitHub
+# collapses diffs and excludes them from language statistics. (They remain LF text.)
+dist/*.html                       linguist-generated=true
+tam-intelligence-os-v2.5.2.html   linguist-generated=true

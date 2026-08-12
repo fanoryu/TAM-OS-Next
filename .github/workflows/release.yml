@@ -1,0 +1,84 @@
+name: Release
+
+# Publishes a GitHub Release when a version tag (v*) is pushed.
+# Guardrails: the tag MUST equal v<APP_VERSION>, build + verify MUST pass, and the
+# version-derived portable HTML MUST exist — otherwise nothing is published.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js (LTS)
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Build portable single file
+        run: node tools/build-single-file.js
+
+      - name: Verify build
+        run: node tools/verify-build.js
+
+      - name: Determine version from APP_VERSION
+        id: meta
+        run: |
+          VERSION="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().version)")"
+          DISTNAME="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().distName)")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dist=dist/$DISTNAME" >> "$GITHUB_OUTPUT"
+          echo "expected_tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm tag matches APP_VERSION
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED="${{ steps.meta.outputs.expected_tag }}"
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "::error::Tag '$TAG' does not match APP_VERSION ('$EXPECTED'). Refusing to publish."
+            exit 1
+          fi
+          echo "Tag $TAG matches APP_VERSION."
+
+      - name: Confirm portable HTML exists and filename matches the version
+        run: |
+          DIST="${{ steps.meta.outputs.dist }}"
+          if [ ! -f "$DIST" ]; then
+            echo "::error::Portable HTML not found: $DIST"
+            exit 1
+          fi
+          echo "Found $DIST ($(wc -c < "$DIST") bytes)"
+
+      - name: Resolve release notes source
+        id: notes
+        run: |
+          if [ -f RELEASE_NOTES.md ]; then
+            echo "file=RELEASE_NOTES.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "file=CHANGELOG.md" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release (idempotent) and upload asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          DIST="${{ steps.meta.outputs.dist }}"
+          NOTES="${{ steps.notes.outputs.file }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — refreshing asset only (no duplicate release)."
+            gh release upload "$TAG" "$DIST" --clobber
+          else
+            gh release create "$TAG" "$DIST" \
+              --title "TAM OS $TAG" \
+              --notes-file "$NOTES" \
+              --verify-tag
+          fi

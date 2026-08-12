@@ -1,0 +1,7 @@
+# Keep issues structured: use the Bug report / Feature request forms above.
+# Security-sensitive reports must NOT be filed as public issues — see SECURITY.md.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private disclosure)
+    url: https://github.com/fanoryu/TAM-OS/security/advisories/new
+    about: Report vulnerabilities privately via GitHub Security Advisories. Never paste payroll, employee, bank, credential, or backup data into a public issue.

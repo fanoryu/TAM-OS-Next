@@ -1,0 +1,222 @@
+/* ===== Shell =====
+   UX-002B spacing/radius/type note: every padding, margin, gap, border-radius
+   and font-size below resolves from a token. The documented exceptions are
+   (a) hairline borders and rules, and (b) fixed component geometry — widths,
+   heights and max-widths — which is layout arithmetic, not spacing. */
+#app{display:flex;min-height:100vh;}
+
+.sidebar{
+  width:258px;flex:none;background:var(--surface);border-right:1px solid var(--border-soft);
+  display:flex;flex-direction:column;padding:var(--space-5) 0;position:sticky;top:0;height:100vh;
+  transition:width .2s ease; /* UX-004E: collapse animates width only (no layout thrash) */
+}
+.brand{position:relative;padding:0 var(--space-5) var(--space-4) var(--space-5);border-bottom:1px solid var(--border-soft);margin-bottom:var(--space-3);}
+/* The wordmark is the ONE place the serif survives (UX-002B / PD-B). */
+.brand .mark{font-family:var(--serif);font-weight:700;font-size:var(--fs-5);letter-spacing:0.1px;color:var(--text);white-space:nowrap;line-height:1.2;}
+.brand .mark span{color:var(--brand);}
+.brand .mark .mshort{display:none;}
+.brand .sub{font-size:var(--fs-1);color:var(--text-faint);margin-top:var(--space-1);letter-spacing:0.5px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* UX-006D1 — reachable principal selector ("Acting as"), lives in the brand block. */
+.identity-selector{margin-top:var(--space-3);}
+.identity-selector-label{display:block;font-size:var(--fs-1);color:var(--text-faint);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:var(--space-1);}
+.identity-selector .identity-select{width:100%;}
+.identity-selector-help{font-size:var(--fs-1);color:var(--text-faint);margin-top:var(--space-1);line-height:1.3;}
+/* UX-006D2 — principal & workspace context presentation. Presentation only: the
+   unselected state is a real state, so it is given a visible cue instead of the
+   same faint grey as an ordinary hint; the active workspace context is labelled
+   because the operator previously had no way to see it. Token-driven throughout. */
+.identity-selector[data-principal-state="none"] .identity-selector-help{color:var(--text-dim);}
+.identity-context{margin-top:var(--space-2);padding:var(--space-2);border:1px solid var(--border-soft);border-radius:var(--radius-md);background:var(--surface-2);display:flex;flex-direction:column;gap:2px;}
+.identity-context-name{font-size:var(--fs-2);font-weight:600;color:var(--text);line-height:1.3;}
+.identity-context-detail{font-size:var(--fs-1);color:var(--text-faint);line-height:1.3;}
+.identity-context[data-principal-state="none"]{background:transparent;border-style:dashed;}
+.identity-context[data-principal-state="none"] .identity-context-name{color:var(--text-dim);font-weight:500;}
+/* The rail chip is the collapsed-sidebar carrier of the same truth; it is hidden
+   whenever the full selector is visible, so the two never show at once. */
+.identity-rail{display:none;width:28px;height:28px;margin:0 auto;border-radius:var(--radius-md);background:var(--interactive-soft);color:var(--interactive);font-size:var(--fs-1);font-weight:700;line-height:28px;text-align:center;letter-spacing:.5px;}
+.identity-rail[data-principal-state="none"]{background:transparent;border:1px dashed var(--border);color:var(--text-faint);line-height:26px;}
+
+/* ===== UX-004E — sidebar interaction (collapse / pin / hover-expand / drawer) ===== */
+.nav-label{white-space:nowrap;overflow:hidden;}
+/* Desktop collapse toggle — lives in the brand block, hidden in drawer mode. */
+.sidebar-collapse-btn{position:absolute;top:0;right:var(--space-3);background:transparent;border:none;color:var(--text-faint);cursor:pointer;font-size:var(--fs-3);line-height:1;padding:var(--space-1);border-radius:var(--radius-md);}
+.sidebar-collapse-btn:hover{color:var(--text);background:var(--surface-2);}
+/* Hamburger + backdrop are desktop-hidden; the drawer media query reveals them. */
+.nav-hamburger{display:none;position:fixed;top:var(--space-3);left:var(--space-3);z-index:890;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);color:var(--text);font-size:var(--fs-4);line-height:1;padding:var(--space-2) var(--space-3);cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25);}
+.sidebar-backdrop{display:none;}
+
+/* Collapsed rail (desktop): icons only, labels/sub/foot hidden, narrow width. */
+.sidebar.collapsed{width:64px;}
+.sidebar.collapsed .brand{padding-left:0;padding-right:0;text-align:center;}
+.sidebar.collapsed .brand .mark .mfull{display:none;}
+.sidebar.collapsed .brand .mark .mshort{display:inline;}
+.sidebar.collapsed .brand .sub{display:none;}
+/* UX-006D2 — the collapsed rail keeps the full selector hidden (unchanged), but no
+   longer hides WHICH principal is active: the block itself stays, its inner controls
+   collapse to the compact chip. */
+.sidebar.collapsed .identity-selector{display:block;}
+.sidebar.collapsed .identity-selector-label,
+.sidebar.collapsed .identity-selector .identity-select,
+.sidebar.collapsed .identity-selector-help,
+.sidebar.collapsed .identity-context{display:none;}
+.sidebar.collapsed .identity-rail{display:block;}
+.sidebar.collapsed .sidebar-collapse-btn{position:static;display:block;margin:var(--space-2) auto 0;right:auto;}
+.sidebar.collapsed .nav{padding:0 var(--space-1);}
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .nav-preview-tag,
+.sidebar.collapsed .nav-group-head > span:first-child,
+.sidebar.collapsed .nav-group-head .chev,
+.sidebar.collapsed .sidebar-foot{display:none;}
+.sidebar.collapsed .nav-group-head{justify-content:center;padding:var(--space-1) 0;}
+.sidebar.collapsed .nav-item{justify-content:center;padding-left:0;padding-right:0;gap:0;}
+
+/* Hover-expand: desktop only, when collapsed. Pure CSS temporary peek; mouseleave
+   re-collapses. Pinned-expanded never reaches here (it is not .collapsed). */
+@media (min-width:769px) and (hover:hover){
+  .sidebar.collapsed:hover{width:258px;}
+  .sidebar.collapsed:hover .brand{padding-left:var(--space-5);padding-right:var(--space-5);text-align:left;}
+  .sidebar.collapsed:hover .brand .mark .mfull{display:inline;}
+  .sidebar.collapsed:hover .brand .mark .mshort{display:none;}
+  .sidebar.collapsed:hover .brand .sub{display:block;}
+  .sidebar.collapsed:hover .identity-selector{display:block;}
+  /* UX-006D2 — hover-peek restores the full selector, so the rail chip stands down. */
+  .sidebar.collapsed:hover .identity-selector-label,
+  .sidebar.collapsed:hover .identity-selector-help,
+  .sidebar.collapsed:hover .identity-context{display:block;}
+  .sidebar.collapsed:hover .identity-selector .identity-select{display:block;}
+  .sidebar.collapsed:hover .identity-context{display:flex;}
+  .sidebar.collapsed:hover .identity-rail{display:none;}
+  .sidebar.collapsed:hover .sidebar-collapse-btn{position:absolute;margin:0;right:var(--space-3);}
+  .sidebar.collapsed:hover .nav{padding:0 var(--space-2);}
+  .sidebar.collapsed:hover .nav-label,
+  .sidebar.collapsed:hover .nav-preview-tag,
+  .sidebar.collapsed:hover .nav-group-head > span:first-child,
+  .sidebar.collapsed:hover .nav-group-head .chev,
+  .sidebar.collapsed:hover .sidebar-foot{display:revert;}
+  .sidebar.collapsed:hover .nav-group-head{justify-content:space-between;padding:var(--space-2) var(--space-2);}
+  .sidebar.collapsed:hover .nav-item{justify-content:flex-start;padding:var(--space-2) var(--space-3);gap:var(--space-2);}
+}
+
+/* Responsive drawer: tablet/mobile. The sidebar becomes an off-canvas overlay; the
+   hamburger toggles it; a backdrop dims the page; collapse has no meaning here. */
+@media (max-width:768px){
+  .nav-hamburger{display:inline-flex;align-items:center;justify-content:center;}
+  .main{padding-top:calc(var(--space-5) + var(--space-6));} /* clear the fixed hamburger (token-only) */
+  .sidebar{position:fixed;top:0;left:0;height:100vh;width:258px;z-index:910;
+    transform:translateX(-100%);transition:transform .2s ease;box-shadow:2px 0 18px rgba(0,0,0,.35);}
+  #app.drawer-open .sidebar{transform:translateX(0);}
+  #app.drawer-open .sidebar-backdrop{display:block;position:fixed;inset:0;background:rgba(6,9,16,.5);z-index:900;}
+  /* Collapsed styling is ignored inside the drawer — always show full labels. */
+  .sidebar.collapsed{width:258px;}
+  .sidebar.collapsed .brand{padding-left:var(--space-5);padding-right:var(--space-5);text-align:left;}
+  .sidebar.collapsed .brand .mark .mfull{display:inline;}
+  .sidebar.collapsed .brand .mark .mshort{display:none;}
+  .sidebar.collapsed .brand .sub{display:block;}
+  .sidebar.collapsed .identity-selector{display:block;}
+  /* UX-006D2 — the drawer always shows the full selector, never the rail chip. */
+  .sidebar.collapsed .identity-selector-label,
+  .sidebar.collapsed .identity-selector-help{display:block;}
+  .sidebar.collapsed .identity-selector .identity-select{display:block;}
+  .sidebar.collapsed .identity-context{display:flex;}
+  .sidebar.collapsed .identity-rail{display:none;}
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .nav-preview-tag,
+  .sidebar.collapsed .nav-group-head > span:first-child,
+  .sidebar.collapsed .nav-group-head .chev,
+  .sidebar.collapsed .sidebar-foot{display:revert;}
+  .sidebar.collapsed .nav-item{justify-content:flex-start;padding:var(--space-2) var(--space-3);gap:var(--space-2);}
+  .sidebar-collapse-btn{display:none;} /* collapse control is desktop-only */
+}
+
+.nav{display:flex;flex-direction:column;gap:var(--space-2);padding:0 var(--space-2);overflow-y:auto;}
+.nav-group{display:flex;flex-direction:column;gap:2px;}
+.nav-group-head{
+  display:flex;align-items:center;justify-content:space-between;background:transparent;border:none;
+  color:var(--text-faint);font-size:var(--fs-1);font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  padding:var(--space-2) var(--space-2);cursor:pointer;
+}
+.nav-group-head:hover{color:var(--text-dim);}
+.nav-group-head .chev{font-size:var(--fs-1);}
+.nav-group-items{display:flex;flex-direction:column;gap:2px;}
+/* UX-004F — quieter placeholder badge: same meaning, much lower visual weight. The
+   heavy filled uppercase pill becomes a light, low-contrast tag (no fill, normal
+   weight, subtle case) so planned features read as background information. */
+.nav-preview-tag{
+  margin-left:auto;font-size:var(--fs-1);font-weight:500;text-transform:none;letter-spacing:.2px;
+  background:transparent;color:var(--text-faint);padding:0;border-radius:0;opacity:.75;
+}
+/* UX-004F — "More" progressive-disclosure toggle inside a nav group. Styled like a
+   nav item but visually quieter (it is a control, not a destination). */
+.nav-more-head{color:var(--text-faint);}
+.nav-more-head .chev{margin-left:auto;font-size:var(--fs-1);}
+.nav-more-items{display:flex;flex-direction:column;gap:2px;}
+/* Collapsed rail: the short wordmark "TAM OS" must fit 64px without clipping "OS". */
+.sidebar.collapsed .brand .mark{font-size:var(--fs-3);}
+.nav-item{
+  display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);color:var(--text-dim);
+  font-size:var(--fs-3);font-weight:500;border:none;background:transparent;text-align:left;width:100%;
+  transition:background .12s, color .12s;
+}
+.nav-item:hover{background:var(--surface-2);color:var(--text);}
+.nav-item.active{background:var(--interactive-soft);color:var(--interactive);}
+.nav-item .ic{width:16px;text-align:center;font-size:var(--fs-3);}
+
+.sidebar-foot{margin-top:auto;padding:var(--space-3) var(--space-5) 0 var(--space-5);border-top:1px solid var(--border-soft);font-size:var(--fs-2);color:var(--text-faint);line-height:1.6;}
+
+.main{flex:1;min-width:0;padding:var(--space-6);max-width:1320px;}
+/* UX-002B: the content gutter was fixed at 36px on every viewport. Below 768px
+   that consumed 72px of a narrow screen for nothing. */
+@media(max-width:768px){ .main{padding:var(--space-5) var(--space-4) var(--space-6) var(--space-4);} }
+@media(max-width:480px){ .main{padding:var(--space-4) var(--space-3) var(--space-5) var(--space-3);} }
+
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-4);margin-bottom:var(--space-5);flex-wrap:wrap;}
+.page-head h1{font-family:var(--sans);font-weight:650;font-size:var(--fs-6);letter-spacing:-.2px;margin:0 0 var(--space-1) 0;}
+.page-head .desc{color:var(--text-dim);font-size:var(--fs-3);margin:0;}
+.head-controls{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;}
+
+/* UX-004D — breadcrumb landmark. A quiet trail above the page title; its own
+   navigation landmark, separate from the sidebar's Primary navigation. Only the
+   linked (owning-item) crumb is interactive; domain and terminal crumbs are text. */
+.breadcrumb{margin:0 0 var(--space-3) 0;font-size:var(--fs-2);line-height:1.4;}
+.breadcrumb .crumb-list{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);}
+.breadcrumb .crumb{display:inline-flex;align-items:center;}
+.breadcrumb .crumb-sep{color:var(--text-faint);margin:0 var(--space-1);user-select:none;}
+.breadcrumb .crumb-text{color:var(--text-dim);}
+.breadcrumb .crumb-text[aria-current="page"]{color:var(--text);font-weight:600;}
+.breadcrumb .crumb-link{background:none;border:0;padding:0;margin:0;font:inherit;color:var(--text-dim);cursor:pointer;text-decoration:none;}
+.breadcrumb .crumb-link:hover{color:var(--accent);text-decoration:underline;}
+.breadcrumb .crumb-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px;}
+
+select, .input{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-md);
+  padding:var(--space-2) var(--space-3);font-size:var(--fs-3);outline:none;
+}
+select:focus, .input:focus{border-color:var(--interactive);}
+
+.btn{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-md);
+  padding:var(--space-2) var(--space-3);font-size:var(--fs-3);font-weight:500;transition:border-color .12s, background .12s;
+}
+.btn:hover{border-color:var(--text-faint);}
+.btn:focus-visible, .nav-item:focus-visible, .tab:focus-visible, .linklike:focus-visible, .actions-item:focus-visible, .month-chip:focus-visible{outline:2px solid var(--interactive);outline-offset:2px;}
+/* UX-005F (A5) — extend the single focus treatment to borderless/custom controls
+   that reset border+background and so had no visible keyboard focus indicator. Same
+   outline as every other control; no new visual language, no token change. */
+.grid-sort:focus-visible, .nav-group-head:focus-visible, .sidebar-collapse-btn:focus-visible, .nav-hamburger:focus-visible{outline:2px solid var(--interactive);outline-offset:2px;}
+/* UX-005F (A1) — skip-to-content link. Kept in the a11y/focusable tree but visually
+   off-canvas until focused; the first Tab reveals it at the top-left. Token-driven. */
+.skip-link{position:fixed;top:var(--space-2);left:var(--space-2);z-index:1000;background:var(--interactive);color:var(--interactive-ink);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);font-size:var(--fs-3);font-weight:600;text-decoration:none;transform:translateY(-200%);transition:transform .15s ease;}
+.skip-link:focus{transform:translateY(0);outline:2px solid var(--interactive);outline-offset:2px;}
+.btn-accent{background:var(--interactive);border-color:var(--interactive);color:var(--interactive-ink);font-weight:600;}
+.btn-accent:hover{filter:brightness(1.08);}
+.btn-danger{color:var(--brick);}
+.btn-sm{padding:var(--space-1) var(--space-2);font-size:var(--fs-2);border-radius:var(--radius-sm);}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+/* UX-006D2 — availability-denied controls (the UX-006C3 affordance). These stay
+   VISIBLE and DISABLED exactly as C3 froze them; this only makes the denied state
+   legible. opacity:.4 alone pushed label text under a readable contrast ratio AND
+   made "you may not do this" indistinguishable from "not right now" (a locked
+   payroll period disables the same button). A denied control therefore keeps more
+   of its contrast and gains a dashed edge — a permanent, non-operational cue.
+   Presentation only: it never re-enables, re-hides, or re-decides anything. */
+.btn:disabled[data-authz-denied]{opacity:.65;border-style:dashed;border-color:var(--text-faint);}

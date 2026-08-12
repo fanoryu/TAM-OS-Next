@@ -1,0 +1,13 @@
+# Checksums — sanitization-2026-07-31
+
+## Externally-preserved recovery assets (NOT copied into this public repo)
+a97de5dfb4c8108f363491ba3858c10ed6ca151d6ba49f014e85f7380331e7a6  ../tam-private-backup/20260731-174217/tam-repo-full-prerewrite.bundle (951887 bytes)
+62785e7e4d11c983c7bf243b35ec80923fc306b5355421f387ac7024485b3033  ../tam-private-backup/20260731-174217/Rencana Penggunaan Dana Juli 2026.xlsx (330742 bytes)
+
+## Archived filter-repo metadata (in this folder)
+89ec7d623114d1a3435d1a1c47f0e11963291fde6fd33fca5218fea24cae0c00 *already_ran.txt
+ded2b7b1ce740798dc3811dd1e13e0f5d03c062a9adbf77d7b1c2270add0fcde *changed-refs.txt
+bb6a5e043a696e8030c206a1658a44007bd505a0d9d2fc6978da372c1894392e *commit-map.txt
+c28bf9207c0c340c22beb6319795a018da1a574896c401681d4c0473a88de63c *first-changed-commits.txt
+d2a6f134b85c760c62777aef80cf64d8b5c9dffe47d6cd07f82b2f183aaab1a5 *ref-map.txt
+9bf900abf6bf9a0b2a41e94d5d5cd361aa290c59c43da7648009564bfd77bca3 *suboptimal-issues.txt

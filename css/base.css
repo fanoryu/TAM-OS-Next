@@ -1,0 +1,20 @@
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;transition:background .2s,color .2s;}
+/* Light-theme readability overrides for status pills / badges / toast so text
+   keeps WCAG-readable contrast on white cards (Part 15).
+   UX-002B: the .pill-status-partial override is gone — that pill now resolves
+   from --warn / --warn-soft, which are theme-aware, so the override is dead. */
+:root[data-theme="light"] .pill-gaji, :root[data-theme="light"] .pill-status-planned{background:rgba(156,107,30,0.14);color:#7A5214;}
+:root[data-theme="light"] .pill-rutin, :root[data-theme="light"] .pill-status-scheduled{background:rgba(46,108,176,0.13);color:#1F5290;}
+:root[data-theme="light"] .pill-kegiatan, :root[data-theme="light"] .pill-status-cancelled{background:rgba(176,64,42,0.13);color:#8F2E1B;}
+:root[data-theme="light"] .pill-income, :root[data-theme="light"] .pill-status-completed{background:rgba(44,131,88,0.14);color:#1E6340;}
+:root[data-theme="light"] .pill-other, :root[data-theme="light"] .pill-status-archived, :root[data-theme="light"] .pill-onbudget{background:#E1E7F0;color:#4E5D78;}
+:root[data-theme="light"] .toast{background:#1B2740;color:#F3F5F8;border-color:#33405C;}
+::selection{background:var(--interactive-soft);}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:var(--radius-sm);}
+::-webkit-scrollbar-track{background:transparent;}
+
+a{color:inherit;}
+button{font-family:var(--sans);cursor:pointer;}
+input,select,textarea{font-family:var(--sans);}

@@ -1,0 +1,21 @@
+.chart-wrap{position:relative;min-height:320px;overflow:hidden;}
+.chart-wrap.tall{min-height:380px;}
+.chart-wrap.dense{min-height:420px;}
+.chart-legend{display:flex;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3);padding-top:2px;}
+.chart-legend button{font-family:var(--sans);}
+.chart-mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-2);margin-top:var(--space-3);}
+/* Same `1fr` floor as .grid: four mono figures hold the tracks open wider than the
+   container on a narrow card. Two columns below 640px keeps every value readable
+   instead of clipped. */
+.chart-mini-stats > *{min-width:0;}
+@media(max-width:640px){ .chart-mini-stats{grid-template-columns:repeat(2,1fr);} }
+.chart-mini-stat{background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:var(--space-2) var(--space-3);}
+.chart-mini-stat .lbl{font-size:var(--fs-1);text-transform:uppercase;letter-spacing:.4px;color:var(--text-faint);margin-bottom:var(--space-1);}
+.chart-mini-stat .val{font-family:var(--sans);font-variant-numeric:tabular-nums;font-size:var(--fs-3);font-weight:600;} /* UX-004D numeric typography */
+.chart-range-chips{display:flex;gap:var(--space-1);flex-wrap:wrap;margin-bottom:var(--space-2);}
+
+.month-strip{display:flex;gap:var(--space-1);flex-wrap:wrap;}
+.month-chip{padding:var(--space-1) var(--space-2);border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border-soft);font-size:var(--fs-2);color:var(--text-dim);cursor:pointer;}
+.month-chip.active{background:var(--interactive-soft);border-color:var(--interactive);color:var(--interactive);}
+
+textarea.input{resize:vertical;min-height:70px;font-family:var(--mono);font-size:var(--fs-2);}
