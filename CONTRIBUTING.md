@@ -58,6 +58,18 @@ Do **not** do any of the following without the maintainer's explicit approval:
 
 ## Local development
 
+**First thing after cloning — activate the attribution guard:**
+
+```bash
+node tools/install-hooks.js
+```
+
+`.git/hooks/` is not version-controlled, so a fresh clone has no commit-message enforcement until Git
+is pointed at the tracked `.githooks/` directory. This command does that for **this repository only**
+and never touches your global Git configuration. Skipping it does not let a violation through — CI's
+`verify-attribution` job still rejects it — it just means you find out later. See
+[`tools/README.md`](tools/README.md).
+
 No framework and no `npm install` — the app has no runtime dependencies. Node is used **only** for
 the build/verify tooling (v18+; tested on v24).
 

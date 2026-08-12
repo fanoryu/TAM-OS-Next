@@ -636,7 +636,9 @@ These are candidate directions, not commitments.
   [feature](.github/ISSUE_TEMPLATE/feature_request.yml) forms; blank issues are disabled and
   security reports are routed privately.
 - **Attribution:** commits are owner-authored; AI-attribution trailers are prohibited and mechanically
-  rejected by [`tools/check-commit-attribution.js`](tools/check-commit-attribution.js).
+  rejected in two layers by [`tools/check-commit-attribution.js`](tools/check-commit-attribution.js) —
+  the tracked `.githooks/commit-msg` hook locally (`node tools/install-hooks.js`) and the
+  `verify-attribution` CI job on every PR and push to `main`.
 - **CI/Release:** official GitHub Actions only; minimal permissions; tag/version guardrails.
 
 ---

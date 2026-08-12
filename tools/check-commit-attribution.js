@@ -13,19 +13,42 @@
  * including ones that merely discuss Claude or mention co-authorship in prose —
  * only the machine-readable attribution forms are prohibited.
  *
+ * This module is the SINGLE source of attribution policy. The tracked commit-msg hook
+ * and the verify-attribution CI workflow both call it; neither restates the rules, so
+ * local enforcement and CI enforcement cannot drift apart.
+ *
  * Usage:
  *   node tools/check-commit-attribution.js <path-to-commit-message-file>
  *   node tools/check-commit-attribution.js --message "<commit message text>"
+ *   node tools/check-commit-attribution.js --range <A>..<B>      # CI: check a range
+ *   node tools/check-commit-attribution.js --base <sha> --head <sha>
  *   node tools/check-commit-attribution.js --selftest
  *
- * Wiring it as a local hook (never installed automatically — the owner opts in):
- *   .git/hooks/commit-msg  ->  node tools/check-commit-attribution.js "$1"
+ * Local enforcement (tracked hook, survives a fresh clone once configured once):
+ *   node tools/install-hooks.js        # sets core.hooksPath=.githooks for THIS repo
+ * or equivalently:
+ *   git config core.hooksPath .githooks
  */
 'use strict';
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
-// Names that may never appear as a commit co-author or generator.
-const AI_NAMES = ['claude', 'anthropic', 'forge', 'copilot', 'chatgpt', 'openai', 'gpt-4', 'gemini', 'cursor', 'devin'];
+/*
+ * Names that may never appear as a commit co-author or generator.
+ *
+ * These are matched ONLY inside a machine-readable attribution trailer value or a
+ * "Generated with …" footer — never against ordinary prose. That distinction matters
+ * here: "Atlas" and "Forge" are this project's own orchestration agent names and appear
+ * legitimately in documentation and commit subjects (for example
+ * docs/00-governance/Atlas_Governance_Register.md). A commit that *talks about* Atlas is
+ * fine; a commit that *credits* Atlas as an author is not.
+ */
+const AI_NAMES = [
+  'claude', 'anthropic', 'forge', 'atlas',
+  'chatgpt', 'openai', 'codex', 'copilot',
+  'gpt-3', 'gpt-4', 'gpt-5', 'gpt4',
+  'gemini', 'cursor', 'devin',
+];
 
 /*
  * Normalize before matching so trivial evasions do not slip through:
@@ -109,6 +132,74 @@ function check(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Range mode — used by CI so that the hook and the workflow share ONE policy
+// implementation. There is deliberately no second copy of the rules in YAML.
+//
+// Accepts "A..B", a single revision, or nothing (defaults to HEAD). A missing or
+// all-zero base (a branch's first push, where `github.event.before` is zeros) is
+// treated as "just check the tip", not as "check nothing".
+// ---------------------------------------------------------------------------
+const ZERO_SHA = /^0{7,40}$/;
+
+function readCommits(range) {
+  // %H then the raw body, NUL-terminated per commit so multi-line bodies survive.
+  const args = ['log', '--no-merges', '--format=%H%n%B%x00'];
+  if (range) args.push(range);
+  const out = execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return out
+    .split('\0')
+    .map((chunk) => chunk.replace(/^\n+/, ''))
+    .filter((chunk) => chunk.trim() !== '')
+    .map((chunk) => {
+      const nl = chunk.indexOf('\n');
+      return nl === -1
+        ? { sha: chunk.trim(), message: '' }
+        : { sha: chunk.slice(0, nl).trim(), message: chunk.slice(nl + 1) };
+    });
+}
+
+function resolveRange(base, head) {
+  const h = head && head.trim() ? head.trim() : 'HEAD';
+  if (!base || !base.trim() || ZERO_SHA.test(base.trim())) return h;
+  return base.trim() + '..' + h;
+}
+
+function checkRange(range) {
+  let commits;
+  try {
+    commits = readCommits(range);
+  } catch (e) {
+    console.error('check-commit-attribution: cannot read commit range "' + range + '": ' + e.message);
+    return 2; // fail closed — an unreadable range is not a passing range
+  }
+  if (commits.length === 0) {
+    console.log('check-commit-attribution: no commits in range "' + (range || 'HEAD') + '" — nothing to check.');
+    return 0;
+  }
+  let bad = 0;
+  for (const c of commits) {
+    const v = check(c.message);
+    const subject = c.message.split('\n')[0];
+    if (v.length === 0) {
+      console.log('  [OK]     ' + c.sha.slice(0, 12) + '  ' + subject);
+    } else {
+      bad++;
+      console.log('  [REJECT] ' + c.sha.slice(0, 12) + '  ' + subject);
+      for (const x of v) console.log('             * ' + x.describe + ' -> ' + x.line);
+    }
+  }
+  console.log('\nchecked ' + commits.length + ' commit(s); ' + bad + ' violation(s).');
+  if (bad > 0) {
+    console.error('\ncheck-commit-attribution: ATTRIBUTION POLICY VIOLATED.');
+    console.error('TAM OS commits are owner-authored (CLAUDE.md §15.7). AI participation belongs in the');
+    console.error('orchestration log, not in Git metadata. Rewrite the offending commit message(s).\n');
+    return 1;
+  }
+  console.log('check-commit-attribution: OK — every commit in range is attribution-clean.');
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Self-test — proves the checker both rejects prohibited forms and accepts
 // ordinary owner-authored messages. No Git commit is created.
 // ---------------------------------------------------------------------------
@@ -134,6 +225,24 @@ const FIXTURES = [
   ['generated-with footer', 'feat: x\n\n🤖 Generated with Claude Code', true],
   ['assisted-by trailer', 'feat: x\n\nAssisted-by: Claude Opus 5', true],
   ['anthropic noreply email only', 'feat: x\n\nCo-authored-by: Someone <noreply@anthropic.com>', true],
+  // --- durable-guard additions: the remaining agent names the policy names explicitly ---
+  ['Atlas co-author', 'feat: x\n\nCo-authored-by: Atlas <atlas@example.com>', true],
+  ['Codex co-author', 'feat: x\n\nCo-authored-by: Codex <codex@example.com>', true],
+  ['ChatGPT co-author', 'feat: x\n\nCo-authored-by: ChatGPT <chatgpt@openai.com>', true],
+  ['OpenAI co-author', 'feat: x\n\nCo-authored-by: OpenAI Assistant <bot@openai.com>', true],
+  ['GitHub Copilot co-author', 'feat: x\n\nCo-authored-by: GitHub Copilot <copilot@github.com>', true],
+  ['Generated-by trailer', 'feat: x\n\nGenerated-by: Codex', true],
+  ['Created-by trailer', 'feat: x\n\nCreated-by: Atlas', true],
+  ['Authored-by trailer', 'feat: x\n\nAuthored-by: ChatGPT', true],
+  // --- durable-guard additions: things that MUST keep passing ---
+  // Atlas and Forge are this project's own agent names and appear legitimately in prose.
+  ['prose naming Atlas (governance register)', 'docs(governance): update the Atlas Governance Register index', false],
+  ['prose naming Forge', 'docs: record the Forge staging assignment outcome in the archive', false],
+  ['prose naming several AI tools', 'docs: compare Claude, ChatGPT and Copilot as implementation tools', false],
+  ['dependabot grouped actions bump', 'chore(deps): bump the github-actions group with 3 updates\n\nBumps actions/checkout, actions/setup-node and actions/upload-artifact.\n\nSigned-off-by: dependabot[bot] <support@github.com>', false],
+  ['dependabot co-author trailer', 'chore(deps): bump actions/checkout from 4 to 5\n\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>', false],
+  ['dependabot bumping an ai-named package', 'chore(deps): bump ariga/atlas-action from 1.0.0 to 1.1.0', false],
+  ['human co-author plus signoff', 'fix(payroll): correct lock check\n\nCo-authored-by: Budi Santoso <budi@example.com>\nSigned-off-by: fanoryu <fanoryu@gmail.com>', false],
 ];
 
 function selftest() {
@@ -158,6 +267,22 @@ function selftest() {
 function main(argv) {
   if (argv.includes('--selftest')) return selftest();
 
+  // Range mode (CI). --range A..B, or --base <sha> --head <sha>.
+  const ri = argv.indexOf('--range');
+  const bi = argv.indexOf('--base');
+  const hi = argv.indexOf('--head');
+  if (ri !== -1) {
+    const r = argv[ri + 1];
+    if (r === undefined) {
+      console.error('check-commit-attribution: --range requires a value (e.g. A..B).');
+      return 2;
+    }
+    return checkRange(r);
+  }
+  if (bi !== -1 || hi !== -1) {
+    return checkRange(resolveRange(bi !== -1 ? argv[bi + 1] : '', hi !== -1 ? argv[hi + 1] : ''));
+  }
+
   let text;
   const mi = argv.indexOf('--message');
   if (mi !== -1) {
@@ -169,7 +294,11 @@ function main(argv) {
   } else {
     const file = argv.find((a) => !a.startsWith('--'));
     if (!file) {
-      console.error('Usage: node tools/check-commit-attribution.js <commit-msg-file> | --message "<text>" | --selftest');
+      console.error('Usage: node tools/check-commit-attribution.js <commit-msg-file>');
+      console.error('       node tools/check-commit-attribution.js --message "<text>"');
+      console.error('       node tools/check-commit-attribution.js --range <A>..<B>');
+      console.error('       node tools/check-commit-attribution.js --base <sha> --head <sha>');
+      console.error('       node tools/check-commit-attribution.js --selftest');
       return 2;
     }
     try {
@@ -195,6 +324,6 @@ function main(argv) {
   return 1;
 }
 
-module.exports = { check, normalize };
+module.exports = { check, normalize, checkRange, resolveRange, AI_NAMES };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));

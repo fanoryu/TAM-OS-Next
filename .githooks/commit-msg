@@ -1,0 +1,13 @@
+#!/bin/sh
+# TAM OS — owner-only authorship guard (CLAUDE.md §15.7).
+#
+# Tracked hook. Unlike .git/hooks/, this file is version-controlled, so it survives a
+# fresh clone. Git only runs it once the clone has been pointed at this directory:
+#
+#   node tools/install-hooks.js        (or: git config core.hooksPath .githooks)
+#
+# That configuration is per-repository and is never written to global Git config.
+#
+# Policy lives in tools/check-commit-attribution.js — the same implementation the
+# verify-attribution CI workflow runs, so local and CI enforcement cannot diverge.
+exec node tools/check-commit-attribution.js "$1"

@@ -80,11 +80,18 @@ it before proposing the commit. Your participation is recorded in the orchestrat
 where it belongs — putting it in Git metadata would permanently misattribute authorship of a
 proprietary codebase.
 
-The rule is mechanically enforced, so a violation fails rather than merely being noticed:
+The rule is mechanically enforced in two layers, so a violation fails rather than merely being
+noticed. Both run the same implementation (`tools/check-commit-attribution.js`):
 
 ```bash
-node tools/check-commit-attribution.js .git/COMMIT_EDITMSG
+node tools/install-hooks.js                              # once per clone — activates .githooks/
+node tools/check-commit-attribution.js --selftest        # 35 fixtures
+node tools/check-commit-attribution.js --range A..B      # what CI runs
 ```
+
+The local hook only exists in clones that ran the installer, so **`verify-attribution` in CI is the
+line you cannot get around**: it inspects every commit in the pull request. Do not attempt to bypass
+either layer, and do not "fix" a rejection by rewording the checker — remove the trailer.
 
 ## Where to look next
 
