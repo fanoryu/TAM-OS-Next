@@ -691,8 +691,8 @@ Use the supplied artwork only — never recolor, rebuild, stretch, rotate, or su
 - **Public core vs. private data:** this repository is the public source core and holds **no** company
   data; production data and configuration are maintained separately (see
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
-- **Security:** report vulnerabilities privately to the repository owner — never in an issue, and
-  never with real data. GitHub Security Advisories are not available on this repository; see
-  [`SECURITY.md`](SECURITY.md) for the current private route.
+- **Security:** report vulnerabilities privately by email to <fanoryu@gmail.com> (subject
+  `TAM-OS Security Report`) — never in an issue, and never with real data. See
+  [`SECURITY.md`](SECURITY.md) for the full policy.
 
 © PT Total Asset Manajemen. All rights reserved.

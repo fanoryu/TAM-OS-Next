@@ -13,17 +13,17 @@ from it.
 
 ### The current private route
 
+Report suspected security vulnerabilities privately, by email, to the repository owner:
+
+> **<fanoryu@gmail.com>**
+>
+> Suggested subject line: **`TAM-OS Security Report`**
+
+This is the canonical vulnerability-reporting route for the current state of the repository.
+
 GitHub **Private Vulnerability Reporting / repository Security Advisories are not available on this
-repository.** `fanoryu/TAM-OS-Next` is a private repository, and the repository security-advisory
-surface is not exposed for it — no advisory URL is published here, because none would resolve.
-
-Until the repository owner establishes a different mechanism, the canonical private route is:
-
-> **Contact the repository owner (@fanoryu) directly, through the same private channel that gave you
-> access to this repository or to the application build you are testing.**
-
-If that channel is unavailable to you, stop and request a reporting channel before sending any
-details — do not fall back to a public or shared destination.
+repository**, so no advisory URL is published here — none would resolve. If that capability becomes
+available later, this policy will be updated; until then, use the email address above.
 
 ### Do not use these routes for a vulnerability
 
