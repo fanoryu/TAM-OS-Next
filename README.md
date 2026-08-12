@@ -16,9 +16,9 @@ support backend capabilities in future roadmap phases.
 ![License](https://img.shields.io/badge/license-see%20LICENSE-red)
 ![JavaScript](https://img.shields.io/badge/JavaScript-vanilla%20%C2%B7%20no%20framework-f7df1e)
 ![HTML](https://img.shields.io/badge/HTML-single--file%20app-e34f26)
-![Core](https://img.shields.io/badge/core-public%20source-blue)
+![Core](https://img.shields.io/badge/core-source%20repository-blue)
 
-> **Public source repository — company data is separate.** This is the **public source core** of TAM
+> **Private source repository — company data is separate.** This is the **source core** of TAM
 > Intelligence OS: application source, tooling, docs, and an empty-data default. Production company data
 > and configuration are **maintained separately** in a private company layer (see
 > [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)); the application ships **no** company data and requires
@@ -688,8 +688,8 @@ Use the supplied artwork only — never recolor, rebuild, stretch, rotate, or su
   Asset Manajemen; reuse, redistribution, and modification are **not** granted and this repository is
   **not** declared open source (see also [`PROPRIETARY-LICENSE-NOTICE.md`](PROPRIETARY-LICENSE-NOTICE.md)).
   A future licensing decision may relax this; until then, treat the source as source-visible only.
-- **Public core vs. private data:** this repository is the public source core and holds **no** company
-  data; production data and configuration are maintained separately (see
+- **Source core vs. private data:** this repository is private and holds **no** company data;
+  production data and configuration are maintained separately (see
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
 - **Security:** report vulnerabilities privately by email to <fanoryu@gmail.com> (subject
   `TAM-OS Security Report`) — never in an issue, and never with real data. See

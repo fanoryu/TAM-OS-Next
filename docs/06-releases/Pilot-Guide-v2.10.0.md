@@ -1,10 +1,12 @@
 # TAM OS v2.10.0 — Controlled Pilot Guide
 
 **Audience:** the named internal TAM operators running the v2.10.0 pilot.
-**Status:** v2.10.0 is **published** (tag `v2.10.0`, marked Latest) so the verified artifact can be
-obtained and checksum-verified. It is **not general-use software**, and **the pilot has not launched** —
-it begins only when the artifact is actually handed to you. This is an internal working document, not
-marketing material.
+**Status:** v2.10.0 is **published** — from the annotated tag `v2.10.0` in the predecessor repository
+`fanoryu/TAM-OS`, where the Release asset is marked Latest — so the verified artifact can be obtained
+and checksum-verified. The canonical repository `fanoryu/TAM-OS-Next` tracks the byte-identical copy at
+`dist/tam-os-v2.10.0.html` and has no tags or Releases of its own; either copy is valid. It is **not
+general-use software**, and **the pilot has not launched** — it begins only when the artifact is
+actually handed to you. This is an internal working document, not marketing material.
 
 > **Read section 1 before you open the application.** It tells you what this software is and, just as
 > importantly, what it is not.
@@ -29,6 +31,10 @@ trust-based application context:
   any principal, including CEO.
 - What it *does* do is keep the product behaving correctly for the role you are working in — an
   Employee context sees only their own records and cannot perform company-wide actions.
+- **The selection is not remembered.** Every time you open or reload the application, no principal is
+  selected and actions are refused until you choose one — you will see messages like *"You do not
+  have permission to…"*. That is the intended behaviour, not a fault and not lost data: pick your
+  principal from the sidebar first, and your data is unaffected either way.
 
 Treat the **device and browser profile** as the real security boundary. Lock your computer.
 
@@ -225,8 +231,9 @@ screenshot. Describe the shape of the problem ("a payroll row for one employee s
 amount"), not the confidential content. If the data itself is essential to diagnosing it, say so and
 the maintainer will arrange a private channel.
 
-Security concerns follow [`SECURITY.md`](../../SECURITY.md) and are reported privately, never as a
-public issue.
+**A security concern is different.** Do not file it as an issue and do not send it through the normal
+bug route — email <fanoryu@gmail.com> with the subject `TAM-OS Security Report`. See
+[`SECURITY.md`](../../SECURITY.md) for what qualifies and what never to include.
 
 ---
 

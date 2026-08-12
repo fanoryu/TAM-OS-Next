@@ -1,6 +1,6 @@
-# Deployment & the Public-Core / Private-Company-Layer Split
+# Deployment & the Source-Core / Private-Company-Layer Split
 
-This document explains how TAM Intelligence OS is structured for a **public source core** with a
+This document explains how TAM Intelligence OS is structured for a **source core** with a
 **separate private company layer**, and how PT Total Asset Manajemen keeps production data and
 configuration outside this repository. It describes only what actually exists in the repo; for the
 module map see [`ARCHITECTURE.md`](../ARCHITECTURE.md), for data rules see
@@ -9,7 +9,7 @@ module map see [`ARCHITECTURE.md`](../ARCHITECTURE.md), for data rules see
 
 ## 1. Two layers
 
-**Public core (this repository)** — application source (`index.html`, `css/`, `js/`), the
+**Source core (this repository)** — application source (`index.html`, `css/`, `js/`), the
 build/verify tooling (`tools/`), the tracked portable release (`dist/*.html`), the golden-master
 reference HTML, documentation, CI/release workflows, and issue/PR templates. It contains **no company
 data** and ships an **empty data seed** (a fresh install starts with zero records; the verifier
@@ -18,7 +18,7 @@ asserts the embedded `seed-data` JSON is `[]`).
 **Private company layer (maintained separately, never in this repo)** — the real fund-usage / payroll
 planning workbook, employee/payroll/finance records, Complete Backup exports, company branding, and any
 deployment-specific configuration or secrets. A ready-to-use template for this layer
-(`tam-company-private-template/`) is kept **outside** the public repository with folders for
+(`tam-company-private-template/`) is kept **outside** this repository with folders for
 `company-config/`, `production-data/`, `workbooks/`, `exports/`, `backups/`, `branding/`, and
 `deployment/`.
 
@@ -76,15 +76,16 @@ version, the storage-key set, the empty seed, and the reporting invariants. Full
 
 ## 7. Maintaining the private layer (PT Total Asset Manajemen)
 
-1. Keep the public core (this repo) and the private layer in **separate locations**. If the private
-   layer becomes a Git repository, keep it **private** and never add the public remote to it.
+1. Keep the source core (this repo) and the private layer in **separate locations**. If the private
+   layer becomes a Git repository, keep it **private** and never add this repository's remote to it.
 2. Put the real workbook, exports, backups, branding, and deployment config in the private layer only.
 3. To run against real data: open the app locally and load a Complete Backup, or import the private
    workbook — all locally, on a company-controlled device.
-4. If any confidential file is ever committed to the public core by mistake, treat it as disclosed:
+4. If any confidential file is ever committed to the source core by mistake, treat it as disclosed:
    purge it from history, rotate anything sensitive, and follow [`SECURITY.md`](../SECURITY.md).
 
 ## 8. Responsible disclosure
 
-Security issues must be reported **privately** — see [`SECURITY.md`](../SECURITY.md). Do not open a
-public issue for a vulnerability, and never include real company data in a report.
+Security issues must be reported **privately** by email to <fanoryu@gmail.com> (subject
+`TAM-OS Security Report`) — see [`SECURITY.md`](../SECURITY.md). Do not file a vulnerability as an
+issue, and never include real company data in a report.
