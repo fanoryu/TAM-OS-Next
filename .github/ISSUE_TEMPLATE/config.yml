@@ -1,7 +1,12 @@
 # Keep issues structured: use the Bug report / Feature request forms above.
-# Security-sensitive reports must NOT be filed as public issues — see SECURITY.md.
+# Security-sensitive reports must NOT be filed as an issue — see SECURITY.md.
+#
+# GitHub Private Vulnerability Reporting / repository Security Advisories are not available on this
+# private repository, so no advisory URL is linked here: a dead link is worse than none. contact_links
+# takes an HTTP(S) URL and cannot carry a mailto: route, so the link points at the policy itself,
+# which names the canonical private contact.
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability (private disclosure)
-    url: https://github.com/fanoryu/TAM-OS/security/advisories/new
-    about: Report vulnerabilities privately via GitHub Security Advisories. Never paste payroll, employee, bank, credential, or backup data into a public issue.
+    url: https://github.com/fanoryu/TAM-OS-Next/blob/main/SECURITY.md
+    about: Do not file a security vulnerability as an issue. Follow the private reporting instructions in SECURITY.md — email fanoryu@gmail.com with the subject "TAM-OS Security Report". Never paste payroll, employee, bank, credential, or backup data into an issue.

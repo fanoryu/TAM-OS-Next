@@ -4,16 +4,34 @@ TAM Intelligence OS is proprietary internal software for **PT Total Asset Manaje
 finance, payroll, employee, and contract data locally in the browser. Please treat security issues
 with care.
 
+This policy covers the canonical repository `fanoryu/TAM-OS-Next` and the application builds produced
+from it.
+
 ## Reporting a vulnerability (private)
 
-**Do not open a public issue for security problems.**
+**Do not report a vulnerability through the issue tracker.**
 
-Report privately through GitHub Security Advisories:
+### The current private route
 
-- <https://github.com/fanoryu/TAM-OS/security/advisories/new>
+Report suspected security vulnerabilities privately, by email, to the repository owner:
 
-If you cannot use Security Advisories, contact the repository owner (**@fanoryu**) privately through
-GitHub. Do not disclose the issue publicly until it has been addressed.
+> **<fanoryu@gmail.com>**
+>
+> Suggested subject line: **`TAM-OS Security Report`**
+
+This is the canonical vulnerability-reporting route for the current state of the repository.
+
+GitHub **Private Vulnerability Reporting / repository Security Advisories are not available on this
+repository**, so no advisory URL is published here — none would resolve. If that capability becomes
+available later, this policy will be updated; until then, use the email address above.
+
+### Do not use these routes for a vulnerability
+
+- The GitHub issue tracker. This repository is private, so its issues are not public — but they are
+  visible to **every collaborator**, which is the wrong audience for an unfixed vulnerability.
+- Pull request titles, descriptions, or review comments.
+- Commit messages or branch names.
+- Any shared chat, group mailbox, or ticketing system not designated by the owner.
 
 ### What to include in a report
 
@@ -21,9 +39,10 @@ A useful report describes the problem without exposing real data:
 
 - A clear description of the issue and its security impact.
 - Steps to reproduce, using **fabricated placeholder** values only.
-- Affected area/module and the application version (Settings → About).
-- Browser and OS.
-- A proof-of-concept **only if** it uses clearly fabricated data.
+- Expected behavior versus actual behavior.
+- Affected area/module and the application version (Settings → About) or build filename.
+- Browser and operating system.
+- A proof-of-concept **only if** it is safe and uses clearly fabricated data.
 
 ### Never include sensitive data in a report
 
@@ -43,6 +62,10 @@ If a proof-of-concept requires data, use clearly fabricated placeholder values.
 ## What counts as a vulnerability
 
 - Unauthorized disclosure, modification, or loss of stored finance/payroll/employee data
+- Bypass of the application's authorization checks or read-scope by a means **other than** the
+  documented local principal selector (see *Security model* below)
+- Privilege escalation into an action the acting principal is not permitted to perform
+- Exposure of sensitive data through an unintended surface — exports, logs, error text, URLs
 - Cross-site scripting (XSS) or code injection via imported files, field values, or settings
 - Bypass of the typed-confirmation / backup safeguards around destructive actions (Start Fresh,
   Reset, Restore)
@@ -51,24 +74,74 @@ If a proof-of-concept requires data, use clearly fabricated placeholder values.
 - Supply-chain risks in the build/verify tooling or GitHub workflows
 - Secrets or real company data committed to the repository
 
-Cosmetic issues, feature requests, and non-security bugs should use the normal issue templates.
+## What should not use the security channel
+
+The following are ordinary product work, not security reports. Use the normal
+[bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or
+[feature request](.github/ISSUE_TEMPLATE/feature_request.yml) form:
+
+- Functional defects with no confidentiality, integrity, or data-loss impact
+- Feature requests and enhancement ideas
+- Layout, styling, wording, or other UX issues
+- Documentation errors and broken links
+- Questions about how a workflow is meant to behave
+
+If you are unsure whether something is security-sensitive, use the private route and say you are
+unsure. Over-reporting privately is preferred to under-reporting publicly.
+
+## Security model
+
+Scope your report against what the software actually claims. TAM Intelligence OS is client-only:
+there is no server, database, API, or account system.
+
+- **There is no authentication.** The "Acting as" principal is a **local, trust-based application
+  context**, not a login. It is spoofable by anyone who can open the application, and it is
+  documented in-source as **not a security boundary**.
+- **Authorization and read-scope are product-integrity behaviour** under that trust model. They
+  prevent accidental cross-principal actions; they do not defend against a local adversary.
+- **Anyone with access to the device, browser profile, or portable HTML file has access to the
+  data.** Device and file custody is the actual control.
+
+Consequently, "I selected a different principal in the UI and then saw that principal's data" is a
+documented property of the current design, not a vulnerability. A defect that exposes or alters data
+**without** changing the selector — or that survives the intended authorization path — is.
 
 ## Supported versions
 
-Only the latest released version receives security fixes. Older versions are not maintained.
+Only the current codebase receives security fixes. Older builds are not maintained.
 
 | Version | Supported |
 |---|---|
-| Latest release (currently **v2.6.8**) | ✅ |
-| Any older version | ❌ |
+| Current `main` of `fanoryu/TAM-OS-Next` (`APP_VERSION` **2.10.0**) | ✅ |
+| Any earlier build or release | ❌ |
+
+> **Provenance.** `fanoryu/TAM-OS-Next` is the canonical repository going forward and currently has
+> **no tags and no Releases of its own**. v2.10.0 was published from the predecessor repository
+> `fanoryu/TAM-OS`, which is retained as a read-only archive. The portable artifact for the current
+> codebase is tracked here as `dist/tam-os-v2.10.0.html`.
 
 ## Response expectations
 
-This is a small, single-owner project; timelines are best-effort:
+This is a small, single-owner project. The following are **best-effort intentions, not a service
+level agreement**, and carry no remediation deadline:
 
 - Acknowledgement: within a few business days.
 - Initial assessment / triage: shortly after acknowledgement.
 - Fix and release: prioritized by severity and data-safety impact.
+
+There is no bug bounty, no compensation, and no safe-harbor commitment attached to this policy.
+
+## Responsible disclosure
+
+We ask reporters to:
+
+- Give a reasonable opportunity to remediate before any public or wider discussion.
+- Access, modify, or copy **only** the minimum needed to demonstrate the issue.
+- Avoid destructive testing — do not delete, reset, or corrupt data belonging to anyone else.
+- Test against fabricated sample data rather than real company data wherever possible.
+
+Good-faith research reported privately is welcomed. Disclosure is coordinated with the repository
+owner and PT Total Asset Manajemen.
 
 ## Credential & data rotation guidance
 
@@ -76,8 +149,10 @@ If credentials or tokens are ever exposed (in a report, a commit, a log, or a sc
 
 1. **Rotate immediately** — revoke and reissue the affected GitHub token / credential.
 2. Remove the exposed value from any issue, PR, or comment.
-3. If it was committed, purge it from history (e.g. `git filter-repo`) and force-update the remote,
-   then rotate again (assume the old value is compromised).
+3. If it was committed, report it to the repository owner. Purging it from history is a **history
+   rewrite** and requires explicit owner approval under [`CLAUDE.md`](CLAUDE.md) §20 — do not
+   force-update a shared branch on your own initiative. Assume the old value is compromised and
+   rotate again after any purge.
 4. If real company/backup data was exposed, notify the data owner at PT Total Asset Manajemen and
    follow internal data-handling procedures.
 
@@ -92,6 +167,8 @@ TAM Intelligence OS is client-only. Understanding its data posture helps scope r
 - Real company data must never be committed to the repository or pasted into issues, PRs, logs, or
   screenshots. See [`docs/DATA-SAFETY.md`](docs/DATA-SAFETY.md) and
   [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- This repository is **private** and holds no company data. Production data and configuration are
+  maintained separately in a private layer (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
 
 ## Security Decision Records (SDR)
 
@@ -103,11 +180,3 @@ Engineering justifications for standing security decisions — such as the dispo
 
 An SDR documents *why* a finding is accepted or classified as a false positive and what future change
 would require it to be re-examined. An SDR does not, by itself, dismiss any alert.
-
-## Disclosure policy
-
-We ask reporters to give a reasonable opportunity to remediate before any public discussion, and to
-avoid accessing, modifying, or exfiltrating data beyond the minimum needed to demonstrate the issue.
-Good-faith research reported privately is welcomed. Disclosure is coordinated with the repository owner
-and PT Total Asset Manajemen. This is the public source core; it contains no company data, and any
-production/company data lives in a separate private layer (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
