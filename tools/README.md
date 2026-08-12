@@ -16,7 +16,8 @@ All commands are run from the repository root.
 | [`build-single-file.js`](build-single-file.js) | Assembles `css/` + `js/` into the portable single-file build. Assembles only — no transform, no minify, no reorder |
 | [`verify-build.js`](verify-build.js) | The invariant verifier. A change is not done until this passes completely |
 | [`integration-surface-manifest.js`](integration-surface-manifest.js) | The frozen UX-006C3 integration surface (43 entries), consumed by the verifier and the authorization harness |
-| [`check-commit-attribution.js`](check-commit-attribution.js) | Owner-only authorship guard — rejects AI-attribution trailers in commit messages (`CLAUDE.md` §15.7) |
+| [`check-commit-attribution.js`](check-commit-attribution.js) | Owner-only authorship guard — the single source of attribution policy, shared by the tracked hook and CI (`CLAUDE.md` §15.7) |
+| [`install-hooks.js`](install-hooks.js) | Points this repository at the tracked `.githooks/` directory (repository-local; never global) |
 
 ### Build
 
@@ -44,18 +45,52 @@ Print the derived version without building:
 node tools/app-version.js
 ```
 
-### Check a commit message
+### Attribution guard — install after cloning
+
+**Run this once per clone.** `.git/hooks/` is not version-controlled, so a fresh clone starts with no
+local commit-message enforcement until Git is pointed at the tracked `.githooks/` directory:
 
 ```bash
-node tools/check-commit-attribution.js .git/COMMIT_EDITMSG
-node tools/check-commit-attribution.js --selftest
+node tools/install-hooks.js
 ```
 
-To enforce it locally, wire it as a `commit-msg` hook (opt-in — it is never installed automatically):
+That sets `core.hooksPath=.githooks` **for this repository only** — it never writes global Git
+configuration — and then proves the guard works by feeding it a prohibited message and confirming the
+rejection. The equivalent raw command is `git config core.hooksPath .githooks`.
+
+| Command | Does |
+|---|---|
+| `node tools/install-hooks.js` | Install and verify |
+| `node tools/install-hooks.js --check` | Verify only; non-zero if not installed |
+| `node tools/install-hooks.js --uninstall` | Unset `core.hooksPath` for this repository |
+
+### Check attribution directly
 
 ```bash
-printf '#!/bin/sh\nexec node tools/check-commit-attribution.js "$1"\n' > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+node tools/check-commit-attribution.js .git/COMMIT_EDITMSG   # one message file
+node tools/check-commit-attribution.js --message "<text>"    # a literal message
+node tools/check-commit-attribution.js --range A..B          # every commit in a range
+node tools/check-commit-attribution.js --base <sha> --head <sha>
+node tools/check-commit-attribution.js --selftest            # 35 fixtures
 ```
+
+### Two layers, one policy
+
+| Layer | Runs | Catches |
+|---|---|---|
+| `.githooks/commit-msg` (tracked) | locally, at commit time | the violation before it exists — but only in clones that ran the installer |
+| `.github/workflows/attribution.yml` → **`verify-attribution`** | on every PR and push to `main` | anything the local layer missed; **cannot be skipped** |
+
+Both layers execute `tools/check-commit-attribution.js`. The rules exist in **one** place — the
+workflow does not restate them — so local and CI enforcement cannot drift apart. CI additionally
+self-tests the checker before trusting it, and asserts that the tracked hook still delegates to it.
+
+The policy: commits are owner-authored; no `Co-authored-by:` / `Assisted-by:` / `Generated-by:` /
+`Authored-by:` / `Created-by:` trailer or "Generated with …" footer may name Claude, Anthropic, Forge,
+Atlas, ChatGPT, OpenAI, Codex, Copilot or any other AI agent, and no `@anthropic.com` address may
+appear in a trailer. Ordinary prose that merely *mentions* those names is fine — the rules match
+machine-readable attribution, not discussion. Genuine human co-authors and Dependabot are permitted
+(`CLAUDE.md` §15.7).
 
 ---
 

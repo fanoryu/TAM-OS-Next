@@ -209,12 +209,23 @@ The step-by-step procedure is [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.m
 6. **Do not remove tracked files without approval.** This includes any intentionally tracked,
    documented exception.
 7. **Owner-only authorship (MUST).** Every commit is authored by the repository owner's Git identity.
-   Commit messages MUST NOT carry AI-attribution trailers or footers — no `Co-authored-by:` naming
-   Claude, Claude Opus, Anthropic, Forge, or any other AI agent, and no "Generated with …" footer.
-   AI participation is recorded in orchestration logs, never in Git metadata. This is mechanically
-   enforced: `node tools/check-commit-attribution.js <file|--message>` fails closed on any prohibited
-   trailer, and it is the check a `commit-msg` hook or CI job must run. Dependabot commits are the
-   one permitted non-owner author.
+   Commit messages MUST NOT carry AI-attribution trailers or footers — no `Co-authored-by:`,
+   `Assisted-by:`, `Generated-by:`, `Authored-by:` or `Created-by:` trailer naming Claude, Claude Opus,
+   Anthropic, Forge, Atlas, ChatGPT, OpenAI, Codex, Copilot or any other AI agent; no "Generated
+   with …" footer; and no `@anthropic.com` address in a trailer. AI participation is recorded in
+   orchestration logs, never in Git metadata. Ordinary prose that *mentions* an AI tool is fine — the
+   rule governs attribution, not discussion.
+
+   **Enforced in two layers, from one implementation.** `tools/check-commit-attribution.js` is the
+   single source of this policy; nothing restates its rules.
+   - **Locally** — the tracked hook `.githooks/commit-msg`, activated per clone by
+     `node tools/install-hooks.js` (sets `core.hooksPath=.githooks` for that repository only; global
+     Git configuration is never modified).
+   - **In CI** — the `verify-attribution` job, which checks every commit in a pull request or push to
+     `main` and cannot be skipped.
+
+   Both fail closed. **Dependabot is the one permitted non-owner author**, and genuine human
+   co-authors remain permitted.
 
 ## 16. Documentation Rules
 

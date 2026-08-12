@@ -1,0 +1,84 @@
+name: Attribution
+
+# Owner-only Git authorship guard (CLAUDE.md §15.7).
+#
+# The local commit-msg hook is the first line of defence, but it only exists in clones
+# that have run `node tools/install-hooks.js`. This workflow is the line that cannot be
+# skipped: every commit reaching a pull request or main is checked here.
+#
+# The policy itself lives in tools/check-commit-attribution.js. This workflow does NOT
+# restate the rules — it invokes that one implementation, so local and CI enforcement
+# cannot drift apart.
+#
+# It needs no dependencies, no GitHub Advanced Security, and does not touch CodeQL or
+# build-and-verify.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attribution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-attribution:
+    name: verify-attribution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v7
+        with:
+          # The whole point is inspecting commit messages, so the range endpoints must
+          # both be present. A shallow clone would make the range unresolvable.
+          fetch-depth: 0
+
+      - name: Setup Node.js (LTS)
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Self-test the attribution checker
+        # If the checker itself is broken, a green range check would be meaningless.
+        run: node tools/check-commit-attribution.js --selftest
+
+      - name: Resolve the commit range to check
+        id: range
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            BASE="$PR_BASE"; HEAD="$PR_HEAD"
+          else
+            BASE="$PUSH_BEFORE"; HEAD="$SHA"
+          fi
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+          echo "Evaluating attribution for base=$BASE head=$HEAD (event: $EVENT)"
+
+      - name: Verify commit attribution
+        # An empty/all-zero base (a branch's first push) degrades to checking the tip
+        # commit rather than checking nothing — see resolveRange() in the checker.
+        run: |
+          node tools/check-commit-attribution.js \
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}"
+
+      - name: Verify the tracked hook is wired to the same checker
+        # Guards against the tracked hook silently drifting away from the shared policy.
+        run: |
+          if ! grep -q "tools/check-commit-attribution.js" .githooks/commit-msg; then
+            echo "::error::.githooks/commit-msg no longer invokes tools/check-commit-attribution.js"
+            exit 1
+          fi
+          echo "Tracked hook delegates to the shared checker."
