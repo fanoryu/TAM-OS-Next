@@ -391,9 +391,33 @@ const issueCfg = read(path.join(root, '.github', 'ISSUE_TEMPLATE', 'config.yml')
 check(dist.includes("const APP_NAME = 'TAM OS';"), 'APP_NAME is TAM OS (current product identity)');
 check(/version-2\.10\.0/.test(readmeSrc) && /v2\.10\.0 — Governed Workspace/.test(readmeSrc),
   'README.md current-state identity is v2.10.0 / TAM OS');
-// Current-state repository slug is TAM-OS in the current-state docs (historical audit/ files exempt).
-check(!/fanoryu\/TAM-Intelligence-OS/.test(readmeSrc + securitySrc + issueCfg) && /fanoryu\/TAM-OS/.test(readmeSrc),
-  'current-state docs (README/SECURITY/issue-template) use the canonical fanoryu/TAM-OS slug');
+// REPO-1 — CANONICAL REPOSITORY SLUG.
+// The canonical repository is fanoryu/TAM-OS-Next. The predecessor fanoryu/TAM-OS is retained as a
+// read-only archive and is still referenced legitimately as provenance (PROVENANCE.md, release history,
+// the archived Release assets), so its mention is NOT forbidden — what matters is that the CURRENT-STATE
+// slug is unambiguously the canonical one.
+//
+// The previous guard tested /fanoryu\/TAM-OS/ against README, which a plain substring match also
+// satisfies for "fanoryu/TAM-OS-Next" — so it could not distinguish the two repositories at all and
+// would have passed either way. These checks pin the distinction explicitly, using a negative
+// lookahead so "fanoryu/TAM-OS" only counts when it is NOT followed by "-Next".
+const CANONICAL_SLUG = /fanoryu\/TAM-OS-Next/;
+const PREDECESSOR_SLUG = /fanoryu\/TAM-OS(?!-Next)/;
+check(!/fanoryu\/TAM-Intelligence-OS/.test(readmeSrc + securitySrc + issueCfg),
+  'current-state docs (README/SECURITY/issue-template) carry no retired fanoryu/TAM-Intelligence-OS slug');
+check(CANONICAL_SLUG.test(readmeSrc),
+  'README.md names the canonical repository slug fanoryu/TAM-OS-Next');
+// The CI badge must report THIS repository's status, never the archived predecessor's.
+check(/!\[CI\]\(https:\/\/github\.com\/fanoryu\/TAM-OS-Next\/actions\/workflows\/ci\.yml\/badge\.svg/.test(readmeSrc)
+  && !/!\[CI\]\(https:\/\/github\.com\/fanoryu\/TAM-OS\/actions/.test(readmeSrc),
+  'README.md CI badge points at the canonical repository, not the predecessor');
+// Any surviving predecessor reference in README must be explicitly framed as predecessor/archive
+// provenance — never presented as this repository's current identity.
+check(!PREDECESSOR_SLUG.test(readmeSrc) || /predecessor repository/i.test(readmeSrc),
+  'README.md frames every predecessor fanoryu/TAM-OS reference as predecessor/archive provenance');
+// This repository has no release lineage yet: the paperwork must say so and must not imply a local tag.
+check(/no tags and no Releases|no Releases of its own|no tags or Releases/i.test(readmeSrc + relNotes),
+  'release paperwork records that TAM-OS-Next has no tags/Releases of its own yet');
 // PUBLICATION: v2.10.0 is PUBLISHED and marked Latest. The paperwork must assert the published
 // state positively, and must carry no stale "release candidate / not published / not tagged"
 // wording left over from the Readiness-3 pre-publication phase.

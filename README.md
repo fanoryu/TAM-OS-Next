@@ -10,8 +10,8 @@ support backend capabilities in future roadmap phases.
 
 </div>
 
-[![CI](https://github.com/fanoryu/TAM-OS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fanoryu/TAM-OS/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/fanoryu/TAM-OS?sort=semver&display_name=tag&label=release)](https://github.com/fanoryu/TAM-OS/releases/latest)
+[![CI](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/ci.yml)
+[![Attribution](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/attribution.yml/badge.svg?branch=main)](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/attribution.yml)
 ![Version](https://img.shields.io/badge/version-2.10.0-blue)
 ![License](https://img.shields.io/badge/license-see%20LICENSE-red)
 ![JavaScript](https://img.shields.io/badge/JavaScript-vanilla%20%C2%B7%20no%20framework-f7df1e)
@@ -79,27 +79,39 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 
 ## Current release
 
-**v2.10.0 — Governed Workspace** · `SCHEMA_VERSION` 6 · **published, marked Latest**
+**v2.10.0 — Governed Workspace** · `SCHEMA_VERSION` 6 · **published from the predecessor repository**
 
-> **Release state.** v2.10.0 is **published** and **marked Latest**, from annotated tag `v2.10.0`. The
-> published asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
+> **Where the releases live.** Every published TAM OS release up to and including **v2.10.0** was cut
+> from the predecessor repository **[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS)** (private),
+> which is retained as a read-only archive. Its tags, Releases and assets are unchanged and remain the
+> authoritative source for those artifacts.
+>
+> **This repository has no tags or Releases yet.** `fanoryu/TAM-OS-Next` became canonical after
+> v2.10.0 was published, and it deliberately begins its own release lineage at the **next separately
+> authorized version**. There is no `v2.10.0` tag here and none will be created — the historical
+> release is not re-published, re-tagged or copied forward.
+
+> **Release state.** v2.10.0 is **published** — cut from annotated tag `v2.10.0` in the predecessor
+> repository. The published asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
 > `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical to the
-> repository artifact `dist/tam-os-v2.10.0.html`. It is the package approved for a **controlled
-> internal pilot** — publication makes the verified artifact obtainable, and is **not** a
-> general-availability declaration. The pilot itself is **approved and ready to start but has not
-> launched**, and no launch date is set. See the
+> artifact `dist/tam-os-v2.10.0.html` tracked here, so the canonical repository still builds the exact
+> package that shipped. It is the package approved for a **controlled internal pilot** — publication
+> makes the verified artifact obtainable, and is **not** a general-availability declaration. The pilot
+> itself is **approved and ready to start but has not launched**, and no launch date is set. See the
 > [pilot guide](docs/06-releases/Pilot-Guide-v2.10.0.md) and the
 > [release checklist](docs/06-releases/Release-Checklist-v2.10.0.md).
 >
 > **v2.9.0 — Workspace Experience** remains **published** and immutable, from annotated tag `v2.9.0`
-> on commit `598edef0`. Its published asset `tam-os-v2.9.0.html` (1,049,018 bytes, SHA-256
+> on predecessor commit `598edef0`. Its published asset `tam-os-v2.9.0.html` (1,049,018 bytes, SHA-256
 > `e7470ff5261896b8d7d1f8645294d2abd6a72e9820df94b799973627ddcaf3ea`) is unchanged and remains the
-> rollback target for the pilot; it is simply no longer the Latest release.
-> **v2.8.6** (annotated tag `v2.8.6` on commit `7ac0092d`; asset `tam-os-v2.8.6.html`, 998,413
+> rollback target for the pilot; it is simply no longer the latest release.
+> **v2.8.6** (annotated tag `v2.8.6` on predecessor commit `7ac0092d`; asset `tam-os-v2.8.6.html`, 998,413
 > bytes, SHA-256 `8481523c11f78c8959291912551ee3205781daf0ec466ff79cfc59c7c91d3f62`) remains published and
-> immutable, and is simply no longer the Latest release; **v2.8.5** (asset `tam-intelligence-os-v2.8.5.html`,
-> 965,767 bytes) and **v2.8.4 — Monthly Plan Result Integrity** also remain published and unchanged. See
-> [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md) for how a release is cut.
+> immutable; **v2.8.5** (asset `tam-intelligence-os-v2.8.5.html`,
+> 965,767 bytes) and **v2.8.4 — Monthly Plan Result Integrity** also remain published and unchanged. All
+> of these tags and assets live in the predecessor repository. See
+> [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md) for how a release is cut, and
+> [`PROVENANCE.md`](PROVENANCE.md) for the migration record.
 
 A feature/minor release completing the **UX-006** authorization / personal-workspace line (complete
 mutation authorization over 20 frozen actions, Employee self-only read scope, principal & workspace
@@ -136,7 +148,11 @@ the architecture *baseline*. **Implementation has not started and is not authori
 
 ### Running it
 
-1. Download **`tam-os-v2.10.0.html`** from the [latest Release](https://github.com/fanoryu/TAM-OS/releases/latest).
+1. Get **`tam-os-v2.10.0.html`**. This repository tracks the exact published artifact at
+   [`dist/tam-os-v2.10.0.html`](dist/tam-os-v2.10.0.html) — use that copy. (The v2.10.0 GitHub Release
+   asset lives in the predecessor repository
+   [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS/releases/latest); both files are byte-identical,
+   so either is valid. This repository has no Releases of its own yet.)
 2. *(Recommended)* Verify it — `Get-FileHash tam-os-v2.10.0.html -Algorithm SHA256` (PowerShell) or
    `shasum -a 256 tam-os-v2.10.0.html`. Expect **1,151,267 bytes** / SHA-256
    `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`.
@@ -323,12 +339,19 @@ tools/
   app-version.js                   Single source of truth for the version (reads constants.js)
   build-single-file.js             Modular source -> dist single file (version-derived filename)
   verify-build.js                  Build + invariant + focus-fix + decomposition + audit verification
+  check-commit-attribution.js      Owner-only authorship policy — shared by the hook and CI
+  install-hooks.js                 Points this clone at .githooks/ (repository-local)
+  verify-*-runtime.js              34 behavioural regression harnesses
   README.md                        Tool index: build, verify, and the runtime harness suite
+.githooks/                         Tracked Git hooks (survive a fresh clone)
+  commit-msg                       Rejects AI-attribution trailers; activate via install-hooks.js
 dist/
   tam-os-v2.10.0.html Portable single-file release (build output, version-controlled)
 tam-intelligence-os-v2.5.2.html    Retained legacy JS-provenance regression comparator
 .github/                           Repository governance & delivery
   workflows/ci.yml                 Build + verify on push/PR to main; uploads dist artifact
+  workflows/attribution.yml        verify-attribution: owner-only authorship on every PR/push
+  workflows/codeql.yml             CodeQL scan; skipped while the repository is private
   workflows/release.yml            Tag-triggered (v*) GitHub Release; publishes portable HTML
   ISSUE_TEMPLATE/                  bug_report.yml, feature_request.yml, config.yml
   pull_request_template.md  CODEOWNERS  RELEASE_TEMPLATE.md
@@ -352,9 +375,8 @@ python -m http.server 8000
 ```
 
 Then open <http://localhost:8000>. Any static server works (`npx serve`, VS Code Live Server). The
-portable build in `dist/` — or the asset from the
-[latest release](https://github.com/fanoryu/TAM-OS/releases/latest) — can also be
-opened directly in a browser.
+portable build in `dist/` can also be opened directly in a browser — it is byte-identical to the
+published v2.10.0 asset.
 
 ---
 
@@ -559,9 +581,10 @@ Also complete since then:
   [UX-006 architecture baseline](docs/99-archive/roadmap-completed/UX-006-Identity-Personal-Workspace-Architecture.md).
 - ✅ **Readiness-1 / Readiness-2 / Readiness-3** — employee read scope, end-to-end journey acceptance,
   and the v2.10.0 release & pilot package. All merged and frozen.
-- ✅ **v2.10.0 Official Release** — **published and marked Latest**, from annotated tag `v2.10.0` on
-  release commit `335d53ed`; asset `tam-os-v2.10.0.html` (1,151,267 bytes) byte-identical to
-  `dist/`.
+- ✅ **v2.10.0 Official Release** — **published and marked Latest in the predecessor repository**
+  [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` on predecessor
+  release commit `335d53ed`; asset `tam-os-v2.10.0.html` (1,151,267 bytes) byte-identical to `dist/`
+  here. That tag and commit resolve in the predecessor repository, not in this one.
 - ✅ **Controlled Pilot Sign-off** — maintainer approval **granted**.
 - ✅ **Multi-User-0** — shared multi-user architecture decision, **merged and frozen**
   ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** as the architecture
