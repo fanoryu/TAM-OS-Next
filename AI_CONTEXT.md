@@ -780,7 +780,7 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
   ([record](docs/99-archive/audit/sanitization-2026-07-31/SANITIZATION_RECORD.md)); it is not tracked and not
   reachable in repository history. Development, examples, and testing use **fabricated or
   appropriately sanitized data only**, and confidential company data must never be introduced into
-  this public repository.
+  this repository.
 - Screenshots and a social-preview image are **delivered** (MAINT-001 Follow-Up): four 1920×1080
   dark-theme UI screenshots under `assets/screenshots/` and a 1280×640 `assets/social/tam-os-social.png`,
   all captured from fabricated data. The GitHub social-preview **Settings upload remains a manual step**.
