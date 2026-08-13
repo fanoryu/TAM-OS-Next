@@ -24,7 +24,7 @@ release**.
 | 3 | Readiness-2 — End-to-End User Journey Acceptance | **MERGED / FROZEN** (`580d8999`) |
 | 4 | Readiness-3 — Release Candidate & Pilot Package | **MERGED / FROZEN** (`61ddd939`) |
 | 5 | Controlled Pilot Sign-off | **APPROVED** (`df76ec20`) |
-| 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST — in the predecessor repository** — annotated tag `v2.10.0` on predecessor release commit `335d53ed`; asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical to `dist/` here. Not re-tagged or re-published in this repository |
+| 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST — in both repositories** — **originally published** from annotated tag `v2.10.0` on predecessor release commit `335d53ed` in `fanoryu/TAM-OS`, and **canonically re-published unchanged** from annotated tag `v2.10.0` here, peeling to `856e3ca6`. Asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical across both Releases and to `dist/`. Not a new product version |
 | 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12). **Implementation NOT authorized** |
 | 8 | **Controlled Pilot** | **NEXT — approved to start, NOT YET LAUNCHED** |
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |
