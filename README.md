@@ -590,10 +590,12 @@ Also complete since then:
   [UX-006 architecture baseline](docs/99-archive/roadmap-completed/UX-006-Identity-Personal-Workspace-Architecture.md).
 - ✅ **Readiness-1 / Readiness-2 / Readiness-3** — employee read scope, end-to-end journey acceptance,
   and the v2.10.0 release & pilot package. All merged and frozen.
-- ✅ **v2.10.0 Official Release** — **published and marked Latest in the predecessor repository**
-  [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` on predecessor
-  release commit `335d53ed`; asset `tam-os-v2.10.0.html` (1,151,267 bytes) byte-identical to `dist/`
-  here. That tag and commit resolve in the predecessor repository, not in this one.
+- ✅ **v2.10.0 Official Release** — **published and marked Latest in both repositories.** *Originally*
+  published from [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` on
+  predecessor release commit `335d53ed` (that commit resolves only in the predecessor); *canonically
+  re-published unchanged* here from annotated tag `v2.10.0`, peeling to `856e3ca6`. Asset
+  `tam-os-v2.10.0.html` (1,151,267 bytes) is byte-identical across both Releases and to `dist/`. Not a
+  new product version.
 - ✅ **Controlled Pilot Sign-off** — maintainer approval **granted**.
 - ✅ **Multi-User-0** — shared multi-user architecture decision, **merged and frozen**
   ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** as the architecture

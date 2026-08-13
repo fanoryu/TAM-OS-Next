@@ -7,10 +7,21 @@ authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file
 there rather than duplicating it.
 
 **As of the current source state:** v2.10.0 — "Governed Workspace"; `SCHEMA_VERSION` 6; `ACTIONS` 20.
-**v2.10.0 is PUBLISHED and marked Latest**, from annotated tag `v2.10.0`. Its published asset
+**v2.10.0 is PUBLISHED and marked Latest.** It was **originally published** on 2026-08-11 from the
+predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) (annotated tag `v2.10.0`
+there, tag object `26c74071`, release commit `335d53ed`), and **canonically re-published unchanged** on
+2026-08-13 from the canonical repository `fanoryu/TAM-OS-Next` (annotated tag `v2.10.0` here, tag object
+`fe4a663c`, peeling to `856e3ca6a6bfee41f1840996eec2f292bf5ef4eb`). **Both repositories currently show
+Latest = v2.10.0**; the predecessor's original tag, Release and asset are untouched and remain the
+historical record. This was **not a new product version** — `APP_VERSION` remains **2.10.0**,
+`SCHEMA_VERSION` remains **6**, and no runtime was rebuilt. Its published asset
 `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
-`60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical to the repository
-artifact `dist/tam-os-v2.10.0.html`, which is frozen. Publication makes the verified artifact obtainable
+`60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical across both
+Releases and to the repository artifact `dist/tam-os-v2.10.0.html`, which is frozen. **Artifact identity
+is not tree identity:** the canonical tag's source/docs checkpoint is *newer* than the predecessor's
+v2.10.0 source snapshot (it also carries PILOT-0 and SECURITY-1), while the portable artifact is
+unchanged. `fanoryu/TAM-OS-Next` is the canonical repository going forward.
+Publication makes the verified artifact obtainable
 — it is **not** a general-availability declaration. The controlled pilot is **APPROVED but NOT YET
 LAUNCHED**, and no launch date is set.
 **v2.9.0 — "Workspace Experience" — remains published and immutable** (no longer Latest; v2.10.0
@@ -683,8 +694,10 @@ CSS is pinned by digest instead (see §19). The authoritative, detailed layout i
 Bump the version constants, add release notes, build + verify, present a Release Candidate, and — on
 approval — commit, tag, push, and let the tag-triggered workflow publish the GitHub Release and
 portable asset (guarded so it publishes only when the tag matches the source version). **v2.10.0 is the latest
-published release, published from annotated tag `v2.10.0` and marked Latest; v2.9.0 (publication commit
-`598edef0`), v2.8.6 and earlier remain published and unchanged but are no longer Latest.** Detailed steps:
+published release and is marked Latest — originally published from annotated tag `v2.10.0` in the
+predecessor `fanoryu/TAM-OS` (release commit `335d53ed`) and canonically re-published from annotated tag
+`v2.10.0` here (peeling to `856e3ca6`); v2.9.0 (publication commit
+`598edef0`), v2.8.6 and earlier remain published and unchanged in the predecessor but are no longer Latest.** Detailed steps:
 [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md). History: [`CHANGELOG.md`](CHANGELOG.md); latest
 summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 

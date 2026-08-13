@@ -423,12 +423,21 @@ check(!PREDECESSOR_SLUG.test(readmeSrc) || /predecessor repository/i.test(readme
 // never dropped. These checks are strictly stronger: the old guard only proved an absence, whereas
 // these pin the full provenance claim (original vs canonical, artifact identity, and the negative
 // space of retired wording) so the two publications can never be conflated in either direction.
+const aiContextSrc = read(path.join(root, 'AI_CONTEXT.md'));
+const architectureSrc = read(path.join(root, 'ARCHITECTURE.md'));
+const milestoneRoadmapSrc = read(path.join(root, 'docs', '01-roadmap', 'Milestone_Roadmap.md'));
 const republicationDocs = [
   ['README.md', readmeSrc],
   ['RELEASE_NOTES.md', relNotes],
   ['SECURITY.md', securitySrc],
   ['docs/01-roadmap/README.md', read(path.join(root, 'docs', '01-roadmap', 'README.md'))],
   ['docs/06-releases/Pilot-Guide-v2.10.0.md', read(path.join(root, 'docs', '06-releases', 'Pilot-Guide-v2.10.0.md'))],
+  // RELEASE-0D — the current-state knowledge records. These were NOT covered by the original
+  // RELEASE-0B block, which is exactly why their pre-publication wording survived two green
+  // release gates and had to be reconciled after the fact.
+  ['AI_CONTEXT.md', aiContextSrc],
+  ['ARCHITECTURE.md', architectureSrc],
+  ['docs/01-roadmap/Milestone_Roadmap.md', milestoneRoadmapSrc],
 ];
 // (1) The canonical re-publication is documented in the operator-facing paperwork.
 check(/canonically re-published|canonical re-publication/i.test(readmeSrc)
@@ -453,11 +462,50 @@ check(/byte-identical/i.test(readmeSrc) && /byte-identical/i.test(relNotes),
   'README.md and RELEASE_NOTES.md record the artifact as byte-identical to the original publication');
 // (5) NEGATIVE SPACE. The retired pre-republication wording must be gone from every CURRENT-STATE
 // document. Archived/dated records under docs/99-archive keep their historical wording untouched.
-const RETIRED_RELEASE_WORDING = /no tags and no Releases|no Releases of its own|no tags or Releases|none will be created|not re-published, re-tagged|is not\s+re-tagged or re-published here/i;
+//
+// RELEASE-0D hardening. These are kept as SEPARATE named patterns rather than one catch-all, so a
+// failure says which false claim was made. The distinction each pattern must respect:
+//   LEGITIMATE — "originally published from the predecessor"; "the predecessor still shows Latest
+//                v2.10.0"; "that commit resolves only in the predecessor" (historical provenance).
+//   INVALID    — any claim that v2.10.0 exists ONLY in the predecessor, that TAM-OS-Next has no
+//                v2.10.0 tag/Release, or that it was never re-tagged/re-published here.
+// So every pattern below is anchored on the EXCLUSIVE framing ("not in this one", "no tags", "not
+// re-tagged"), never on the mere co-occurrence of "predecessor" with "Latest" or "published".
+const RETIRED_RELEASE_WORDING = [
+  // Pre-publication absence claims.
+  [/no tags and no Releases|no Releases of its own|no tags or Releases/i, 'claims TAM-OS-Next has no tags/Releases'],
+  [/none will be created/i, 'claims no v2.10.0 tag will ever be created here'],
+  [/no\s+`?v2\.10\.0`?\s+(tag|Release)\s+(here|in this repository)/i, 'claims there is no v2.10.0 tag/Release here'],
+  // "not re-tagged / not re-published" in any word order, with or without a trailing locator.
+  [/not\s+re-published,\s*re-tagged/i, 'claims v2.10.0 was not re-published/re-tagged'],
+  [/not\s+re-(tagged|published)\s+or\s+re-(published|tagged)/i, 'claims v2.10.0 was not re-tagged or re-published'],
+  // Latest asserted as living in the predecessor rather than in both repositories.
+  [/Latest\s*[—–-]*\s*in the predecessor repository/i, 'asserts Latest lives in the predecessor repository'],
+  // Predecessor-EXCLUSIVE resolution. Anchored on the "not in this one/repository" tail so the
+  // legitimate "resolves only in the predecessor" provenance note is NOT rejected.
+  [/predecessor[^.]{0,120}not in this (one|repository)/i, 'claims v2.10.0 resolves in the predecessor and not here'],
+];
 for (const [label, src] of republicationDocs) {
-  check(!RETIRED_RELEASE_WORDING.test(src),
-    `${label} carries no retired pre-republication "no tags/Releases / none will be created" wording`);
+  const hit = RETIRED_RELEASE_WORDING.find(([re]) => re.test(src));
+  check(!hit, hit
+    ? `${label} carries retired pre-republication wording — ${hit[1]}`
+    : `${label} carries no retired pre-republication or predecessor-only current-state wording`);
 }
+// (5b) POSITIVE current-state semantics for the knowledge records. Absence of stale wording is not
+// the same as presence of the correct claim — a doc that simply went silent on v2.10.0 would pass
+// the negative check above while telling a reader nothing.
+for (const [label, src] of [['AI_CONTEXT.md', aiContextSrc], ['ARCHITECTURE.md', architectureSrc], ['docs/01-roadmap/Milestone_Roadmap.md', milestoneRoadmapSrc]]) {
+  check(/canonically re-published|canonical re-publication/i.test(src),
+    `${label} records the canonical re-publication of v2.10.0 from TAM-OS-Next`);
+  check(/original(ly)? published/i.test(src) && PREDECESSOR_SLUG.test(src + ' fanoryu/TAM-OS'),
+    `${label} attributes the ORIGINAL v2.10.0 publication to the predecessor`);
+}
+// (5c) DUAL-LATEST. Both repositories legitimately show Latest = v2.10.0; the knowledge records must
+// say so, because "marked Latest" alone is what read as predecessor-only before RELEASE-0D.
+check(/both repositories/i.test(aiContextSrc) && /Latest/i.test(aiContextSrc),
+  'AI_CONTEXT.md records that BOTH repositories currently show Latest = v2.10.0');
+check(/both repositories/i.test(architectureSrc) && /Latest/i.test(architectureSrc),
+  'ARCHITECTURE.md records that BOTH repositories currently show Latest = v2.10.0');
 // (6) A re-publication is NOT a new product version. If this ever reads as a new build, the duplicate
 // v2.10.0 across two repositories becomes a genuine ambiguity instead of a documented one.
 check(/not v2\.10\.1/i.test(relNotes) && /not a new runtime build/i.test(relNotes)

@@ -1,9 +1,18 @@
 # TAM OS — Architecture
 
-**Current published release:** v2.10.0 — Governed Workspace (**published, marked Latest**), from
-annotated tag `v2.10.0`. Its published asset (`tam-os-v2.10.0.html`, **1,151,267 bytes**, SHA-256
-`60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical to the repository
-artifact and packages the UX-006 authorization line and the Readiness programme.
+**Current published release:** v2.10.0 — Governed Workspace (**published, marked Latest**). It was
+**originally published** (2026-08-11) from the predecessor repository `fanoryu/TAM-OS` — annotated tag
+`v2.10.0` there, release commit `335d53ed` — and **canonically re-published unchanged** (2026-08-13)
+from the canonical repository `fanoryu/TAM-OS-Next` — annotated tag `v2.10.0` here, peeling to
+`856e3ca6a6bfee41f1840996eec2f292bf5ef4eb`. **Both repositories currently show Latest = v2.10.0**; the
+predecessor's tag, Release and asset are untouched historical provenance. This was **not** a new product
+version: `APP_VERSION` remains **2.10.0**, `SCHEMA_VERSION` remains **6**, no runtime was rebuilt.
+Its published asset (`tam-os-v2.10.0.html`, **1,151,267 bytes**, SHA-256
+`60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical across both
+Releases and to the repository artifact, and packages the UX-006 authorization line and the Readiness
+programme. **Artifact identity is not tree identity** — the canonical tag's source/docs checkpoint is
+newer than the predecessor's v2.10.0 snapshot while the portable artifact is unchanged.
+`fanoryu/TAM-OS-Next` is canonical going forward.
 **Current distributable:** `dist/tam-os-v2.10.0.html` — the same artifact. It is the **controlled-pilot
 package**: publication makes it obtainable and checksum-verifiable, and **the pilot itself has not
 launched**. It is a **single-file application package**, not a fully offline one: the XLSX parser and
