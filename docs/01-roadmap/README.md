@@ -12,8 +12,9 @@ release**.
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in
 > [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) before the clean migration. They do **not** resolve
-> in this repository, which starts from a fresh history. This repository also has **no tags or Releases**
-> of its own; it begins its release lineage at the next separately authorized version. See
+> in this repository, which starts from a fresh history. This repository's own release lineage begins
+> with the **canonical re-publication of v2.10.0** — the same byte-identical artifact originally
+> published from the predecessor, re-published here unchanged rather than rebuilt. See
 > [`PROVENANCE.md`](../../PROVENANCE.md).
 
 | # | Item | Status |

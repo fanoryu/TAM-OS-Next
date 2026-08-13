@@ -79,20 +79,29 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 
 ## Current release
 
-**v2.10.0 — Governed Workspace** · `SCHEMA_VERSION` 6 · **published from the predecessor repository**
+**v2.10.0 — Governed Workspace** · `SCHEMA_VERSION` 6 · **originally published from the predecessor repository, canonically re-published here**
 
-> **Where the releases live.** Every published TAM OS release up to and including **v2.10.0** was cut
-> from the predecessor repository **[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS)** (private),
-> which is retained as a read-only archive. Its tags, Releases and assets are unchanged and remain the
-> authoritative source for those artifacts.
+> **Where the releases live.** Every published TAM OS release up to and including the **original**
+> **v2.10.0** was cut from the predecessor repository
+> **[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS)** (private), which is retained as a read-only
+> archive. Its tags, Releases and assets are unchanged and remain the authoritative record of those
+> publications.
 >
-> **This repository has no tags or Releases yet.** `fanoryu/TAM-OS-Next` became canonical after
-> v2.10.0 was published, and it deliberately begins its own release lineage at the **next separately
-> authorized version**. There is no `v2.10.0` tag here and none will be created — the historical
-> release is not re-published, re-tagged or copied forward.
+> **v2.10.0 is canonically re-published here.** `fanoryu/TAM-OS-Next` became canonical after v2.10.0
+> was originally published, and the same frozen artifact is re-published **unchanged** from this
+> repository under the tag `v2.10.0` — the same version, the same byte-identical file, a canonical
+> download location. It is **not** v2.10.1, not a new runtime build, not a schema change and not a
+> feature release; `APP_VERSION` remains **2.10.0** and `SCHEMA_VERSION` remains **6**. Ongoing
+> development continues here.
+>
+> **Artifact identity, not tree identity.** The canonical `v2.10.0` tag marks the re-publication
+> checkpoint, so its source and documentation are **newer** than the predecessor's v2.10.0 source
+> snapshot (they additionally carry the PILOT-0 and SECURITY-1 readiness records). The portable
+> artifact is byte-identical. See [`PROVENANCE.md`](PROVENANCE.md).
 
-> **Release state.** v2.10.0 is **published** — cut from annotated tag `v2.10.0` in the predecessor
-> repository. The published asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
+> **Release state.** v2.10.0 is **published** and **marked Latest** — originally cut from annotated tag
+> `v2.10.0` in the predecessor repository, and canonically re-published unchanged from annotated tag
+> `v2.10.0` here. The published asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
 > `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical to the
 > artifact `dist/tam-os-v2.10.0.html` tracked here, so the canonical repository still builds the exact
 > package that shipped. It is the package approved for a **controlled internal pilot** — publication
@@ -149,10 +158,10 @@ the architecture *baseline*. **Implementation has not started and is not authori
 ### Running it
 
 1. Get **`tam-os-v2.10.0.html`**. This repository tracks the exact published artifact at
-   [`dist/tam-os-v2.10.0.html`](dist/tam-os-v2.10.0.html) — use that copy. (The v2.10.0 GitHub Release
-   asset lives in the predecessor repository
-   [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS/releases/latest); both files are byte-identical,
-   so either is valid. This repository has no Releases of its own yet.)
+   [`dist/tam-os-v2.10.0.html`](dist/tam-os-v2.10.0.html) — use that copy, or take the identical asset
+   from this repository's canonical `v2.10.0` Release. (The **original** v2.10.0 Release asset lives in
+   the predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS/releases/latest); all
+   three files are byte-identical, so any of them is valid.)
 2. *(Recommended)* Verify it — `Get-FileHash tam-os-v2.10.0.html -Algorithm SHA256` (PowerShell) or
    `shasum -a 256 tam-os-v2.10.0.html`. Expect **1,151,267 bytes** / SHA-256
    `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`.
