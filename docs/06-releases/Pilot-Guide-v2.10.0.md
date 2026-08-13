@@ -1,12 +1,13 @@
 # TAM OS v2.10.0 — Controlled Pilot Guide
 
 **Audience:** the named internal TAM operators running the v2.10.0 pilot.
-**Status:** v2.10.0 is **published** — from the annotated tag `v2.10.0` in the predecessor repository
-`fanoryu/TAM-OS`, where the Release asset is marked Latest — so the verified artifact can be obtained
-and checksum-verified. The canonical repository `fanoryu/TAM-OS-Next` tracks the byte-identical copy at
-`dist/tam-os-v2.10.0.html` and has no tags or Releases of its own; either copy is valid. It is **not
-general-use software**, and **the pilot has not launched** — it begins only when the artifact is
-actually handed to you. This is an internal working document, not marketing material.
+**Status:** v2.10.0 is **published** — **originally** from the annotated tag `v2.10.0` in the
+predecessor repository `fanoryu/TAM-OS`, where the Release asset is marked Latest, and **canonically
+re-published unchanged** from the canonical repository `fanoryu/TAM-OS-Next` under its own `v2.10.0`
+tag — so the verified artifact can be obtained and checksum-verified. `fanoryu/TAM-OS-Next` also tracks
+the byte-identical copy at `dist/tam-os-v2.10.0.html`; any of these copies is valid, and they are the
+same file. It is **not general-use software**, and **the pilot has not launched** — it begins only when
+the artifact is actually handed to you. This is an internal working document, not marketing material.
 
 > **Read section 1 before you open the application.** It tells you what this software is and, just as
 > importantly, what it is not.

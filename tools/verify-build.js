@@ -415,9 +415,61 @@ check(/!\[CI\]\(https:\/\/github\.com\/fanoryu\/TAM-OS-Next\/actions\/workflows\
 // provenance — never presented as this repository's current identity.
 check(!PREDECESSOR_SLUG.test(readmeSrc) || /predecessor repository/i.test(readmeSrc),
   'README.md frames every predecessor fanoryu/TAM-OS reference as predecessor/archive provenance');
-// This repository has no release lineage yet: the paperwork must say so and must not imply a local tag.
-check(/no tags and no Releases|no Releases of its own|no tags or Releases/i.test(readmeSrc + relNotes),
-  'release paperwork records that TAM-OS-Next has no tags/Releases of its own yet');
+// RELEASE-0B — CANONICAL RE-PUBLICATION OF v2.10.0.
+//
+// v2.10.0 was ORIGINALLY published from the predecessor fanoryu/TAM-OS and is CANONICALLY
+// RE-PUBLISHED, byte-identical and unchanged, from fanoryu/TAM-OS-Next. The previous guard here
+// asserted the opposite ("no tags/Releases of its own yet") and is obsolete — but it is REPLACED,
+// never dropped. These checks are strictly stronger: the old guard only proved an absence, whereas
+// these pin the full provenance claim (original vs canonical, artifact identity, and the negative
+// space of retired wording) so the two publications can never be conflated in either direction.
+const republicationDocs = [
+  ['README.md', readmeSrc],
+  ['RELEASE_NOTES.md', relNotes],
+  ['SECURITY.md', securitySrc],
+  ['docs/01-roadmap/README.md', read(path.join(root, 'docs', '01-roadmap', 'README.md'))],
+  ['docs/06-releases/Pilot-Guide-v2.10.0.md', read(path.join(root, 'docs', '06-releases', 'Pilot-Guide-v2.10.0.md'))],
+];
+// (1) The canonical re-publication is documented in the operator-facing paperwork.
+check(/canonically re-published|canonical re-publication/i.test(readmeSrc)
+  && /canonically re-published|canonical re-publication/i.test(relNotes),
+  'README.md and RELEASE_NOTES.md document the canonical re-publication of v2.10.0 from TAM-OS-Next');
+// (2) ORIGIN IS NEVER REWRITTEN. The original publication stays attributed to the predecessor.
+// Without this, "canonical" could silently drift into "originated here" — the one provenance lie
+// this whole exercise exists to prevent.
+check(/original(ly)? published/i.test(relNotes) && PREDECESSOR_SLUG.test(relNotes),
+  'RELEASE_NOTES.md attributes the ORIGINAL v2.10.0 publication to the predecessor fanoryu/TAM-OS');
+check(/original/i.test(readmeSrc) && PREDECESSOR_SLUG.test(readmeSrc),
+  'README.md attributes the ORIGINAL v2.10.0 publication to the predecessor fanoryu/TAM-OS');
+// (3) The artifact is identified by exact size AND digest wherever it is offered for download.
+// The checksum is deliberately NOT shipped as a separate file, so the paperwork IS the checksum.
+const ARTIFACT_SHA = '60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704';
+check(readmeSrc.includes(ARTIFACT_SHA) && relNotes.includes(ARTIFACT_SHA),
+  'README.md and RELEASE_NOTES.md state the exact v2.10.0 artifact SHA-256');
+check(/1,151,267 bytes/.test(readmeSrc) && /1,151,267 bytes/.test(relNotes),
+  'README.md and RELEASE_NOTES.md state the exact v2.10.0 artifact byte size');
+// (4) Byte-identity is the load-bearing claim of a re-publication — it must be stated, not implied.
+check(/byte-identical/i.test(readmeSrc) && /byte-identical/i.test(relNotes),
+  'README.md and RELEASE_NOTES.md record the artifact as byte-identical to the original publication');
+// (5) NEGATIVE SPACE. The retired pre-republication wording must be gone from every CURRENT-STATE
+// document. Archived/dated records under docs/99-archive keep their historical wording untouched.
+const RETIRED_RELEASE_WORDING = /no tags and no Releases|no Releases of its own|no tags or Releases|none will be created|not re-published, re-tagged|is not\s+re-tagged or re-published here/i;
+for (const [label, src] of republicationDocs) {
+  check(!RETIRED_RELEASE_WORDING.test(src),
+    `${label} carries no retired pre-republication "no tags/Releases / none will be created" wording`);
+}
+// (6) A re-publication is NOT a new product version. If this ever reads as a new build, the duplicate
+// v2.10.0 across two repositories becomes a genuine ambiguity instead of a documented one.
+check(/not v2\.10\.1/i.test(relNotes) && /not a new runtime build/i.test(relNotes)
+  && /not a schema change/i.test(relNotes) && /not a feature release/i.test(relNotes),
+  'RELEASE_NOTES.md states the re-publication is not a new version/runtime build/schema change/feature release');
+check(/APP_VERSION` remains \*\*2\.10\.0\*\*|remains \*\*2\.10\.0\*\*/i.test(relNotes)
+  && /SCHEMA_VERSION` \*\*remains 6\*\*|remains \*\*6\*\*/i.test(relNotes),
+  'RELEASE_NOTES.md pins APP_VERSION 2.10.0 and SCHEMA_VERSION 6 as unchanged by the re-publication');
+// (7) Artifact identity, not tree identity: the canonical tag carries a NEWER source/docs checkpoint
+// than the predecessor's v2.10.0 snapshot. Stating this is what keeps the diff from reading as drift.
+check(/artifact identity, not tree identity/i.test(relNotes) && /newer/i.test(relNotes),
+  'RELEASE_NOTES.md records the artifact-identity (not tree-identity) semantics of the canonical tag');
 // PUBLICATION: v2.10.0 is PUBLISHED and marked Latest. The paperwork must assert the published
 // state positively, and must carry no stale "release candidate / not published / not tagged"
 // wording left over from the Readiness-3 pre-publication phase.

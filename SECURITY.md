@@ -115,10 +115,11 @@ Only the current codebase receives security fixes. Older builds are not maintain
 | Current `main` of `fanoryu/TAM-OS-Next` (`APP_VERSION` **2.10.0**) | ✅ |
 | Any earlier build or release | ❌ |
 
-> **Provenance.** `fanoryu/TAM-OS-Next` is the canonical repository going forward and currently has
-> **no tags and no Releases of its own**. v2.10.0 was published from the predecessor repository
-> `fanoryu/TAM-OS`, which is retained as a read-only archive. The portable artifact for the current
-> codebase is tracked here as `dist/tam-os-v2.10.0.html`.
+> **Provenance.** `fanoryu/TAM-OS-Next` is the canonical repository going forward. v2.10.0 was
+> **originally published** from the predecessor repository `fanoryu/TAM-OS`, which is retained as a
+> read-only archive, and the same byte-identical artifact is **canonically re-published** from this
+> repository under the tag `v2.10.0`. It is the same version, not a new one. The portable artifact for
+> the current codebase is tracked here as `dist/tam-os-v2.10.0.html`.
 
 ## Response expectations
 

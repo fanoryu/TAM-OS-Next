@@ -1,17 +1,40 @@
 # TAM OS v2.10.0 — Governed Workspace
 
 **Release Name:** Governed Workspace
-**Status:** v2.10.0 is **published** and **marked Latest** in the predecessor repository
-[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` there. The published
-asset is `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
-`60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`), byte-identical to the repository
-artifact `dist/tam-os-v2.10.0.html` tracked here. `SCHEMA_VERSION` **remains 6** — this release carries
-**no data migration**, so Complete Backups taken on v2.9.0 restore unchanged.
+**Status:** v2.10.0 is **published** and **marked Latest**. It was **originally published on
+2026-08-11** from the predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS),
+from annotated tag `v2.10.0` there (tag object `26c74071`, commit `335d53ed`), where it remains
+published, marked Latest and immutable. The same frozen artifact is now **canonically re-published,
+unchanged**, from [`fanoryu/TAM-OS-Next`](https://github.com/fanoryu/TAM-OS-Next). The asset is
+`tam-os-v2.10.0.html` (**1,151,267 bytes**, SHA-256
+`60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`), verified **byte-identical** to the
+repository artifact `dist/tam-os-v2.10.0.html` tracked here. `SCHEMA_VERSION` **remains 6** — this
+release carries **no data migration**, so Complete Backups taken on v2.9.0 restore unchanged.
 
-> **Release lineage.** All tags and Releases up to v2.10.0 belong to the predecessor repository, which is
-> retained as a read-only archive. The canonical repository `fanoryu/TAM-OS-Next` currently has **no tags
-> and no Releases**, and begins its own lineage at the next separately authorized version. v2.10.0 is not
-> re-tagged or re-published here. See [`PROVENANCE.md`](PROVENANCE.md).
+> **This is not a new product version.** Not v2.10.1, not a new runtime build,
+> not a schema change, not a feature release.
+> `APP_VERSION` remains **2.10.0** and `SCHEMA_VERSION` remains **6**. Canonical
+> re-publication moves *where the verified artifact can be downloaded* — it changes nothing about what
+> the artifact is.
+
+> **Release lineage.** Every release up to and including the original v2.10.0 belongs to the predecessor
+> repository `fanoryu/TAM-OS`, which is retained as a read-only archive; its tags, Releases and assets
+> are unchanged and remain the authoritative record of those publications. `fanoryu/TAM-OS-Next` is the
+> canonical repository from this point forward, and v2.10.0 is its first Release — the same artifact,
+> re-published rather than rebuilt. Ongoing development continues in `fanoryu/TAM-OS-Next`. See
+> [`PROVENANCE.md`](PROVENANCE.md).
+
+> **Artifact identity, not tree identity.** The canonical `v2.10.0` tag marks the re-publication
+> checkpoint in `fanoryu/TAM-OS-Next`. Its **source and documentation are newer** than the predecessor's
+> v2.10.0 source snapshot — they additionally carry the PILOT-0 controlled-pilot readiness record, the
+> SECURITY-1 policy reconciliation and this canonical re-publication reconciliation. The **portable
+> artifact is unchanged and byte-identical**. What v2.10.0 denotes is the identity of the shipped
+> artifact, not the identity of the source tree that accompanies it.
+
+> **Scope.** This publication exists for download convenience, frozen-baseline distribution and
+> canonical archival availability. It does **not** launch the pilot — **PILOT-1 remains ON HOLD PENDING
+> VPS**. Backend work remains **NOT STARTED**. Nothing here authorizes use with real company data.
+
 **v2.9.0** remains **published** and immutable (asset `tam-os-v2.9.0.html`, 1,049,018 bytes) and is
 simply no longer marked Latest; v2.10.0 supersedes it as Latest without moving, replacing, re-labelling
 or rewriting it.
