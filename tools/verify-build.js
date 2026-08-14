@@ -445,7 +445,12 @@ const PRIVATE_REPO_CLAIMS = [
   [/\brepository\s+remains\s+\*{0,2}private\b/i, '"repository remains private"'],
   [/Private source repository/i, '"Private source repository" heading'],
 ];
-for (const [docName, docSrc] of [['README.md', readmeSrc], ['SECURITY.md', securitySrc]]) {
+// PUBLIC-4 extends the guarded set to AI_CONTEXT.md — now that it carries the canonical public
+// repository-posture statement, it must not regress to claiming the repository itself is private
+// either. (aiContextSrc is read just below for the RELEASE-0B block; read it here so the guard can
+// run first without reordering that block's own use.)
+const aiContextSrcForPosture = read(path.join(root, 'AI_CONTEXT.md'));
+for (const [docName, docSrc] of [['README.md', readmeSrc], ['SECURITY.md', securitySrc], ['AI_CONTEXT.md', aiContextSrcForPosture]]) {
   const hit = PRIVATE_REPO_CLAIMS.find(([re]) => re.test(docSrc));
   check(!hit, `${docName} current-state posture does not claim the repository itself is private`
     + (hit ? ` (found ${hit[1]})` : ''));

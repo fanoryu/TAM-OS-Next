@@ -21,10 +21,10 @@ Report suspected security vulnerabilities privately, by email, to the repository
 
 This is the canonical vulnerability-reporting route for the current state of the repository.
 
-If GitHub **Private Vulnerability Reporting** is enabled on this repository, it may be used as a
-private reporting channel (via the repository's **Security** tab). If it is not enabled, use the
-security email above. Either way, the email route above is always a valid private channel. Never
-report a suspected vulnerability through a public surface.
+GitHub **Private Vulnerability Reporting** is **enabled** on this repository — you may open a private
+report from the repository's **Security** tab (**Report a vulnerability**). The security email above
+remains an always-valid private alternative. Never report a suspected vulnerability through a public
+surface (Issues, pull requests, commits, or discussions).
 
 ### Do not use these routes for a vulnerability
 
