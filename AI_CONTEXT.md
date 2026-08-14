@@ -13,6 +13,20 @@ identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 20. The portable artifact
 Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1503d`. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
+**Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
+but TAM OS remains **proprietary, all rights reserved**; public visibility is **not** an open-source
+grant and confers no additional right to use, copy, modify, redistribute, sublicense, or commercialize
+the software (see [`LICENSE`](LICENSE)). The **PUBLIC workstream is CLOSED**: public-readiness
+remediation, the final readiness audit, and the PRIVATE → PUBLIC operation all completed with **zero
+source/runtime delta** and no Release change. Live GitHub state: **Wiki disabled**, **Issues enabled**
+(public — deliberately **not** a security-reporting channel; see [`SECURITY.md`](SECURITY.md)),
+**GitHub Private Vulnerability Reporting enabled**, and **CodeQL verified operational** on the public
+repository (no longer skipped — it runs and its analysis/SARIF upload succeed). The predecessor
+`fanoryu/TAM-OS` **remains private**, retained only as historical provenance and not resolvable by
+public visitors. Publication changed no application behavior — **PILOT-1 remains ON HOLD PENDING VPS**
+and **backend remains NOT STARTED**; the next operational dependency is **VPS availability/access**, not
+any further publication objective.
+
 **v2.10.0 is PUBLISHED** (now the prior release, no longer Latest). It was **originally published** on 2026-08-11 from the
 predecessor repository `fanoryu/TAM-OS` (private predecessor repository retained for historical provenance; not resolvable by public visitors) (annotated tag `v2.10.0`
 there, tag object `26c74071`, release commit `335d53ed`), and **canonically re-published unchanged** on
