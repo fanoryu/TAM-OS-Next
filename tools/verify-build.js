@@ -433,6 +433,23 @@ check(/!\[CI\]\(https:\/\/github\.com\/fanoryu\/TAM-OS-Next\/actions\/workflows\
 // provenance — never presented as this repository's current identity.
 check(!PREDECESSOR_SLUG.test(readmeSrc) || /predecessor repository/i.test(readmeSrc),
   'README.md frames every predecessor fanoryu/TAM-OS reference as predecessor/archive provenance');
+// PUBLIC-1 — PUBLIC-VISIBILITY POSTURE GUARD.
+// Once fanoryu/TAM-OS-Next is publicly viewable, the current-state operator docs must not regress to
+// claiming the repository ITSELF is private. This is a narrow, SEMANTIC guard: it targets only the
+// "this repository is private" family of assertions. It deliberately does NOT reject legitimate uses
+// of "private" — the private PREDECESSOR repository, the private production/company data layer, or any
+// historical discussion of when this repository used to be private (those never phrase it as
+// "repository is private").
+const PRIVATE_REPO_CLAIMS = [
+  [/\brepository is\s+\*{0,2}private\b/i, '"repository is private"'],
+  [/\brepository\s+remains\s+\*{0,2}private\b/i, '"repository remains private"'],
+  [/Private source repository/i, '"Private source repository" heading'],
+];
+for (const [docName, docSrc] of [['README.md', readmeSrc], ['SECURITY.md', securitySrc]]) {
+  const hit = PRIVATE_REPO_CLAIMS.find(([re]) => re.test(docSrc));
+  check(!hit, `${docName} current-state posture does not claim the repository itself is private`
+    + (hit ? ` (found ${hit[1]})` : ''));
+}
 // RELEASE-0B — CANONICAL RE-PUBLICATION OF v2.10.0.
 //
 // v2.10.0 was ORIGINALLY published from the predecessor fanoryu/TAM-OS and is CANONICALLY

@@ -35,7 +35,8 @@ financial/payroll calculation. **PILOT-1 remains ON HOLD PENDING VPS**; backend 
 **Release Name:** Governed Workspace
 **Status:** v2.10.0 is **published** and intact — now the **prior release** (no longer Latest; superseded
 by v2.11.0). It was **originally published on
-2026-08-11** from the predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS),
+2026-08-11** from the predecessor repository `fanoryu/TAM-OS` (private predecessor repository retained
+for historical provenance; not resolvable by public visitors),
 from annotated tag `v2.10.0` there (tag object `26c74071`, commit `335d53ed`), where it remains
 published, marked Latest and immutable. The same frozen artifact is now **canonically re-published,
 unchanged**, from [`fanoryu/TAM-OS-Next`](https://github.com/fanoryu/TAM-OS-Next). The asset is

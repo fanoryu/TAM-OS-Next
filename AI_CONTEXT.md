@@ -14,7 +14,7 @@ Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1
 published and intact as the **prior release** (no longer Latest), described next.
 
 **v2.10.0 is PUBLISHED** (now the prior release, no longer Latest). It was **originally published** on 2026-08-11 from the
-predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) (annotated tag `v2.10.0`
+predecessor repository `fanoryu/TAM-OS` (private predecessor repository retained for historical provenance; not resolvable by public visitors) (annotated tag `v2.10.0`
 there, tag object `26c74071`, release commit `335d53ed`), and **canonically re-published unchanged** on
 2026-08-13 from the canonical repository `fanoryu/TAM-OS-Next` (annotated tag `v2.10.0` here, tag object
 `fe4a663c`, peeling to `856e3ca6a6bfee41f1840996eec2f292bf5ef4eb`). `fanoryu/TAM-OS-Next` now shows

@@ -18,12 +18,14 @@ support backend capabilities in future roadmap phases.
 ![HTML](https://img.shields.io/badge/HTML-single--file%20app-e34f26)
 ![Core](https://img.shields.io/badge/core-source%20repository-blue)
 
-> **Private source repository — company data is separate.** This is the **source core** of TAM
+> **Publicly viewable source — company data is separate.** This is the **source core** of TAM
 > Intelligence OS: application source, tooling, docs, and an empty-data default. Production company data
 > and configuration are **maintained separately** in a private company layer (see
 > [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)); the application ships **no** company data and requires
-> none to run. **Licensing:** the current [`LICENSE`](LICENSE) is proprietary — reuse, redistribution,
-> or modification rights are **not** granted, and this repository is **not** (yet) declared open source.
+> none to run. **Licensing:** the source repository is publicly viewable, but TAM OS remains
+> **proprietary and all rights reserved** under the current [`LICENSE`](LICENSE) — public visibility does
+> **not** grant permission to use, copy, modify, redistribute, sublicense, or commercialize the software
+> except as explicitly permitted by that license, and this repository is **not** open source.
 > Do **not** commit real company, employee, payroll, or backup data.
 
 ---
@@ -94,7 +96,8 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 
 > **Previous release — v2.10.0 (Governed Workspace).** v2.10.0 remains **published** and intact (now the
 > prior release, no longer Latest). It was **originally published** from the predecessor repository
-> **[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS)** (private, retained as a read-only archive) and
+> **`fanoryu/TAM-OS`** (private predecessor repository retained for historical provenance — not
+> resolvable by public visitors) and
 > **canonically re-published** unchanged from `fanoryu/TAM-OS-Next` under annotated tag `v2.10.0`. Its
 > asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
 > `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is **byte-identical** across both
@@ -353,7 +356,7 @@ tam-intelligence-os-v2.5.2.html    Retained legacy JS-provenance regression comp
 .github/                           Repository governance & delivery
   workflows/ci.yml                 Build + verify on push/PR to main; uploads dist artifact
   workflows/attribution.yml        verify-attribution: owner-only authorship on every PR/push
-  workflows/codeql.yml             CodeQL scan; skipped while the repository is private
+  workflows/codeql.yml             CodeQL security scan on push/PR to main
   workflows/release.yml            Tag-triggered (v*) GitHub Release; publishes portable HTML
   ISSUE_TEMPLATE/                  bug_report.yml, feature_request.yml, config.yml
   pull_request_template.md  CODEOWNERS  RELEASE_TEMPLATE.md
@@ -589,7 +592,8 @@ Also complete since then:
   `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is byte-identical to `dist/`. The
   merged BRAND-1 product-identity / offline-typography modernization; presentation only.
 - ✅ **v2.10.0 Official Release** — **published**, now the **prior release** (no longer Latest). *Originally*
-  published from [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` on
+  published from `fanoryu/TAM-OS` (private predecessor repository retained for historical provenance),
+  from annotated tag `v2.10.0` on
   predecessor release commit `335d53ed` (that commit resolves only in the predecessor); *canonically
   re-published unchanged* here from annotated tag `v2.10.0`, peeling to `856e3ca6`. Asset
   `tam-os-v2.10.0.html` (1,151,267 bytes) is byte-identical across both Releases and to `dist/` at that
@@ -695,9 +699,10 @@ Use the supplied artwork only — never recolor, rebuild, stretch, rotate, or su
 
 - **License:** the current [`LICENSE`](LICENSE) is **proprietary** — all rights reserved by PT Total
   Asset Manajemen; reuse, redistribution, and modification are **not** granted and this repository is
-  **not** declared open source (see also [`PROPRIETARY-LICENSE-NOTICE.md`](PROPRIETARY-LICENSE-NOTICE.md)).
-  A future licensing decision may relax this; until then, treat the source as source-visible only.
-- **Source core vs. private data:** this repository is private and holds **no** company data;
+  **not** open source (see also [`PROPRIETARY-LICENSE-NOTICE.md`](PROPRIETARY-LICENSE-NOTICE.md)). The
+  source repository is publicly viewable, but public visibility grants no license beyond what the
+  `LICENSE` explicitly permits.
+- **Source core vs. private data:** this repository is publicly viewable and holds **no** company data;
   production data and configuration are maintained separately (see
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
 - **Security:** report vulnerabilities privately by email to <fanoryu@gmail.com> (subject
