@@ -9,13 +9,16 @@ predecessor's tag, Release and asset are untouched historical provenance. This w
 version: `APP_VERSION` remains **2.10.0**, `SCHEMA_VERSION` remains **6**, no runtime was rebuilt.
 Its published asset (`tam-os-v2.10.0.html`, **1,151,267 bytes**, SHA-256
 `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical across both
-Releases and to the repository artifact, and packages the UX-006 authorization line and the Readiness
-programme. **Artifact identity is not tree identity** — the canonical tag's source/docs checkpoint is
+Releases and to the artifact originally tracked here; that published asset is frozen. It packages the
+UX-006 authorization line and the Readiness programme. (The current repository source has since advanced
+to v2.11.0 — see **Current source / distributable** below.) **Artifact identity is not tree identity** — the canonical tag's source/docs checkpoint is
 newer than the predecessor's v2.10.0 snapshot while the portable artifact is unchanged.
 `fanoryu/TAM-OS-Next` is canonical going forward.
-**Current distributable:** `dist/tam-os-v2.10.0.html` — the same artifact. It is the **controlled-pilot
-package**: publication makes it obtainable and checksum-verifiable, and **the pilot itself has not
-launched**. It is a **single-file application package**, not a fully offline one: the XLSX parser and
+**Current source / distributable:** `dist/tam-os-v2.11.0.html` — the prepared **v2.11.0 (Identity Refresh)**
+artifact carrying the merged BRAND-1 product-identity modernization (`APP_VERSION` 2.11.0, `SCHEMA_VERSION`
+6, `ACTIONS` 20; identity/typography presentation only). The published **v2.10.0** asset above remains the
+current Latest Release until v2.11.0 is tagged and published under separate owner authorization. The
+artifact **has not** launched any pilot — **PILOT-1 remains ON HOLD PENDING VPS**. It is a **single-file application package**, not a fully offline one: the XLSX parser and
 web fonts remain CDN-loaded (see [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)).
 The prior **v2.9.0** release remains published and immutable (no longer Latest) — annotated tag
 `v2.9.0` on commit `598edef0`; its published asset (`tam-os-v2.9.0.html`, **1,049,018 bytes**, SHA-256

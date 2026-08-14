@@ -230,7 +230,7 @@ function seed(rt, principal){
       'the availability condition is still the frozen delegation to can()');
     check(!/State\./.test(helper), 'availability is still derived, never cached');
     check(/const SCHEMA_VERSION = 6;/.test(read('js/core/constants.js')), 'SCHEMA_VERSION remains 6');
-    check(/const APP_VERSION = '2\.10\.0';/.test(read('js/core/constants.js')), 'APP_VERSION is 2.10.0 (Readiness-3 release decision)'); }
+    check(/const APP_VERSION = '2\.11\.0';/.test(read('js/core/constants.js')), 'APP_VERSION is 2.11.0 (RELEASE-1 version)'); }
 
   /* 7. D3-7 — Global Search scope wiring remains outside UX-006D */
   console.log('-- 7. D3-7 : Global Search scope wiring remains deferred --');

@@ -1,4 +1,34 @@
-# TAM OS v2.10.0 — Governed Workspace
+# TAM OS v2.11.0 — Identity Refresh
+
+**Release Name:** Identity Refresh
+**Type:** Presentation / product-identity release carrying the merged **BRAND-1** identity modernization.
+`APP_VERSION` is **2.11.0**; `SCHEMA_VERSION` **remains 6** (no data migration); `ACTIONS` remains **20**.
+The portable artifact is `dist/tam-os-v2.11.0.html`.
+
+**What changed (identity & typography only):**
+
+- **Refreshed TAM OS product lockup** — the persistent sidebar chrome pairs the existing TAM monogram with
+  a live "TAM OS" wordmark. Expanded: `[monogram] TAM OS`; collapsed: monogram only.
+- **Sora SemiBold 600** wordmark typography (`--display`), scoped to the wordmark; **Inter** remains the UI
+  face. The `OS` carries the **TAM Teal** identity accent (`#08B9B0` dark; `#0A857E` on light backgrounds).
+- **Persistent company subtitle removed** — `PT Total Asset Manajemen` no longer appears in the application
+  brand block; company identity is retained in About, Settings, reports and positioning copy.
+- **Identity palette tokens (P1)** — Navy/Blue/Teal for the product identity, kept separate from the
+  existing **semantic gold** UI accent, which is preserved unchanged.
+- **Self-contained offline typography** — Sora, Inter, Source Serif 4 and JetBrains Mono are embedded as
+  base64 WOFF2 in `css/fonts.css` (SIL OFL 1.1 sources under `assets/fonts/`); the portable artifact
+  renders its intended type under `file://` with **no Google Fonts network dependency**.
+
+**No change** to authorization, Acting-as semantics, read-scope, persistence, schema, or any
+financial/payroll calculation. **PILOT-1 remains ON HOLD PENDING VPS**; backend remains **NOT STARTED**.
+
+> **Publication status.** Tagging (`v2.11.0`) and the GitHub Release are performed under **separate owner
+> authorization**. Until that step completes, **v2.10.0 remains the current published Latest release**, as
+> recorded below. This document describes the prepared v2.11.0 content; it does not itself publish it.
+
+---
+
+## Previous published release — v2.10.0 — Governed Workspace
 
 **Release Name:** Governed Workspace
 **Status:** v2.10.0 is **published** and **marked Latest**. It was **originally published on
