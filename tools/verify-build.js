@@ -51,7 +51,7 @@ function extractMainScript(h){ const i=h.indexOf('const APP_VERSION'); if(i<0) r
 
 const distCss = extractStyle(dist), distJs = extractMainScript(dist);
 
-const cssFiles = ['tokens.css','base.css','shell.css','components.css','charts.css'];
+const cssFiles = ['fonts.css','tokens.css','base.css','shell.css','components.css','charts.css'];
 const jsFiles = require('./module-order.js');
 const srcCss = cssFiles.map((f)=>read(path.join(root,'css',f))).join(LF);
 const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
@@ -121,11 +121,29 @@ const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
 //     so wider viewports and ordinary copy render identically. No layout, spacing,
 //     colour, token or type-scale change; tokens.css byte-unchanged (pinned below);
 //     css/shell.css untouched by D3.
-const CSS_GOLDEN_SHA256 = '6d9c21375bdc608e99a56a3a65bc6fc293bbc506cda1b521742560902e3b4b96';
+//   BRAND-1 (current) — AUTHORIZED golden-master + tokens revision. Identity modernization:
+//     (a) new css/fonts.css joins the concat (offline-embedded base64 WOFF2: Sora/Inter/
+//     Source Serif 4/JetBrains Mono, Latin subset) — this is the bulk of the golden delta;
+//     (b) css/tokens.css gains identity tokens (--identity-navy/blue/teal) and a --display
+//     wordmark face token in both themes — the ONLY tokens.css change, so its pin moves too;
+//     (c) css/shell.css moves the wordmark to var(--display) (Sora SemiBold), colours "OS"
+//     with --identity-teal, adds the monogram lockup, makes the collapsed rail monogram-only
+//     (wordmark visually-hidden for a11y), and removes the persistent company subtitle.
+//     Semantic gold (--brand/--accent/--chart-actual and the pill/status colours) is
+//     deliberately UNCHANGED (palette strategy P1: identity/UI separation). No schema,
+//     storage-key, migration, type-scale or spacing change. Old CSS golden pin was
+//     6d9c2137…3b4b96; old tokens pin was 60dde600…1a7d1.
+//   BRAND-1 refinement (current) — AUTHORIZED golden revision, css/shell.css only. Owner
+//     optical ruling: the expanded-sidebar monogram grows 30px→34px so it reads as a brand
+//     mark; the collapsed rail keeps it at 30px (size intentionally differs by state);
+//     hover-peek and the mobile drawer show the expanded 34px mark. Presentation only; no
+//     token change (tokens.css pin unchanged). Prior CSS golden pin was 742164ea…4e0a7d8a.
+const CSS_GOLDEN_SHA256 = '84c3434fe6b1f9c571462fa42bce0f62d550851f7b8605bcd9998f4b500f7bae';
 // UX-005C — tokens.css anti-drift pin. The design tokens are the single source of truth
 // for spacing/type/radius/color; this pin fails loudly if any token VALUE is changed,
 // so a "consistency" edit can never silently move the scale it normalizes onto.
-const TOKENS_CSS_SHA256 = '60dde600fce5ebe389160efdaf8c3ded5dca32c0882d7fb8079b2cde7d91a7d1';
+// BRAND-1 authorized revision (identity + --display tokens); prior pin 60dde600…1a7d1.
+const TOKENS_CSS_SHA256 = '78d6dd315e43347770c780eca5ffce4591cbaae5db5c1ffaba06ab399786f8ef';
 console.log('== CSS GOLDEN MASTER (pinned digest of concat(css/*.css)) ==');
 const cssDigest = crypto.createHash('sha256').update(trimLF(srcCss), 'utf8').digest('hex');
 check(cssDigest === CSS_GOLDEN_SHA256,
@@ -2882,9 +2900,12 @@ const ux4fCss = ux4eCss;
 check(/const APP_NAME = 'TAM OS';/.test(ux4fConstants), 'UX-004F: APP_NAME is "TAM OS"');
 check(!/const APP_NAME = 'TAM Intelligence OS';/.test(ux4fConstants), 'UX-004F: the old product name is no longer the APP_NAME');
 check(dist.includes('<title>TAM OS v' + meta.version + '</title>'), 'UX-004F: browser <title> rebranded to TAM OS');
-// Sidebar wordmark is "TAM OS" (both mfull and mshort), no "Intelligence" in the shell markup.
+// Sidebar wordmark is "TAM OS", no "Intelligence" in the shell markup.
+// BRAND-1: the wordmark is a single live-text mark — TAM&nbsp;<span class="os">OS</span> —
+// alongside the monogram (Model C); the old mfull/mshort split is gone (collapsed shows the
+// monogram, wordmark visually-hidden).
 const ux4fMark = (ux4fShell.match(/<div class="mark">[\s\S]*?<\/div>/)||[''])[0];
-check(/mfull">TAM(&nbsp;| )<span>OS<\/span>/.test(ux4fMark) && !/Intelligence/.test(ux4fMark),
+check(/>TAM(&nbsp;| )<span class="os">OS<\/span>/.test(ux4fMark) && !/Intelligence/.test(ux4fMark),
   'UX-004F: sidebar wordmark is "TAM OS" (no "Intelligence")');
 // No current-state in-app literal "TAM Intelligence OS" remains in the runtime JS,
 // EXCEPT the historical Release Notes array in settings-about.js (immutable history).
@@ -2991,19 +3012,24 @@ check(ux2bFrac.length === 0,
   + (ux2bFrac.length ? ' >> VIOLATION: ' + ux2bFrac.join(' | ') : ''));
 
 // (2) The serif is identity-only: it may appear on the wordmark and nowhere else.
-const ux2bSerifSites = [];
+// BRAND-1: the wordmark moved off --serif onto the dedicated display face --display
+// (Sora SemiBold). The durable invariant is unchanged in spirit — the product wordmark has
+// its OWN face, and general UI chrome does not borrow it. So: var(--display) is used exactly
+// once in CSS, on .brand .mark, and nowhere else (UI content stays on --sans). --serif is no
+// longer referenced in CSS at all (its only remaining use is the payroll month header in JS).
+const ux2bDisplaySites = [];
 ux2bCssFiles.forEach(({name,src})=>{
   ux2bStrip(src).split('\n').forEach((line,i)=>{
-    if(/var\(--serif\)/.test(line))
-      ux2bSerifSites.push({at:name + ':' + (i+1), brand:/^\.brand \.mark\{/.test(line.trim())});
+    if(/var\(--display\)/.test(line))
+      ux2bDisplaySites.push({at:name + ':' + (i+1), brand:/^\.brand \.mark\{/.test(line.trim())});
   });
 });
-const ux2bSerifBad = ux2bSerifSites.filter(s=>!s.brand).map(s=>s.at);
-check(ux2bSerifSites.length === 1 && ux2bSerifBad.length === 0,
-  'var(--serif) is used exactly once in CSS, on .brand .mark (UI chrome is sans)'
-  + ((ux2bSerifSites.length === 1 && ux2bSerifBad.length === 0) ? ''
-     : ' >> VIOLATION: ' + ux2bSerifSites.length + ' usage site(s)'
-       + (ux2bSerifBad.length ? ', non-brand: ' + ux2bSerifBad.join(', ') : '')));
+const ux2bDisplayBad = ux2bDisplaySites.filter(s=>!s.brand).map(s=>s.at);
+check(ux2bDisplaySites.length === 1 && ux2bDisplayBad.length === 0,
+  'BRAND-1: var(--display) is used exactly once in CSS, on .brand .mark (the wordmark has its own face; UI chrome is sans)'
+  + ((ux2bDisplaySites.length === 1 && ux2bDisplayBad.length === 0) ? ''
+     : ' >> VIOLATION: ' + ux2bDisplaySites.length + ' usage site(s)'
+       + (ux2bDisplayBad.length ? ', non-brand: ' + ux2bDisplayBad.join(', ') : '')));
 
 // (3) Dark/light parity: every custom property declared in :root must also be
 //     declared in :root[data-theme="light"]. A theme cannot be half-defined.
@@ -5171,6 +5197,72 @@ console.log('== READINESS-2 — END-TO-END USER JOURNEY ACCEPTANCE ==');
   check(/ACTIONS remains exactly 20/.test(r2src) && /SCHEMA_VERSION remains 6/.test(r2src),
     'Readiness-2: the harness re-asserts the platform invariants it must not move');
 }
+
+/* ============================================================
+   BRAND-1 — IDENTITY MODERNIZATION INVARIANTS
+   Offline-embedded typography, TAM OS-only persistent chrome, dedicated wordmark
+   face, identity palette separated from semantic gold. These encode the visual/offline
+   contract mechanically so it cannot silently regress.
+   ============================================================ */
+console.log('== BRAND-1 IDENTITY MODERNIZATION INVARIANTS ==');
+const b1Index   = read(path.join(root,'index.html'));
+const b1Fonts   = read(path.join(root,'css','fonts.css'));
+const b1Tokens  = read(path.join(root,'css','tokens.css'));
+const b1Shell   = read(path.join(root,'css','shell.css'));
+const b1ShellJs = read(path.join(root,'js','ui','shell-render.js'));
+
+// 1. No remote webfont dependency anywhere in the portable artifact OR the source head.
+check(!/googleapis|gstatic/.test(dist),
+  'BRAND-1: portable artifact makes no Google Fonts / gstatic request (offline-safe typography)');
+check(!/fonts\.googleapis\.com|fonts\.gstatic\.com/.test(b1Index),
+  'BRAND-1: index.html no longer links remote Google Fonts');
+
+// 2. Typography is embedded locally: exactly the 8 expected faces as base64 WOFF2 data URIs.
+check((b1Fonts.match(/@font-face/g)||[]).length === 8,
+  'BRAND-1: css/fonts.css defines exactly 8 @font-face blocks');
+check((b1Fonts.match(/url\(data:font\/woff2;base64,/g)||[]).length === 8,
+  'BRAND-1: every embedded face is a self-contained base64 WOFF2 data URI (no external src)');
+['Sora','Inter','Source Serif 4','JetBrains Mono'].forEach((fam)=>
+  check(b1Fonts.includes("font-family:'" + fam + "'"),
+    'BRAND-1: embedded family present — ' + fam));
+
+// 3. Vendored font sources + OFL license text are retained in the repository.
+['sora-600','inter-400','inter-500','inter-600','inter-700','jetbrainsmono-400','jetbrainsmono-600','sourceserif4-600']
+  .forEach((f)=>check(fs.existsSync(path.join(root,'assets','fonts',f + '.woff2')),
+    'BRAND-1: vendored WOFF2 present — assets/fonts/' + f + '.woff2'));
+['Sora','Inter','JetBrainsMono','SourceSerif4'].forEach((f)=>
+  check(fs.existsSync(path.join(root,'assets','fonts',f + '-OFL.txt')),
+    'BRAND-1: SIL OFL license retained — assets/fonts/' + f + '-OFL.txt'));
+
+// 4. Dedicated wordmark face: --display token defined (both themes) and used ONLY on the wordmark.
+check((b1Tokens.match(/--display:'Sora'/g)||[]).length === 2,
+  'BRAND-1: --display (Sora) wordmark face token defined in both themes');
+check(/\.brand \.mark\{font-family:var\(--display\)/.test(b1Shell),
+  'BRAND-1: the sidebar wordmark renders in the dedicated display face (var(--display))');
+check(!/\.brand \.mark\{font-family:var\(--serif\)/.test(b1Shell),
+  'BRAND-1: the wordmark no longer uses the old serif treatment (Source Serif cannot silently return to chrome)');
+
+// 5. Identity palette exists and is kept separate from the semantic gold accent.
+check((b1Tokens.match(/--identity-teal:/g)||[]).length === 2 && /--identity-navy:#062E5B/.test(b1Tokens),
+  'BRAND-1: identity palette tokens (Navy/Blue/Teal) defined');
+check(/\.brand \.mark \.os\{color:var\(--identity-teal\);?\}/.test(b1Shell),
+  'BRAND-1: the wordmark "OS" uses the identity teal (not gold)');
+check(/--brand:#C9A15C/.test(b1Tokens) && /--accent:#C9A15C/.test(b1Tokens),
+  'BRAND-1: semantic gold accent (--brand/--accent) is preserved unchanged (palette strategy P1)');
+
+// 6. Persistent chrome is "TAM OS" only — the company subtitle is gone from the brand lockup.
+const b1Brand = (b1ShellJs.match(/<div class="brand">[\s\S]*?<nav class="nav"/)||[''])[0];
+check(b1Brand.includes('class="brand-lockup"') && b1Brand.includes('class="brand-monogram"'),
+  'BRAND-1: persistent chrome renders the Model C lockup (monogram + wordmark)');
+check(!/class="sub">/.test(b1Brand) && !/COMPANY_NAME_DEFAULT/.test(b1Brand),
+  'BRAND-1: persistent chrome shows no company subtitle (company identity stays in About/Settings/reports)');
+// The monogram is decorative (aria-hidden) so it does not duplicate the wordmark for screen readers.
+check(/class="brand-monogram"[^>]*aria-hidden="true"/.test(b1ShellJs),
+  'BRAND-1: the chrome monogram is aria-hidden (no redundant screen-reader announcement)');
+
+// 7. Company identity is NOT globally purged — it remains where it is formal/contextual.
+check(/const COMPANY_NAME_DEFAULT = 'PT Total Asset Manajemen';/.test(read(path.join(root,'js','core','constants.js'))),
+  'BRAND-1: company name default is preserved (About/Settings/reports still identify the company)');
 
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }

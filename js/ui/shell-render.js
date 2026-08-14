@@ -258,8 +258,10 @@ function renderShell(){
     <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
     <div class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="mark"><span class="mfull">TAM&nbsp;<span>OS</span></span><span class="mshort">TAM&nbsp;<span>OS</span></span></div>
-        <div class="sub">${escapeHtml(State.settings.companyName||COMPANY_NAME_DEFAULT)}</div>
+        <div class="brand-lockup">
+          <img class="brand-monogram" src="${BRAND_MONOGRAM}" alt="" aria-hidden="true" width="34" height="34" draggable="false">
+          <div class="mark">TAM&nbsp;<span class="os">OS</span></div>
+        </div>
         <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar"><span class="cbar" aria-hidden="true">«</span></button>
         ${typeof renderIdentitySelectorHTML==='function'?renderIdentitySelectorHTML():''}
       </div>

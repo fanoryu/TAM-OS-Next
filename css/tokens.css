@@ -18,6 +18,12 @@
      other, and neither carries semantic state. */
   --brand:#C9A15C;
   --brand-soft:rgba(201,161,92,0.14);
+  /* BRAND-1: canonical identity palette (Navy / Blue / Teal) — product identity ONLY,
+     kept separate from the semantic UI accent (--accent/--brand gold, which is unchanged).
+     The wordmark "OS" reads Teal; these are theme-independent brand constants. */
+  --identity-navy:#062E5B;
+  --identity-blue:#1478F2;
+  --identity-teal:#08B9B0;
   --interactive:#6E9BEA;
   --interactive-soft:rgba(110,155,234,0.16);
   --interactive-ink:#0B1220;
@@ -48,6 +54,9 @@
   --serif:'Source Serif 4', Georgia, serif;
   --sans:'Inter', -apple-system, sans-serif;
   --mono:'JetBrains Mono', ui-monospace, monospace;
+  /* BRAND-1: dedicated product display/wordmark face (Sora SemiBold). Scoped to the
+     TAM OS wordmark only — general UI text stays on --sans (Inter). */
+  --display:'Sora', 'Inter', -apple-system, sans-serif;
   /* ===== UX-002B type scale — 6 steps, no fractional values ===== */
   --fs-1:10px;
   --fs-2:12px;
@@ -86,6 +95,12 @@
   --accent-soft:rgba(156,107,30,0.13);
   --brand:#9C6B1E;
   --brand-soft:rgba(156,107,30,0.13);
+  /* BRAND-1: identity palette. Navy/Blue kept exact; the wordmark teal is darkened for
+     light backgrounds so the "OS" mark meets WCAG large-text contrast (>=3:1 on white)
+     while staying unmistakably teal. Dark theme keeps the exact TAM Teal #08B9B0. */
+  --identity-navy:#062E5B;
+  --identity-blue:#1478F2;
+  --identity-teal:#0A857E;
   --interactive:#2456A6;
   --interactive-soft:rgba(36,86,166,0.12);
   --interactive-ink:#FFFFFF;
@@ -111,6 +126,9 @@
   --serif:'Source Serif 4', Georgia, serif;
   --sans:'Inter', -apple-system, sans-serif;
   --mono:'JetBrains Mono', ui-monospace, monospace;
+  /* BRAND-1: dedicated product display/wordmark face (Sora SemiBold). Scoped to the
+     TAM OS wordmark only — general UI text stays on --sans (Inter). */
+  --display:'Sora', 'Inter', -apple-system, sans-serif;
   --fs-1:10px;
   --fs-2:12px;
   --fs-3:13px;

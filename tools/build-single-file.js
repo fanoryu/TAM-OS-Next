@@ -28,7 +28,7 @@ const LF = '\n';
 // Derive the release version + output filename from constants.js (fails clearly if unparseable).
 const meta = readAppMeta();
 
-const cssFiles = ['tokens.css', 'base.css', 'shell.css', 'components.css', 'charts.css'];
+const cssFiles = ['fonts.css', 'tokens.css', 'base.css', 'shell.css', 'components.css', 'charts.css'];
 // JS load order lives in one place (mirrored by index.html). Paths are relative to js/.
 const jsFiles = require('./module-order.js');
 
