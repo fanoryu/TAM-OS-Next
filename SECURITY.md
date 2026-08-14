@@ -21,14 +21,16 @@ Report suspected security vulnerabilities privately, by email, to the repository
 
 This is the canonical vulnerability-reporting route for the current state of the repository.
 
-GitHub **Private Vulnerability Reporting / repository Security Advisories are not available on this
-repository**, so no advisory URL is published here — none would resolve. If that capability becomes
-available later, this policy will be updated; until then, use the email address above.
+If GitHub **Private Vulnerability Reporting** is enabled on this repository, it may be used as a
+private reporting channel (via the repository's **Security** tab). If it is not enabled, use the
+security email above. Either way, the email route above is always a valid private channel. Never
+report a suspected vulnerability through a public surface.
 
 ### Do not use these routes for a vulnerability
 
-- The GitHub issue tracker. This repository is private, so its issues are not public — but they are
-  visible to **every collaborator**, which is the wrong audience for an unfixed vulnerability.
+- The GitHub issue tracker. This repository is **publicly viewable**, so its Issues are visible to
+  **anyone on the internet** — never disclose an unfixed vulnerability, credentials, infrastructure
+  secrets, confidential data, or other sensitive security information there.
 - Pull request titles, descriptions, or review comments.
 - Commit messages or branch names.
 - Any shared chat, group mailbox, or ticketing system not designated by the owner.
@@ -112,7 +114,7 @@ Only the current codebase receives security fixes. Older builds are not maintain
 
 | Version | Supported |
 |---|---|
-| Current `main` of `fanoryu/TAM-OS-Next` (`APP_VERSION` **2.10.0**) | ✅ |
+| Current `main` of `fanoryu/TAM-OS-Next` (`APP_VERSION` **2.11.0**) | ✅ |
 | Any earlier build or release | ❌ |
 
 > **Provenance.** `fanoryu/TAM-OS-Next` is the canonical repository going forward. v2.10.0 was
@@ -163,13 +165,15 @@ TAM Intelligence OS is client-only. Understanding its data posture helps scope r
 
 - All finance/payroll/employee/contract data is stored **locally** (browser `localStorage` or the
   Claude Artifact storage environment). There is no server, database, or API.
-- The app makes **no network calls that carry user data**. The only external references are the XLSX
-  parser and web fonts (CDN); exports (CSV/JSON) are generated locally and downloaded by the user.
+- The app makes **no network calls that carry user data**. Typography is self-contained (fonts are
+  bundled, not fetched from a CDN); the only external reference is the XLSX parser (CDN). Exports
+  (CSV/JSON) are generated locally and downloaded by the user.
 - Real company data must never be committed to the repository or pasted into issues, PRs, logs, or
   screenshots. See [`docs/DATA-SAFETY.md`](docs/DATA-SAFETY.md) and
   [`CONTRIBUTING.md`](CONTRIBUTING.md).
-- This repository is **private** and holds no company data. Production data and configuration are
-  maintained separately in a private layer (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
+- This repository is **publicly viewable** (source-available, not open source) and holds no company
+  data. Production data and configuration are maintained separately in a private layer (see
+  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)).
 
 ## Security Decision Records (SDR)
 
