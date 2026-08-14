@@ -12,7 +12,7 @@ support backend capabilities in future roadmap phases.
 
 [![CI](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/ci.yml)
 [![Attribution](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/attribution.yml/badge.svg?branch=main)](https://github.com/fanoryu/TAM-OS-Next/actions/workflows/attribution.yml)
-![Version](https://img.shields.io/badge/version-2.10.0-blue)
+![Version](https://img.shields.io/badge/version-2.11.0-blue)
 ![License](https://img.shields.io/badge/license-see%20LICENSE-red)
 ![JavaScript](https://img.shields.io/badge/JavaScript-vanilla%20%C2%B7%20no%20framework-f7df1e)
 ![HTML](https://img.shields.io/badge/HTML-single--file%20app-e34f26)
@@ -43,7 +43,7 @@ Design principles:
   approved architecture decision — the current release remains client-only.
 - **No build framework, no dependencies.** The app is plain HTML, CSS, and classic-script JavaScript
   sharing one global scope. Node.js is used **only** for the build/verify tooling, never to run the
-  app. The only external network references are the XLSX parser and web fonts (CDN).
+  app. Typography is embedded locally (offline-safe); the only external network reference is the XLSX parser (CDN).
 - **Two shippable forms.** A modular development source and a single portable HTML file that behaves
   identically.
 - **Data-safety first.** A 2443-check verifier guards the persisted-data schema, storage keys,
@@ -79,36 +79,28 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 
 ## Current release
 
-**v2.10.0 — Governed Workspace** · `SCHEMA_VERSION` 6 · **originally published from the predecessor repository, canonically re-published here**
+**v2.11.0 — Identity Refresh** · `SCHEMA_VERSION` 6 · **published and marked Latest** — the BRAND-1 TAM OS product-identity and offline-typography modernization
 
-> **Where the releases live.** Every published TAM OS release up to and including the **original**
-> **v2.10.0** was cut from the predecessor repository
-> **[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS)** (private), which is retained as a read-only
-> archive. Its tags, Releases and assets are unchanged and remain the authoritative record of those
-> publications.
->
-> **v2.10.0 is canonically re-published here.** `fanoryu/TAM-OS-Next` became canonical after v2.10.0
-> was originally published, and the same frozen artifact is re-published **unchanged** from this
-> repository under the tag `v2.10.0` — the same version, the same byte-identical file, a canonical
-> download location. It is **not** v2.10.1, not a new runtime build, not a schema change and not a
-> feature release; `APP_VERSION` remains **2.10.0** and `SCHEMA_VERSION` remains **6**. Ongoing
-> development continues here.
->
-> **Artifact identity, not tree identity.** The canonical `v2.10.0` tag marks the re-publication
-> checkpoint, so its source and documentation are **newer** than the predecessor's v2.10.0 source
-> snapshot (they additionally carry the PILOT-0 and SECURITY-1 readiness records). The portable
-> artifact is byte-identical. See [`PROVENANCE.md`](PROVENANCE.md).
+> **Release state.** **v2.11.0 — Identity Refresh** is **published** and **marked Latest**, from annotated
+> tag `v2.11.0` in `fanoryu/TAM-OS-Next` (targeting commit `04c1503d`). The published asset
+> `tam-os-v2.11.0.html` (**1,676,709 bytes**, SHA-256
+> `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is byte-identical to the artifact
+> `dist/tam-os-v2.11.0.html` tracked here, so the canonical repository still builds the exact package that
+> shipped. It is a **presentation / product-identity release** carrying the merged BRAND-1 work: the
+> refreshed `[monogram] TAM OS` lockup, the Sora wordmark, and self-contained offline typography (no Google
+> Fonts dependency). `APP_VERSION` **2.11.0**, `SCHEMA_VERSION` **6**, `ACTIONS` **20** — no authorization,
+> data-model, financial-logic or backend change. The **controlled internal pilot has not launched** —
+> **PILOT-1 remains ON HOLD PENDING VPS** — and backend work is **NOT STARTED**.
 
-> **Release state.** v2.10.0 is **published** and **marked Latest** — originally cut from annotated tag
-> `v2.10.0` in the predecessor repository, and canonically re-published unchanged from annotated tag
-> `v2.10.0` here. The published asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
-> `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical to the
-> artifact `dist/tam-os-v2.10.0.html` tracked here, so the canonical repository still builds the exact
-> package that shipped. It is the package approved for a **controlled internal pilot** — publication
-> makes the verified artifact obtainable, and is **not** a general-availability declaration. The pilot
-> itself is **approved and ready to start but has not launched**, and no launch date is set. See the
+> **Previous release — v2.10.0 (Governed Workspace).** v2.10.0 remains **published** and intact (now the
+> prior release, no longer Latest). It was **originally published** from the predecessor repository
+> **[`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS)** (private, retained as a read-only archive) and
+> **canonically re-published** unchanged from `fanoryu/TAM-OS-Next` under annotated tag `v2.10.0`. Its
+> asset `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
+> `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is **byte-identical** across both
+> Releases. It is the package approved for the controlled internal pilot; see the
 > [pilot guide](docs/06-releases/Pilot-Guide-v2.10.0.md) and the
-> [release checklist](docs/06-releases/Release-Checklist-v2.10.0.md).
+> [release checklist](docs/06-releases/Release-Checklist-v2.10.0.md), and [`PROVENANCE.md`](PROVENANCE.md).
 >
 > **v2.9.0 — Workspace Experience** remains **published** and immutable, from annotated tag `v2.9.0`
 > on predecessor commit `598edef0`. Its published asset `tam-os-v2.9.0.html` (1,049,018 bytes, SHA-256
@@ -122,12 +114,14 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 > [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md) for how a release is cut, and
 > [`PROVENANCE.md`](PROVENANCE.md) for the migration record.
 
-A feature/minor release completing the **UX-006** authorization / personal-workspace line (complete
-mutation authorization over 20 frozen actions, Employee self-only read scope, principal & workspace
-presentation, C3 integration freeze) and the **Readiness-1 / Readiness-2** programme (privacy closure and
-eight accepted end-to-end user journeys). No change to business calculations, no schema change, no new or
-renamed storage key, and no data migration — `SCHEMA_VERSION` remains **6**, so v2.9.0 backups restore
-unchanged and rollback stays viable. The portable artifact is `dist/tam-os-v2.10.0.html`.
+A presentation / product-identity release carrying the merged **BRAND-1** identity modernization: the
+refreshed `[monogram] TAM OS` app-chrome lockup, the **Sora** wordmark with a TAM Teal `OS` accent, removal
+of the persistent company subtitle from the brand block (company identity retained in About/Settings/reports),
+and self-contained **offline typography** (embedded WOFF2, no Google Fonts dependency). No change to
+authorization, business calculations, schema, storage keys or data migration — `APP_VERSION` **2.11.0**,
+`SCHEMA_VERSION` remains **6**, `ACTIONS` **20**, so v2.10.0 backups restore unchanged and rollback stays
+viable. The BRAND-1 line completed in v2.10.0 (the UX-006 authorization / personal-workspace programme and
+Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v2.11.0.html`.
 
 > **Trust model.** "Acting as" is a **local, trust-based application context**, not authentication. It is
 > not a security boundary against anyone with local access to the device, browser profile or portable
@@ -153,21 +147,20 @@ shared database in this release.
 A future shared multi-user architecture has been **decided but not built**: Multi-User-0 is
 **merged/frozen** and [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) is **Accepted** as
 the architecture *baseline*. **Implementation has not started and is not authorized** — the `CLAUDE.md`
-§4.3 client-only rule remains fully operative. Nothing in that direction ships in v2.10.0.
+§4.3 client-only rule remains fully operative. Nothing in that direction ships in v2.11.0.
 
 ### Running it
 
-1. Get **`tam-os-v2.10.0.html`**. This repository tracks the exact published artifact at
-   [`dist/tam-os-v2.10.0.html`](dist/tam-os-v2.10.0.html) — use that copy, or take the identical asset
-   from this repository's canonical `v2.10.0` Release. (The **original** v2.10.0 Release asset lives in
-   the predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS/releases/latest); all
-   three files are byte-identical, so any of them is valid.)
-2. *(Recommended)* Verify it — `Get-FileHash tam-os-v2.10.0.html -Algorithm SHA256` (PowerShell) or
-   `shasum -a 256 tam-os-v2.10.0.html`. Expect **1,151,267 bytes** / SHA-256
-   `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`.
+1. Get **`tam-os-v2.11.0.html`**. This repository tracks the exact published artifact at
+   [`dist/tam-os-v2.11.0.html`](dist/tam-os-v2.11.0.html) — use that copy, or take the identical asset
+   from this repository's Latest `v2.11.0` Release. (The prior **v2.10.0** release remains available and
+   byte-identical across both repositories.)
+2. *(Recommended)* Verify it — `Get-FileHash tam-os-v2.11.0.html -Algorithm SHA256` (PowerShell) or
+   `shasum -a 256 tam-os-v2.11.0.html`. Expect **1,676,709 bytes** / SHA-256
+   `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`.
 3. Open it in a **desktop Chromium browser**. No install, no server, no build step.
-4. Keep internet access available: `.xlsx` import needs the CDN-hosted parser (`.csv` does not); fonts
-   are cosmetic.
+4. Fonts are embedded — the app renders its intended typography offline. `.xlsx` import still needs the
+   CDN-hosted parser (`.csv` does not).
 5. Data stays **local to that browser profile** — nothing is uploaded. Export via **Settings → Complete
    Backup**.
 
@@ -200,7 +193,7 @@ Two supported outputs:
 | Output | What it is | Where |
 |---|---|---|
 | **A. Modular development source** | `index.html` + `css/` (5 files) + `js/` (73 classic-script modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/ cli/` — 72 browser-loaded in one shared global scope, plus the CLI-only module), no ES modules | project root |
-| **B. Portable single-file release** | the whole application inlined into one HTML file, identical in behavior. **Single-file packaging, not a fully offline artifact** — the XLSX parser and web fonts are still loaded from CDNs (see [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)) | `dist/tam-os-v2.10.0.html` |
+| **B. Portable single-file release** | the whole application inlined into one HTML file, identical in behavior. Typography is **embedded** (self-contained offline); the **XLSX parser** is still loaded from a CDN (see [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)) | `dist/tam-os-v2.11.0.html` |
 
 ---
 
@@ -297,7 +290,7 @@ flowchart LR
     BUILD["tools/build-single-file.js"]
     VERIFY["tools/verify-build.js<br/>(2443 checks)"]
   end
-  DIST["dist/tam-os-v2.10.0.html<br/>(portable single file)"]
+  DIST["dist/tam-os-v2.11.0.html<br/>(portable single file)"]
 
   IDX --> JS --> STATE --> LS
   CSS --> IDX
@@ -355,7 +348,7 @@ tools/
 .githooks/                         Tracked Git hooks (survive a fresh clone)
   commit-msg                       Rejects AI-attribution trailers; activate via install-hooks.js
 dist/
-  tam-os-v2.10.0.html Portable single-file release (build output, version-controlled)
+  tam-os-v2.11.0.html Portable single-file release (build output, version-controlled)
 tam-intelligence-os-v2.5.2.html    Retained legacy JS-provenance regression comparator
 .github/                           Repository governance & delivery
   workflows/ci.yml                 Build + verify on push/PR to main; uploads dist artifact
@@ -590,12 +583,17 @@ Also complete since then:
   [UX-006 architecture baseline](docs/99-archive/roadmap-completed/UX-006-Identity-Personal-Workspace-Architecture.md).
 - ✅ **Readiness-1 / Readiness-2 / Readiness-3** — employee read scope, end-to-end journey acceptance,
   and the v2.10.0 release & pilot package. All merged and frozen.
-- ✅ **v2.10.0 Official Release** — **published and marked Latest in both repositories.** *Originally*
+- ✅ **v2.11.0 Official Release — Identity Refresh** — **published and marked Latest** in
+  `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1503d`. Asset
+  `tam-os-v2.11.0.html` (1,676,709 bytes, SHA-256
+  `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is byte-identical to `dist/`. The
+  merged BRAND-1 product-identity / offline-typography modernization; presentation only.
+- ✅ **v2.10.0 Official Release** — **published**, now the **prior release** (no longer Latest). *Originally*
   published from [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS), from annotated tag `v2.10.0` on
   predecessor release commit `335d53ed` (that commit resolves only in the predecessor); *canonically
   re-published unchanged* here from annotated tag `v2.10.0`, peeling to `856e3ca6`. Asset
-  `tam-os-v2.10.0.html` (1,151,267 bytes) is byte-identical across both Releases and to `dist/`. Not a
-  new product version.
+  `tam-os-v2.10.0.html` (1,151,267 bytes) is byte-identical across both Releases and to `dist/` at that
+  tag. Not a new product version.
 - ✅ **Controlled Pilot Sign-off** — maintainer approval **granted**.
 - ✅ **Multi-User-0** — shared multi-user architecture decision, **merged and frozen**
   ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** as the architecture

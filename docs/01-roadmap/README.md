@@ -6,8 +6,8 @@ truth; the [Governance](../00-governance/README.md) layer above it is timeless a
 
 ## Authoritative roadmap state
 
-Current as of `main` in the canonical repository **`fanoryu/TAM-OS-Next`**, after the **v2.10.0 official
-release**.
+Current as of `main` in the canonical repository **`fanoryu/TAM-OS-Next`**, after the **v2.11.0 official
+release** (Identity Refresh; the prior v2.10.0 release remains published and intact).
 
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in

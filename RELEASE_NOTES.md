@@ -22,16 +22,19 @@ The portable artifact is `dist/tam-os-v2.11.0.html`.
 **No change** to authorization, Acting-as semantics, read-scope, persistence, schema, or any
 financial/payroll calculation. **PILOT-1 remains ON HOLD PENDING VPS**; backend remains **NOT STARTED**.
 
-> **Publication status.** Tagging (`v2.11.0`) and the GitHub Release are performed under **separate owner
-> authorization**. Until that step completes, **v2.10.0 remains the current published Latest release**, as
-> recorded below. This document describes the prepared v2.11.0 content; it does not itself publish it.
+> **Publication status.** v2.11.0 is **published** and **marked Latest** in `fanoryu/TAM-OS-Next`, from
+> annotated tag `v2.11.0` peeling to commit `04c1503d`. The published asset `tam-os-v2.11.0.html`
+> (**1,676,709 bytes**, SHA-256 `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is
+> byte-identical to `dist/tam-os-v2.11.0.html` tracked here. v2.10.0 remains published and intact as the
+> **prior release** (no longer Latest), recorded below.
 
 ---
 
 ## Previous published release — v2.10.0 — Governed Workspace
 
 **Release Name:** Governed Workspace
-**Status:** v2.10.0 is **published** and **marked Latest**. It was **originally published on
+**Status:** v2.10.0 is **published** and intact — now the **prior release** (no longer Latest; superseded
+by v2.11.0). It was **originally published on
 2026-08-11** from the predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS),
 from annotated tag `v2.10.0` there (tag object `26c74071`, commit `335d53ed`), where it remains
 published, marked Latest and immutable. The same frozen artifact is now **canonically re-published,

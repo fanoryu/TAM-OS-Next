@@ -407,8 +407,8 @@ const readmeSrc = read(path.join(root, 'README.md'));
 const securitySrc = read(path.join(root, 'SECURITY.md'));
 const issueCfg = read(path.join(root, '.github', 'ISSUE_TEMPLATE', 'config.yml'));
 check(dist.includes("const APP_NAME = 'TAM OS';"), 'APP_NAME is TAM OS (current product identity)');
-check(/version-2\.10\.0/.test(readmeSrc) && /v2\.10\.0 — Governed Workspace/.test(readmeSrc),
-  'README.md current-state identity is v2.10.0 / TAM OS');
+check(/version-2\.11\.0/.test(readmeSrc) && /v2\.11\.0 — Identity Refresh/.test(readmeSrc),
+  'README.md current-state identity is v2.11.0 / Identity Refresh');
 // REPO-1 — CANONICAL REPOSITORY SLUG.
 // The canonical repository is fanoryu/TAM-OS-Next. The predecessor fanoryu/TAM-OS is retained as a
 // read-only archive and is still referenced legitimately as provenance (PROVENANCE.md, release history,
@@ -518,12 +518,13 @@ for (const [label, src] of [['AI_CONTEXT.md', aiContextSrc], ['ARCHITECTURE.md',
   check(/original(ly)? published/i.test(src) && PREDECESSOR_SLUG.test(src + ' fanoryu/TAM-OS'),
     `${label} attributes the ORIGINAL v2.10.0 publication to the predecessor`);
 }
-// (5c) DUAL-LATEST. Both repositories legitimately show Latest = v2.10.0; the knowledge records must
-// say so, because "marked Latest" alone is what read as predecessor-only before RELEASE-0D.
-check(/both repositories/i.test(aiContextSrc) && /Latest/i.test(aiContextSrc),
-  'AI_CONTEXT.md records that BOTH repositories currently show Latest = v2.10.0');
-check(/both repositories/i.test(architectureSrc) && /Latest/i.test(architectureSrc),
-  'ARCHITECTURE.md records that BOTH repositories currently show Latest = v2.10.0');
+// (5c) CURRENT LATEST. After RELEASE-1, fanoryu/TAM-OS-Next shows Latest = v2.11.0 while the predecessor
+// fanoryu/TAM-OS still shows Latest = v2.10.0. The knowledge records must state the current Latest
+// (v2.11.0) positively AND still name the predecessor's v2.10.0, so the dual-repository history is intact.
+check(/v2\.11\.0/.test(aiContextSrc) && /Latest/i.test(aiContextSrc) && /v2\.10\.0/.test(aiContextSrc),
+  'AI_CONTEXT.md records v2.11.0 as the current Latest (predecessor v2.10.0 preserved)');
+check(/v2\.11\.0/.test(architectureSrc) && /Latest/i.test(architectureSrc) && /v2\.10\.0/.test(architectureSrc),
+  'ARCHITECTURE.md records v2.11.0 as the current Latest (predecessor v2.10.0 preserved)');
 // (6) A re-publication is NOT a new product version. If this ever reads as a new build, the duplicate
 // v2.10.0 across two repositories becomes a genuine ambiguity instead of a documented one.
 check(/not v2\.10\.1/i.test(relNotes) && /not a new runtime build/i.test(relNotes)
@@ -536,16 +537,18 @@ check(/APP_VERSION` remains \*\*2\.10\.0\*\*|remains \*\*2\.10\.0\*\*/i.test(rel
 // than the predecessor's v2.10.0 snapshot. Stating this is what keeps the diff from reading as drift.
 check(/artifact identity, not tree identity/i.test(relNotes) && /newer/i.test(relNotes),
   'RELEASE_NOTES.md records the artifact-identity (not tree-identity) semantics of the canonical tag');
-// PUBLICATION: v2.10.0 is PUBLISHED and marked Latest. The paperwork must assert the published
-// state positively, and must carry no stale "release candidate / not published / not tagged"
-// wording left over from the Readiness-3 pre-publication phase.
-check(/v2\.10\.0 is \*\*published/i.test(relNotes) && /marked Latest/i.test(relNotes),
-  'RELEASE_NOTES.md records v2.10.0 as published and marked Latest');
-check(!/not (yet )?(been )?(published|tagged)/i.test(relNotes) && !/v2\.10\.0 is (a |the )?\*\*release candidate/i.test(relNotes),
+// PUBLICATION: v2.11.0 is PUBLISHED and marked Latest (RELEASE-1). The paperwork must assert the current
+// published state positively, must carry no stale "release candidate / not published / not tagged"
+// wording, and must STILL record v2.10.0 as a published prior release (never demoted to unpublished).
+check(/v2\.11\.0 is \*\*published/i.test(relNotes) && /marked Latest/i.test(relNotes),
+  'RELEASE_NOTES.md records v2.11.0 as published and marked Latest');
+check(/v2\.10\.0 is \*\*published/i.test(relNotes),
+  'RELEASE_NOTES.md still records v2.10.0 as a published prior release (not demoted to unpublished)');
+check(!/not (yet )?(been )?(published|tagged)/i.test(relNotes) && !/v2\.1[01]\.0 is (a |the )?\*\*release candidate/i.test(relNotes),
   'RELEASE_NOTES.md carries no stale pre-publication "release candidate / not published / not tagged" wording');
-check(/v2\.10\.0[\s\S]{0,160}\*\*published/i.test(readmeSrc) && /marked Latest/i.test(readmeSrc)
+check(/v2\.11\.0[\s\S]{0,160}\*\*published/i.test(readmeSrc) && /marked Latest/i.test(readmeSrc)
   && !/release candidate \(not published\)/i.test(readmeSrc) && !/not (yet )?(been )?(published|tagged)/i.test(readmeSrc),
-  'README.md records v2.10.0 as published and marked Latest (no stale candidate wording)');
+  'README.md records v2.11.0 as published and marked Latest (no stale candidate wording)');
 // v2.9.0 remains HISTORICALLY published — the v2.10.0 publication supersedes it as Latest but
 // must never re-label, demote, rewrite or delete it.
 check(/v2\.9\.0/.test(relNotes) && /published/i.test(relNotes),
