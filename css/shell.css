@@ -11,11 +11,15 @@
   transition:width .2s ease; /* UX-004E: collapse animates width only (no layout thrash) */
 }
 .brand{position:relative;padding:0 var(--space-5) var(--space-4) var(--space-5);border-bottom:1px solid var(--border-soft);margin-bottom:var(--space-3);}
-/* The wordmark is the ONE place the serif survives (UX-002B / PD-B). */
-.brand .mark{font-family:var(--serif);font-weight:700;font-size:var(--fs-5);letter-spacing:0.1px;color:var(--text);white-space:nowrap;line-height:1.2;}
-.brand .mark span{color:var(--brand);}
-.brand .mark .mshort{display:none;}
-.brand .sub{font-size:var(--fs-1);color:var(--text-faint);margin-top:var(--space-1);letter-spacing:0.5px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* BRAND-1: Model C lockup — existing TAM monogram + live "TAM OS" wordmark in the
+   dedicated display face (Sora SemiBold). The company subtitle is intentionally absent
+   from persistent chrome (company identity remains in About/Settings/reports). */
+.brand-lockup{display:flex;align-items:center;gap:var(--space-2);}
+/* Expanded lockup: the monogram reads as a brand mark (34px). The collapsed rail keeps it
+   at 30px (see below) — the size intentionally differs by sidebar state. */
+.brand-monogram{width:34px;height:34px;flex:0 0 auto;display:block;}
+.brand .mark{font-family:var(--display);font-weight:600;font-size:var(--fs-5);letter-spacing:0.3px;color:var(--text);white-space:nowrap;line-height:1.2;}
+.brand .mark .os{color:var(--identity-teal);}
 /* UX-006D1 — reachable principal selector ("Acting as"), lives in the brand block. */
 .identity-selector{margin-top:var(--space-3);}
 .identity-selector-label{display:block;font-size:var(--fs-1);color:var(--text-faint);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:var(--space-1);}
@@ -48,9 +52,12 @@
 /* Collapsed rail (desktop): icons only, labels/sub/foot hidden, narrow width. */
 .sidebar.collapsed{width:64px;}
 .sidebar.collapsed .brand{padding-left:0;padding-right:0;text-align:center;}
-.sidebar.collapsed .brand .mark .mfull{display:none;}
-.sidebar.collapsed .brand .mark .mshort{display:inline;}
-.sidebar.collapsed .brand .sub{display:none;}
+.sidebar.collapsed .brand .brand-lockup{justify-content:center;gap:0;}
+/* Collapsed rail keeps the monogram at 30px (accepted as-is). */
+.sidebar.collapsed .brand .brand-monogram{width:30px;height:30px;}
+/* Collapsed rail shows the monogram only. The wordmark text is visually hidden but kept
+   in the DOM so the brand retains an accessible name for screen readers. */
+.sidebar.collapsed .brand .mark{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;}
 /* UX-006D2 — the collapsed rail keeps the full selector hidden (unchanged), but no
    longer hides WHICH principal is active: the block itself stays, its inner controls
    collapse to the compact chip. */
@@ -75,9 +82,10 @@
 @media (min-width:769px) and (hover:hover){
   .sidebar.collapsed:hover{width:258px;}
   .sidebar.collapsed:hover .brand{padding-left:var(--space-5);padding-right:var(--space-5);text-align:left;}
-  .sidebar.collapsed:hover .brand .mark .mfull{display:inline;}
-  .sidebar.collapsed:hover .brand .mark .mshort{display:none;}
-  .sidebar.collapsed:hover .brand .sub{display:block;}
+  .sidebar.collapsed:hover .brand .brand-lockup{justify-content:flex-start;gap:var(--space-2);}
+  /* Hover-peek is the expanded lockup — restore the 34px mark and the full wordmark. */
+  .sidebar.collapsed:hover .brand .brand-monogram{width:34px;height:34px;}
+  .sidebar.collapsed:hover .brand .mark{position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;border:0;}
   .sidebar.collapsed:hover .identity-selector{display:block;}
   /* UX-006D2 — hover-peek restores the full selector, so the rail chip stands down. */
   .sidebar.collapsed:hover .identity-selector-label,
@@ -109,9 +117,10 @@
   /* Collapsed styling is ignored inside the drawer — always show full labels. */
   .sidebar.collapsed{width:258px;}
   .sidebar.collapsed .brand{padding-left:var(--space-5);padding-right:var(--space-5);text-align:left;}
-  .sidebar.collapsed .brand .mark .mfull{display:inline;}
-  .sidebar.collapsed .brand .mark .mshort{display:none;}
-  .sidebar.collapsed .brand .sub{display:block;}
+  .sidebar.collapsed .brand .brand-lockup{justify-content:flex-start;gap:var(--space-2);}
+  /* Drawer shows the expanded lockup — restore the 34px mark and the full wordmark. */
+  .sidebar.collapsed .brand .brand-monogram{width:34px;height:34px;}
+  .sidebar.collapsed .brand .mark{position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;border:0;}
   .sidebar.collapsed .identity-selector{display:block;}
   /* UX-006D2 — the drawer always shows the full selector, never the rail chip. */
   .sidebar.collapsed .identity-selector-label,
@@ -150,8 +159,6 @@
 .nav-more-head{color:var(--text-faint);}
 .nav-more-head .chev{margin-left:auto;font-size:var(--fs-1);}
 .nav-more-items{display:flex;flex-direction:column;gap:2px;}
-/* Collapsed rail: the short wordmark "TAM OS" must fit 64px without clipping "OS". */
-.sidebar.collapsed .brand .mark{font-size:var(--fs-3);}
 .nav-item{
   display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);color:var(--text-dim);
   font-size:var(--fs-3);font-weight:500;border:none;background:transparent;text-align:left;width:100%;

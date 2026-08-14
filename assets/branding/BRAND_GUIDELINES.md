@@ -1,12 +1,33 @@
 # TAM OS — Brand Guidelines
 
-The **canonical, authoritative** brand reference is
-[`TAM-OS-Brand-Guidelines.pdf`](TAM-OS-Brand-Guidelines.pdf) in this folder. This
-Markdown file is a convenience summary for engineers and tooling; where the two differ,
-**the PDF wins**.
+This Markdown file is the **canonical, authoritative** brand reference (BRAND-1). The
+[`TAM-OS-Brand-Guidelines.pdf`](TAM-OS-Brand-Guidelines.pdf) in this folder is retained as a
+**historical/exported** reference from the pre-BRAND-1 identity; where the two differ, **this
+Markdown file wins**. A refreshed PDF should be exported from this document, not edited directly.
 
-> **Use the supplied artwork only.** Never typeset, rebuild, recolor, recreate, stretch,
-> rotate, or substitute the logo. All official marks live in this folder.
+> **Use the supplied symbol artwork only.** Never recolor, recreate, stretch, rotate, or
+> substitute the TAM monogram/symbol. The **wordmark**, by contrast, is now set live in the
+> approved display typeface (below) rather than shipped as fixed artwork.
+
+## Product vs. company naming
+
+- **`TAM OS`** is the product identity. It is the only name shown in the **persistent application
+  chrome** (sidebar/header brand lockup).
+- **`PT Total Asset Manajemen`** is the company/legal identity. It appears where company
+  identification is formal or contextual — About, Settings (company field), reports/exports, and
+  organizational copy — **not** repeated in persistent product chrome.
+- Capitalization: the product is `TAM OS` (all caps, single space). The company is
+  `PT Total Asset Manajemen` in prose; `PT TOTAL ASSET MANAJEMEN` only where a historical record
+  already used that form (history is never rewritten).
+
+## Identity architecture
+
+- **Primary lockup (app chrome):** TAM monogram + `TAM OS` wordmark, side by side.
+- **Compact/collapsed:** TAM monogram only (the collapsed sidebar rail); the wordmark text is
+  visually hidden but kept for assistive technology.
+- **Formal/company:** `TAM OS` with `PT Total Asset Manajemen` beneath, in About/legal contexts.
+- Do **not** imitate, trace, or reconstruct the Instagram (or any third-party) wordmark. The TAM OS
+  wordmark is its own identity.
 
 ## Logo assets (official, in this folder)
 
@@ -23,18 +44,29 @@ Default signature for websites, presentations, reports, GitHub, and formal
 communication is the **primary** wordmark. Where space is limited, switch to the
 **secondary** monogram.
 
-## Color palette (core brand colors)
+## Color palette
+
+### Identity palette (product identity only)
 
 | Token | Hex | RGB | Role |
 |---|---|---|---|
 | TAM Navy | `#062E5B` | 6 46 91 | Primary wordmark / authority |
 | TAM Blue | `#1478F2` | 20 120 242 | Progress / digital emphasis |
-| TAM Teal | `#08B9B0` | 8 185 176 | Growth / operations |
+| TAM Teal | `#08B9B0` | 8 185 176 | Growth / operations; the wordmark **`OS`** reads teal |
 | Ink | `#102A43` | 16 42 67 | Body text / UI |
 | Cloud | `#F4F8FC` | 244 248 252 | Background / panels |
 
-The logo uses controlled tonal transitions between Navy, Blue, and Teal. **Do not
-introduce additional hues into the official mark.**
+In the application these are exposed as `--identity-navy`, `--identity-blue`, `--identity-teal`.
+On **light** backgrounds the wordmark teal is darkened (`#0A857E`) so the `OS` mark meets WCAG
+large-text contrast (≥3:1) while staying unmistakably teal; the **dark** theme uses the exact
+`#08B9B0`. **Do not introduce additional hues into the official mark.**
+
+### Semantic UI accent (not part of the identity)
+
+The application UI uses a **gold** accent (`--brand` / `--accent`: `#C9A15C` dark, `#9C6B1E` light)
+for semantic meaning — the *Planned* status, the *Gaji*/payroll category, and the *Actual* chart
+series. This gold is **not** part of the product identity and must **not** be used for the wordmark.
+Identity (Navy/Blue/Teal) and semantic UI (gold) are deliberately separate systems.
 
 ## Background rules
 
@@ -66,12 +98,34 @@ zone.
 
 ## Typography
 
-- **Primary typeface:** Inter (product UI, web, PDF, presentations) — neutral, compact,
-  legible. This matches the application's existing UI font.
-- **System fallback:** Arial / sans-serif.
-- **Hierarchy:** Display 32–48 px / Bold · Heading 20–28 px / Bold · Subheading
+- **Display / wordmark typeface:** **Sora SemiBold (600)** — geometric, modern, distinctive. Used
+  **only** for the `TAM OS` wordmark (`--display`), never for general UI text.
+- **UI / body typeface:** **Inter** (`--sans`) — neutral, compact, legible, for all application
+  content: navigation, tables, forms, KPIs.
+- **Supporting faces:** Source Serif 4 (`--serif`, one monthly-header use) and JetBrains Mono
+  (`--mono`, code/contract-progress). **System fallback:** `-apple-system` / sans-serif.
+- **Hierarchy:** Display 32–48 px / SemiBold · Heading 20–28 px / Bold · Subheading
   14–18 px / SemiBold · Body 10–16 px / Regular · Caption 8–12 px / Medium.
-- Always use the supplied logo artwork; never typeset or rebuild the wordmark.
+
+### Offline / embedded-font requirement (MUST)
+
+All faces are **embedded locally** as base64 WOFF2 in [`css/fonts.css`](../../css/fonts.css)
+(Latin subset). The application makes **no request to `fonts.googleapis.com` or
+`fonts.gstatic.com`** and renders its intended typography under genuine offline `file://`. Any new
+face must be embedded the same way — never linked from a CDN.
+
+### Font licensing (MUST)
+
+Every embedded face is **SIL Open Font License 1.1**, which permits redistribution, subsetting, and
+embedding. The license texts are retained beside the fonts in
+[`assets/fonts/`](../fonts/) (`*-OFL.txt`). No font may be added without verifying its license
+permits redistribution/embedding and retaining that license text in the repository.
+
+### Prohibited treatments
+
+Do not stretch, recolor, or rotate the symbol; do not place the mark on low-contrast backgrounds;
+do not set the wordmark in gold; do not imitate, trace, or reconstruct the Instagram (or any
+third-party) wordmark; do not link fonts from a remote CDN.
 
 ## Correct / incorrect usage
 
