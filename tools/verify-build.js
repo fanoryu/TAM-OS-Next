@@ -368,14 +368,14 @@ if (fs.existsSync(prevDist)) {
 const distHtml = fs.readdirSync(path.join(root, 'dist')).filter((f)=>/\.html$/.test(f));
 check(distHtml.length === 1 && distHtml[0] === 'tam-os-v' + meta.version + '.html', 'dist/ holds exactly one release artifact — the current v' + meta.version + ' under the TAM OS naming (dist/tam-os-v' + meta.version + '.html)');
 check(!distHtml.some((f)=>/^tam-intelligence-os-v/.test(f)), 'no legacy tam-intelligence-os-v* artifact remains tracked in dist/ (historical filenames live only in Git history + published Releases)');
-check(meta.version === '2.10.0', 'APP_VERSION is 2.10.0 (this development release)');
+check(meta.version === '2.11.0', 'APP_VERSION is 2.11.0 (this development release — RELEASE-1)');
 
 // == RELEASE IDENTITY GUARDRAILS (v2.10.0) ==
 // The version and release name live ONCE in js/core/constants.js; these checks prove every
 // authoritative surface agrees with that single source and that the release paperwork exists.
 // They are derived from meta wherever possible so they do not need editing next release.
 const distArtifacts = distHtml; // alias retained for downstream references
-check(meta.releaseName === 'Governed Workspace', 'APP_RELEASE_NAME is the approved v2.10.0 release name');
+check(meta.releaseName === 'Identity Refresh', 'APP_RELEASE_NAME is the approved v2.11.0 release name');
 check(!/tam-intelligence-os-v2\.8\.[456]\.html/.test(distArtifacts.join('|')), 'no tracked current artifact remains under a superseded tam-intelligence-os filename');
 check(read(path.join(root, 'index.html')).includes('<title>TAM OS v' + meta.version + '</title>'), 'index.html <title> agrees with APP_VERSION');
 const relNotes = read(path.join(root, 'RELEASE_NOTES.md'));
@@ -2968,8 +2968,8 @@ check(/\.nav-preview-tag\{[^}]*background:transparent/.test(ux4fCss) && /\.nav-p
 // ---- invariants unchanged ----
 check(/const SCHEMA_VERSION = 6;/.test(ux4fConstants), 'UX-004F: SCHEMA_VERSION remains 6');
 // v2.9.0 release: constants carry the single-source release identity forward.
-check(/const APP_VERSION = '2\.10\.0';/.test(ux4fConstants) && /const APP_RELEASE_NAME = 'Governed Workspace';/.test(ux4fConstants),
-  'release: APP_VERSION 2.10.0 and APP_RELEASE_NAME match the v2.10.0 release identity');
+check(/const APP_VERSION = '2\.11\.0';/.test(ux4fConstants) && /const APP_RELEASE_NAME = 'Identity Refresh';/.test(ux4fConstants),
+  'release: APP_VERSION 2.11.0 and APP_RELEASE_NAME match the v2.11.0 release identity');
 check(fs.existsSync(path.join(root,'tools','verify-nav-simplification-runtime.js')),
   'UX-004F runtime harness present: tools/verify-nav-simplification-runtime.js');
 
@@ -4028,8 +4028,8 @@ check(/<link rel="icon"[^>]*href="data:image\/png;base64,/.test(dist),
 check(!/<link rel="icon"[^>]*href="https?:\/\//.test(dist),
   'MAINT-001: portable artifact has no external favicon URL');
 // 4. APP_VERSION / SCHEMA_VERSION unchanged by branding work
-check(indexHtml.includes('<title>TAM OS v' + meta.version + '</title>') && meta.version === '2.10.0',
-  'MAINT-001: APP_VERSION/title consistent (v2.10.0)');
+check(indexHtml.includes('<title>TAM OS v' + meta.version + '</title>') && meta.version === '2.11.0',
+  'MAINT-001: APP_VERSION/title consistent (v2.11.0)');
 // 5. repository asset paths referenced by README actually resolve
 ['assets/branding/tam-os-logo-full-color.png',
  'assets/screenshots/dashboard-dark.png',
@@ -5017,8 +5017,8 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
     'UX-006D2: ACTIONS remains exactly 20 (D2 adds no capability)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D2: SCHEMA_VERSION remains 6 (no D2 migration/storage change)');
-  check(/const APP_VERSION = '2\.10\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'UX-006D2: APP_VERSION is 2.10.0 (the Readiness-3 release decision, not a presentation change)');
+  check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'UX-006D2: APP_VERSION is 2.11.0 (RELEASE-1 version; D2 remained presentation-only)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-ux006d2-presentation-runtime.js')),
     'UX-006D2: presentation runtime harness present — tools/verify-ux006d2-presentation-runtime.js');
   // Global Search scope wiring is OUTSIDE UX-006D and must stay deferred.
@@ -5062,8 +5062,8 @@ console.log('== UX-006D3 — CROSS-SURFACE PRESENTATION CONSISTENCY ==');
     'UX-006D3: ACTIONS remains exactly 20 (D3 adds no capability)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D3: SCHEMA_VERSION remains 6 (no D3 migration/storage change)');
-  check(/const APP_VERSION = '2\.10\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'UX-006D3: APP_VERSION is 2.10.0 (the Readiness-3 release decision, not a presentation change)');
+  check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'UX-006D3: APP_VERSION is 2.11.0 (RELEASE-1 version; D3 remained presentation-only)');
   check(!/getScopedRecords|getCurrentWorkspace|getCurrentUser/.test(read(path.join(root, 'js', 'core', 'global-search.js'))),
     'UX-006D3: Global Search scope wiring remains deferred (outside UX-006D)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-ux006d3-presentation-runtime.js')),
@@ -5161,8 +5161,8 @@ console.log('== READINESS-1 — EMPLOYEE READ SCOPE ==');
     'Readiness-1: ACTIONS remains exactly 20 (read scope needed no new action)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'Readiness-1: SCHEMA_VERSION remains 6 (no migration)');
-  check(/const APP_VERSION = '2\.10\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'Readiness-1: APP_VERSION is 2.10.0 (the version decision Readiness-3 owned, now made)');
+  check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'Readiness-1: APP_VERSION is 2.11.0 (RELEASE-1 version; Readiness-1 scope unchanged)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-employee-read-scope-runtime.js')),
     'Readiness-1: read-scope runtime harness present — tools/verify-employee-read-scope-runtime.js');
 }

@@ -6,7 +6,11 @@ AI assistants get productive quickly. It is descriptive (what *is*), whereas
 authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file summarizes and points
 there rather than duplicating it.
 
-**As of the current source state:** v2.10.0 — "Governed Workspace"; `SCHEMA_VERSION` 6; `ACTIONS` 20.
+**As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the BRAND-1 identity
+modernization, prepared for release); `SCHEMA_VERSION` 6; `ACTIONS` 20. The portable artifact is
+`dist/tam-os-v2.11.0.html`. Tagging and the GitHub Release for v2.11.0 are performed under separate owner
+authorization; **until then, v2.10.0 remains the current published Latest release**, described next.
+
 **v2.10.0 is PUBLISHED and marked Latest.** It was **originally published** on 2026-08-11 from the
 predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) (annotated tag `v2.10.0`
 there, tag object `26c74071`, release commit `335d53ed`), and **canonically re-published unchanged** on
@@ -17,7 +21,9 @@ historical record. This was **not a new product version** — `APP_VERSION` rema
 `SCHEMA_VERSION` remains **6**, and no runtime was rebuilt. Its published asset
 `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
 `60382271a6dcea23431fabb91e0d16abb03196e5cf64c6dc4da1e1af2c7fa704`) is byte-identical across both
-Releases and to the repository artifact `dist/tam-os-v2.10.0.html`, which is frozen. **Artifact identity
+Releases and to the artifact originally tracked as `dist/tam-os-v2.10.0.html`; that published asset is
+frozen and immutable. The current repository source has since advanced to v2.11.0 (above), whose artifact
+is `dist/tam-os-v2.11.0.html`. **Artifact identity
 is not tree identity:** the canonical tag's source/docs checkpoint is *newer* than the predecessor's
 v2.10.0 source snapshot (it also carries PILOT-0 and SECURITY-1), while the portable artifact is
 unchanged. `fanoryu/TAM-OS-Next` is the canonical repository going forward.

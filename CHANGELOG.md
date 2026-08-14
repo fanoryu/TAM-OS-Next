@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.11.0 — Identity Refresh
+
+**Type:** Presentation / product-identity release carrying the merged **BRAND-1** identity modernization.
+Identity and typography changes only — **no** change to authorization, Acting-as semantics, read-scope,
+payroll, overtime, contract, finance, execution, approval, posting, import or export behaviour; **no**
+schema, storage-key, persisted-data or migration change (`SCHEMA_VERSION` stays **6**); `ACTIONS` remains
+**20**; no historical record is rewritten. Publication (tag `v2.11.0` and the GitHub Release) is performed
+under separate owner authorization; until then, `v2.10.0` remains the current published Latest release.
+
+### Changed
+- **Refreshed TAM OS product lockup** — the persistent sidebar chrome now pairs the existing TAM monogram
+  with a live "TAM OS" wordmark. The expanded lockup is `[monogram] TAM OS`; the collapsed rail shows the
+  monogram only.
+- **Dedicated wordmark typography** — the wordmark is set in **Sora SemiBold 600** (`--display`), scoped to
+  the wordmark; general UI text stays on **Inter**. The `OS` carries the **TAM Teal** identity accent
+  (`#08B9B0` dark; `#0A857E` on light backgrounds for contrast).
+- **Persistent company subtitle removed** — `PT Total Asset Manajemen` no longer appears in the application
+  brand block. Company identity is retained in About, Settings, reports and positioning copy.
+- **Identity palette tokens (P1)** — the Navy/Blue/Teal identity palette is introduced as `--identity-*`
+  tokens for the product identity, kept separate from the existing semantic gold UI accent, which is
+  **preserved unchanged** (planned status, Gaji category, Actual chart series).
+
+### Added
+- **Self-contained offline typography** — Sora, Inter, Source Serif 4 and JetBrains Mono are embedded as
+  base64 WOFF2 (Latin subset) in `css/fonts.css`; vendored sources and SIL OFL 1.1 licenses live under
+  `assets/fonts/`. The portable artifact renders its intended type under `file://` with **no Google Fonts
+  network dependency**.
+- **Brand Guidelines** — `assets/branding/BRAND_GUIDELINES.md` is now the canonical brand source and records
+  the chrome naming rule, identity-vs-semantic palette, display/UI typography and the offline-font rule.
+
+### Unchanged
+- Authorization capability set (**20 actions**), Acting-as semantics, read-scope, persistence,
+  `SCHEMA_VERSION` (**6**), backup/restore/reset, and all financial/payroll calculations.
+- **PILOT-1 remains ON HOLD PENDING VPS**; backend remains **NOT STARTED**.
+
 ## 2.10.0 — Governed Workspace
 
 **Type:** Feature/minor release completing the **UX-006** authorization / personal-workspace line and the
