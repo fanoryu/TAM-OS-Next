@@ -6,17 +6,20 @@ AI assistants get productive quickly. It is descriptive (what *is*), whereas
 authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file summarizes and points
 there rather than duplicating it.
 
-**As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the BRAND-1 identity
-modernization, prepared for release); `SCHEMA_VERSION` 6; `ACTIONS` 20. The portable artifact is
-`dist/tam-os-v2.11.0.html`. Tagging and the GitHub Release for v2.11.0 are performed under separate owner
-authorization; **until then, v2.10.0 remains the current published Latest release**, described next.
+**As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the merged BRAND-1
+identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 20. The portable artifact is
+`dist/tam-os-v2.11.0.html` (1,676,709 bytes, SHA-256
+`57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`). **v2.11.0 is published and marked
+Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1503d`. v2.10.0 remains
+published and intact as the **prior release** (no longer Latest), described next.
 
-**v2.10.0 is PUBLISHED and marked Latest.** It was **originally published** on 2026-08-11 from the
+**v2.10.0 is PUBLISHED** (now the prior release, no longer Latest). It was **originally published** on 2026-08-11 from the
 predecessor repository [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) (annotated tag `v2.10.0`
 there, tag object `26c74071`, release commit `335d53ed`), and **canonically re-published unchanged** on
 2026-08-13 from the canonical repository `fanoryu/TAM-OS-Next` (annotated tag `v2.10.0` here, tag object
-`fe4a663c`, peeling to `856e3ca6a6bfee41f1840996eec2f292bf5ef4eb`). **Both repositories currently show
-Latest = v2.10.0**; the predecessor's original tag, Release and asset are untouched and remain the
+`fe4a663c`, peeling to `856e3ca6a6bfee41f1840996eec2f292bf5ef4eb`). `fanoryu/TAM-OS-Next` now shows
+**Latest = v2.11.0**, while the predecessor `fanoryu/TAM-OS` still shows Latest = v2.10.0; across both
+repositories the v2.10.0 tag, Release and asset are untouched and remain the
 historical record. This was **not a new product version** — `APP_VERSION` remains **2.10.0**,
 `SCHEMA_VERSION` remains **6**, and no runtime was rebuilt. Its published asset
 `tam-os-v2.10.0.html` (1,151,267 bytes, SHA-256
@@ -337,9 +340,9 @@ byte-identical, zero writes; CEO ⇒ still schedules and still reports success).
 identity **33**, GS **26**, DG **36**. **Deferred and untouched: backup restore (C2C-3), supplemental,
 settings, bank, reset, recurring, monthly plan, legacy mapping, employee dedup, C3, remaining UX-006D.**
 
-**v2.10.0 is the latest published release (Latest); the repository artifact is byte-identical to its
-published asset; the published v2.9.0 and v2.8.6 Release assets remain immutable.** `dist/` holds
-`tam-os-v2.10.0.html` only — the superseded `dist/tam-os-v2.9.0.html` was removed by the release
+**v2.11.0 is the latest published release (Latest); the repository artifact is byte-identical to its
+published asset; the prior v2.10.0, v2.9.0 and v2.8.6 Release assets remain immutable.** `dist/` holds
+`tam-os-v2.11.0.html` only — the superseded `dist/tam-os-v2.10.0.html` was removed by the release
 dist-swap, and every published Release asset stays immutable regardless:
 
 | | Published v2.10.0 Release asset (Latest) | Published v2.9.0 Release asset (immutable) | Published v2.8.6 Release asset (immutable) |
@@ -699,11 +702,12 @@ CSS is pinned by digest instead (see §19). The authoritative, detailed layout i
 
 Bump the version constants, add release notes, build + verify, present a Release Candidate, and — on
 approval — commit, tag, push, and let the tag-triggered workflow publish the GitHub Release and
-portable asset (guarded so it publishes only when the tag matches the source version). **v2.10.0 is the latest
-published release and is marked Latest — originally published from annotated tag `v2.10.0` in the
-predecessor `fanoryu/TAM-OS` (release commit `335d53ed`) and canonically re-published from annotated tag
-`v2.10.0` here (peeling to `856e3ca6`); v2.9.0 (publication commit
-`598edef0`), v2.8.6 and earlier remain published and unchanged in the predecessor but are no longer Latest.** Detailed steps:
+portable asset (guarded so it publishes only when the tag matches the source version). **v2.11.0 is the latest
+published release and is marked Latest** — published from annotated tag `v2.11.0` in `fanoryu/TAM-OS-Next`
+(peeling to `04c1503d`). The prior **v2.10.0** was **originally published** from annotated tag `v2.10.0` in
+the predecessor `fanoryu/TAM-OS` (release commit `335d53ed`) and **canonically re-published** from annotated
+tag `v2.10.0` here (peeling to `856e3ca6`); v2.10.0, v2.9.0 (publication commit
+`598edef0`), v2.8.6 and earlier remain published and unchanged but are no longer Latest. Detailed steps:
 [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md). History: [`CHANGELOG.md`](CHANGELOG.md); latest
 summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 

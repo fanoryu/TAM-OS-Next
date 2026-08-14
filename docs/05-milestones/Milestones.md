@@ -109,10 +109,18 @@ recorded in [RDR-011](../99-archive/RDR/RDR-011-epsilon-repository-snapshot.md);
 > application remains client-only per [`CLAUDE.md`](../../CLAUDE.md) §4.3. **Compound persistence** is the
 > next architectural frontier.
 
-## v2.10.0 Official Release — **Completed · Published · Latest**
+## v2.11.0 Official Release — **Completed · Published · Latest**
+**Theme:** the Identity Refresh release ships (merged BRAND-1 product identity + offline typography).
+
+TAM OS **v2.11.0 — Identity Refresh** is **published and marked Latest** in `fanoryu/TAM-OS-Next`, from
+annotated tag `v2.11.0` (peeling to `04c1503d`); asset `tam-os-v2.11.0.html` (1,676,709 B, SHA-256
+`57d8b0c2…2358557`). Presentation/identity only — no authorization, schema, data or backend change
+(`SCHEMA_VERSION` 6, `ACTIONS` 20). **PILOT-1 remains ON HOLD PENDING VPS**; backend **NOT STARTED**.
+
+## v2.10.0 Official Release — **Completed · Published (prior release)**
 **Theme:** the Governed Workspace release ships.
 
-TAM OS **v2.10.0 — Governed Workspace** is **published and marked Latest**.
+TAM OS **v2.10.0 — Governed Workspace** is **published** (now the prior release, no longer Latest; superseded by v2.11.0).
 
 | Field | State |
 |---|---|
@@ -150,7 +158,7 @@ participants, results, findings or exit decision may be recorded before they exi
 |---|---|
 | Maintainer approval | **YES** |
 | Technical readiness | **GO** |
-| Product released | **YES — v2.10.0 published and Latest** |
+| Product released | **YES — v2.11.0 (Identity Refresh) published and Latest; v2.10.0 prior** |
 | Launch status | **NOT YET LAUNCHED** |
 | Audience | **1–3 named internal operators** (desktop Chromium, controlled profile) — not to be broadened |
 | Canonical artifact | `tam-os-v2.10.0.html` — **published and frozen**, 1,151,267 B, SHA-256 `60382271…2c7fa704` |
