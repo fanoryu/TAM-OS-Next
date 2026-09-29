@@ -77,11 +77,15 @@ function testConfig(array $overrides = []): Config
     ]);
 }
 
-/** @param list<Route>|null $routes production routes when null */
-function kernel(?Config $config = null, ?array $routes = null): Kernel
+/**
+ * @param list<Route>|null $routes production routes when null
+ * @param string|null $migrationsDir readiness' migration directory (an absent one = zero migrations)
+ */
+function kernel(?Config $config = null, ?array $routes = null, ?string $migrationsDir = null): Kernel
 {
     $config ??= testConfig();
-    return new Kernel($routes ?? Routes::production(), new NullPrincipalResolver(), $config, new Logger($config->logPath, $config->env));
+    $routes ??= Routes::production(new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'));
+    return new Kernel($routes, new NullPrincipalResolver(), $config, new Logger($config->logPath, $config->env));
 }
 
 function requestId(): string
@@ -195,6 +199,64 @@ function testDatabase(): \TamOs\Data\Database
         $db->execute('DROP TABLE `' . $table . '`');
     }
     return $db;
+}
+
+/**
+ * A temporary migration directory holding exactly these files (name => bytes). Fixtures live
+ * only in the system temp directory — never under server/migrations/.
+ *
+ * @param array<string, string> $files
+ */
+function migrationFixture(array $files): string
+{
+    $dir = tempDir() . DIRECTORY_SEPARATOR . 'migrations';
+    mkdir($dir);
+    foreach ($files as $name => $bytes) {
+        file_put_contents($dir . DIRECTORY_SEPARATOR . $name, $bytes);
+    }
+    return $dir;
+}
+
+/** Writes a config file for a child process (the CLI or php -S) and returns its path. */
+function writeConfigFile(Config $config): string
+{
+    $file = tempDir() . DIRECTORY_SEPARATOR . 'config.local.php';
+    $values = ['env' => $config->env, 'origin' => $config->origin, 'log_path' => $config->logPath];
+    if ($config->db !== null) {
+        $values['db'] = $config->db;
+    }
+    file_put_contents($file, "<?php\ndeclare(strict_types=1);\nreturn " . var_export($values, true) . ";\n");
+    return $file;
+}
+
+/**
+ * Runs server/bin/migrate.php in a child process with the given config file.
+ *
+ * @param list<string> $args
+ * @return array{exit: int, stdout: string, stderr: string}
+ */
+function runMigrateCli(array $args, ?string $configFile): array
+{
+    $env = getenv();
+    unset($env['TAMOS_CONFIG']);
+    if ($configFile !== null) {
+        $env['TAMOS_CONFIG'] = $configFile;
+    }
+    $cmd = [PHP_BINARY];
+    if (php_ini_loaded_file() === false) {
+        $cmd[] = '-n';
+    }
+    array_push($cmd, dirname(__DIR__) . '/bin/migrate.php', ...$args);
+    $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
+    if (!is_resource($proc)) {
+        fail('cannot start migrate.php');
+    }
+    fclose($pipes[0]);
+    $stdout = (string) stream_get_contents($pipes[1]);
+    $stderr = (string) stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    return ['exit' => proc_close($proc), 'stdout' => $stdout, 'stderr' => $stderr];
 }
 
 /** Builds a request the way a browser on the canonical origin would send a JSON mutation. */

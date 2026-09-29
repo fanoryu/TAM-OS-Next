@@ -22,7 +22,8 @@ final class Logger
     {
     }
 
-    public function access(string $requestId, string $method, ?string $route, int $status, int $durationMs, ?string $error): void
+    /** @param string|null $reason a fixed internal code (ApiError::LOG_REASON_PATTERN), never request data */
+    public function access(string $requestId, string $method, ?string $route, int $status, int $durationMs, ?string $error, ?string $reason = null): void
     {
         $this->write([
             'level' => $status >= 500 ? 'error' : 'info',
@@ -33,6 +34,7 @@ final class Logger
             'status' => $status,
             'durationMs' => $durationMs,
             'error' => $error,
+            'reason' => $reason,
         ]);
     }
 

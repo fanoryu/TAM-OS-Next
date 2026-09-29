@@ -337,8 +337,9 @@ acceptance · **MU-8** cutover & decommission.
 error contract, request ID, `GET /api/health`, logging, null identity seam, boundary tool, backend tests
 and CI) is implemented as source only — no database, authentication, deployment or
 frontend change. **BF-2** is split in two: **BF-2A** (data layer, transactions, MariaDB CI) is
-implemented as source only, with no table or migration; **BF-2B** (migrations, `schema_migrations`,
-readiness) is not yet authorized. The hostile-principal harness waits for the first scoped repository.
+implemented as source only, with no table or migration; **BF-2B** (migration runner, `schema_migrations`,
+`/api/ready`) is implemented as source only, with zero production migrations. The hostile-principal
+harness waits for the first scoped repository.
 See `ARCHITECTURE.md` → Backend foundation and Data foundation.
 
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today

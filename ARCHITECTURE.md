@@ -769,8 +769,9 @@ automatic CEO or Employee fallback at any step. Frontend hosting and the product
 ### Backend foundation — BF-1 (source only; not deployed, no data, no identity)
 
 BF-1 added the first slice of the ADR-0004 backend under `server/`: the HTTP foundation. The backend has
-**no migrations, authentication, sessions, policy or business endpoint** (the data layer below, BF-2A,
-creates no schema), and the frontend makes no call to it. The shipped application is unchanged and still
+**no authentication, sessions, policy, business endpoint or production migration** (BF-2A and BF-2B below
+add the data layer and migration machinery, but no application schema), and the frontend makes no call
+to it. The shipped application is unchanged and still
 client-only.
 
 | Path | Role |
@@ -826,6 +827,32 @@ records a PDO message.
 `backend.yml` → `backend-db` runs the database suite against a disposable MariaDB 10.11 service
 container (a CI baseline — the host's engine version is not yet verified); locally that suite reports
 NOT RUN.
+
+### Migrations and readiness — BF-2B (machinery only; zero production migrations)
+
+Schema changes run only through `php server/bin/migrate.php status|apply` (CLI only; it does nothing
+under any other SAPI). There is no migration endpoint and nothing migrates at start-up. No numbered
+migration exists yet; `server/migrations/` appears with the first one, `0001`.
+
+| Class | Role |
+|---|---|
+| `Data/Migration/MigrationSet` | Reads `server/migrations/`: `NNNN_name.sql` only, versions exactly `1..N`, name ≤ 64, non-empty UTF-8 without BOM or CR, SHA-256 over the exact bytes. A missing directory is an empty set |
+| `Data/Migration/Migration` | One validated file. Its executed text drops trailing whitespace and at most one final `;` — nothing else is rewritten |
+| `Data/Migration/MigrationHistory` | All migration-metadata SQL: creates and verifies `schema_migrations` (engine, five columns, types, lengths, precision, nullability, `ascii` charsets, primary key on `version`), reads rows, records `started` / `applied`, takes and releases `GET_LOCK('tamos_migrate', 0)` |
+| `Data/Migration/Migrator` | `inspect()` read-only; `status()` under the lock; `apply()` under the lock: create/verify history, refuse incomplete or drifted history, run pending migrations in order |
+| `Data/Migration/MigrationError` | Fixed reasons: `migrations_invalid`, `history_missing`, `history_invalid`, `schema_incomplete`, `schema_drift`, `schema_pending`, `migration_busy` |
+| `Data/Readiness` + `Controller/ReadyController` | `GET /api/ready`: 200 `{"status":"ready"}` only when the db section is valid, the database answers and the schema is exactly current; otherwise 503 `service_unavailable`, with the reason in the access log only |
+
+**Failure contract.** Migration DDL is never wrapped in `Database::transaction()` (DDL commits
+implicitly). For each migration a `started` row (`applied_at` NULL) is committed first, then the single
+statement runs, then exactly that row is marked applied. Any failure after the marker leaves the row
+incomplete, and every later `apply`, `status` and readiness check refuses until a person reconciles it —
+nothing is deleted, replayed or guessed, whatever the engine's DDL atomicity. One statement per file is
+enforced operationally: DDL runs as a native prepared statement with multi-statements off, and a
+two-statement file is refused before either statement runs.
+
+**Readiness is read-only.** It takes no lock and never creates, alters or writes anything: before the
+first `apply` it reports `history_missing`. `/api/health` stays independent of the database.
 
 ### Release engineering
 

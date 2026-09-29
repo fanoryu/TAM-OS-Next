@@ -35,10 +35,13 @@ const { execFileSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const SERVER = 'server';
 const DATA_DIR = 'server/src/Data/';
-// Slice gate: these arrive with later, separately authorized slices (BF-2B migrations and the
-// CLI runner; the authorization milestone for Policy). Remove an entry only in that slice.
-// server/src/Data was un-gated by BF-2A.
-const NOT_YET_AUTHORIZED = ['server/migrations', 'server/bin', 'server/src/Policy'];
+// Slice gate: these arrive with later, separately authorized slices (the authorization
+// milestone for Policy). Remove an entry only in that slice. server/src/Data was un-gated by
+// BF-2A; server/migrations and server/bin by BF-2B, each narrowly (see checkTree).
+const NOT_YET_AUTHORIZED = ['server/src/Policy'];
+// The only file allowed under server/bin/, and the only shape a migration file may have.
+const CLI_FILES = new Set(['server/bin/migrate.php']);
+const MIGRATION_FILE = /^server\/migrations\/\d{4}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 const SUPERGLOBAL_READERS = new Set(['server/src/Http/Request.php', 'server/dev/router.php']);
 const HEADER_EMITTERS = new Set(['server/src/Http/Response.php', 'server/src/bootstrap.php']);
 const INI_WRITERS = new Set(['server/src/bootstrap.php']);
@@ -125,7 +128,7 @@ const CODE_RULES = [
 const EVERYWHERE_RULES = [
   { id: 'mysqli', re: /\bmysqli\b|(?<![\w$>:])mysqli?_[a-z_]+\s*\(/i, msg: 'mysqli/mysql functions are forbidden (PDO only)' },
   { id: 'raw-query', re: /->\s*query\s*\(/i, msg: '->query() is forbidden: every statement is prepared' },
-  { id: 'raw-exec', re: /->\s*exec\s*\(/i, msg: '->exec() is forbidden in BF-2A (static migration DDL arrives with BF-2B)' },
+  { id: 'raw-exec', re: /->\s*exec\s*\(/i, msg: '->exec() is forbidden: migration DDL also runs as a prepared statement' },
 ];
 // Allowed only inside server/src/Data/.
 const DATA_RULES = [
@@ -154,7 +157,7 @@ const SECRET_RULES = [
 ];
 
 function isProductionPhp(file) {
-  return file.startsWith('server/src/') || file.startsWith('server/public/') || file.startsWith('server/dev/') || file.startsWith('server/config/');
+  return file.startsWith('server/src/') || file.startsWith('server/public/') || file.startsWith('server/dev/') || file.startsWith('server/config/') || file.startsWith('server/bin/');
 }
 
 // `<?php`, at least one whitespace character, then any number of `/* … */` or `// …\n`
@@ -217,6 +220,9 @@ function checkPhp(file, src) {
   if (!INI_WRITERS.has(file) && /(?<![\w$>:])(ini_set|ini_alter|set_include_path|putenv)\s*\(/i.test(lex.code)) {
     out.push('runtime configuration changes are made only in server/src/bootstrap.php');
   }
+  if (CLI_FILES.has(file) && !(/\bPHP_SAPI\b/.test(lex.code) && lex.strings.includes('cli'))) {
+    out.push('a CLI entry point must refuse any non-CLI SAPI (PHP_SAPI !== \'cli\')');
+  }
   if (file !== RESOLVER_ALLOWED && /\bimplements\b[^{]*\bPrincipalResolver\b/.test(lex.code)) {
     out.push('BF-1 permits exactly one PrincipalResolver (NullPrincipalResolver); an identity-producing resolver needs the authentication milestone');
   }
@@ -261,9 +267,12 @@ function checkTree(files, dirs = []) {
   for (const f of files) {
     const base = path.posix.basename(f);
     if (/^composer\.(json|lock)$/.test(base) || f.includes('/vendor/')) out.push(f + ': Composer/vendor code is not authorized (SDR-0002 §15)');
-    if (/\.sql$/i.test(f)) out.push(f + ': .sql files belong only to the future server/migrations/');
+    const isMigration = MIGRATION_FILE.test(f) && base.length - '0000_'.length - '.sql'.length <= 64;
+    if (f.startsWith('server/migrations/') && !isMigration) out.push(f + ': server/migrations/ holds only NNNN_name.sql migration files');
+    if (/\.sql$/i.test(f) && !f.startsWith('server/migrations/')) out.push(f + ': .sql files belong only in server/migrations/');
+    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php');
     if (/^\.env/.test(base) || /\.(phar|pem|key)$/i.test(base)) out.push(f + ': forbidden file type');
-    if (!/\.php$/.test(f) && f !== 'server/public/api/.htaccess') out.push(f + ': unexpected file type under server/');
+    if (!/\.php$/.test(f) && f !== 'server/public/api/.htaccess' && !isMigration && !f.startsWith('server/migrations/')) out.push(f + ': unexpected file type under server/');
   }
   return out;
 }
@@ -350,6 +359,12 @@ function run() {
   for (const f of files.filter((x) => x.endsWith('.php'))) {
     php++;
     for (const v of checkPhp(f, fs.readFileSync(path.join(root, f), 'utf8'))) failures.push(f + ': ' + v);
+  }
+  // Migration files are data, not PHP: they are only scanned for secret-shaped values here;
+  // MigrationSet validates their bytes at run time.
+  for (const f of files.filter((x) => x.endsWith('.sql'))) {
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    for (const re of SECRET_RULES) if (re.test(src)) failures.push(f + ': secret-shaped value: ' + re);
   }
   const contract = require('./package-headers.js');
   for (const v of checkParity(fs.readFileSync(path.join(root, 'server/src/Http/ApiHeaders.php'), 'utf8'), contract)) failures.push(v);
@@ -453,7 +468,27 @@ function selftest() {
   const treeCase = (name, files, needle) => cases.push({ name, run: () => checkTree(files), expect: needle });
   cases.push({ name: 'a clean tree passes', run: () => checkTree(['server/src/X.php', 'server/public/api/.htaccess'], ['server/src']), expect: 0 });
   cases.push({ name: 'server/src/Data is authorized since BF-2A', run: () => checkTree(['server/src/Data/Database.php'], ['server/src/Data']), expect: 0 });
-  treeCase('server/bin (BF-2B) is still gated', ['server/bin/migrate.php'], 'not authorized');
+  // BF-2B: migrations and the CLI runner.
+  cases.push({ name: 'server/bin/migrate.php is authorized since BF-2B', run: () => checkTree(['server/bin/migrate.php'], ['server/bin']), expect: 0 });
+  cases.push({ name: 'a valid migration file name passes', run: () => checkTree(['server/migrations/0001_create_probe.sql', 'server/migrations/0002_a1_b2.sql'], ['server/migrations']), expect: 0 });
+  treeCase('an extra file under server/bin is caught', ['server/bin/seed.php'], 'only migrate.php');
+  for (const bad of ['server/migrations/1_x.sql', 'server/migrations/0001-x.sql', 'server/migrations/0001_X.sql', 'server/migrations/0001_x_.sql',
+    'server/migrations/0001_.sql', 'server/migrations/README.md', 'server/migrations/0001_x.sql.bak', 'server/migrations/sub/0001_x.sql',
+    'server/migrations/0001_' + 'a'.repeat(65) + '.sql']) {
+    treeCase('a bad migration path is caught: ' + bad.slice(18, 50), [bad], 'server/migrations/ holds only');
+  }
+  treeCase('a .sql file outside server/migrations is caught', ['server/src/Data/Migration/0001_x.sql'], 'belong only in server/migrations');
+  const CLI = 'server/bin/migrate.php';
+  clean('migrate.php with its CLI guard passes', CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\nrequire dirname(__DIR__) . '/src/bootstrap.php';\n$m = Migrator::fromConfig($c, $d);\n");
+  dirty('migrate.php without the CLI guard is caught', CLI, S + "require dirname(__DIR__) . '/src/bootstrap.php';\n", 'non-CLI SAPI');
+  dirty('migrate.php checking the wrong SAPI is caught', CLI, S + "if (PHP_SAPI !== 'cli-server') { exit(1); }\n", 'non-CLI SAPI');
+  dirty('SQL inside migrate.php is caught', CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$q = 'CREATE TABLE t (a INT)';\n", 'SQL');
+  dirty('Database inside migrate.php is caught', CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$d = new Database($c);\n", 'DAL bypass');
+  dirty('DatabaseConfig inside migrate.php is caught', CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$d = DatabaseConfig::fromConfig($c);\n", 'DAL bypass');
+  dirty('PDO inside migrate.php is caught', CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$p = new \\PDO('x');\n", 'PDO');
+  dirty('->exec inside Data/Migration is caught', 'server/src/Data/Migration/Migrator.php', S + "$pdo->exec('CREATE TABLE t (a INT)');\n", 'exec');
+  dirty('concatenated SQL inside Data/Migration is caught', 'server/src/Data/Migration/MigrationHistory.php', S + "const Q = 'SELECT a ' . 'FROM t';\n", 'concatenation');
+  clean('fixed SQL literals inside Data/Migration pass', 'server/src/Data/Migration/MigrationHistory.php', S + "$this->db->select(\"SELECT GET_LOCK('tamos_migrate', 0) AS acquired\");\n");
 
   // BF-2A data-layer boundary.
   const DB = 'server/src/Data/Database.php';
@@ -480,13 +515,12 @@ function selftest() {
   dirty('SQL appended with .= is caught', DB, S + "$sql .= ' WHERE id = ?';\n", 'concatenation');
   dirty('SQL assembled with sprintf is caught', DB, S + "$sql = sprintf('SELECT %s FROM t', $col);\n", 'string builder');
   dirty('SQL assembled with implode is caught', DB, S + "$sql = implode(' AND ', $parts) ;$w = implode(' WHERE ', $x);\n", 'string builder');
-  treeCase('server/migrations is gated', ['server/migrations/0000_init.sql'], 'not authorized');
   cases.push({ name: 'server/src/Policy is gated', run: () => checkTree([], ['server/src/Policy']), expect: 'not authorized' });
   dirty('a variable include outside the allow-list is caught', 'server/src/Http/X.php', S + 'require $file;\n', 'include');
   clean('prose that reads like SELECT…FROM is not SQL', 'server/src/X.php', S + "\$m = 'Select a principal from the list above';\n");
   treeCase('composer.json is caught', ['server/composer.json'], 'Composer');
   treeCase('a vendor tree is caught', ['server/vendor/autoload.php'], 'Composer');
-  treeCase('a stray .sql file is caught', ['server/src/schema.sql'], '.sql');
+  treeCase('a stray .sql file is caught', ['server/src/schema.sql'], 'belong only in server/migrations');
   treeCase('a .env file is caught', ['server/.env'], 'forbidden');
   treeCase('an unexpected file type is caught', ['server/src/notes.txt'], 'unexpected');
 
