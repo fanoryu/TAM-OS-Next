@@ -111,8 +111,9 @@ zone.
 
 All faces are **embedded locally** as base64 WOFF2 in [`css/fonts.css`](../../css/fonts.css)
 (Latin subset). The application makes **no request to `fonts.googleapis.com` or
-`fonts.gstatic.com`** and renders its intended typography under genuine offline `file://`. Any new
-face must be embedded the same way — never linked from a CDN.
+`fonts.gstatic.com`** and renders its intended typography with no font network request (the strict
+Content-Security-Policy permits fonts only from the page itself or embedded `data:`). Any new face must
+be embedded the same way — never linked from a CDN.
 
 ### Font licensing (MUST)
 

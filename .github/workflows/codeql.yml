@@ -3,8 +3,9 @@ name: CodeQL
 # Static analysis (SAST) for TAM Intelligence OS — see EDR-PR-2.
 # Independent, reporting-only workflow: it never gates merges (branch protection is a
 # separate future change) and never interacts with the CI or Release workflows.
-# Query suite is the default "security" suite (NOT security-extended); the inlined
-# portable build and golden-master reference are excluded via the config file.
+# Query suite is the default "security" suite (NOT security-extended); the frozen
+# single-file releases, the golden-master reference and vendored third-party code are
+# excluded via the config file.
 on:
   push:
     branches: [main]

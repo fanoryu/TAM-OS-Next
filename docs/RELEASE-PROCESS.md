@@ -24,10 +24,11 @@ follow the steps below.
 
 ## 2. Build
 ```bash
-node tools/build-single-file.js
+node tools/build-package.js
 ```
-Produces `dist/tam-os-v<APP_VERSION>.html`. Remove the superseded dist from the prior
-version (`git rm`).
+Produces the deployment package `dist/package/`, `dist/tam-os-v<APP_VERSION>-package.zip` and the
+committed record `dist/package-manifest.json` (Distribution-1). Single-file releases already in
+`dist/` are frozen history and are never rebuilt or removed.
 
 ## 3. Verify
 ```bash
@@ -36,7 +37,8 @@ node tools/verify-build.js
 Must pass all checks. (PowerShell fallback available for machines without Node.)
 
 ## 4. QA
-Run `docs/QA-CHECKLIST.md` against the modular source **and** the portable dist. Zero console errors.
+Run `docs/QA-CHECKLIST.md` against the package served by `node tools/serve-package.js`. Zero console
+errors, zero CSP violations.
 
 ## 5. Regression
 Re-test previously-working features (payroll, overtime, execution, import, dedup, backup/restore,
@@ -55,8 +57,8 @@ authorizes the **merge only** — it does not authorize tagging or publishing (s
 ```
 Release vX.Y.Z - <Release Name>
 ```
-Commit the source **and** the rebuilt `dist/` together on the release branch. Confirm the working
-tree is clean.
+Commit the source **and** the regenerated `dist/package-manifest.json` together on the release
+branch. Confirm the working tree is clean.
 
 ## 9. Pull request into `main`
 Push the **feature branch only** — never `main`:
@@ -77,7 +79,8 @@ Merge with a **merge commit** (squash and rebase are rejected by the ruleset), t
 release branch. On updated `main`, confirm:
 - the merge commit is present and the working tree is clean;
 - `node tools/verify-build.js` passes;
-- the portable build's size and SHA-256 are unchanged from the reviewed artifact;
+- rebuilding the package leaves `dist/package-manifest.json` unchanged (same package digest and ZIP
+  SHA-256 as reviewed);
 - `APP_VERSION`, `APP_RELEASE_NAME`, and `SCHEMA_VERSION` are as intended.
 
 **Record the merged `main` commit** — that commit, and only that commit, is the tag target.
@@ -102,11 +105,12 @@ git push origin refs/tags/vX.Y.Z
 ```
 
 ## 14. GitHub Release
-Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which rebuilds, verifies,
-confirms the tag equals `v<APP_VERSION>`, and publishes the release with the portable HTML asset.
+Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which verifies, rebuilds the
+package, confirms the build reproduces the committed manifest and the tag equals `v<APP_VERSION>`,
+and publishes the release with the package ZIP and `package-manifest.json` as assets.
 If publishing manually instead:
 ```bash
-gh release create vX.Y.Z dist/tam-os-vX.Y.Z.html \
+gh release create vX.Y.Z dist/tam-os-vX.Y.Z-package.zip dist/package-manifest.json \
   --title "TAM OS vX.Y.Z" --notes-file RELEASE_NOTES.md --verify-tag
 ```
 
@@ -114,8 +118,9 @@ gh release create vX.Y.Z dist/tam-os-vX.Y.Z.html \
 ```bash
 gh release view vX.Y.Z
 ```
-Confirm the release exists and the asset `tam-os-vX.Y.Z.html` is attached. Record the
-commit hash, tag, release URL, asset name, CI status, branch, and working-tree status.
+Confirm the release exists and the assets `tam-os-vX.Y.Z-package.zip` and `package-manifest.json`
+are attached, and that the ZIP's SHA-256 equals the manifest's `zip.sha256`. Record the commit hash,
+tag, release URL, asset names, CI status, branch, and working-tree status.
 
 ## Rollback
 - **Bad release, tag not yet relied upon:** delete the GitHub Release and tag

@@ -21,9 +21,14 @@ untouched historical provenance. That v2.10.0 re-publication was **not** a new p
 It packages the UX-006 authorization line and the Readiness programme. **Artifact identity is not tree
 identity** — the canonical tag's source/docs checkpoint is newer than the predecessor's v2.10.0 snapshot
 while the portable artifact is unchanged. `fanoryu/TAM-OS-Next` is canonical going forward.
-**Current source / distributable:** `dist/tam-os-v2.11.0.html` — the published **v2.11.0 (Identity Refresh)**
-artifact. It is a **single-file application package**: typography is **embedded** (offline-safe), while the
-XLSX parser is CDN-loaded (see [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)).
+**Current distributable — Distribution-1 (ADR-0002 Model B):** the **deployment package** built by
+`tools/build-package.js` — the static document root (`index.html`, 6 stylesheets, `js/boot/theme-boot.js`,
+the module-order scripts, vendored SheetJS 0.18.5, licence texts), each file byte-identical to its source,
+recorded by the committed `dist/package-manifest.json`. The page has no inline executable script and makes
+no third-party request, so it runs under a strict Content-Security-Policy (header contract:
+`tools/package-headers.js`; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8). It is **unreleased** until the
+next version. The published **v2.11.0 (Identity Refresh)** single-file artifact, `dist/tam-os-v2.11.0.html`
+(typography embedded, XLSX parser CDN-loaded), stays in `dist/` as frozen history, pinned by digest.
 The pilot has **not** launched — **PILOT-1 remains ON HOLD** pending the multi-user readiness gate (no VPS
 is required; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8); backend **NOT STARTED**.
 The prior **v2.9.0** release remains published and immutable (no longer Latest) — annotated tag
@@ -128,9 +133,9 @@ flowchart TD
   ORDER["tools/module-order.js<br/>(load-order source of truth)"]
   CONST["js/core/constants.js<br/>APP_VERSION (single source)"]
   AV["tools/app-version.js"]
-  BUILD["tools/build-single-file.js"]
-  VERIFY["tools/verify-build.js<br/>2443 invariant checks"]
-  DIST["dist/tam-intelligence-os-v{APP_VERSION}.html<br/>portable single file"]
+  BUILD["tools/build-package.js"]
+  VERIFY["tools/verify-build.js<br/>invariant checks"]
+  DIST["dist/package/ + ZIP<br/>deployment package (manifest committed)"]
 
   CSS --> IDX
   JSMOD --> IDX
@@ -144,7 +149,7 @@ flowchart TD
   CSS --> BUILD
   JSMOD --> BUILD
   BUILD --> DIST
-  DIST --> VERIFY
+  IDX --> VERIFY
   CONST --> VERIFY
 ```
 
@@ -438,20 +443,21 @@ is a **derived**, read-only comparison (`payrollOvertimeDrift`) reusing `approve
 
 ```mermaid
 flowchart LR
-  SRC["Modular source"] --> BUILD["build-single-file.js"]
-  BUILD --> VERIFY["verify-build.js<br/>(invariant checks)"]
-  VERIFY --> COMMIT["Commit source + dist"]
+  SRC["Modular source"] --> VERIFY["verify-build.js<br/>(invariant checks)"]
+  VERIFY --> BUILD["build-package.js"]
+  BUILD --> COMMIT["Commit source + package manifest"]
   COMMIT --> TAG["Annotated tag vX.Y.Z<br/>(push main, then tag)"]
   TAG --> GA["GitHub Actions: release.yml"]
-  GA --> REBUILD["rebuild + verify + re-derive version"]
-  REBUILD --> GATE{"tag == v-APP_VERSION<br/>AND dist exists?"}
+  GA --> REBUILD["verify + rebuild + re-derive version"]
+  REBUILD --> GATE{"tag == v-APP_VERSION<br/>AND build == committed manifest?"}
   GATE -->|no| STOP["fail: publish nothing"]
   GATE -->|yes| REL["Create/refresh GitHub Release<br/>(idempotent)"]
-  REL --> ASSET["Upload portable asset<br/>tam-os-vX.Y.Z.html"]
+  REL --> ASSET["Upload package ZIP + manifest<br/>tam-os-vX.Y.Z-package.zip"]
 ```
 
-CI (`ci.yml`) runs build + verify on every push/PR to `main` and uploads the portable HTML as an
-artifact. The release job publishes nothing unless every guardrail passes.
+CI (`ci.yml`) runs verify + package build on every push/PR to `main`, fails if the build changes the
+committed manifest, and uploads the package ZIP and manifest as an artifact. The release job publishes
+nothing unless every guardrail passes.
 
 ---
 
@@ -762,11 +768,12 @@ automatic CEO or Employee fallback at any step. Frontend hosting and the product
 
 ### Release engineering
 
-`release.yml` is **tag-triggered**: it rebuilds, verifies, re-derives the version from `APP_VERSION`,
-refuses to publish unless the tag equals that version and the portable HTML exists, then creates or
-refreshes the GitHub Release idempotently and uploads the portable asset. The portable build is
-**reproducible** — the same source yields a byte-identical artifact, so the published SHA-256 verifies any
-downloaded copy. Shipped releases are never rewritten. The workflow titles a Release
+`release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the
+version from `APP_VERSION`, refuses to publish unless the tag equals that version and the build reproduces
+the committed `dist/package-manifest.json` (and the ZIP matches it), then creates or refreshes the GitHub
+Release idempotently and uploads the package ZIP and manifest. The package build is **reproducible** —
+the same source yields byte-identical files, ZIP and manifest, so the recorded SHA-256 values verify any
+downloaded or deployed copy. (Up to v2.11.0 the asset was the single-file HTML; those releases are frozen.) Shipped releases are never rewritten. The workflow titles a Release
 `TAM OS <tag>` — the short convention — which is why the published v2.9.0 Release is titled
 `TAM OS v2.9.0` rather than carrying the release name. Releases published before the branding change
 (v2.8.5 and earlier) carry the older `TAM Intelligence OS <tag>` title and are never rewritten.

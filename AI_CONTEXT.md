@@ -7,10 +7,14 @@ authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file
 there rather than duplicating it.
 
 **As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the merged BRAND-1
-identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 20. The portable artifact is
+identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 20. The published v2.11.0 portable artifact is
 `dist/tam-os-v2.11.0.html` (1,676,709 bytes, SHA-256
-`57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`). **v2.11.0 is published and marked
-Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1503d`. v2.10.0 remains
+`57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`), now frozen history. **v2.11.0 is
+published and marked Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1503d`.
+**Distribution-1 is implemented on the source** (ADR-0002 Model B): the canonical distribution is the
+strict-CSP deployment package built by `tools/build-package.js` and recorded by `dist/package-manifest.json`,
+with SheetJS vendored and no inline script. The single-file build is retired, and the first release to
+ship the package will be the next version. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
@@ -528,8 +532,9 @@ appears when a legacy plan disagrees with its committed transaction. No storage 
 
 TAM OS is a **single-page, client-side** finance, payroll, and operations application
 for **PT Total Asset Manajemen**. It runs entirely in the browser with no backend, database, API, or
-runtime dependencies; all data persists locally. It ships in two forms: a modular development source
-and a portable single-file HTML build. See [`README.md`](README.md) for the public overview.
+runtime dependency beyond the vendored SheetJS parser; all data persists locally. The modular
+development source is assembled, byte-for-byte, into a static deployment package served over HTTP under
+a strict Content-Security-Policy (Distribution-1). See [`README.md`](README.md) for the public overview.
 
 ## 2. Product Vision
 
@@ -643,13 +648,14 @@ labels so exported terminology matches the screen.
 
 ## 6. Build System
 
-- **Node tooling only** (no `npm install`): a build script inlines CSS + JS in manifest order into
-  the portable single file, and a verifier runs a suite of invariant checks (**2443** on `main`),
-  joined by **thirty-four** runtime harnesses (**2921** checks).
-  PowerShell fallbacks exist for machines without Node.
-- The portable build is **reproducible**: the same source produces a byte-identical artifact, so the
-  published SHA-256 verifies any downloaded copy.
-- **Version is derived** from a single source constant; the portable filename follows it
+- **Node tooling only** (no `npm install`): `tools/build-package.js` copies the runtime files into the
+  deployment package (no inlining or transformation) and writes a deterministic ZIP plus the committed
+  `dist/package-manifest.json`; a verifier runs a suite of invariant checks, joined by **thirty-four**
+  runtime harnesses. The single-file builder is retired.
+- The package build is **reproducible**: the same source produces byte-identical files, ZIP and
+  manifest, so the recorded SHA-256 values verify any downloaded or deployed copy. The response-header
+  contract (CSP, security headers, cache rules) lives in `tools/package-headers.js`.
+- **Version is derived** from a single source constant; the package ZIP name follows it
   automatically.
 - Commands and the full verifier scope are documented in [`README.md`](README.md) and
   [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -702,8 +708,8 @@ Approved → Posted → Executed; reuses the finance transaction model and Execu
 
 ## 12. Repository Layout
 
-At a glance: `index.html` + `css/` + `js/` (modular source), `tools/` (build/verify), `dist/`
-(portable build), `docs/` and root Markdown (governance/knowledge), `.github/` (CI, release,
+At a glance: `index.html` + `css/` + `js/` + `vendor/` (modular source), `tools/` (build/verify),
+`dist/` (package manifest + frozen single-file releases), `docs/` and root Markdown (governance/knowledge), `.github/` (CI, release,
 templates), `docs/99-archive/audit/` (immutable dated records), and a frozen reference HTML (`tam-intelligence-os-v2.5.2.html`)
 retained as the **JS provenance** golden master. Since UX-002B it is no longer the CSS comparator —
 CSS is pinned by digest instead (see §19). The authoritative, detailed layout is in
@@ -711,10 +717,10 @@ CSS is pinned by digest instead (see §19). The authoritative, detailed layout i
 
 ## 13. Current Engineering Practices
 
-- Edit modular source; never hand-edit the portable build; commit source + regenerated build
-  together.
-- Build + verify on every change; boot modular and portable with zero console errors; validate with
-  fabricated data only.
+- Edit modular source; never hand-edit generated output or a frozen release; commit source + the
+  regenerated package manifest together.
+- Verify + build on every change; boot the served package with zero console errors and zero CSP
+  violations; validate with fabricated data only.
 - Documentation is updated as part of behavior/structure/build changes; version references stay
   consistent. Full contract: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
@@ -953,8 +959,9 @@ The canonical roadmap lives in [`README.md`](README.md#roadmap).
 
 ## 19. Important Design Decisions
 
-- **Single-file, client-only, zero-dependency** by design — maximizes portability and keeps
-  confidential data on-device.
+- **Client-only, minimal-dependency** by design, keeping confidential data on-device. It began as a
+  single portable file; Distribution-1 moved the canonical distribution to a strict-CSP static
+  package, which the same-origin backend (ADR-0004) will sit beside.
 - **Classic scripts in one global scope** were kept deliberately (not migrated to modules) to
   preserve a verified, byte-checked golden master and avoid a bundler.
 - **CSS is pinned by digest, not derived from a reference artifact** (UX-002B / PD-A). The verifier
@@ -991,7 +998,9 @@ The canonical roadmap lives in [`README.md`](README.md#roadmap).
 ## 20. Glossary
 
 - **Modular source** — the human-edited `index.html` + `css/` + `js/` application.
-- **Portable build** — the single self-contained HTML file under `dist/`, generated from source.
+- **Deployment package** — the static document root built from source by `tools/build-package.js`
+  (Distribution-1); recorded by `dist/package-manifest.json`.
+- **Portable build** *(historical)* — the single-file HTML releases up to v2.11.0, frozen in `dist/`.
 - **JS-provenance comparator** — the retained legacy reference HTML (`tam-intelligence-os-v2.5.2.html`),
   read by `tools/verify-build.js` **only** as the regression comparator for **JS provenance** and the
   data-safety invariants derived from it. It is *not* a general source of truth for the current

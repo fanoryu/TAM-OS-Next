@@ -43,11 +43,13 @@ Design principles:
   Claude Artifact storage environment); the shipped application sends nothing to a server. Backend
   capabilities are a **future roadmap direction** and are introduced only under a separate, explicitly
   approved architecture decision — the current release remains client-only.
-- **No build framework, no dependencies.** The app is plain HTML, CSS, and classic-script JavaScript
-  sharing one global scope. Node.js is used **only** for the build/verify tooling, never to run the
-  app. Typography is embedded locally (offline-safe); the only external network reference is the XLSX parser (CDN).
-- **Two shippable forms.** A modular development source and a single portable HTML file that behaves
-  identically.
+- **No build framework, one pinned dependency.** The app is plain HTML, CSS, and classic-script
+  JavaScript sharing one global scope; its only runtime dependency is the vendored, integrity-checked
+  SheetJS parser. Node.js is used **only** for the build/verify tooling, never to run the app.
+  Typography is embedded locally, and the page makes no third-party network request.
+- **One canonical distribution.** The modular source is assembled, byte-for-byte, into a static
+  **deployment package** that runs over HTTP under a strict Content-Security-Policy (Distribution-1).
+  Published single-file releases remain available as frozen history.
 - **Data-safety first.** A 2443-check verifier guards the persisted-data schema, storage keys,
   migration flags, and build fidelity on every change.
 
@@ -168,8 +170,12 @@ TAM OS yet, and will not until the production cutover gate in [`docs/DEPLOYMENT.
    `shasum -a 256 tam-os-v2.11.0.html`. Expect **1,676,709 bytes** / SHA-256
    `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`.
 3. Open it in a **desktop Chromium browser**. No install, no server, no build step.
-4. Fonts are embedded — the app renders its intended typography offline. `.xlsx` import still needs the
-   CDN-hosted parser (`.csv` does not).
+4. Fonts are embedded — the app renders its intended typography offline. In this published v2.11.0
+   file, `.xlsx` import still needs the CDN-hosted parser (`.csv` does not).
+
+> **Next release:** from the release after v2.11.0, TAM OS ships as the Distribution-1 **deployment
+> package** (a ZIP of the static document root plus `package-manifest.json`) served over HTTP, with
+> SheetJS vendored — see [Getting started](#getting-started) and [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 5. Data stays **local to that browser profile** — nothing is uploaded. Export via **Settings → Complete
    Backup**.
 
@@ -197,12 +203,13 @@ future, separately-approved backend direction.
 Builds on the **v2.9.0 Workspace Experience** release. See [`CHANGELOG.md`](CHANGELOG.md)
 and [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for full history.
 
-Two supported outputs:
+Source and distribution:
 
-| Output | What it is | Where |
+| Form | What it is | Where |
 |---|---|---|
-| **A. Modular development source** | `index.html` + `css/` (5 files) + `js/` (73 classic-script modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/ cli/` — 72 browser-loaded in one shared global scope, plus the CLI-only module), no ES modules | project root |
-| **B. Portable single-file release** | the whole application inlined into one HTML file, identical in behavior. Typography is **embedded** (self-contained offline); the **XLSX parser** is still loaded from a CDN (see [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)) | `dist/tam-os-v2.11.0.html` |
+| **A. Modular development source** | `index.html` + `css/` (6 files) + `js/` (73 classic-script modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/ cli/` — 72 browser-loaded in one shared global scope, plus the CLI-only module) + the pre-paint `js/boot/theme-boot.js` + vendored SheetJS under `vendor/`; no ES modules | project root |
+| **B. Deployment package** (canonical, Distribution-1) | the static document root: every runtime file copied byte-for-byte from the source, no inline script, no third-party request, strict CSP ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) Model B) | built into `dist/package/` + ZIP; recorded by `dist/package-manifest.json` |
+| **C. Historical single-file release** | the published v2.11.0 portable file — frozen, digest-pinned, never rebuilt | `dist/tam-os-v2.11.0.html` |
 
 ---
 
@@ -287,7 +294,7 @@ Overview, and the Transactions data grid (sorting + pagination). Sanitized captu
 flowchart LR
   subgraph Source["Modular source"]
     IDX["index.html<br/>(ordered script tags)"]
-    CSS["css/ (5 files)"]
+    CSS["css/ (6 files)"]
     JS["js/ (73 classic-script modules)<br/>core · ui · finance · people · import · analytics<br/>domain · platform · transport · repository · cli"]
   end
   subgraph Runtime["Browser runtime (client-only)"]
@@ -296,10 +303,10 @@ flowchart LR
   end
   subgraph Build["Build & verify tooling (Node)"]
     ORDER["tools/module-order.js<br/>(load-order source of truth)"]
-    BUILD["tools/build-single-file.js"]
-    VERIFY["tools/verify-build.js<br/>(2443 checks)"]
+    BUILD["tools/build-package.js"]
+    VERIFY["tools/verify-build.js"]
   end
-  DIST["dist/tam-os-v2.11.0.html<br/>(portable single file)"]
+  DIST["dist/package/ + ZIP<br/>(deployment package; manifest committed)"]
 
   IDX --> JS --> STATE --> LS
   CSS --> IDX
@@ -348,22 +355,28 @@ js/                                73 classic-script modules (72 browser-loaded,
 tools/
   module-order.js                  Single source of truth for JS load order
   app-version.js                   Single source of truth for the version (reads constants.js)
-  build-single-file.js             Modular source -> dist single file (version-derived filename)
-  verify-build.js                  Build + invariant + focus-fix + decomposition + audit verification
+  build-package.js                 Modular source -> deployment package + ZIP + manifest (Distribution-1)
+  package-headers.js               Production response-header contract (CSP, security, cache)
+  serve-package.js                 Local loopback server applying that contract (validation only)
+  build-single-file.js             RETIRED — refuses to run (frozen single-file releases)
+  verify-build.js                  Package + invariant + focus-fix + decomposition + audit verification
   check-commit-attribution.js      Owner-only authorship policy — shared by the hook and CI
   install-hooks.js                 Points this clone at .githooks/ (repository-local)
   verify-*-runtime.js              34 behavioural regression harnesses
   README.md                        Tool index: build, verify, and the runtime harness suite
 .githooks/                         Tracked Git hooks (survive a fresh clone)
   commit-msg                       Rejects AI-attribution trailers; activate via install-hooks.js
+vendor/
+  sheetjs/                         SheetJS 0.18.5 (xlsx.full.min.js, SRI-pinned) + Apache-2.0 LICENSE
 dist/
-  tam-os-v2.11.0.html Portable single-file release (build output, version-controlled)
+  package-manifest.json            Committed record of the deployment package (per-file SHA-256)
+  tam-os-v2.11.0.html              Published v2.11.0 single-file release (frozen, digest-pinned)
 tam-intelligence-os-v2.5.2.html    Retained legacy JS-provenance regression comparator
 .github/                           Repository governance & delivery
-  workflows/ci.yml                 Build + verify on push/PR to main; uploads dist artifact
+  workflows/ci.yml                 Verify + build the package on push/PR to main; uploads the package ZIP
   workflows/attribution.yml        verify-attribution: owner-only authorship on every PR/push
   workflows/codeql.yml             CodeQL security scan on push/PR to main
-  workflows/release.yml            Tag-triggered (v*) GitHub Release; publishes portable HTML
+  workflows/release.yml            Tag-triggered (v*) GitHub Release; publishes the package ZIP + manifest
   ISSUE_TEMPLATE/                  bug_report.yml, feature_request.yml, config.yml
   pull_request_template.md  CODEOWNERS  RELEASE_TEMPLATE.md
 docs/                              QA-CHECKLIST.md, RELEASE-PROCESS.md, DATA-SAFETY.md
@@ -377,17 +390,16 @@ RELEASE_NOTES.md  README.md  ARCHITECTURE.md  CHANGELOG.md  PROVENANCE.md
 
 ## Getting started
 
-No framework and no `npm install` are required to run the app. Because the modular source loads
-local `css/` and `js/` files, serve the folder over HTTP (recommended) rather than opening via
-`file://`:
+No framework and no `npm install` are required to run the app. Build the deployment package and serve
+it over HTTP under the production header contract (CSP included):
 
 ```bash
-python -m http.server 8000
+node tools/build-package.js
+node tools/serve-package.js
 ```
 
-Then open <http://localhost:8000>. Any static server works (`npx serve`, VS Code Live Server). The
-portable build in `dist/` can also be opened directly in a browser — it is byte-identical to the
-published v2.10.0 asset.
+Then open <http://127.0.0.1:8765/>. `file://` is not supported for the current source. The published
+v2.11.0 single file in `dist/` is frozen history and still opens directly, as released.
 
 ---
 
@@ -397,8 +409,9 @@ published v2.10.0 asset.
    `git describe --tags --abbrev=0` (latest release tag).
 2. **Edit the modular source** — never edit `dist/` by hand. If you add or move a module, update
    `tools/module-order.js` **and** `index.html` together.
-3. **Build** the portable file, then **verify** (both below).
-4. **Browser QA** in both the modular source and the portable dist — zero console errors.
+3. **Verify**, then **build** the deployment package (both below).
+4. **Browser QA** on the served package (`node tools/serve-package.js`) — zero console errors and zero
+   CSP violations.
 5. Update [`CHANGELOG.md`](CHANGELOG.md) (and [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for a release)
    and any affected docs; keep version references consistent (the version lives once, in
    `APP_VERSION`).
@@ -415,13 +428,13 @@ Branch naming: `feature/<name>`, `fix/<name>`, `chore/<name>`, `release/<version
 It has no dependencies — plain `fs`/`path`, nothing to `npm install`. PowerShell scripts are an
 optional fallback for machines without Node.
 
-Build the portable single file from the modular source:
+Build the deployment package from the modular source:
 
 ```bash
-node tools/build-single-file.js
+node tools/build-package.js
 ```
 
-Verify (2443 checks):
+Verify:
 
 ```bash
 node tools/verify-build.js
@@ -452,19 +465,20 @@ automatically. The verifier fails the build if:
 Releases are tag-driven and guarded end-to-end (see [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md)):
 
 1. Bump `APP_VERSION` + `APP_RELEASE_NAME` in `js/core/constants.js`; add a Release Notes entry.
-2. Build + verify; boot modular and dist with zero console errors.
-3. Commit source + rebuilt dist; annotate a `vX.Y.Z` tag; push `main` then the tag.
-4. The **Release** workflow (`.github/workflows/release.yml`) rebuilds, verifies, **refuses to
-   publish unless the tag equals `v<APP_VERSION>`** and the portable HTML exists, then creates or
-   refreshes the GitHub Release idempotently and uploads the portable asset.
+2. Verify + build; boot the served package with zero console errors and zero CSP violations.
+3. Commit source + package manifest; annotate a `vX.Y.Z` tag; push `main` then the tag.
+4. The **Release** workflow (`.github/workflows/release.yml`) verifies and rebuilds, **refuses to
+   publish unless the tag equals `v<APP_VERSION>`** and the build reproduces and matches the committed
+   manifest, then creates or refreshes the GitHub Release idempotently and uploads the package ZIP and
+   manifest.
 
 ```mermaid
 flowchart LR
-  DEV["Edit modular source"] --> B["build-single-file.js"] --> V["verify-build.js (2443)"]
-  V --> C["commit source + dist"] --> T["push tag vX.Y.Z"]
+  DEV["Edit modular source"] --> V["verify-build.js"] --> B["build-package.js"]
+  B --> C["commit source + manifest"] --> T["push tag vX.Y.Z"]
   T --> GA["GitHub Actions: Release"]
   GA --> GATE{"tag matches<br/>v-APP_VERSION?"}
-  GATE -->|yes| REL["GitHub Release + portable asset"]
+  GATE -->|yes| REL["GitHub Release + package ZIP + manifest"]
   GATE -->|no| STOP["fail: publish nothing"]
 ```
 
@@ -614,9 +628,9 @@ Also complete since then:
 Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2):
 
 1. ✅ **SDR-0002** — the [security decision record](docs/security/SDR-0002-php-mariadb-security-architecture.md) for the PHP + MariaDB backend (Accepted 2026-09-29).
-2. **Distribution-1** — modular distribution migration
-   ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md), revalidated: no
-   longer post-pilot; it precedes the backend so TAM OS can carry a strict Content-Security-Policy).
+2. ✅ **Distribution-1** — the strict-CSP deployment package
+   ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) Model B; completed
+   2026-09-29, first shipped with the next version).
 3. **Multi-User implementation** — backend foundation, authentication/session, authoritative identity,
    authorization/data scope, audit/backup, authenticated E2E, "Acting as" removal — then production
    readiness with an external security review, and the `finance.reliabilityindonesia.com` cutover

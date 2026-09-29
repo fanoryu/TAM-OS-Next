@@ -34,7 +34,7 @@ The AI-facing entry point that requires this reading before implementation is
 | [`QA-CHECKLIST.md`](QA-CHECKLIST.md) | The living QA checklist run before a change is done |
 | [`RELEASE-PROCESS.md`](RELEASE-PROCESS.md) | The step-by-step release procedure |
 | [`DATA-SAFETY.md`](DATA-SAFETY.md) | Data-safety guidance for storage, migrations, and backups |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | How the portable build is deployed and the public/private layering |
+| [`DEPLOYMENT.md`](DEPLOYMENT.md) | How the deployment package is built and deployed, the header contract, and the public/private layering |
 
 ## Decision records
 

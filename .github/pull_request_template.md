@@ -22,7 +22,7 @@
 - [ ] Yes — an intentional migration (describe below, bump `SCHEMA_VERSION`, add migration + flag):
 
 ## Build result
-<!-- Paste the output of: node tools/build-single-file.js -->
+<!-- Paste the output of: node tools/build-package.js -->
 ```
 ```
 
@@ -32,9 +32,9 @@
 ```
 
 ## Browser QA
-<!-- Which pages/workflows did you exercise, in modular AND dist? What did you observe? -->
-- Modular source:
-- Portable dist:
+<!-- Which pages/workflows did you exercise in the served package (node tools/serve-package.js)? -->
+- Served package:
+- CSP violations / console errors:
 
 ## Regression testing
 <!-- Confirm previously-working features still work (payroll, overtime, execution, import,
@@ -47,14 +47,13 @@
 <!-- What could this break? Blast radius? -->
 
 ## Rollback plan
-<!-- How do we revert if this ships and misbehaves? (e.g. revert commit, restore prior dist tag) -->
+<!-- How do we revert if this ships and misbehaves? (e.g. revert commit, redeploy the prior package) -->
 
 ## Checklist
-- [ ] `node tools/build-single-file.js` succeeds
+- [ ] `node tools/build-package.js` succeeds
 - [ ] `node tools/verify-build.js` passes (all checks)
-- [ ] Modular source boots with **zero console errors**
-- [ ] Portable dist boots with **zero console errors**
-- [ ] The `dist/` portable HTML is rebuilt and committed
+- [ ] The served package boots with **zero console errors** and **zero CSP violations**
+- [ ] `dist/package-manifest.json` is regenerated and committed with the source
 - [ ] `CHANGELOG.md` (and `RELEASE_NOTES.md` for a release) is updated
 - [ ] `SCHEMA_VERSION` is unchanged (or an intentional, documented migration)
 - [ ] Storage keys and migration flags are unchanged (or an intentional, documented migration)

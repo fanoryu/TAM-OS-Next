@@ -57,7 +57,7 @@ no anonymous mutation path.
 
 ### Law VIII — The Verifier Is the Gate
 A change is not "done" until the verifier passes every check. A green verifier is necessary but not
-sufficient; behavior is still validated in both the modular source and the portable build. Nothing
+sufficient; behavior is still validated in the served deployment package. Nothing
 merges on optimism.
 
 ### Law IX — One PR, One Purpose

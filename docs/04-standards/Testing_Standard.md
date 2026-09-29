@@ -8,7 +8,8 @@ Verification is mechanical and layered. A change is not "done" until every layer
 ### 1. The verifier (`tools/verify-build.js`)
 The mechanical gate. It guards invariants, including:
 
-- CSS golden master and build fidelity (portable build equals concatenated source in manifest order).
+- CSS golden master; package determinism and fidelity (the committed manifest equals a fresh build;
+  every package file equals its source); frozen single-file releases pinned by digest; strict-CSP shape.
 - Version identity consistency; schema/storage/migration invariants; empty seed data.
 - Absence of ES-module syntax; module decomposition and load-order agreement.
 - Domain invariants: operational aggregate/command/query counts; aggregate and helper **purity**;
@@ -35,9 +36,10 @@ and require zero differences.
 Test to break, not to confirm — failure and rollback paths matter more than the happy path.
 
 ### 3. Browser validation
-Boot **both** artifacts — the modular source and the portable build — and confirm:
+Boot the deployment package served over HTTP under its production headers
+(`node tools/serve-package.js`) and confirm:
 
-- Zero console errors.
+- Zero console errors and zero Content-Security-Policy violations.
 - Data persists across reload; no duplicate records.
 - Interaction invariants hold (search keeps focus, scroll position preserved, menus open/close).
 - Validation uses clearly fabricated sample data, left behind nowhere.
