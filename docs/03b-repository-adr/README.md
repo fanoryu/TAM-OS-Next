@@ -23,7 +23,8 @@ add it to the register below, and link it from any related record.
 |---|---|---|---|---|
 | [ADR-0001](ADR-0001-documentation-governance-model.md) | Documentation Governance & Lifecycle Model | Accepted | 2026-08-01 | — |
 | [ADR-0002](ADR-0002-canonical-distribution-architecture.md) | Canonical Distribution Architecture — single-file artifact vs. application package | Accepted | 2026-08-11 | — |
-| [ADR-0003](ADR-0003-shared-multi-user-architecture.md) | Shared Multi-User Architecture — one authoritative company dataset behind a server-enforced trust boundary | Accepted | 2026-08-12 | — |
+| [ADR-0003](ADR-0003-shared-multi-user-architecture.md) | Shared Multi-User Architecture — one authoritative company dataset behind a server-enforced trust boundary | Superseded | 2026-08-12 | [ADR-0004](ADR-0004-hostinger-same-origin-backend.md) |
+| [ADR-0004](ADR-0004-hostinger-same-origin-backend.md) | Hostinger Same-Origin PHP + MariaDB Backend Architecture | Accepted | 2026-09-29 | — |
 
 ## Timeline
 
@@ -41,6 +42,10 @@ add it to the register below, and link it from any related record.
 - **2026-09-29** — ADR-0002 **revalidated** (§5 triggers occurred; forward-pointer note appended, decision
   unchanged): Distribution-1 is no longer gated on the pilot concluding and now precedes Multi-User
   implementation, per maintainer ruling.
+- **2026-09-29** — ADR-0004 **Accepted**, **superseding ADR-0003**: the maintainer rejected Supabase (no
+  separately paid managed backend); the backend becomes a same-origin PHP 8.3 + MariaDB API on the
+  existing Hostinger hosting. ADR-0003's architecture-neutral decisions are carried forward; its text
+  is preserved, with only its status marked Superseded. Authorizes no implementation.
 
 *Security decisions live in [`../security/`](../security/README.md) as SDRs. Engineering decision
 records (EDR) referenced from workflows are tracked in their originating decision packages.*

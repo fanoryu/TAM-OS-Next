@@ -21,8 +21,8 @@ TAM Intelligence OS is a **proprietary, single-page** finance, payroll, and oper
 **PT Total Asset Manajemen**. The shipped application is **client-side**: it runs entirely in the
 browser with **no backend, no database, and no runtime dependencies**, and all data is stored locally
 on the user's device. It is transitioning — only through separately authorized milestones — to the
-managed multi-user architecture accepted in
-[ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) (see §4.3). Until that
+shared multi-user architecture accepted in
+[ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) (see §4.3). Until that
 work lands, no backend exists and none may be described as implemented.
 
 - It is **not** open source. See [`LICENSE`](LICENSE) and [`PROPRIETARY-LICENSE-NOTICE.md`](PROPRIETARY-LICENSE-NOTICE.md).
@@ -66,15 +66,15 @@ duplicate that map here.
    The load order lives in exactly one manifest; `index.html` mirrors it, and the build/verify tools
    read it. If you add or move a module, update the manifest **and** `index.html` together.
 3. **Client-only until the authorized backend lands (MUST).** The shipped application is client-only.
-   The **only** server, database, or API that may be introduced is the managed backend accepted in
-   ADR-0003 — Supabase Auth, managed PostgreSQL with Row-Level Security, and approved server
-   functions — and only through separately authorized Multi-User milestones. Any other server, API,
-   database, self-hosted backend, custom authentication, or client-side data synchronization requires
-   a superseding ADR. The browser is an **untrusted client**: once the backend exists, authorization
-   and read scope are enforced there (RLS / server functions), and client-side checks are UX affordance
-   only. External network references are limited to the spreadsheet parser and, once implemented, that
-   backend's HTTPS/WSS endpoints; typography is embedded. Until then no user data is transmitted;
-   afterwards it is transmitted only to that backend.
+   The **only** server, database, or API that may be introduced is the backend accepted in ADR-0004 —
+   a same-origin PHP API at `/api/*` over MariaDB/MySQL on the existing Hostinger web hosting — and
+   only through separately authorized Multi-User milestones. Any other server, API, database, managed
+   backend service, VPS, or client-side data synchronization requires a further ADR. The browser is an
+   **untrusted client**: once the backend exists, authentication, authorization and read scope are
+   enforced by its central policy and data-access layer, the browser never reaches the database, and
+   client-side checks are UX affordance only. External network references are limited to the
+   spreadsheet parser and, once implemented, that same-origin API; typography is embedded. Until then
+   no user data is transmitted; afterwards it is transmitted only to that API.
 4. **Derived, not duplicated (SHOULD).** Prefer computing display state from stored data at render
    time over storing new flags — this avoids migrations and stale state.
 5. **CSS is a golden master (MUST).** Styles are treated as frozen; changes to CSS are exceptional
@@ -97,7 +97,9 @@ contributor contract is [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 1. **Match surrounding style.** Naming, indentation, comment density, and idioms should be
    indistinguishable from the neighboring code.
-2. **No new runtime dependencies.** The application ships zero dependencies; keep it that way.
+2. **No new runtime dependencies.** The frontend ships zero dependencies; keep it that way. A backend
+   (Composer) dependency is permitted only when it is justified, minimal, pinned and locked,
+   security-reviewed, and approved under §20 (ADR-0004).
 3. **Escape untrusted data (MUST).** Any employee/company-supplied value rendered into the DOM MUST
    be escaped. Never build HTML by concatenating unescaped user data.
 4. **Pure functions for calculations (SHOULD).** Money and payroll math should be deterministic and
@@ -118,16 +120,15 @@ contributor contract is [`CONTRIBUTING.md`](CONTRIBUTING.md).
 4. **The shipped build seeds no data (MUST).** A fresh install starts empty.
 5. **Backups are a recovery contract (MUST).** The Complete Backup format is stable while local
    storage is in use. Destructive actions must snapshot data first and require explicit confirmation.
-   Once authoritative data lives in the ADR-0003 backend, recovery rests on that backend's managed
-   backups — including point-in-time recovery where required — which must be enabled and
+   Once authoritative data lives in the ADR-0004 backend database, recovery rests on the provider
+   backup plus a nightly, encrypted, off-host database dump, which must be in place and
    restore-rehearsed before real company data is entered.
 6. **Never store secrets.** No credentials, tokens, or keys in state, storage, or the repository. A
-   backend's **public** client configuration (project URL, public anon key) is not a secret; server
-   secrets (service-role keys, database passwords, deployment credentials) never enter the frontend or
-   the repository.
+   Backend secrets (database credentials, token and session keys, SMTP and deployment credentials)
+   never enter the frontend or the repository, and live outside the public web root.
 7. **One authoritative store (MUST).** `localStorage` behind `StorageAdapter` is the current client
    store, governed by rules 1–3 until migrated. Under the multi-user architecture, authoritative
-   business data lives only in the approved shared PostgreSQL store; the browser never becomes a second
+   business data lives only in the approved shared server database; the browser never becomes a second
    authoritative copy, and moving data between the two is an explicit, documented migration.
 
 Detailed data-safety guidance: [`docs/DATA-SAFETY.md`](docs/DATA-SAFETY.md).

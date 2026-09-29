@@ -85,29 +85,42 @@ version, the storage-key set, the empty seed, and the reporting invariants. Full
 4. If any confidential file is ever committed to the source core by mistake, treat it as disclosed:
    purge it from history, rotate anything sensitive, and follow [`SECURITY.md`](../SECURITY.md).
 
-## 8. Production hosting — frontend target (not yet cut over)
+## 8. Production hosting — target (not yet cut over)
 
-**Target:** `https://finance.reliabilityindonesia.com`, served from the company's existing
-**Hostinger managed web hosting** (hPanel), which it shares with the `reliabilityindonesia.com` web
-presence. It is **not** a VPS. HOSTING-0 (2026-09-29) observed that the hostname already resolves to
-Hostinger with valid HTTPS behind Hostinger's CDN, and that it serves the Hostinger default page —
-**TAM OS is not deployed there.** A separately hosted TAM OS copy exists but is **pre-operational**:
-no real company data has been entered, and none may be until the cutover gate below is met.
+**Target:** `https://finance.reliabilityindonesia.com`, on the company's existing **Hostinger Premium
+Web Hosting** (hPanel), which it shares with the `reliabilityindonesia.com` web presence. It is **not**
+a VPS. HOSTING-0 (2026-09-29) observed that the hostname already resolves to Hostinger with valid HTTPS
+behind Hostinger's CDN, and that it serves the Hostinger default page — **TAM OS is not deployed
+there.** A separately hosted TAM OS copy exists but is **pre-operational**: no real company data has
+been entered, and none may be until the cutover gate below is met.
 
-**Role.** Hostinger serves **static frontend files only**. The backend accepted in
-[ADR-0003](03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) — Supabase Auth, managed
-PostgreSQL with Row-Level Security, and server functions — runs on Supabase, reached from the browser
-over HTTPS/WSS. No backend code runs on Hostinger: its PHP runtime is irrelevant to the architecture,
-Node/database/container capability there is not required, and **no VPS is required** (a self-hosted
-backend is only ADR-0003's fallback if the Supabase direction is explicitly rejected). The backend is
-**not implemented**; see [`Milestones.md`](05-milestones/Milestones.md) for Multi-User status.
+**Role — same origin, per [ADR-0004](03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md).**
+The same host will serve both halves of TAM OS from one origin:
+
+- `/` — the static TAM OS frontend;
+- `/api/*` — a PHP 8.3 backend over MariaDB/MySQL (InnoDB).
+
+The browser never reaches the database. **No separate managed backend service and no VPS are
+required.** The backend is **not implemented**; see [`Milestones.md`](05-milestones/Milestones.md)
+for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
+
+Plan facts confirmed by the maintainer in hPanel (2026-09-29):
+
+| Facility | State |
+|---|---|
+| PHP | 8.3, with PHP configuration and extensions in hPanel |
+| Database facility | Available |
+| SFTP | Available |
+| SSH | Available but **inactive** |
+| SSL / CDN | Active |
+| Provider backups | **Weekly** |
 
 **Source of truth.** Git `main` is canonical. Files on the host are deployment copies, never source;
 nothing is edited on the server. A local copy of the artifact outside `dist/` is a convenience copy,
-not a release input. Hosting credentials, server paths and account details belong in the private
-layer (§1), never in this repository.
+not a release input. Hosting credentials, database credentials, server paths and account details
+belong in the private layer (§1), never in this repository.
 
-**Governed frontend deployment flow:**
+**Governed deployment flow:**
 
 1. Canonical `main` at the release commit/tag (per [`RELEASE-PROCESS.md`](RELEASE-PROCESS.md)).
 2. Deterministic build and a passing verifier.
@@ -115,10 +128,27 @@ layer (§1), never in this repository.
 4. Upload that output over SFTP (currently via WinSCP) to the Hostinger web root.
 5. Confirm the deployed file's SHA-256 matches, then run a production smoke test.
 
-Today the output is the single-file `dist/tam-os-v<version>.html`. A multi-user client also needs
-public runtime configuration (backend URL, public anon key — never a server secret), so under
-[ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) the multi-user frontend
-is expected to ship as a package (Distribution-1), not one inlined file.
+Today the output is the single-file `dist/tam-os-v<version>.html`. Same-origin needs no frontend
+runtime configuration, but the multi-user frontend is still expected to ship as a package
+(Distribution-1, [ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)): the
+inlined single file cannot carry a strict Content-Security-Policy without broad `'unsafe-inline'`.
+
+**Mandatory pre-deployment verifications (backend):**
+
+- backend configuration and secrets can live **outside the public web root**;
+- `/api/*` responses are never publicly cached by the CDN (for example `Cache-Control: no-store,
+  private`);
+- the required PHP extensions are present;
+- cron is available for the nightly database dump;
+- database transactions (InnoDB) behave as designed.
+
+**Backup target:**
+
+1. Hostinger's automatic backup (currently Weekly) as the provider baseline.
+2. A nightly cron database dump, encrypted, with an off-host copy in the private layer.
+3. Periodic restore rehearsal, with row counts and monetary totals reconciled.
+
+Target RPO is about 24 hours; PITR is not required initially.
 
 **Cutover gate.** TAM OS replaces the default page at `finance.reliabilityindonesia.com` — and real
 company data may be entered — only when **all** of the following hold. A visible login form is not
@@ -126,14 +156,17 @@ readiness.
 
 - [ ] Canonical production build verified; deployed hash matches the release artifact
 - [ ] HTTPS valid on the production hostname
-- [ ] Supabase Auth operational: sign-in, session refresh, logout, password recovery/reset
+- [ ] Authentication operational: sign-in, session rotation, logout, password recovery/reset, rate
+      limiting
 - [ ] Disabled and unauthorized accounts are denied
 - [ ] User → membership → employee mapping verified
 - [ ] Shared persistence verified across separate browsers/devices
-- [ ] Default-deny RLS and server-side authorization verified with a real token, bypassing the UI
+- [ ] Server-side authorization and data scope verified with hostile-principal tests that bypass the UI
+- [ ] `/api/*` is never publicly cached
 - [ ] No "Acting as" selector in production
-- [ ] No server secret in the frontend or the repository
-- [ ] Managed backups / point-in-time recovery enabled and a restore rehearsed
+- [ ] No secret in the frontend, the repository or the public web root
+- [ ] Nightly encrypted off-host database dump running, and a restore rehearsed
+- [ ] External security review completed, with findings resolved or explicitly accepted
 - [ ] Authenticated end-to-end tests pass
 - [ ] Production smoke test passes
 

@@ -185,6 +185,18 @@ production "Acting as") **→ production readiness validation → `finance.relia
 cutover → PILOT-1**, followed by the recorded Post-Pilot Findings & Remediation, Pilot Exit Review and
 General-Use Readiness.
 
+**Refinement (ARCH-GOV-2, 2026-09-29).** The maintainer rejected Supabase, and
+[ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) superseded ADR-0003. The backend is now a same-origin PHP + MariaDB API on the
+existing Hostinger hosting. The binding sequence is now:
+
+**ARCH-GOV-2 → SDR-0002 → Distribution-1 → backend foundation → authentication/session →
+authoritative identity → authorization/data scope → audit/backup → authenticated E2E → "Acting as"
+removal → production readiness/security review → `finance.reliabilityindonesia.com` cutover →
+PILOT-1**.
+
+Distribution-1 keeps its place before the backend for a new reason: a strict Content-Security-Policy,
+which the inlined single file cannot carry (ADR-0004 §2.8).
+
 ## Post-Pilot Findings & Remediation — **Upcoming**
 **Theme:** what the pilot actually surfaces.
 
@@ -264,10 +276,10 @@ composite/irreversible operations, and an **online-required** client. The browse
 
 | Gate | State |
 |---|---|
-| `CLAUDE.md` §4.3 client-only **MUST** amendment | ✅ **Performed by ARCH-GOV-1 (2026-09-29)** — §1, §4.3 and §7 now permit **only** the ADR-0003 managed backend; authorizes no implementation |
-| ADR-0003 | ✅ **Accepted** (2026-08-12) — direction only; authorizes no implementation |
-| SDR-0002 (security decision record) | **Not created** — required before MU-1 |
-| Data-residency answer | **Open** — may change the vendor/region choice |
+| `CLAUDE.md` §4.3 client-only **MUST** amendment | ✅ **Performed by ARCH-GOV-1 (2026-09-29)**, then **re-amended by ARCH-GOV-2** — §1, §4.3, §6.2 and §7 now permit **only** the ADR-0004 same-origin PHP + MariaDB backend; authorizes no implementation |
+| ADR-0003 | **Superseded** (2026-09-29) by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) — Accepted 2026-08-12; its architecture-neutral decisions carry forward |
+| SDR-0002 (security decision record) | **Not created** — to be drafted for PHP + MariaDB; required before backend work |
+| Data-residency answer | **Open** — now concerns the hosting location (ADR-0004 §5, trigger 3) |
 | Per-milestone authorization | **None issued** — each MU milestone needs its own Sprint Assignment |
 
 **Relationship to the controlled pilot (binding).** The approved v2.10.0 pilot runs on the **current
@@ -279,13 +291,14 @@ cheap to fix.
 
 **Sequencing.** Distribution-1 is recommended **before** Multi-User implementation: a multi-user client
 needs runtime configuration and a deployable static bundle, so Model B is effectively a prerequisite
-rather than a parallel track. ADR-0002 is **not** invalidated.
+rather than a parallel track. ADR-0002 is **not** invalidated. *(ARCH-GOV-2: the runtime-configuration
+reason lapsed with ADR-0004's same-origin API; Distribution-1 now precedes the backend for a strict CSP.)*
 
 ## Multi-User-1…8 — Shared Multi-User Implementation — **Future · not authorized**
-**Theme:** building it, only if ADR-0003 is Accepted.
+**Theme:** building the [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) backend — same-origin PHP + MariaDB on Hostinger.
 
 Proposed decomposition: **MU-1** governance & backend foundation · **MU-2** authentication & identity
-linkage · **MU-3** shared persistence (schema + RLS) · **MU-4** server authorization & read scope ·
+linkage · **MU-3** shared persistence (schema + central data-access layer) · **MU-4** server authorization & read scope ·
 **MU-5** domain migration & data cutover · **MU-6** audit, backup & recovery · **MU-7** multi-user E2E
 acceptance · **MU-8** cutover & decommission.
 
@@ -295,11 +308,17 @@ sole acceptance criterion is proving that an authenticated Employee **cannot** f
 payroll through the raw API. Confidential data does not move until the privacy boundary is proven
 against a hostile client.
 
-**Remaining prerequisites (none authorized yet):** SDR-0002 created and Accepted; the data-residency
-answer; Distribution-1 completed (a multi-user client needs public runtime configuration, so it
-cannot ship as one inlined file); and a per-milestone Sprint Assignment. The frontend host is
-settled — the existing Hostinger web hosting at `finance.reliabilityindonesia.com`, with the cutover
-gate in [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8 — and **no VPS is required**. "Acting as" is removed
+**Remaining prerequisites (none authorized yet):**
+
+- SDR-0002 (PHP + MariaDB) created and Accepted;
+- the data-residency answer;
+- Distribution-1 completed (a strict CSP needs more than one inlined file);
+- the mandatory pre-deployment host verifications in [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8;
+- a per-milestone Sprint Assignment.
+
+The host is settled: frontend and backend both on the existing Hostinger Premium Web Hosting at
+`finance.reliabilityindonesia.com`, with the cutover gate in [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8.
+**No VPS and no managed backend service are required.** "Acting as" is removed
 from production only after authenticated E2E passes, with no automatic CEO/Employee fallback (see
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md), security boundary).
 

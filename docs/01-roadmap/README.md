@@ -25,17 +25,19 @@ release** (Identity Refresh; the prior v2.10.0 release remains published and int
 | 4 | Readiness-3 — Release Candidate & Pilot Package | **MERGED / FROZEN** (`61ddd939`) |
 | 5 | Controlled Pilot Sign-off | **APPROVED** (`df76ec20`) |
 | 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST — in both repositories** — **originally published** from annotated tag `v2.10.0` on predecessor release commit `335d53ed` in `fanoryu/TAM-OS`, and **canonically re-published unchanged** from annotated tag `v2.10.0` here, peeling to `856e3ca6`. Asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical across both Releases and to `dist/`. Not a new product version |
-| 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12). **Implementation NOT authorized** |
+| 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12; **superseded 2026-09-29** by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md), same-origin PHP + MariaDB on Hostinger). **Implementation NOT authorized** |
 | 8 | **Controlled Pilot** (PILOT-1) | **APPROVED, NOT YET LAUNCHED — ON HOLD** until the multi-user readiness gate |
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |
 | 10 | Pilot Exit Review | **UPCOMING** |
 | 11 | Distribution-1 — Modular Distribution Migration | **UPCOMING — after SDR-0002, before Multi-User** (no longer post-pilot) |
-| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (`CLAUDE.md` §4.3 amendment **performed by ARCH-GOV-1**; still blocked on SDR-0002 and per-milestone authorization) |
+| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; still blocked on SDR-0002, Distribution-1 and per-milestone authorization) |
 | 13 | General-Use Readiness / Hardening | **FUTURE** |
 | 14 | UX-006F / v3.0.0 | **FUTURE** |
 
-**Sequence (maintainer ruling, 2026-09-29):** ARCH-GOV-1 → SDR-0002 → Distribution-1 →
-**Multi-User-1…8** → production readiness validation → `finance.reliabilityindonesia.com` cutover →
+**Sequence (maintainer ruling, 2026-09-29, refined by ARCH-GOV-2):** ARCH-GOV-2 → SDR-0002 →
+Distribution-1 → **Multi-User implementation** (backend foundation → authentication/session →
+authoritative identity → authorization/data scope → audit/backup → authenticated E2E → "Acting as"
+removal) → production readiness/security review → `finance.reliabilityindonesia.com` cutover →
 **PILOT-1** → Pilot Findings / Remediation → Pilot Exit Review → General-Use Readiness → v3.0.0. Detail:
 [Milestones](../05-milestones/Milestones.md); cutover gate: [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8.
 
@@ -53,12 +55,14 @@ Four points the ordering is there to make unambiguous:
 - **Distribution-1 now precedes Multi-User, not the pilot's conclusion.** Model A remains canonical
   until it lands; Model B is the approved future architecture per
   [ADR-0002](../03b-repository-adr/ADR-0002-canonical-distribution-architecture.md), revalidated on
-  2026-09-29 because PILOT-1 (real company data) now follows the multi-user work.
+  2026-09-29 because PILOT-1 (real company data) now follows the multi-user work. Its current rationale
+  is a strict Content-Security-Policy, which the inlined single file cannot carry
+  ([ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) §2.8).
 - **Neither v2.10.0 nor the controlled pilot is multi-user, and Multi-User-0 does not change that.**
   The released product runs on the **current local, single-device, trust-based** architecture; two
   computers running v2.10.0 hold **two independent datasets**.
   [Multi-User-0](Multi-User-0-Shared-Multi-User-Architecture-Decision.md) is an **architecture decision
-  only**: ADR-0003 is **Accepted as the baseline**, but shared backend, shared database, real
+  only**: its ADR-0003 was **superseded by ADR-0004** (same-origin PHP + MariaDB), but shared backend, shared database, real
   authentication, server-side authorization, server-side read scope and data migration are all
   **NOT IMPLEMENTED**, and implementation **has not started**. The two must never be conflated — the
   pilot's trust model is unchanged and must not be described as improved by a *planned* architecture.
@@ -67,7 +71,7 @@ Milestone-level detail lives in [Milestones.md](../05-milestones/Milestones.md).
 
 | Document | Read it for |
 |---|---|
-| [Multi-User-0-Shared-Multi-User-Architecture-Decision.md](Multi-User-0-Shared-Multi-User-Architecture-Decision.md) | **Multi-User-0 — the shared multi-user architecture decision (ACCEPTED as the architecture baseline 2026-08-12; MERGED / FROZEN; implements nothing, and authorizes no implementation).** Mechanical inventory of the current persistence / authorization / read-scope / identity architecture and its trust boundary; the target model in which the **browser is untrusted and the server is the authorization boundary**; one shared company dataset with server-computed per-user projections (never one database per employee); single-company schema carrying `company_id`; the User/Employee/Membership identity model; weighted technology matrix (**Supabase + PostgreSQL + RLS + Supabase Auth, 4.55/5**, with Node+PG as the designated fallback); server-side authorization and read-scope design mapping the frozen 20 `ACTIONS` and the 6 `ENTITY_SCOPE` predicates onto RLS; actor-bearing audit model (today's audit record has **no actor** — a newly surfaced gap); concurrency rules; the **online-required** ruling; frontend KEEP/ADAPT/REPLACE/REMOVE classification; `localStorage` migration design (not executed); backup/PITR; deployment; the Distribution-1-first sequencing recommendation; the pilot-runs-in-parallel recommendation; cost model; **11 governance conflicts headed by the `CLAUDE.md` §4.3 client-only MUST**; and the proposed Multi-User-1…8 decomposition (**not authorized, not started** — blocked on the unperformed `CLAUDE.md` §4.3 amendment). Decision record: [ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) (**Accepted**) |
+| [Multi-User-0-Shared-Multi-User-Architecture-Decision.md](Multi-User-0-Shared-Multi-User-Architecture-Decision.md) | **Multi-User-0 — the shared multi-user architecture decision (ACCEPTED as the architecture baseline 2026-08-12; MERGED / FROZEN; implements nothing, and authorizes no implementation). Its Supabase backend selection was superseded on 2026-09-29 by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); the document is kept as historical analysis.** Mechanical inventory of the current persistence / authorization / read-scope / identity architecture and its trust boundary; the target model in which the **browser is untrusted and the server is the authorization boundary**; one shared company dataset with server-computed per-user projections (never one database per employee); single-company schema carrying `company_id`; the User/Employee/Membership identity model; weighted technology matrix (**Supabase + PostgreSQL + RLS + Supabase Auth, 4.55/5**, with Node+PG as the designated fallback); server-side authorization and read-scope design mapping the frozen 20 `ACTIONS` and the 6 `ENTITY_SCOPE` predicates onto RLS; actor-bearing audit model (today's audit record has **no actor** — a newly surfaced gap); concurrency rules; the **online-required** ruling; frontend KEEP/ADAPT/REPLACE/REMOVE classification; `localStorage` migration design (not executed); backup/PITR; deployment; the Distribution-1-first sequencing recommendation; the pilot-runs-in-parallel recommendation; cost model; **11 governance conflicts headed by the `CLAUDE.md` §4.3 client-only MUST**; and the proposed Multi-User-1…8 decomposition (**not authorized, not started** — blocked on the unperformed `CLAUDE.md` §4.3 amendment). Decision record: [ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) (**Accepted**) |
 | [Multi-User-Requirement-Note.md](../99-archive/roadmap-completed/Multi-User-Requirement-Note.md) | **NEW MAINTAINER REQUIREMENT — NOT YET ARCHITECTED.** The future multi-user target (shared company data, real authentication, backend/shared persistence, server-side authorization & read scope, multi-user deployment), why it is **separate from** the approved local/trust-based v2.10.0 controlled pilot, and the `CLAUDE.md` §4.3 amendment + ADR/SDR it would require first. Authorizes nothing; no technology chosen |
 | [Repository-Freshness-Audit-2026-08-11.md](../99-archive/roadmap-completed/Repository-Freshness-Audit-2026-08-11.md) | The post-sign-off repository freshness audit — every stale, contradictory or superseded current-state statement found at `2d33b00f`, its classification, and the corrections applied |
 | [Domain_Roadmap.md](Domain_Roadmap.md) | The sequenced evolution of the Domain layer |

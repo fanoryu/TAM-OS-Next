@@ -725,7 +725,7 @@ sense of being made impossible.
 - **Smart Import undo takes no pre-operation backup.** Employee Merge and Smart Import commit each
   snapshot one before writing; the undo path does not, so there is no undo-specific restore point.
 - There is **no backend, server-side transaction, or multi-user synchronisation**, so cross-key atomicity
-  cannot be delegated to a server. [`CLAUDE.md`](CLAUDE.md) §4.3 permits only the ADR-0003 managed
+  cannot be delegated to a server. [`CLAUDE.md`](CLAUDE.md) §4.3 permits only the ADR-0004 same-origin
   backend, through authorized Multi-User milestones; none is implemented.
 
 ### Architecture frontier — what is and is not authorised
@@ -744,10 +744,10 @@ SPR-077, SPR-078, SPR-079, SPR-081 and SPR-082 each introduced no transaction ab
 
 ### Security boundary — current vs. target (target accepted, not implemented)
 
-| | Current (shipped) | Target ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md)) |
+| | Current (shipped) | Target ([ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md)) |
 |---|---|---|
-| Path | Browser → `LocalIdentityProvider` → "Acting as" → client-side `can(...)` / `getScopedRecords()` → `localStorage` | Browser → Supabase Auth → verified session/JWT → user / membership / company / employee mapping → RLS and server functions → shared PostgreSQL |
-| Boundary | **None.** A trust-based product control; anyone holding the file and a devtools console can call any handler | **Server-enforced.** The browser is untrusted; client checks are UX affordance only |
+| Path | Browser → `LocalIdentityProvider` → "Acting as" → client-side `can(...)` / `getScopedRecords()` → `localStorage` | Browser → same-origin HTTPS → PHP authentication / server-side session → authoritative principal (user / membership / company / employee) → central policy + data-access layer → MariaDB |
+| Boundary | **None.** A trust-based product control; anyone holding the file and a devtools console can call any handler | **Server-enforced** by the PHP policy and data-access layer (there is no database RLS backstop). The browser is untrusted and never reaches the database; client checks are UX affordance only |
 | Data | One independent dataset per browser profile | One authoritative company dataset |
 
 Until the target exists, the product provides **no** authenticated identity, no confidentiality between
@@ -755,8 +755,8 @@ users, no shared data, no server-side denial, no actor-bearing audit and no mana
 
 **"Acting as" stays until the target is proven.** It is removed from production only after, in order:
 authentication exists; the session resolves; an authoritative current user is resolved through the
-`IdentityProvider` seam; membership/role exists; employee binding works; RLS/server authorization is
-enforced; workspace derivation is correct; authenticated end-to-end tests pass. There is **no**
+`IdentityProvider` seam; membership/role exists; employee binding works; server-side authorization and
+data scope are enforced; workspace derivation is correct; authenticated end-to-end tests pass. There is **no**
 automatic CEO or Employee fallback at any step. Frontend hosting and the production cutover gate are in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8.
 

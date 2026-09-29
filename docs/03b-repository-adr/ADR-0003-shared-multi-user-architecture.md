@@ -4,13 +4,13 @@
 |---|---|
 | **Record** | ADR-0003 |
 | **Title** | Shared Multi-User Architecture — one authoritative company dataset behind a server-enforced trust boundary |
-| **Status** | **Accepted** |
+| **Status** | **Superseded** by [ADR-0004](ADR-0004-hostinger-same-origin-backend.md) (2026-09-29); Accepted 2026-08-12 |
 | **Date created** | 2026-08-11 |
 | **Date accepted** | 2026-08-12 |
 | **Author** | Multi-User-0 architecture decision review |
 | **Accountable approver** | Maintainer (`CLAUDE.md` §20) — ruling recorded 2026-08-12 |
 | **Supersedes** | — |
-| **Superseded by** | — |
+| **Superseded by** | [ADR-0004](ADR-0004-hostinger-same-origin-backend.md) |
 | **Related** | [ADR-0001](ADR-0001-documentation-governance-model.md); [ADR-0002](ADR-0002-canonical-distribution-architecture.md); [Multi-User-0 architecture decision](../01-roadmap/Multi-User-0-Shared-Multi-User-Architecture-Decision.md); [Multi-User requirement note](../99-archive/roadmap-completed/Multi-User-Requirement-Note.md); `CLAUDE.md` §4.3, §7, §17 |
 
 > **What this is.** An Architecture Decision Record captures one architecture-level decision, why it
