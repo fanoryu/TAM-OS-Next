@@ -14,7 +14,11 @@ published and marked Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.1
 **Distribution-1 is implemented on the source** (ADR-0002 Model B): the canonical distribution is the
 strict-CSP deployment package built by `tools/build-package.js` and recorded by `dist/package-manifest.json`,
 with SheetJS vendored and no inline script. The single-file build is retired, and the first release to
-ship the package will be the next version. v2.10.0 remains
+ship the package will be the next version. **Backend Foundation BF-1** adds the first backend source
+under `server/`: a PHP 8.3 HTTP foundation with one route (`GET /api/health`), a null identity seam, a
+static boundary tool (`tools/verify-backend-boundary.js`), backend tests and a `backend-verify` CI job. It
+has no database, SQL, authentication or business endpoint, is not deployed, and the frontend does not
+call it (see `ARCHITECTURE.md` → Backend foundation). v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
@@ -28,7 +32,7 @@ source/runtime delta** and no Release change. Live GitHub state: **Wiki disabled
 repository (no longer skipped — it runs and its analysis/SARIF upload succeed). The predecessor
 `fanoryu/TAM-OS` **remains private**, retained only as historical provenance and not resolvable by
 public visitors. Publication changed no application behavior — **PILOT-1 remains ON HOLD** and
-**backend remains NOT STARTED**. HOSTING-0 (2026-09-29) retired the earlier "pending VPS" assumption:
+backend implementation had **not started** at publication (BF-1, above, is its first source-only slice). HOSTING-0 (2026-09-29) retired the earlier "pending VPS" assumption:
 no VPS is required. The target is the existing Hostinger Premium Web Hosting at
 `finance.reliabilityindonesia.com` (not yet cut over), serving both the frontend and — per
 [ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md), which superseded the

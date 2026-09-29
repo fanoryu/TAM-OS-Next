@@ -22,6 +22,20 @@ All commands are run from the repository root.
 | [`integration-surface-manifest.js`](integration-surface-manifest.js) | The frozen UX-006C3 integration surface (43 entries), consumed by the verifier and the authorization harness |
 | [`check-commit-attribution.js`](check-commit-attribution.js) | Owner-only authorship guard — the single source of attribution policy, shared by the tracked hook and CI (`CLAUDE.md` §15.7) |
 | [`install-hooks.js`](install-hooks.js) | Points this repository at the tracked `.githooks/` directory (repository-local; never global) |
+| [`verify-backend-boundary.js`](verify-backend-boundary.js) | Static boundary check for the PHP backend under `server/` (data-access boundary, forbidden APIs, API-header parity, `.gitignore` traps) |
+
+### Backend (BF-1)
+
+The PHP backend under `server/` has its own checks; none of them affects the frontend verifier count.
+
+```bash
+node tools/verify-backend-boundary.js --selftest   # prove every rule catches its violation
+node tools/verify-backend-boundary.js              # check server/ (needs every server/ file tracked)
+php server/tests/run.php                           # backend tests (PHP 8.3; no Composer, no database)
+```
+
+The boundary tool runs without PHP. The tests need a PHP 8.3 CLI; CI (`backend.yml` → `backend-verify`)
+uses the runner's own PHP 8.3 and fails if the runner has a different version.
 
 ### Build
 

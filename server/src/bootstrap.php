@@ -1,0 +1,85 @@
+<?php
+declare(strict_types=1);
+
+/*
+ * TAM OS backend bootstrap (BF-1).
+ * Registers the internal autoloader (no Composer) and defines run(), the production
+ * request entry. Including this file has no other side effect, so the test harness can
+ * load the classes without dispatching a request.
+ */
+
+namespace TamOs;
+
+use TamOs\Config\ConfigError;
+use TamOs\Config\ConfigLoader;
+use TamOs\Http\ErrorCode;
+use TamOs\Http\Kernel;
+use TamOs\Http\Request;
+use TamOs\Http\RequestId;
+use TamOs\Http\Response;
+use TamOs\Http\Routes;
+use TamOs\Identity\NullPrincipalResolver;
+use TamOs\Log\Logger;
+
+spl_autoload_register(static function (string $class): void {
+    if (!str_starts_with($class, 'TamOs\\')) {
+        return;
+    }
+    $relative = str_replace('\\', '/', substr($class, strlen('TamOs\\')));
+    if (!preg_match('#^[A-Za-z][A-Za-z0-9]*(/[A-Za-z][A-Za-z0-9]*)*$#', $relative)) {
+        return;
+    }
+    $file = __DIR__ . '/' . $relative . '.php';
+    if (is_file($file)) {
+        require $file;
+    }
+});
+
+/** Warnings, notices and deprecations become exceptions, so they reach the error boundary. */
+function installErrorHandler(): void
+{
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+        if (!(error_reporting() & $severity)) {
+            return false;
+        }
+        throw new \ErrorException($message, 0, $severity, $file, $line);
+    });
+}
+
+/** Production entry: one request in, one JSON response out. */
+function run(): void
+{
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    ini_set('html_errors', '0');
+    error_reporting(E_ALL);
+    header_remove('X-Powered-By');
+    installErrorHandler();
+    ob_start();
+
+    $requestId = RequestId::generate();
+    $started = hrtime(true);
+
+    // A fatal error bypasses every catch block; answer with the generic 500 envelope.
+    register_shutdown_function(static function () use ($requestId): void {
+        $error = error_get_last();
+        $fatal = E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR;
+        if ($error !== null && ($error['type'] & $fatal) !== 0 && !headers_sent()) {
+            Response::error(ErrorCode::InternalError, $requestId)->emit(false);
+        }
+    });
+
+    try {
+        $config = ConfigLoader::load(ConfigLoader::resolvePath(), Request::documentRootFromGlobals());
+    } catch (ConfigError $e) {
+        // Fail closed. The reason is a fixed code; configuration values are never logged.
+        error_log('tamos: configuration rejected (' . $e->reason . ')');
+        Response::error(ErrorCode::ServiceUnavailable, $requestId)->emit(Request::isHeadFromGlobals());
+        return;
+    }
+
+    $logger = new Logger($config->logPath, $config->env);
+    $request = Request::fromGlobals($config->bodyLimitBytes);
+    $kernel = new Kernel(Routes::production(), new NullPrincipalResolver(), $config, $logger);
+    $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');
+}

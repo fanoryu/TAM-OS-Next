@@ -1,0 +1,11 @@
+# TAM OS API (BF-1): route every /api/* request to the front controller.
+# Behaviour on the Hostinger web server is NOT YET VERIFIED (SDR-0002 §17); it is
+# proven only by the pre-deployment evidence run, never assumed.
+Options -Indexes
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_URI} !^/api/index\.php$
+  RewriteRule ^ index.php [L]
+</IfModule>
