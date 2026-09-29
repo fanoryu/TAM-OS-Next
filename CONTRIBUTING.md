@@ -51,7 +51,7 @@ Do **not** do any of the following without the maintainer's explicit approval:
   If you add or move a module, update the manifest **and** `index.html` together.
 - **Portable build** = one single-file application package `dist/tam-os-v<APP_VERSION>.html`,
   produced by inlining the CSS and JS. It is **single-file packaging, not a fully offline artifact** —
-  the XLSX parser and web fonts are still loaded from CDNs (see
+  the XLSX parser is still loaded from a CDN; typography is embedded (see
   [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)). The version is derived from `APP_VERSION` in
   `js/core/constants.js` via `tools/app-version.js` — never hand-typed into the tooling.
 - See `ARCHITECTURE.md` for the full module map and history.

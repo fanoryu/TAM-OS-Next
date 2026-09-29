@@ -35,8 +35,9 @@ dependencies**. Two equivalent forms:
 - **Portable build** — open `dist/tam-os-v<version>.html` directly in a browser.
 
 All data is stored **locally** in the browser's `localStorage` (or the Claude Artifact storage
-environment). Nothing is transmitted to a server. The only external network references are the
-spreadsheet parser and web fonts loaded from a CDN; no user data is sent to them.
+environment). Nothing is transmitted to a server. Typography is embedded; the only external network
+reference is the spreadsheet parser loaded from a CDN, and no user data is sent to it. Two browsers —
+including two visitors to the same hosted copy — hold two independent datasets.
 
 ## 3. Local / offline data handling
 
@@ -84,7 +85,59 @@ version, the storage-key set, the empty seed, and the reporting invariants. Full
 4. If any confidential file is ever committed to the source core by mistake, treat it as disclosed:
    purge it from history, rotate anything sensitive, and follow [`SECURITY.md`](../SECURITY.md).
 
-## 8. Responsible disclosure
+## 8. Production hosting — frontend target (not yet cut over)
+
+**Target:** `https://finance.reliabilityindonesia.com`, served from the company's existing
+**Hostinger managed web hosting** (hPanel), which it shares with the `reliabilityindonesia.com` web
+presence. It is **not** a VPS. HOSTING-0 (2026-09-29) observed that the hostname already resolves to
+Hostinger with valid HTTPS behind Hostinger's CDN, and that it serves the Hostinger default page —
+**TAM OS is not deployed there.** A separately hosted TAM OS copy exists but is **pre-operational**:
+no real company data has been entered, and none may be until the cutover gate below is met.
+
+**Role.** Hostinger serves **static frontend files only**. The backend accepted in
+[ADR-0003](03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) — Supabase Auth, managed
+PostgreSQL with Row-Level Security, and server functions — runs on Supabase, reached from the browser
+over HTTPS/WSS. No backend code runs on Hostinger: its PHP runtime is irrelevant to the architecture,
+Node/database/container capability there is not required, and **no VPS is required** (a self-hosted
+backend is only ADR-0003's fallback if the Supabase direction is explicitly rejected). The backend is
+**not implemented**; see [`Milestones.md`](05-milestones/Milestones.md) for Multi-User status.
+
+**Source of truth.** Git `main` is canonical. Files on the host are deployment copies, never source;
+nothing is edited on the server. A local copy of the artifact outside `dist/` is a convenience copy,
+not a release input. Hosting credentials, server paths and account details belong in the private
+layer (§1), never in this repository.
+
+**Governed frontend deployment flow:**
+
+1. Canonical `main` at the release commit/tag (per [`RELEASE-PROCESS.md`](RELEASE-PROCESS.md)).
+2. Deterministic build and a passing verifier.
+3. Record the SHA-256 of the verified `dist/` output.
+4. Upload that output over SFTP (currently via WinSCP) to the Hostinger web root.
+5. Confirm the deployed file's SHA-256 matches, then run a production smoke test.
+
+Today the output is the single-file `dist/tam-os-v<version>.html`. A multi-user client also needs
+public runtime configuration (backend URL, public anon key — never a server secret), so under
+[ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) the multi-user frontend
+is expected to ship as a package (Distribution-1), not one inlined file.
+
+**Cutover gate.** TAM OS replaces the default page at `finance.reliabilityindonesia.com` — and real
+company data may be entered — only when **all** of the following hold. A visible login form is not
+readiness.
+
+- [ ] Canonical production build verified; deployed hash matches the release artifact
+- [ ] HTTPS valid on the production hostname
+- [ ] Supabase Auth operational: sign-in, session refresh, logout, password recovery/reset
+- [ ] Disabled and unauthorized accounts are denied
+- [ ] User → membership → employee mapping verified
+- [ ] Shared persistence verified across separate browsers/devices
+- [ ] Default-deny RLS and server-side authorization verified with a real token, bypassing the UI
+- [ ] No "Acting as" selector in production
+- [ ] No server secret in the frontend or the repository
+- [ ] Managed backups / point-in-time recovery enabled and a restore rehearsed
+- [ ] Authenticated end-to-end tests pass
+- [ ] Production smoke test passes
+
+## 9. Responsible disclosure
 
 Security issues must be reported **privately** by email to <fanoryu@gmail.com> (subject
 `TAM-OS Security Report`) — see [`SECURITY.md`](../SECURITY.md). Do not file a vulnerability as an

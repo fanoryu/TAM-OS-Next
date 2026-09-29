@@ -24,7 +24,8 @@ while the portable artifact is unchanged. `fanoryu/TAM-OS-Next` is canonical goi
 **Current source / distributable:** `dist/tam-os-v2.11.0.html` — the published **v2.11.0 (Identity Refresh)**
 artifact. It is a **single-file application package**: typography is **embedded** (offline-safe), while the
 XLSX parser is CDN-loaded (see [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)).
-The pilot has **not** launched — **PILOT-1 remains ON HOLD PENDING VPS**; backend **NOT STARTED**.
+The pilot has **not** launched — **PILOT-1 remains ON HOLD** pending the multi-user readiness gate (no VPS
+is required; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8); backend **NOT STARTED**.
 The prior **v2.9.0** release remains published and immutable (no longer Latest) — annotated tag
 `v2.9.0` on commit `598edef0`; its published asset (`tam-os-v2.9.0.html`, **1,049,018 bytes**, SHA-256
 `e7470ff5261896b8d7d1f8645294d2abd6a72e9820df94b799973627ddcaf3ea`) is unchanged and is the pilot
@@ -724,7 +725,8 @@ sense of being made impossible.
 - **Smart Import undo takes no pre-operation backup.** Employee Merge and Smart Import commit each
   snapshot one before writing; the undo path does not, so there is no undo-specific restore point.
 - There is **no backend, server-side transaction, or multi-user synchronisation**, so cross-key atomicity
-  cannot be delegated to a server. Backend remains prohibited by [`CLAUDE.md`](CLAUDE.md) §4.3.
+  cannot be delegated to a server. [`CLAUDE.md`](CLAUDE.md) §4.3 permits only the ADR-0003 managed
+  backend, through authorized Multi-User milestones; none is implemented.
 
 ### Architecture frontier — what is and is not authorised
 
@@ -739,6 +741,24 @@ nothing below should be read as scheduled work.
 
 Generic compound-persistence coordination has **not** been approved. The verifier actively asserts that
 SPR-077, SPR-078, SPR-079, SPR-081 and SPR-082 each introduced no transaction abstraction.
+
+### Security boundary — current vs. target (target accepted, not implemented)
+
+| | Current (shipped) | Target ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md)) |
+|---|---|---|
+| Path | Browser → `LocalIdentityProvider` → "Acting as" → client-side `can(...)` / `getScopedRecords()` → `localStorage` | Browser → Supabase Auth → verified session/JWT → user / membership / company / employee mapping → RLS and server functions → shared PostgreSQL |
+| Boundary | **None.** A trust-based product control; anyone holding the file and a devtools console can call any handler | **Server-enforced.** The browser is untrusted; client checks are UX affordance only |
+| Data | One independent dataset per browser profile | One authoritative company dataset |
+
+Until the target exists, the product provides **no** authenticated identity, no confidentiality between
+users, no shared data, no server-side denial, no actor-bearing audit and no managed backup.
+
+**"Acting as" stays until the target is proven.** It is removed from production only after, in order:
+authentication exists; the session resolves; an authoritative current user is resolved through the
+`IdentityProvider` seam; membership/role exists; employee binding works; RLS/server authorization is
+enforced; workspace derivation is correct; authenticated end-to-end tests pass. There is **no**
+automatic CEO or Employee fallback at any step. Frontend hosting and the production cutover gate are in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8.
 
 ### Release engineering
 

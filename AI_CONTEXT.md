@@ -23,9 +23,12 @@ source/runtime delta** and no Release change. Live GitHub state: **Wiki disabled
 **GitHub Private Vulnerability Reporting enabled**, and **CodeQL verified operational** on the public
 repository (no longer skipped — it runs and its analysis/SARIF upload succeed). The predecessor
 `fanoryu/TAM-OS` **remains private**, retained only as historical provenance and not resolvable by
-public visitors. Publication changed no application behavior — **PILOT-1 remains ON HOLD PENDING VPS**
-and **backend remains NOT STARTED**; the next operational dependency is **VPS availability/access**, not
-any further publication objective.
+public visitors. Publication changed no application behavior — **PILOT-1 remains ON HOLD** and
+**backend remains NOT STARTED**. HOSTING-0 (2026-09-29) retired the earlier "pending VPS" assumption:
+no VPS is required. The frontend target is the existing Hostinger managed web hosting at
+`finance.reliabilityindonesia.com` (not yet cut over), the backend is ADR-0003's Supabase direction,
+and real company data enters only after the multi-user readiness gate — see
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8.
 
 **v2.10.0 is PUBLISHED** (now the prior release, no longer Latest). It was **originally published** on 2026-08-11 from the
 predecessor repository `fanoryu/TAM-OS` (private predecessor repository retained for historical provenance; not resolvable by public visitors) (annotated tag `v2.10.0`
@@ -402,7 +405,8 @@ This means *only* that every aggregate-backed handler delegates persistence thro
 Repository. It does **not** mean all persistence is mediated (the layer covers 3 of 11 persist
 functions), that compound persistence is solved, that multi-store transactions are supported, or that
 backend readiness is achieved. Non-aggregate and compound writes remain direct by design and are
-verifier-fenced. **Backend remains prohibited** by [`CLAUDE.md`](CLAUDE.md) §4.3 (client-only MUST).
+verifier-fenced. **No backend exists**; [`CLAUDE.md`](CLAUDE.md) §4.3 permits only the ADR-0003 managed
+backend, through separately authorized Multi-User milestones.
 
 **Contract authority.** Contract status transitions are aggregate-backed, and renewal is
 **aggregate-authored**: `ContractRenewalAggregate` decides eligibility and authors the successor's
@@ -809,8 +813,8 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
   [`audit/ux-002b-2026-08-05/`](docs/99-archive/audit/ux-002b-2026-08-05/CSS-GOLDEN-MASTER-REVISION.md). Dashboard
   information-integrity and alert-reachability are likewise protected by documented behavioural probes,
   not by static invariants.
-- **External CDN references** for the spreadsheet parser and fonts mean the fully offline experience
-  depends on those assets (no user data is sent to them).
+- **External CDN reference** for the spreadsheet parser means `.xlsx` import depends on that asset
+  (no user data is sent to it); typography is embedded and needs no network.
 - **Single-owner project** — response and review timelines are best-effort.
 - **The repository contains no real company workbook and no confidential operational dataset.** A
   confidential workbook was removed from all branches and tags by the 2026-07-31 sanitization
@@ -883,9 +887,10 @@ Directions (no committed release numbers unless already approved):
   **complete and merged**, and **UX-006 — Identity, Personal Workspace, Authorization and Presentation
   (A/B/C/C2/C2C/C3/D) is COMPLETE and FROZEN**; the Readiness-1/2/3 programme is merged and frozen and
   **v2.10.0 is published and marked Latest**, while the v2.10.0 controlled pilot is **APPROVED but NOT
-  YET LAUNCHED** (publication is not a launch). The forward-looking sequence is
+  YET LAUNCHED** (publication is not a launch). The recorded forward-looking sequence is
   Controlled Pilot → Post-Pilot Findings & Remediation → Pilot Exit Review → Distribution-1 →
-  Multi-User-1…8 → General-Use Readiness → UX-006F / v3.0.0; the authoritative table is
+  Multi-User-1…8 → General-Use Readiness → UX-006F / v3.0.0 — **superseded** by the maintainer's
+  2026-09-29 sequencing ruling (see the multi-user bullet below); the authoritative table is
   [`docs/01-roadmap/README.md`](docs/01-roadmap/README.md) and the milestone detail is
   [`docs/05-milestones/Milestones.md`](docs/05-milestones/Milestones.md). **UX-006E — Persistence &
   Migration Hardening and UX-006F — Integration Freeze & v3.0.0 Readiness have not begun.**
@@ -908,10 +913,19 @@ Directions (no committed release numbers unless already approved):
   and [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md). **ADR-0003 is `Accepted`
   (2026-08-12) as the architecture *baseline* — Multi-User-0 is MERGED / FROZEN.** Acceptance settles
   the **direction only**: it authorizes **no** implementation, backend provisioning, migration, runtime
-  or schema change, and **no `CLAUDE.md` amendment**. **`CLAUDE.md` §4.3 remains fully operative and
-  unamended, and continues to block every Multi-User implementation milestone** — Multi-User-1…8 have
-  **not begun and are not authorized**. The approved v2.10.0 controlled pilot is **unchanged** and is
-  not multi-user.
+  or schema change, and **no `CLAUDE.md` amendment**. **ARCH-GOV-1 (2026-09-29) then amended
+  `CLAUDE.md` §1, §4.3 and §7** to permit **only** the ADR-0003 managed backend (browser untrusted), to
+  make the shared PostgreSQL store the future single authoritative store, and to admit managed
+  backups/PITR as the future recovery contract. The amendment removes the constitutional blocker but
+  **authorizes no implementation**: Multi-User-1…8 have **not begun**, each still needs its own
+  authorization, and **SDR-0002 has not been created** (required before MU-1). **PILOT-1** — real
+  operational use with company data — is **ON HOLD** by maintainer direction until the multi-user
+  readiness gate is met; no real company data has been entered. The maintainer's **2026-09-29
+  sequencing ruling** resolved the resulting circular dependency: ARCH-GOV-1 → SDR-0002 →
+  Distribution-1 → Multi-User implementation → production readiness validation →
+  `finance.reliabilityindonesia.com` cutover → PILOT-1. Distribution-1 is no longer gated on the pilot
+  (ADR-0002 revalidated by an appended note; its decision is unchanged) — see
+  [`docs/05-milestones/Milestones.md`](docs/05-milestones/Milestones.md).
 
 The canonical roadmap lives in [`README.md`](README.md#roadmap).
 

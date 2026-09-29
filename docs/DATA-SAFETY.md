@@ -56,6 +56,7 @@ change is an **intentional, documented migration**:
 
 ## Privacy posture
 
-- No network calls carry user data; the app runs entirely client-side (external CDN is used only for
-  the XLSX parser and fonts).
+- No network calls carry user data; the app runs entirely client-side (an external CDN is used only for
+  the XLSX parser; fonts are embedded). The future multi-user backend permitted by `CLAUDE.md` §4.3
+  (ADR-0003) is not implemented; when it is, user data travels only to that backend.
 - Exports (CSV / JSON) are generated locally and downloaded by the user; they are never transmitted.

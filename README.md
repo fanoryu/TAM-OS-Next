@@ -92,7 +92,8 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 > refreshed `[monogram] TAM OS` lockup, the Sora wordmark, and self-contained offline typography (no Google
 > Fonts dependency). `APP_VERSION` **2.11.0**, `SCHEMA_VERSION` **6**, `ACTIONS` **20** — no authorization,
 > data-model, financial-logic or backend change. The **controlled internal pilot has not launched** —
-> **PILOT-1 remains ON HOLD PENDING VPS** — and backend work is **NOT STARTED**.
+> **PILOT-1 remains ON HOLD** until the multi-user readiness gate (no VPS is required — see
+> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8) — and backend work is **NOT STARTED**.
 
 > **Previous release — v2.10.0 (Governed Workspace).** v2.10.0 remains **published** and intact (now the
 > prior release, no longer Latest). It was **originally published** from the predecessor repository
@@ -149,8 +150,12 @@ shared database in this release.
 
 A future shared multi-user architecture has been **decided but not built**: Multi-User-0 is
 **merged/frozen** and [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) is **Accepted** as
-the architecture *baseline*. **Implementation has not started and is not authorized** — the `CLAUDE.md`
-§4.3 client-only rule remains fully operative. Nothing in that direction ships in v2.11.0.
+the architecture *baseline*. `CLAUDE.md` §4.3 has been amended to permit **only** that managed backend
+(Supabase Auth, PostgreSQL with Row-Level Security), but **implementation has not started and is not
+authorized**. The planned frontend host is the existing company web hosting at
+`finance.reliabilityindonesia.com`, which does **not** serve TAM OS yet and will not until the production
+cutover gate in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8 is met. Nothing in that direction ships in
+v2.11.0.
 
 ### Running it
 
@@ -603,14 +608,19 @@ Also complete since then:
   ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** as the architecture
   *baseline*). **Implementation has not started and is not authorized.**
 
-Next, in order:
+Next, in order (maintainer sequencing ruling, 2026-09-29):
 
-1. **Controlled Pilot (v2.10.0)** — **approved to start, NOT YET LAUNCHED**; no launch date is set.
+1. **SDR-0002** — the multi-user security decision record.
+2. **Distribution-1** — modular distribution migration
+   ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md), revalidated: no
+   longer post-pilot, because the multi-user client needs runtime configuration).
+3. **Multi-User-1…8**, then production readiness validation and the `finance.reliabilityindonesia.com`
+   cutover ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8).
+4. **PILOT-1** — real operational use with company data. The v2.10.0 controlled pilot was approved but
+   **never launched** and is **ON HOLD** until this point; no real company data has been entered.
    Publishing v2.10.0 made the verified artifact obtainable; **it did not launch the pilot**.
-2. **Post-Pilot Findings & Remediation**, then **Pilot Exit Review**.
-3. **Distribution-1** — modular distribution migration, post-pilot
-   ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)); it does not block the pilot.
-4. **General-Use Readiness / Hardening**, then **UX-006F / v3.0.0**.
+5. **Post-Pilot Findings & Remediation**, **Pilot Exit Review**, **General-Use Readiness / Hardening**,
+   then **UX-006F / v3.0.0**.
 
 The authoritative roadmap table is [`docs/01-roadmap/README.md`](docs/01-roadmap/README.md); milestone
 detail is in [`docs/05-milestones/Milestones.md`](docs/05-milestones/Milestones.md).
