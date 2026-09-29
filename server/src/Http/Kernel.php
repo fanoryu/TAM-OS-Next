@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TamOs\Http;
 
 use TamOs\Config\Config;
+use TamOs\Data\DatabaseError;
 use TamOs\Identity\PrincipalResolver;
 use TamOs\Log\Logger;
 
@@ -13,8 +14,9 @@ use TamOs\Log\Logger;
  *   route (404 / 405) → mutation guards: origin (403), Content-Type (415), size (413),
  *   JSON object (400) → query allow-list (400) → principal → handler → envelope
  *
- * Any ApiError becomes its fixed envelope; any other Throwable becomes internal_error and
- * is logged, redacted, server-side only. Nothing a handler throws reaches the client.
+ * Any ApiError becomes its fixed envelope; a DatabaseError becomes service_unavailable or
+ * internal_error by kind; any other Throwable becomes internal_error. Failures are logged,
+ * redacted, server-side only. Nothing a handler throws reaches the client.
  */
 final class Kernel
 {
@@ -48,6 +50,12 @@ final class Kernel
         } catch (ApiError $e) {
             $error = $e->errorCode->value;
             $response = Response::error($e->errorCode, $requestId, $e);
+        } catch (DatabaseError $e) {
+            // Unreachable or transient (deadlock, lock wait) → 503; any other database failure → 500.
+            $code = $e->kind === DatabaseError::FAILURE ? ErrorCode::InternalError : ErrorCode::ServiceUnavailable;
+            $error = $code->value;
+            $this->logger->database($requestId, $e);
+            $response = Response::error($code, $requestId);
         } catch (\Throwable $e) {
             $error = ErrorCode::InternalError->value;
             $this->logger->exception($requestId, $e);

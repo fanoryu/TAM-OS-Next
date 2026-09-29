@@ -18,7 +18,9 @@ ship the package will be the next version. **Backend Foundation BF-1** adds the 
 under `server/`: a PHP 8.3 HTTP foundation with one route (`GET /api/health`), a null identity seam, a
 static boundary tool (`tools/verify-backend-boundary.js`), backend tests and a `backend-verify` CI job. It
 has no database, SQL, authentication or business endpoint, is not deployed, and the frontend does not
-call it (see `ARCHITECTURE.md` → Backend foundation). v2.10.0 remains
+call it (see `ARCHITECTURE.md` → Backend foundation). **BF-2A** adds the data layer under
+`server/src/Data/` (lazy PDO connection, prepared statements, transactions, classified database errors)
+and a MariaDB-backed CI job; it creates no table, migration or database-backed endpoint. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

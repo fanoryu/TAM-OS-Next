@@ -33,7 +33,13 @@ return [
     },
     'unknown keys fail closed (a typo is never ignored)' => static function () use ($valid, $reason): void {
         assertSame('unknown_key', $reason($valid(['orgin' => 'x'])));
-        assertSame('unknown_key', $reason($valid(['db' => ['pass' => 'x']])));
+        assertSame('unknown_key', $reason($valid(['database' => ['pass' => 'x']])));
+    },
+    'the optional db section is carried unvalidated (checked only when the database is used)' => static function () use ($valid): void {
+        assertSame(null, ConfigLoader::fromArray($valid())->db);
+        foreach ([['host' => 'CHANGE_ME'], 'not-an-array', ['pass' => 'x']] as $db) {
+            assertSame($db, ConfigLoader::fromArray($valid(['db' => $db]))->db);
+        }
     },
     'any CHANGE_ME placeholder is refused' => static function () use ($valid, $reason): void {
         assertSame('placeholder_value', $reason($valid(['origin' => 'https://CHANGE_ME.invalid'])));

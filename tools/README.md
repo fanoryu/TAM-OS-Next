@@ -37,6 +37,11 @@ php server/tests/run.php                           # backend tests (PHP 8.3; no 
 The boundary tool runs without PHP. The tests need a PHP 8.3 CLI; CI (`backend.yml` → `backend-verify`)
 uses the runner's own PHP 8.3 and fails if the runner has a different version.
 
+The database suite (`server/tests/Db/`) runs only with `TAMOS_DB_TESTS=1` and a guarded disposable
+database (`TAMOS_TEST_DB_HOST` / `_PORT` / `_NAME` / `_USER` / `_PASS`: loopback host, name ending in
+`_test`). Otherwise it is reported **NOT RUN**, never passed. CI (`backend.yml` → `backend-db`) runs it
+against a MariaDB 10.11 service container with `php server/tests/run.php --require-db`.
+
 ### Build
 
 ```bash

@@ -11,7 +11,10 @@ declare(strict_types=1);
  * root. Whether the host permits that placement is pre-deployment evidence (SDR-0002 E1).
  *
  * Unknown keys are rejected, so a typo fails closed instead of being ignored.
- * BF-1 has no database: database settings arrive with the data-layer slice (BF-2).
+ *
+ * `db` is optional. It is validated only when the database is first used, so without it
+ * (or with a broken one) the API still boots and /api/health still answers; database-backed
+ * operations answer 503 instead. Use a dedicated TAM OS database and user.
  */
 return [
     // 'production' | 'development' | 'test'. Production requires an https:// origin.
@@ -26,4 +29,14 @@ return [
 
     // Maximum request body in bytes (default 65536, at most 1048576).
     'body_limit_bytes' => 65536,
+
+    // MariaDB/MySQL connection (exactly these five keys). The password is a secret: it
+    // lives only in the real config file outside the web root, never in the repository.
+    'db' => [
+        'host' => 'CHANGE_ME',
+        'port' => 3306,
+        'name' => 'CHANGE_ME',
+        'user' => 'CHANGE_ME',
+        'pass' => 'CHANGE_ME',
+    ],
 ];

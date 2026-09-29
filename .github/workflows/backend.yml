@@ -1,9 +1,12 @@
 name: Backend
 
-# Backend Foundation (BF-1): lint, boundary-check and test the PHP backend under server/.
-# PHP comes from the GitHub-hosted runner image (no third-party setup action). The job fails
+# Backend Foundation: lint, boundary-check and test the PHP backend under server/.
+# PHP comes from the GitHub-hosted runner image (no third-party setup action). Both jobs fail
 # loudly if that PHP is not 8.3.x — the production target (ADR-0004) — rather than testing
-# against a different version. No Composer, no database, no network service.
+# against a different version. No Composer.
+#
+# backend-db (BF-2A) runs the database suite against a disposable MariaDB service container.
+# It is the authoritative database integration environment; it never reaches Hostinger.
 on:
   push:
     branches: [main]
@@ -56,3 +59,52 @@ jobs:
 
       - name: Backend tests
         run: php server/tests/run.php
+
+  backend-db:
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        # Official Docker Library image, MariaDB 10.11 LTS — a CI baseline, NOT proof of
+        # compatibility with the (unverified) Hostinger server version. Pinned by tag AND by
+        # the multi-arch index digest, resolved from registry-1.docker.io on 2026-09-29
+        # (library/mariadb:10.11 = 10.11.19 = 10.11.19-jammy). Update deliberately: resolve the
+        # new digest, record it here, and review the MariaDB release notes.
+        image: mariadb:10.11.19@sha256:7f22313fc130a377a44999965bcb0a08dd5b21e8502824c1b864f792f9bc66ab
+        env:
+          # Disposable CI-only values for a throw-away container; not secrets, never reused.
+          MARIADB_ROOT_PASSWORD: ci-only-root-not-a-secret
+          MARIADB_DATABASE: tamos_test
+          MARIADB_USER: tamos_ci
+          MARIADB_PASSWORD: ci-only-not-a-secret
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=24
+    env:
+      TAMOS_DB_TESTS: '1'
+      TAMOS_TEST_DB_HOST: 127.0.0.1
+      TAMOS_TEST_DB_PORT: '3306'
+      TAMOS_TEST_DB_NAME: tamos_test
+      TAMOS_TEST_DB_USER: tamos_ci
+      TAMOS_TEST_DB_PASS: ci-only-not-a-secret
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Require the runner's PHP to be 8.3.x with pdo_mysql
+        run: |
+          php -v
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 3 ? 0 : 1);' || {
+            echo "::error::Runner PHP is not 8.3.x. Stop: adding a PHP setup action needs owner approval (CLAUDE.md §20)."
+            exit 1
+          }
+          php -r 'exit(extension_loaded("pdo_mysql") ? 0 : 1);' || {
+            echo "::error::Runner PHP has no pdo_mysql. Stop: changing the PHP toolchain needs owner approval."
+            exit 1
+          }
+
+      - name: Backend tests including the database suite
+        run: php server/tests/run.php --require-db

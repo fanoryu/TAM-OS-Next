@@ -16,7 +16,7 @@ final class ConfigLoader
 {
     public const DEFAULT_BODY_LIMIT = 65536;
     public const MAX_BODY_LIMIT = 1048576;
-    private const KEYS = ['env', 'origin', 'log_path', 'body_limit_bytes'];
+    private const KEYS = ['env', 'origin', 'log_path', 'body_limit_bytes', 'db'];
     private const PLACEHOLDER = 'CHANGE_ME';
 
     public static function resolvePath(): string
@@ -52,7 +52,7 @@ final class ConfigLoader
     }
 
     /** @param array<mixed> $data */
-    public static function fromArray(array $data, ?string $documentRoot = null): Config
+    public static function fromArray(#[\SensitiveParameter] array $data, ?string $documentRoot = null): Config
     {
         foreach (array_keys($data) as $key) {
             if (!in_array($key, self::KEYS, true)) {
@@ -91,7 +91,7 @@ final class ConfigLoader
             throw new ConfigError('invalid_body_limit');
         }
 
-        return new Config($env, $origin, $logPath, $limit);
+        return new Config($env, $origin, $logPath, $limit, $data['db'] ?? null);
     }
 
     private static function isAbsolute(string $path): bool
