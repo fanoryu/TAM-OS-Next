@@ -768,9 +768,10 @@ automatic CEO or Employee fallback at any step. Frontend hosting and the product
 
 ### Backend foundation — BF-1 (source only; not deployed, no data, no identity)
 
-`server/` holds the first slice of the ADR-0004 backend: the HTTP foundation only. It has **no database,
-SQL, migrations, authentication, sessions, policy or business endpoint**, and the frontend makes no call
-to it. The shipped application is unchanged and still client-only.
+BF-1 added the first slice of the ADR-0004 backend under `server/`: the HTTP foundation. The backend has
+**no migrations, authentication, sessions, policy or business endpoint** (the data layer below, BF-2A,
+creates no schema), and the frontend makes no call to it. The shipped application is unchanged and still
+client-only.
 
 | Path | Role |
 |---|---|
@@ -800,6 +801,31 @@ header use, and missing `strict_types`. It also gates not-yet-authorized directo
 `migrations/`, `bin/`, `Policy/`), checks the header mirror, and fails on any `server/` file that
 `.gitignore` would silently drop. `.github/workflows/backend.yml` (`backend-verify`) runs it with
 `php -l` and the tests on the runner's PHP 8.3.
+
+### Data foundation — BF-2A (data layer and transactions; no schema, no migrations)
+
+`server/src/Data/` is the only place PDO, prepared statements and SQL may appear. BF-2A adds no table,
+migration or database-backed route: `/api/health` never touches it, and `/api/ready` arrives with BF-2B.
+
+| Class | Role |
+|---|---|
+| `DatabaseConfig` | Validates the optional `db` config section (`host`, `port`, `name`, `user`, `pass`) only when the database is first used, and is the only code that opens a PDO connection. The password is `#[\SensitiveParameter]` and masked in debug output |
+| `Database` | One lazy, non-persistent connection per request. Only prepared `select()` / `execute()` with positional int / string / bool / null parameters, and `transaction()` — nested calls refused, any throwable rolls back and is rethrown, no retry |
+| `DatabaseError` | Message-free classification: `unavailable` (connect failure, lost connection, no config) and `transient` (deadlock 1213, lock-wait 1205) answer 503; `failure` answers 500. Only SQLSTATE and driver code are kept, and they reach the log, never a client |
+
+**Connection contract.** `mysql:host=…;port=…;dbname=…;charset=utf8mb4`; `ERRMODE_EXCEPTION`, native
+prepares (`EMULATE_PREPARES=false`), `FETCH_ASSOC`, no persistent connections, no multi-statements, a
+5-second connect timeout, and a session init of `time_zone='+00:00'` with
+`sql_mode='STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,NO_ENGINE_SUBSTITUTION,ERROR_FOR_DIVISION_BY_ZERO'`.
+Bootstrap sets `zend.exception_ignore_args=1`, so no trace records call arguments, and the logger never
+records a PDO message.
+
+**Enforcement.** The boundary tool now allows `server/src/Data/`, keeps `migrations/`, `bin/` and
+`Policy/` gated, bans `mysqli`, `->query()` and `->exec()` everywhere, confines PDO, `->prepare()` and the
+`Database` / `DatabaseConfig` handle to `Data/`, and rejects interpolated or concatenated SQL inside it.
+`backend.yml` → `backend-db` runs the database suite against a disposable MariaDB 10.11 service
+container (a CI baseline — the host's engine version is not yet verified); locally that suite reports
+NOT RUN.
 
 ### Release engineering
 

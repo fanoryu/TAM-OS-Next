@@ -46,13 +46,24 @@ function installErrorHandler(): void
     });
 }
 
-/** Production entry: one request in, one JSON response out. */
-function run(): void
+/**
+ * Runtime hardening applied before any request work. Stack traces never carry call
+ * arguments (a failed `new PDO(…)` would otherwise record the password in the trace), and
+ * errors are never displayed.
+ */
+function hardenRuntime(): void
 {
+    ini_set('zend.exception_ignore_args', '1');
     ini_set('display_errors', '0');
     ini_set('display_startup_errors', '0');
     ini_set('html_errors', '0');
     error_reporting(E_ALL);
+}
+
+/** Production entry: one request in, one JSON response out. */
+function run(): void
+{
+    hardenRuntime();
     header_remove('X-Powered-By');
     installErrorHandler();
     ob_start();

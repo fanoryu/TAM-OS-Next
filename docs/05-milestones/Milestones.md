@@ -336,8 +336,10 @@ acceptance · **MU-8** cutover & decommission.
 **MU-1 progress — Backend Foundation.** Phase 0 (discovery) is complete. **BF-1** (HTTP, configuration,
 error contract, request ID, `GET /api/health`, logging, null identity seam, boundary tool, backend tests
 and CI) is implemented as source only — no database, authentication, deployment or
-frontend change. **BF-2** (data-access layer, migrations, readiness) and **BF-3** (hostile-principal
-harness, remaining enforcement) are not yet authorized. See `ARCHITECTURE.md` → Backend foundation.
+frontend change. **BF-2** is split in two: **BF-2A** (data layer, transactions, MariaDB CI) is
+implemented as source only, with no table or migration; **BF-2B** (migrations, `schema_migrations`,
+readiness) is not yet authorized. The hostile-principal harness waits for the first scoped repository.
+See `ARCHITECTURE.md` → Backend foundation and Data foundation.
 
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today
 throughout. **MU-5 is the first irreversible step**, and it is deliberately gated behind MU-4, whose

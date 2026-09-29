@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace TamOs\Log;
 
+use TamOs\Data\DatabaseError;
+
 /**
  * Structured server log: one JSON object per line, appended to the configured path, which
  * must sit outside the public web root.
@@ -34,14 +36,30 @@ final class Logger
         ]);
     }
 
+    /** Database failures: codes and classification only — never a driver message, SQL or value. */
+    public function database(string $requestId, DatabaseError $e): void
+    {
+        $this->write([
+            'level' => 'error',
+            'event' => 'db_error',
+            'requestId' => $requestId,
+            'kind' => $e->kind,
+            'operation' => $e->operation,
+            'sqlstate' => $e->sqlstate,
+            'driverCode' => $e->driverCode,
+        ]);
+    }
+
     public function exception(string $requestId, \Throwable $e): void
     {
+        // A PDOException message can name the user, host, SQL or row values: never log it.
+        $message = $e instanceof \PDOException ? '[database message withheld]' : Redactor::redact($e->getMessage());
         $entry = [
             'level' => 'error',
             'event' => 'exception',
             'requestId' => $requestId,
             'class' => $e::class,
-            'message' => Redactor::redact($e->getMessage()),
+            'message' => $message,
             'at' => basename($e->getFile()) . ':' . $e->getLine(),
         ];
         if ($this->env !== 'production') {

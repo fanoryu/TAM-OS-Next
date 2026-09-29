@@ -131,6 +131,72 @@ function assertNoLeak(string $body, array $secrets = []): void
     }
 }
 
+/**
+ * Every reason the database test guards refuse, for this configuration and environment. The
+ * database suite may create or drop anything only when this list is empty. The guards are
+ * deliberately redundant: a disposable CI database must satisfy all of them at once.
+ *
+ * @param array<string, string|false> $env TAMOS_DB_TESTS and friends, as getenv() returns them
+ * @return list<string>
+ */
+function dbGuardViolations(Config $config, array $env): array
+{
+    $out = [];
+    if ($config->env !== 'test') {
+        $out[] = 'env is not test';
+    }
+    if (($env['TAMOS_DB_TESTS'] ?? false) !== '1') {
+        $out[] = 'TAMOS_DB_TESTS is not 1';
+    }
+    $db = is_array($config->db) ? $config->db : [];
+    if (!is_string($db['name'] ?? null) || preg_match('/^[a-z0-9_]{1,58}_test$/', $db['name']) !== 1) {
+        $out[] = 'database name does not end in _test';
+    }
+    if (!in_array($db['host'] ?? null, ['127.0.0.1', 'localhost', '::1'], true)) {
+        $out[] = 'database host is not loopback';
+    }
+    return $out;
+}
+
+/** The disposable test database's configuration, from TAMOS_TEST_DB_* (CI sets them). */
+function testDbConfig(): Config
+{
+    $port = getenv('TAMOS_TEST_DB_PORT');
+    return testConfig(['db' => [
+        'host' => (string) getenv('TAMOS_TEST_DB_HOST'),
+        'port' => is_string($port) && ctype_digit($port) ? (int) $port : 0,
+        'name' => (string) getenv('TAMOS_TEST_DB_NAME'),
+        'user' => (string) getenv('TAMOS_TEST_DB_USER'),
+        'pass' => (string) getenv('TAMOS_TEST_DB_PASS'),
+    ]]);
+}
+
+/**
+ * A connection to the guarded test database, with every table in it dropped. Refuses unless
+ * all guards pass AND the server confirms the connected schema is the configured one.
+ */
+function testDatabase(): \TamOs\Data\Database
+{
+    $config = testDbConfig();
+    $violations = dbGuardViolations($config, ['TAMOS_DB_TESTS' => getenv('TAMOS_DB_TESTS')]);
+    if ($violations !== []) {
+        fail('database test guard refused: ' . implode('; ', $violations));
+    }
+    $db = new \TamOs\Data\Database(\TamOs\Data\DatabaseConfig::fromConfig($config));
+    $current = $db->select('SELECT DATABASE() AS name')[0]['name'] ?? null;
+    if ($current !== $config->db['name']) {
+        fail('database test guard refused: connected schema is not the configured test database');
+    }
+    foreach ($db->select('SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()') as $row) {
+        $table = (string) $row['t'];
+        if (preg_match('/^[a-z0-9_]{1,64}$/', $table) !== 1) {
+            fail('database test guard refused: unexpected table name');
+        }
+        $db->execute('DROP TABLE `' . $table . '`');
+    }
+    return $db;
+}
+
 /** Builds a request the way a browser on the canonical origin would send a JSON mutation. */
 function jsonPost(string $path, string $body, array $overrides = []): Request
 {

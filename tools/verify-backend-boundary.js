@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /*
- * verify-backend-boundary.js — TAM OS (Backend Foundation, BF-1)
+ * verify-backend-boundary.js — TAM OS (Backend Foundation, BF-1 / BF-2A)
  * -----------------------------------------------------------------
  * Static enforcement of the backend's architectural boundary (ADR-0004 §2.3, SDR-0002 §8.2).
  * MariaDB has no Row-Level Security, so "SQL and database access exist only in the data-access
  * layer" must be a mechanical rule, not a convention. This tool fails the build when:
  *
- *   - PDO, mysqli, ->query/->exec/->prepare or SQL statements appear outside server/src/Data/
- *     (the future data-access layer; BF-1 has none, and the slice gate below keeps it absent);
+ *   - PDO, ->prepare, the Database / DatabaseConfig handle or SQL statements appear outside
+ *     server/src/Data/ (the data-access layer), or mysqli, ->query or ->exec appear anywhere;
+ *   - SQL inside server/src/Data/ is interpolated ("… $x …") or built by concatenation or
+ *     sprintf — variable values must be bound parameters;
  *   - production PHP uses eval, process execution, unserialize, extract, phpinfo, var_dump,
  *     print_r, session_start, setcookie, CORS headers, or request superglobals outside the one
  *     class allowed to read them;
@@ -33,9 +35,10 @@ const { execFileSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const SERVER = 'server';
 const DATA_DIR = 'server/src/Data/';
-// BF-1 slice gate: these arrive with later, separately authorized slices (BF-2 data layer,
-// migrations; the authorization milestone for Policy). Remove an entry only in that slice.
-const NOT_YET_AUTHORIZED = ['server/src/Data', 'server/migrations', 'server/bin', 'server/src/Policy'];
+// Slice gate: these arrive with later, separately authorized slices (BF-2B migrations and the
+// CLI runner; the authorization milestone for Policy). Remove an entry only in that slice.
+// server/src/Data was un-gated by BF-2A.
+const NOT_YET_AUTHORIZED = ['server/migrations', 'server/bin', 'server/src/Policy'];
 const SUPERGLOBAL_READERS = new Set(['server/src/Http/Request.php', 'server/dev/router.php']);
 const HEADER_EMITTERS = new Set(['server/src/Http/Response.php', 'server/src/bootstrap.php']);
 const INI_WRITERS = new Set(['server/src/bootstrap.php']);
@@ -51,6 +54,7 @@ const LOCAL_CONFIG = /^server\/config\/config\.local\.php$/;
 function lexPhp(src) {
   let code = '';
   const strings = [];
+  const spans = []; // { start, end, value, dq } — positions in `code`
   let i = 0;
   let heredoc = false;
   const n = src.length;
@@ -91,14 +95,16 @@ function lexPhp(src) {
         j++;
       }
       strings.push(value);
+      const start = code.length;
       code += c + src.slice(i + 1, j).replace(/[^\n]/g, ' ') + c;
+      spans.push({ start, end: code.length, value, dq: c === '"' });
       i = j + 1;
       continue;
     }
     code += c;
     i++;
   }
-  return { code, strings, heredoc };
+  return { code, strings, spans, heredoc };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -115,11 +121,22 @@ const CODE_RULES = [
   { id: 'cookie', re: /(?<![\w$>:])set(raw)?cookie\s*\(/i, msg: 'setting cookies is not authorized in BF-1' },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
 ];
+// Banned in every production file, the data layer included.
+const EVERYWHERE_RULES = [
+  { id: 'mysqli', re: /\bmysqli\b|(?<![\w$>:])mysqli?_[a-z_]+\s*\(/i, msg: 'mysqli/mysql functions are forbidden (PDO only)' },
+  { id: 'raw-query', re: /->\s*query\s*\(/i, msg: '->query() is forbidden: every statement is prepared' },
+  { id: 'raw-exec', re: /->\s*exec\s*\(/i, msg: '->exec() is forbidden in BF-2A (static migration DDL arrives with BF-2B)' },
+];
+// Allowed only inside server/src/Data/.
 const DATA_RULES = [
   { id: 'pdo', re: /\bPDO\b|\bPDOStatement\b/, msg: 'PDO is allowed only in ' + DATA_DIR },
-  { id: 'mysqli', re: /\bmysqli\b|(?<![\w$>:])mysqli?_[a-z_]+\s*\(/i, msg: 'mysqli/mysql functions are allowed only in ' + DATA_DIR },
-  { id: 'db-method', re: /->\s*(query|exec|prepare)\s*\(/i, msg: '->query/->exec/->prepare are allowed only in ' + DATA_DIR },
+  { id: 'db-method', re: /->\s*prepare\s*\(/i, msg: '->prepare() is allowed only in ' + DATA_DIR },
+  { id: 'db-handle', re: /\bDatabase(Config)?\b/, msg: 'the Database / DatabaseConfig handle is used only inside ' + DATA_DIR + ' (no DAL bypass)' },
 ];
+// Upper-case SQL keywords mark a literal as a SQL fragment for the interpolation and
+// concatenation rules below (project SQL is written in upper case). One flat alternation.
+const SQL_KEYWORD = /\b(SELECT|INSERT|UPDATE|DELETE|REPLACE|FROM|WHERE|VALUES|SET|JOIN|INTO|LIMIT|HAVING|UNION|ORDER BY|GROUP BY)\b/;
+const SQL_BUILDERS = /\b(sprintf|vsprintf|str_replace|strtr|implode|join)\s*\(\s*$/i;
 // SELECT needs SQL shape after FROM (end of string, `;`, or a clause keyword), so prose such as
 // "Select a principal from the list" is not mistaken for a query.
 const SQL_STRING = /^\s*(SELECT\s+[\s\S]+?\s+FROM\s+[`\w.]+\s*(;|$|\b(WHERE|JOIN|INNER|LEFT|RIGHT|ORDER|GROUP|LIMIT|FOR|AS|UNION)\b)|INSERT\s+(IGNORE\s+)?INTO\b|UPDATE\s+[`\w.]+\s+SET\b|DELETE\s+FROM\b|REPLACE\s+INTO\b|(CREATE|ALTER|DROP)\s+(TEMPORARY\s+)?(TABLE|DATABASE|SCHEMA|INDEX|VIEW|USER|TRIGGER|PROCEDURE|FUNCTION)\b|TRUNCATE\s+(TABLE\s+)?[`\w]|GRANT\s+\w|REVOKE\s+\w|LOCK\s+TABLES?\b|SET\s+(NAMES|SESSION|GLOBAL|TRANSACTION)\b|(START\s+TRANSACTION|BEGIN\s+WORK)\b)/i;
@@ -181,6 +198,8 @@ function checkPhp(file, src) {
   if (!isProductionPhp(file)) return out; // tests may spawn processes, dump values and name CORS headers
   const inData = file.startsWith(DATA_DIR);
   for (const r of CODE_RULES) if (!(r.allow && r.allow(file)) && r.re.test(lex.code)) out.push(r.msg);
+  for (const r of EVERYWHERE_RULES) if (r.re.test(lex.code)) out.push(r.msg);
+  if (inData) for (const v of checkSqlConstruction(lex)) out.push(v);
   if (!inData) {
     for (const r of DATA_RULES) if (r.re.test(lex.code)) out.push(r.msg);
     for (const s of lex.strings) if (SQL_STRING.test(s)) out.push('SQL statement outside ' + DATA_DIR + ': "' + s.slice(0, 40) + '"');
@@ -204,11 +223,39 @@ function checkPhp(file, src) {
   return out;
 }
 
+// Inside the data layer, SQL must be a plain single-quoted literal with bound parameters:
+// no "…$var…" interpolation, no `.` concatenation and no sprintf-style assembly of a SQL
+// fragment. A heuristic, not a proof of SQL safety — review and tests remain the backstop.
+function checkSqlConstruction(lex) {
+  const out = [];
+  const code = lex.code;
+  const prevNonSpace = (k) => {
+    k--;
+    while (k >= 0 && /\s/.test(code[k])) k--;
+    return k;
+  };
+  const nextNonSpace = (k) => {
+    while (k < code.length && /\s/.test(code[k])) k++;
+    return k;
+  };
+  for (const s of lex.spans) {
+    if (s.dq && s.value.includes('$')) out.push('interpolated double-quoted string in the data layer (bind parameters instead)');
+    if (!SQL_KEYWORD.test(s.value)) continue;
+    const before = prevNonSpace(s.start);
+    const after = nextNonSpace(s.end);
+    const concatBefore = before >= 0 && (code[before] === '.' || (code[before] === '=' && code[before - 1] === '.'));
+    const concatAfter = code[after] === '.' && !/[0-9]/.test(code[after + 1] || '');
+    if (concatBefore || concatAfter) out.push('SQL fragment built by concatenation in the data layer: "' + s.value.slice(0, 40) + '"');
+    if (SQL_BUILDERS.test(code.slice(Math.max(0, s.start - 40), s.start))) out.push('SQL fragment assembled by a string builder in the data layer: "' + s.value.slice(0, 40) + '"');
+  }
+  return out;
+}
+
 function checkTree(files, dirs = []) {
   const out = [];
   for (const p of [...files, ...dirs]) {
     for (const gate of NOT_YET_AUTHORIZED) {
-      if (p === gate || p.startsWith(gate + '/')) out.push(p + ': ' + gate + ' is not authorized in BF-1');
+      if (p === gate || p.startsWith(gate + '/')) out.push(p + ': ' + gate + ' is not authorized yet');
     }
   }
   for (const f of files) {
@@ -405,7 +452,34 @@ function selftest() {
 
   const treeCase = (name, files, needle) => cases.push({ name, run: () => checkTree(files), expect: needle });
   cases.push({ name: 'a clean tree passes', run: () => checkTree(['server/src/X.php', 'server/public/api/.htaccess'], ['server/src']), expect: 0 });
-  treeCase('server/src/Data (BF-2) is gated', ['server/src/Data/Database.php'], 'not authorized');
+  cases.push({ name: 'server/src/Data is authorized since BF-2A', run: () => checkTree(['server/src/Data/Database.php'], ['server/src/Data']), expect: 0 });
+  treeCase('server/bin (BF-2B) is still gated', ['server/bin/migrate.php'], 'not authorized');
+
+  // BF-2A data-layer boundary.
+  const DB = 'server/src/Data/Database.php';
+  clean('Data: PDO construction and prepare are allowed', DB, S + "final class Database { private function f(\\PDO $pdo): void { $s = $pdo->prepare('SELECT id FROM t WHERE a = ?'); $s->bindValue(1, $x, \\PDO::PARAM_INT); } }\n");
+  clean('Data: a double-quoted constant without $ is allowed', 'server/src/Data/DatabaseConfig.php', S + "const INIT = \"SET time_zone='+00:00'\";\n");
+  clean('Data: a DSN built with sprintf is not SQL', 'server/src/Data/DatabaseConfig.php', S + "$d = sprintf('mysql:host=%s;port=%d', $h, $p);\n");
+  clean('Data: lower-case messages may be concatenated', DB, S + "error_log('tamos: rollback failed (' . $code . ')');\n");
+  clean('Kernel may catch DatabaseError (not the handle)', 'server/src/Http/Kernel.php', S + 'use TamOs\\Data\\DatabaseError;\ntry { f(); } catch (DatabaseError $e) {}\n');
+  clean('Logger may test for PDOException', 'server/src/Log/Logger.php', S + "$m = $e instanceof \\PDOException ? 'x' : 'y';\n");
+  for (const dir of ['Controller', 'Identity', 'Http']) {
+    dirty('PDO in ' + dir + ' is caught', 'server/src/' + dir + '/X.php', S + "$p = new \\PDO('mysql:');\n", 'PDO');
+    dirty('SQL in ' + dir + ' is caught', 'server/src/' + dir + '/X.php', S + "$q = 'SELECT id FROM users WHERE id = ?';\n", 'SQL');
+  }
+  dirty('a Database handle in a controller is caught (DAL bypass)', 'server/src/Controller/X.php', S + 'function f(Database $db): void { $db->select($sql); }\n', 'DAL bypass');
+  dirty('DatabaseConfig in a controller is caught (DAL bypass)', 'server/src/Controller/X.php', S + '$c = DatabaseConfig::fromConfig($config);\n', 'DAL bypass');
+  dirty('->prepare outside Data is caught', 'server/src/Http/X.php', S + "$s = $h->prepare('x');\n", 'prepare');
+  dirty('mysqli inside Data is caught', DB, S + "$m = new mysqli('h');\n", 'mysqli');
+  dirty('->query inside Data is caught', DB, S + "$pdo->query('SELECT 1');\n", 'query');
+  dirty('->exec inside Data is caught (BF-2A)', DB, S + "$pdo->exec('CREATE TABLE t (a INT)');\n", 'exec');
+  dirty('interpolated SQL in Data is caught', DB, S + '$s = $pdo->prepare("SELECT a FROM t WHERE id = $id");\n', 'interpolated');
+  dirty('any interpolated string in Data is caught', DB, S + '$m = "value {$x}";\n', 'interpolated');
+  dirty('SQL concatenated after a literal is caught', DB, S + "$s = $pdo->prepare('SELECT a FROM t WHERE id = ' . $id);\n", 'concatenation');
+  dirty('SQL concatenated before a literal is caught', DB, S + "$s = $pdo->prepare($cols . ' FROM t WHERE a = ?');\n", 'concatenation');
+  dirty('SQL appended with .= is caught', DB, S + "$sql .= ' WHERE id = ?';\n", 'concatenation');
+  dirty('SQL assembled with sprintf is caught', DB, S + "$sql = sprintf('SELECT %s FROM t', $col);\n", 'string builder');
+  dirty('SQL assembled with implode is caught', DB, S + "$sql = implode(' AND ', $parts) ;$w = implode(' WHERE ', $x);\n", 'string builder');
   treeCase('server/migrations is gated', ['server/migrations/0000_init.sql'], 'not authorized');
   cases.push({ name: 'server/src/Policy is gated', run: () => checkTree([], ['server/src/Policy']), expect: 'not authorized' });
   dirty('a variable include outside the allow-list is caught', 'server/src/Http/X.php', S + 'require $file;\n', 'include');

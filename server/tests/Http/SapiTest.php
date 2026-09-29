@@ -164,6 +164,23 @@ return [
             ($s['stop'])();
         }
     },
+    'real server: /api/health is 200 with no, a broken or an unreachable db section' => static function () use ($startServer, $writeConfig, $assertEnvelope): void {
+        $base = ['env' => 'production', 'origin' => 'https://tamos.test', 'log_path' => tempDir() . DIRECTORY_SEPARATOR . 'api.log'];
+        foreach ([
+            'none' => $base,
+            'broken' => $base + ['db' => 'mysql://tamos_ci:hunter2-password@db.internal.example/tamos_prod'],
+            'unreachable' => $base + ['db' => ['host' => '127.0.0.1', 'port' => 1, 'name' => 'tamos_prod', 'user' => 'tamos_ci', 'pass' => 'hunter2-password']],
+        ] as $label => $values) {
+            $s = $startServer($writeConfig($values));
+            try {
+                $r = ($s['send'])('GET', '/api/health');
+                $assertEnvelope($r, 200, null);
+                assertTrue(!str_contains($r['body'], 'hunter2') && !str_contains($r['body'], 'tamos_prod'), $label . ': no db detail');
+            } finally {
+                ($s['stop'])();
+            }
+        }
+    },
     'real server: missing, placeholder or misplaced configuration fails closed with 503' => static function () use ($startServer, $writeConfig, $assertEnvelope, $serverRoot): void {
         $cases = [
             'missing' => tempDir() . '/absent.php',
