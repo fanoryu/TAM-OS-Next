@@ -766,6 +766,41 @@ data scope are enforced; workspace derivation is correct; authenticated end-to-e
 automatic CEO or Employee fallback at any step. Frontend hosting and the production cutover gate are in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8.
 
+### Backend foundation — BF-1 (source only; not deployed, no data, no identity)
+
+`server/` holds the first slice of the ADR-0004 backend: the HTTP foundation only. It has **no database,
+SQL, migrations, authentication, sessions, policy or business endpoint**, and the frontend makes no call
+to it. The shipped application is unchanged and still client-only.
+
+| Path | Role |
+|---|---|
+| `server/public/api/index.php`, `.htaccess` | Front controller and rewrite, deployed at `<document root>/api/` (host behaviour not yet verified) |
+| `server/src/bootstrap.php` | Internal autoloader (no Composer), error/exception/fatal handlers, `display_errors=0`, fail-closed config load |
+| `server/src/Config/` | Loads a PHP-array config from `TAMOS_CONFIG` or `<app root>/config/config.local.php`; rejects unknown keys, placeholders, and a config or log inside the document root |
+| `server/src/Http/` | `Kernel` (pipeline + single exception boundary), `Router` (exact routes, canonical paths only), `Request` (the only reader of request globals), `Response` (the only header emitter), `JsonBody`, `OriginGuard`, `ErrorCode`, `ApiHeaders` |
+| `server/src/Controller/HealthController.php` | `GET /api/health` → `{"ok":true,"data":{"status":"ok"},"requestId":…}`; no database, version or host detail |
+| `server/src/Identity/` | `PrincipalResolver` seam; the only implementation, `NullPrincipalResolver`, returns null for every request |
+| `server/src/Log/` | JSON-lines log outside the web root; metadata only, redacted, traces never in production |
+| `server/dev/router.php` | Built-in-server router for local use; never deployed |
+| `server/tests/` | Custom test runner (no PHPUnit): unit, in-process contract and real-server tests |
+
+**Pipeline.** Route (404 / 405 + `Allow`) → for `POST`/`PUT`/`PATCH`/`DELETE`: exact-origin check
+(403), `application/json` (415), 64 KiB body cap (413), one JSON object (400) → query allow-list (400) →
+principal (null) → handler → envelope. Errors use 13 fixed codes (`ErrorCode`) with fixed messages; any
+other throwable is a logged, redacted `500 internal_error`. Every response carries the API headers from
+[`tools/package-headers.js`](tools/package-headers.js), mirrored in `ApiHeaders.php`, plus a
+server-generated `X-Request-Id`; HSTS is added only in production over HTTPS. There is no CORS.
+The origin check is only half of CSRF defense; the synchronizer token arrives with sessions (SDR-0002
+§3.4).
+
+**Enforcement.** [`tools/verify-backend-boundary.js`](tools/verify-backend-boundary.js) keeps PDO, SQL and
+`->query/exec/prepare` out of everything but the future `server/src/Data/`, and bans eval, process
+execution, `unserialize`, `extract`, debug output, native sessions, cookies, CORS, stray superglobal or
+header use, and missing `strict_types`. It also gates not-yet-authorized directories (`Data/`,
+`migrations/`, `bin/`, `Policy/`), checks the header mirror, and fails on any `server/` file that
+`.gitignore` would silently drop. `.github/workflows/backend.yml` (`backend-verify`) runs it with
+`php -l` and the tests on the runner's PHP 8.3.
+
 ### Release engineering
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the

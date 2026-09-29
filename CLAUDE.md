@@ -54,6 +54,9 @@ work lands, no backend exists and none may be described as implemented.
 - **Deployment package** — the canonical distribution (ADR-0002 Model B): the static document root
   assembled from the source by the package builder, recorded by a committed package manifest under
   `dist/`. Earlier single-file releases stay in `dist/` as frozen, digest-pinned history.
+- **Backend source** — a `server/` folder holding the ADR-0004 same-origin PHP API, grown only through
+  its separately authorized Multi-User milestones and checked by its own boundary tool, tests and CI.
+  It is not part of the deployment package and never holds configuration secrets.
 - **Governance & docs** — root Markdown files and a `docs/` folder; `.github/` for CI, release, and
   issue/PR templates.
 

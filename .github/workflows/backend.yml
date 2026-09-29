@@ -1,0 +1,58 @@
+name: Backend
+
+# Backend Foundation (BF-1): lint, boundary-check and test the PHP backend under server/.
+# PHP comes from the GitHub-hosted runner image (no third-party setup action). The job fails
+# loudly if that PHP is not 8.3.x — the production target (ADR-0004) — rather than testing
+# against a different version. No Composer, no database, no network service.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js (LTS)
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Require the runner's PHP to be 8.3.x
+        run: |
+          php -v
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 3 ? 0 : 1);' || {
+            echo "::error::Runner PHP is not 8.3.x. Stop: adding a PHP setup action needs owner approval (CLAUDE.md §20)."
+            exit 1
+          }
+
+      - name: Lint every tracked PHP file
+        run: |
+          set -e
+          count=0
+          while IFS= read -r -d '' f; do
+            php -l "$f" > /dev/null
+            count=$((count + 1))
+          done < <(git ls-files -z -- 'server/*.php')
+          test "$count" -gt 0
+          echo "php -l: $count files, no syntax errors"
+
+      - name: Backend boundary check (selftest, then the repository)
+        run: |
+          node tools/verify-backend-boundary.js --selftest
+          node tools/verify-backend-boundary.js
+
+      - name: Backend tests
+        run: php server/tests/run.php

@@ -32,3 +32,4 @@
 
 # Vendored third-party runtime (Distribution-1)
 /vendor/                @fanoryu
+/server/                @fanoryu
