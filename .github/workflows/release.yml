@@ -1,8 +1,9 @@
 name: Release
 
 # Publishes a GitHub Release when a version tag (v*) is pushed.
-# Guardrails: the tag MUST equal v<APP_VERSION>, build + verify MUST pass, and the
-# version-derived portable HTML MUST exist — otherwise nothing is published.
+# Guardrails: the tag MUST equal v<APP_VERSION>, verify + build MUST pass, the build MUST
+# reproduce the committed package manifest, and the version-derived package ZIP MUST exist
+# and match that manifest — otherwise nothing is published (Distribution-1).
 on:
   push:
     tags:
@@ -23,19 +24,21 @@ jobs:
         with:
           node-version: lts/*
 
-      - name: Build portable single file
-        run: node tools/build-single-file.js
-
       - name: Verify build
         run: node tools/verify-build.js
+
+      - name: Build deployment package
+        run: node tools/build-package.js
+
+      - name: Confirm the build reproduces the committed package manifest
+        run: git diff --exit-code -- dist/package-manifest.json
 
       - name: Determine version from APP_VERSION
         id: meta
         run: |
           VERSION="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().version)")"
-          DISTNAME="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().distName)")"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "dist=dist/$DISTNAME" >> "$GITHUB_OUTPUT"
+          echo "zip=dist/tam-os-v$VERSION-package.zip" >> "$GITHUB_OUTPUT"
           echo "expected_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Confirm tag matches APP_VERSION
@@ -48,14 +51,15 @@ jobs:
           fi
           echo "Tag $TAG matches APP_VERSION."
 
-      - name: Confirm portable HTML exists and filename matches the version
+      - name: Confirm package ZIP exists and matches the committed manifest
         run: |
-          DIST="${{ steps.meta.outputs.dist }}"
-          if [ ! -f "$DIST" ]; then
-            echo "::error::Portable HTML not found: $DIST"
+          ZIP="${{ steps.meta.outputs.zip }}"
+          if [ ! -f "$ZIP" ]; then
+            echo "::error::Package ZIP not found: $ZIP"
             exit 1
           fi
-          echo "Found $DIST ($(wc -c < "$DIST") bytes)"
+          node -e "const m=require('./dist/package-manifest.json');const h=require('crypto').createHash('sha256').update(require('fs').readFileSync(process.argv[1])).digest('hex');if(m.zip.name!==require('path').basename(process.argv[1])||m.zip.sha256!==h){console.error('::error::Package ZIP does not match dist/package-manifest.json');process.exit(1)}" "$ZIP"
+          echo "Found $ZIP ($(wc -c < "$ZIP") bytes), matching dist/package-manifest.json"
 
       - name: Resolve release notes source
         id: notes
@@ -66,18 +70,18 @@ jobs:
             echo "file=CHANGELOG.md" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub Release (idempotent) and upload asset
+      - name: Create GitHub Release (idempotent) and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          DIST="${{ steps.meta.outputs.dist }}"
+          ZIP="${{ steps.meta.outputs.zip }}"
           NOTES="${{ steps.notes.outputs.file }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — refreshing asset only (no duplicate release)."
-            gh release upload "$TAG" "$DIST" --clobber
+            echo "Release $TAG already exists — refreshing assets only (no duplicate release)."
+            gh release upload "$TAG" "$ZIP" dist/package-manifest.json --clobber
           else
-            gh release create "$TAG" "$DIST" \
+            gh release create "$TAG" "$ZIP" dist/package-manifest.json \
               --title "TAM OS $TAG" \
               --notes-file "$NOTES" \
               --verify-tag

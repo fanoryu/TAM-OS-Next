@@ -29,8 +29,8 @@ release** (Identity Refresh; the prior v2.10.0 release remains published and int
 | 8 | **Controlled Pilot** (PILOT-1) | **APPROVED, NOT YET LAUNCHED — ON HOLD** until the multi-user readiness gate |
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |
 | 10 | Pilot Exit Review | **UPCOMING** |
-| 11 | Distribution-1 — Modular Distribution Migration | **UPCOMING — after SDR-0002, before Multi-User** (no longer post-pilot) |
-| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; SDR-0002 Accepted; still blocked on Distribution-1 and per-milestone authorization) |
+| 11 | Distribution-1 — Modular Distribution Migration | **COMPLETED** (2026-09-29) — strict-CSP deployment package; unreleased until the next version |
+| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; SDR-0002 Accepted; Distribution-1 completed; still blocked on per-milestone authorization) |
 | 13 | General-Use Readiness / Hardening | **FUTURE** |
 | 14 | UX-006F / v3.0.0 | **FUTURE** |
 

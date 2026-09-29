@@ -1,7 +1,8 @@
 # `tools/` — Build, Verify, and Runtime Harnesses
 
-Node is the **only** place Node is used in this project (`CLAUDE.md` §3). The application itself ships
-zero dependencies and never runs Node. Nothing here needs `npm install`.
+Node is the **only** place Node is used in this project (`CLAUDE.md` §3). The application itself never
+runs Node; its only runtime dependency is the vendored, pinned SheetJS parser. Nothing here needs
+`npm install`.
 
 All commands are run from the repository root.
 
@@ -13,7 +14,10 @@ All commands are run from the repository root.
 |---|---|
 | [`module-order.js`](module-order.js) | **Single source of truth** for classic-script load order, mirrored by `index.html` |
 | [`app-version.js`](app-version.js) | **Single source of truth** for the version in tooling — parses `APP_VERSION` / `APP_RELEASE_NAME` from `js/core/constants.js` and derives the artifact filename |
-| [`build-single-file.js`](build-single-file.js) | Assembles `css/` + `js/` into the portable single-file build. Assembles only — no transform, no minify, no reorder |
+| [`build-package.js`](build-package.js) | Builds the Distribution-1 deployment package (`dist/package/`, the ZIP, and the committed `dist/package-manifest.json`). Copies only — no inline, transform, minify or reorder |
+| [`package-headers.js`](package-headers.js) | **Single source of truth** for the production response headers (CSP, security headers, cache rules) |
+| [`serve-package.js`](serve-package.js) | Local loopback server for `dist/package/` that applies the production header contract — for browser validation only, never deployed |
+| [`build-single-file.js`](build-single-file.js) | **Retired** by Distribution-1 — refuses to run so it cannot overwrite a frozen single-file release |
 | [`verify-build.js`](verify-build.js) | The invariant verifier. A change is not done until this passes completely |
 | [`integration-surface-manifest.js`](integration-surface-manifest.js) | The frozen UX-006C3 integration surface (43 entries), consumed by the verifier and the authorization harness |
 | [`check-commit-attribution.js`](check-commit-attribution.js) | Owner-only authorship guard — the single source of attribution policy, shared by the tracked hook and CI (`CLAUDE.md` §15.7) |
@@ -22,12 +26,19 @@ All commands are run from the repository root.
 ### Build
 
 ```bash
-node tools/build-single-file.js
+node tools/build-package.js
 ```
 
-Writes `dist/tam-os-v<APP_VERSION>.html`. The version is **derived, never typed** — it comes from
-`js/core/constants.js` via `app-version.js`. The build is reproducible: the same source produces
-byte-identical output.
+Writes `dist/package/` (the document root), `dist/tam-os-v<APP_VERSION>-package.zip` and
+`dist/package-manifest.json`. Only the manifest is committed. The version is **derived, never typed** —
+it comes from `js/core/constants.js` via `app-version.js`. The build is reproducible: the same source
+produces byte-identical files, ZIP and manifest.
+
+Serve the built package locally under the production headers:
+
+```bash
+node tools/serve-package.js        # http://127.0.0.1:8765/
+```
 
 ### Verify
 
@@ -35,9 +46,10 @@ byte-identical output.
 node tools/verify-build.js
 ```
 
-Guards the CSS golden-master pin, build fidelity (output equals concatenated source), version identity,
-schema/storage/migration invariants, empty seed data, absence of ES-module syntax, the module
-decomposition and load-order agreement, and the `dist/` single-artifact invariant.
+Guards the CSS golden-master pin, package determinism and fidelity (the committed manifest equals a
+fresh assembly; every package file equals its source), the frozen single-file releases (pinned by
+digest), the strict-CSP shape, version identity, schema/storage/migration invariants, empty seed data,
+absence of ES-module syntax, and the module decomposition and load-order agreement.
 
 Print the derived version without building:
 
@@ -185,7 +197,7 @@ Get-ChildItem tools/verify-*-runtime.js | ForEach-Object { node $_.FullName *> $
 
 ## Rules
 
-- **Never hand-edit the portable build.** Regenerate it (`CLAUDE.md` §10.4).
+- **Never hand-edit generated output or a frozen release.** Rebuild the package (`CLAUDE.md` §10.4).
 - **Never hardcode a version** in tooling — derive it from `app-version.js` (`CLAUDE.md` §10.1).
 - **If you add or move a JS module**, update `module-order.js` **and** `index.html` together
   (`CLAUDE.md` §4.2).

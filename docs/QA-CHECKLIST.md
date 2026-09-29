@@ -1,16 +1,17 @@
 # QA Checklist — TAM Intelligence OS
 
-Run this checklist against **both** the modular source (`index.html`) and the portable build
-(`dist/tam-os-v<APP_VERSION>.html`) before every release. Use fabricated placeholder
-data — never real company data.
+Run this checklist against the **deployment package** built by `node tools/build-package.js` and
+served by `node tools/serve-package.js` (the production header contract, CSP included) before every
+release. Use fabricated placeholder data — never real company data.
 
 ## Environments
-- [ ] Modular source boots (served over HTTP), sidebar mounts, correct version in title/footer
-- [ ] Portable dist boots (opened directly), sidebar mounts, correct version
-- [ ] **Zero browser console errors** in both
+- [ ] Served package boots over HTTP, sidebar mounts, correct version in title/footer
+- [ ] **Zero browser console errors** and **zero Content-Security-Policy violations**
+- [ ] SheetJS loads from `vendor/` (same-origin); fonts render; no third-party network request
 
 ## Build & verify
-- [ ] `node tools/build-single-file.js` succeeds; dist filename = `...-v<APP_VERSION>.html`
+- [ ] `node tools/build-package.js` succeeds; ZIP = `tam-os-v<APP_VERSION>-package.zip`; rebuilding
+      leaves `dist/package-manifest.json` unchanged
 - [ ] `node tools/verify-build.js` passes (all checks)
 - [ ] PowerShell fallback derives the same version (optional)
 

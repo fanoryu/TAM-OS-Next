@@ -27,5 +27,8 @@
 /docs/                  @fanoryu
 /*.md                   @fanoryu
 
-# Portable release artifact
+# Historical single-file releases + Distribution-1 package manifest
 /dist/                  @fanoryu
+
+# Vendored third-party runtime (Distribution-1)
+/vendor/                @fanoryu

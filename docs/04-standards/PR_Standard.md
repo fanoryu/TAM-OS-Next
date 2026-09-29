@@ -9,8 +9,8 @@ expresses one purpose, lands as one feature commit, and stays within its authori
   `release/<version>`. Example: `feature/pr-5e-custodian`, `docs/project-governance`.
 - **Exactly one feature commit.** The commit subject follows the form named by the SPR, e.g.
   `feat(domain): second aggregate boundary — EmployeeEmploymentAggregate (PR-5E)`.
-- **Source and generated output together.** When the portable build is regenerated, `dist/` is
-  committed with the source that produced it (documentation-only PRs touch neither).
+- **Source and generated record together.** When the source changes, the regenerated
+  `dist/package-manifest.json` is committed with it (documentation-only PRs touch neither).
 - **Draft first.** Open as a draft; do not mark ready for review until every pre-review gate passes.
 
 ## Scope discipline
@@ -26,8 +26,8 @@ A PR may leave draft only when **all** of the following hold:
 - [ ] Exactly one feature commit; diff within approved scope.
 - [ ] Verifier passes completely.
 - [ ] Runtime verification passes (fabricated data only).
-- [ ] Generated `dist` matches source (byte-reproducible), or the PR is documentation-only.
-- [ ] Modular source **and** portable build boot with zero console errors (for code changes).
+- [ ] The committed package manifest matches a fresh, byte-reproducible build, or the PR is documentation-only.
+- [ ] The served package boots with zero console errors and zero CSP violations (for code changes).
 - [ ] CI succeeds; CodeQL succeeds; no new CodeQL alerts.
 - [ ] `APP_VERSION` and `SCHEMA_VERSION` unchanged (unless the SPR authorizes a change).
 - [ ] Storage keys unchanged; golden master untouched.

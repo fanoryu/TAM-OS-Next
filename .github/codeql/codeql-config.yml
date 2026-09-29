@@ -13,3 +13,6 @@ name: "TAM Intelligence OS — CodeQL config"
 paths-ignore:
   - "dist/**"
   - "tam-intelligence-os-v2.5.2.html"
+  # Distribution-1: vendored third-party code (SheetJS 0.18.5, pinned by SRI) is not ours to fix;
+  # analyzing its minified build would only report upstream findings.
+  - "vendor/**"

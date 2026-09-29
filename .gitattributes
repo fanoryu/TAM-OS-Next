@@ -17,4 +17,9 @@
 # Generated / frozen large HTML artifacts: still tracked, but marked generated so GitHub
 # collapses diffs and excludes them from language statistics. (They remain LF text.)
 dist/*.html                       linguist-generated=true
+dist/package-manifest.json        linguist-generated=true
+
+# Vendored third-party runtime (Distribution-1): byte-exact, Subresource-Integrity pinned —
+# never normalize line endings, and keep it out of language statistics.
+vendor/**                         -text linguist-vendored=true
 tam-intelligence-os-v2.5.2.html   linguist-generated=true

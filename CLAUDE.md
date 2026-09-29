@@ -35,8 +35,8 @@ work lands, no backend exists and none may be described as implemented.
    feature. When in doubt, do less and preserve invariants.
 2. **Preserve the architecture.** This is a single shared global scope of classic scripts by
    deliberate design. Do not introduce frameworks, bundlers, or module systems to "modernize" it.
-3. **Determinism.** The build must be reproducible; the same source MUST produce the same portable
-   output. Verification is mechanical, not a matter of opinion.
+3. **Determinism.** The build must be reproducible; the same source MUST produce the same deployment
+   package. Verification is mechanical, not a matter of opinion.
 4. **One source of truth.** Every fact (version, load order, schema) lives in exactly one place.
    Never create a second copy that can drift.
 5. **Explicit over clever.** Prefer readable, boring code that matches the surrounding style over
@@ -48,10 +48,12 @@ work lands, no backend exists and none may be described as implemented.
 
 - **Modular source** — the human-edited application: `index.html` + a `css/` folder + a `js/` folder
   of classic-script modules grouped by domain (`core`, `ui`, `finance`, `people`, `import`,
-  `analytics`).
+  `analytics`), plus pinned third-party runtime code under `vendor/`.
 - **Build/verify tooling** — a `tools/` folder of Node scripts (plus PowerShell fallbacks) that
-  assemble and check the portable build. It is the **only** place Node is used.
-- **Portable build** — a single self-contained HTML file under `dist/`, generated from the source.
+  assemble and check the deployment package. It is the **only** place Node is used.
+- **Deployment package** — the canonical distribution (ADR-0002 Model B): the static document root
+  assembled from the source by the package builder, recorded by a committed package manifest under
+  `dist/`. Earlier single-file releases stay in `dist/` as frozen, digest-pinned history.
 - **Governance & docs** — root Markdown files and a `docs/` folder; `.github/` for CI, release, and
   issue/PR templates.
 
@@ -72,9 +74,10 @@ duplicate that map here.
    backend service, VPS, or client-side data synchronization requires a further ADR. The browser is an
    **untrusted client**: once the backend exists, authentication, authorization and read scope are
    enforced by its central policy and data-access layer, the browser never reaches the database, and
-   client-side checks are UX affordance only. External network references are limited to the
-   spreadsheet parser and, once implemented, that same-origin API; typography is embedded. Until then
-   no user data is transmitted; afterwards it is transmitted only to that API.
+   client-side checks are UX affordance only. The page makes no third-party network request: the
+   spreadsheet parser is vendored and typography is embedded, so its only network peer, once
+   implemented, is that same-origin API. Until then no user data is transmitted; afterwards it is
+   transmitted only to that API.
 4. **Derived, not duplicated (SHOULD).** Prefer computing display state from stored data at render
    time over storing new flags — this avoids migrations and stale state.
 5. **CSS is a golden master (MUST).** Styles are treated as frozen; changes to CSS are exceptional
@@ -84,9 +87,10 @@ duplicate that map here.
 
 1. **Confirm the baseline** before editing: working tree clean, correct branch, latest commit and
    release tag as expected. If the baseline is unexpected, stop and reconcile.
-2. **Edit the modular source only.** Never hand-edit the portable build.
+2. **Edit the modular source only.** Never hand-edit generated output or the frozen historical releases.
 3. **Build**, then **verify** (see §10, §11).
-4. **Validate in the browser** — modular source and portable build (see §12).
+4. **Validate in the browser** — the deployment package served over HTTP under its production headers
+   (see §12).
 5. **Update documentation** affected by the change.
 6. Prepare the change for review; perform approval-gated actions (§20) only after approval.
 
@@ -97,7 +101,8 @@ contributor contract is [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 1. **Match surrounding style.** Naming, indentation, comment density, and idioms should be
    indistinguishable from the neighboring code.
-2. **No new runtime dependencies.** The frontend ships zero dependencies; keep it that way. A backend
+2. **No new runtime dependencies.** The frontend ships no dependency beyond the vendored, pinned and
+   integrity-checked spreadsheet parser; keep it that way. A backend
    (Composer) dependency is permitted only when it is justified, minimal, pinned and locked,
    security-reviewed, and approved under §20 (ADR-0004).
 3. **Escape untrusted data (MUST).** Any employee/company-supplied value rendered into the DOM MUST
@@ -166,8 +171,10 @@ Detailed data-safety guidance: [`docs/DATA-SAFETY.md`](docs/DATA-SAFETY.md).
 1. **Version is derived, never hardcoded (MUST).** The release version lives once, in the source
    constants; the tooling derives the output filename and identity from it. Never type a version
    into the tooling.
-2. **The build only assembles.** It inlines CSS and JS in the manifest order into one portable file;
-   it does not transform, minify, or reorder logic.
+2. **The build only assembles.** It copies the files `index.html` references — CSS, the manifest-ordered
+   JS, vendored code — plus their licence texts into the deployment package, each byte-identical at the
+   same relative path; it does not inline, transform, minify, or reorder logic. The page carries no
+   inline executable script, so it runs under a strict Content-Security-Policy.
 3. **Reproducible (MUST).** The same source produces byte-identical output. If output changes without
    a source change, investigate before proceeding.
 4. **Never edit the output by hand.** Regenerate it from source.
@@ -176,9 +183,11 @@ Detailed data-safety guidance: [`docs/DATA-SAFETY.md`](docs/DATA-SAFETY.md).
 
 1. **Verification must pass (MUST).** The build is not "done" until the verifier passes all checks.
    A green build is necessary but not sufficient — it does not prove behavior.
-2. **The verifier guards invariants**, including: CSS golden master, build fidelity (output equals
-   concatenated source), version identity consistency, schema/storage/migration invariants, empty
-   seed data, absence of ES-module syntax, and the module decomposition/load-order agreement.
+2. **The verifier guards invariants**, including: CSS golden master, package fidelity (every package
+   file equals its source; the committed manifest equals a fresh, deterministic assembly), frozen
+   historical releases pinned by digest, strict-CSP shape, version identity consistency,
+   schema/storage/migration invariants, empty seed data, absence of ES-module syntax, and the module
+   decomposition/load-order agreement.
 3. **Test to break, not to confirm.** Exercise edge cases and failure paths, not just the happy path.
 4. **Regressions are release blockers (MUST).** Any regression in a previously-working feature blocks
    the change until fixed.
@@ -187,9 +196,11 @@ The living checklist is [`docs/QA-CHECKLIST.md`](docs/QA-CHECKLIST.md).
 
 ## 12. Browser Validation Rules
 
-1. **Validate both artifacts (MUST).** Every change is exercised in the modular source **and** the
-   portable build.
-2. **Zero console errors (MUST).** Both must boot and operate with no console errors.
+1. **Validate the package over HTTP (MUST).** Every change is exercised in the built deployment
+   package served over HTTP with the production header contract, including its Content-Security-Policy
+   (`file://` is not a supported way to run TAM OS).
+2. **Zero console errors (MUST).** The package must boot and operate with no console errors and no
+   Content-Security-Policy violations.
 3. **Confirm persistence.** Data must survive reload; no duplicate records are produced.
 4. **Confirm interaction invariants.** Search keeps focus, scroll position is preserved, and menus
    open/close correctly.
@@ -201,7 +212,8 @@ The living checklist is [`docs/QA-CHECKLIST.md`](docs/QA-CHECKLIST.md).
 1. **Releases are proposed, not published directly.** Present a Release Candidate and obtain explicit
    approval before any release action (see §20).
 2. **Tag-driven and guarded (MUST).** Publishing is triggered by a version tag; automation refuses to
-   publish unless the tag equals the source version and the portable build exists.
+   publish unless the tag equals the source version and the deployment package builds, reproduces the
+   committed package manifest, and matches it.
 3. **Idempotent (MUST).** Re-running the release must not create duplicate releases or corrupt the
    asset.
 4. **Never rewrite a published release.** A shipped tag, release, and asset are immutable; corrections
@@ -221,8 +233,9 @@ The step-by-step procedure is [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.m
 
 ## 15. Git Rules
 
-1. **Commit source and its generated output together.** When the portable build is regenerated, it is
-   committed with the source that produced it.
+1. **Commit source and its generated record together.** When the source changes, the regenerated
+   package manifest is committed with it. Package files and the package ZIP are build output and are
+   never committed.
 2. **Clear, imperative commit subjects.** Release commits follow the agreed release-commit format.
 3. **Do not rewrite published history (MUST).** No force-push or history rewrite of shared branches.
 4. **Never commit secrets or real data (MUST).** No credentials, tokens, `.env` files, real company
@@ -302,9 +315,10 @@ A change is **done** only when **all** of the following hold:
 
 - [ ] The modular source is edited (never the generated output by hand).
 - [ ] Load-order manifest and `index.html` agree (if modules changed).
-- [ ] The portable build is regenerated from source.
+- [ ] The deployment package is rebuilt from source and its manifest committed.
 - [ ] Verification passes **all** checks.
-- [ ] Modular source and portable build both boot with **zero console errors**.
+- [ ] The package, served over HTTP under its production headers, boots with **zero console errors**
+      and no Content-Security-Policy violations.
 - [ ] Data persists across reload; no duplicates; committed data is immutable.
 - [ ] Invariants preserved: schema version, storage keys, migration flags, empty seed, CSS golden
       master (or an intentional, documented migration).

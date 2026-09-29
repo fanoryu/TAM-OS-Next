@@ -41,7 +41,7 @@ Do **not** do any of the following without the maintainer's explicit approval:
 
 ## Architecture (what you are editing)
 
-- **Modular source** = `index.html` + `css/` (5 files) + `js/` (**72 browser-loaded** classic-script
+- **Modular source** = `index.html` + `css/` (6 files) + `js/` (**72 browser-loaded** classic-script
   modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/
   repository/`), loaded as ordered `<script>` tags sharing one global scope. **No ES modules, no
   bundler.** A 73rd module, `js/cli/cli.js`, is a Node-only ingress and is deliberately **not**
@@ -49,11 +49,14 @@ Do **not** do any of the following without the maintainer's explicit approval:
 - **Load order is behavior-critical** and lives in exactly one place: `tools/module-order.js`.
   `index.html` mirrors it; the build/verify tools read it; `verify-build.js` asserts they match.
   If you add or move a module, update the manifest **and** `index.html` together.
-- **Portable build** = one single-file application package `dist/tam-os-v<APP_VERSION>.html`,
-  produced by inlining the CSS and JS. It is **single-file packaging, not a fully offline artifact** —
-  the XLSX parser is still loaded from a CDN; typography is embedded (see
-  [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)). The version is derived from `APP_VERSION` in
-  `js/core/constants.js` via `tools/app-version.js` — never hand-typed into the tooling.
+- **Deployment package** (Distribution-1, [ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)
+  Model B) = the static document root built by `node tools/build-package.js` into `dist/package/`
+  (plus a deterministic ZIP). Every file is a byte-identical copy of its source; the page has no inline
+  executable script and makes no third-party request (SheetJS is vendored under `vendor/`, typography
+  is embedded), so it runs under a strict Content-Security-Policy. `dist/package-manifest.json` (per-file
+  SHA-256) is the committed record. Earlier single-file releases in `dist/` are frozen history. The
+  version is derived from `APP_VERSION` in `js/core/constants.js` via `tools/app-version.js` — never
+  hand-typed into the tooling.
 - See `ARCHITECTURE.md` for the full module map and history.
 
 ## Local development
@@ -70,22 +73,23 @@ and never touches your global Git configuration. Skipping it does not let a viol
 `verify-attribution` job still rejects it — it just means you find out later. See
 [`tools/README.md`](tools/README.md).
 
-No framework and no `npm install` — the app has no runtime dependencies. Node is used **only** for
-the build/verify tooling (v18+; tested on v24).
+No framework and no `npm install` — the app's only runtime dependency is the vendored, pinned SheetJS
+parser. Node is used **only** for the build/verify tooling (v18+; tested on v24).
 
-Serve the folder over HTTP and open the modular source:
+Build the package and serve it locally under the production header contract (CSP included):
 
 ```bash
-python -m http.server 8000     # or: npx serve
-# open http://localhost:8000
+node tools/build-package.js
+node tools/serve-package.js     # http://127.0.0.1:8765/
 ```
 
-The portable build in `dist/` can also be opened directly in a browser.
+For quick iteration you can also serve the repository root over HTTP (`python -m http.server 8000`),
+but validation (`CLAUDE.md` §12) happens against the served package. `file://` is not supported.
 
 ## Build
 
 ```bash
-node tools/build-single-file.js
+node tools/build-package.js
 ```
 
 
@@ -114,9 +118,10 @@ the audit/timeline/blocker features regress.
 
 ## QA requirements (before opening a PR)
 
-Exercise your change in **both** the modular source and the portable dist:
+Exercise your change in the built package served by `node tools/serve-package.js` (production
+headers, CSP included):
 
-- Zero browser console errors.
+- Zero browser console errors and zero Content-Security-Policy violations.
 - Verify the affected pages/workflows behave correctly.
 - Confirm search keeps focus, scroll is preserved, and floating menus open/close.
 - Confirm no duplicate records are produced and data persists across reload.
@@ -139,11 +144,12 @@ Any regression in a previously-working feature is a **release blocker**.
 ## Source → build → verify → dist workflow
 
 1. Edit the **modular source** (never `dist/`).
-2. `node tools/build-single-file.js` to regenerate the portable HTML.
+2. `node tools/build-package.js` to rebuild the package and its manifest.
 3. `node tools/verify-build.js` (must pass).
-4. Boot both the modular source and the dist; confirm zero console errors.
+4. `node tools/serve-package.js` and boot the package; confirm zero console errors and zero CSP
+   violations.
 5. Update `CHANGELOG.md` (and `RELEASE_NOTES.md` for a release) and any affected docs.
-6. Commit the source **and** the rebuilt `dist/` together.
+6. Commit the source **and** the regenerated `dist/package-manifest.json` together.
 
 ## Release-candidate process
 
@@ -151,11 +157,11 @@ Releases are proposed as a **Release Candidate**, not published directly. Before
 
 1. Bump `APP_VERSION` + `APP_RELEASE_NAME` in `js/core/constants.js`; add a `RELEASE_NOTES.md` entry
    and a `CHANGELOG.md` entry.
-2. `node tools/build-single-file.js` then `node tools/verify-build.js` (must pass).
-3. Boot the modular source **and** the portable dist — zero console errors.
+2. `node tools/build-package.js` then `node tools/verify-build.js` (must pass).
+3. Boot the served package — zero console errors, zero CSP violations.
 4. Present the RC (root cause, files changed, validation, regression, known limitations, build/verify
    output, working-tree status) and **wait for explicit approval**.
-5. Only after approval: commit source + rebuilt dist → annotate `vX.Y.Z` → push `main` then the tag →
+5. Only after approval: commit source + package manifest → annotate `vX.Y.Z` → push `main` then the tag →
    let the tag-triggered Release workflow publish. See [`docs/RELEASE-PROCESS.md`](docs/RELEASE-PROCESS.md).
 
 ## Version-consistency audit

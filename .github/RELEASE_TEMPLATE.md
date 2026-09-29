@@ -29,7 +29,7 @@
 
 ## Compatibility
 <!-- Who/what is affected. This app is client-only with local storage. -->
-- Runs in the browser (modular source or portable single file); no backend.
+- Runs in the browser from the static deployment package, served over HTTP; no backend.
 - Existing local data: <fully compatible | migrated — see Migration>
 - `SCHEMA_VERSION`: <unchanged (6) | X → Y>
 
@@ -47,8 +47,8 @@
 <!-- Distinguish: browser-tested / automated-test verified / source-inspected / unable to verify -->
 - Build: <result>
 - Verify: <N/N checks>
-- Browser (modular): <what was exercised>
-- Browser (dist): <what was exercised>
+- Browser (served package, production headers): <what was exercised>
+- CSP violations: <count>
 - Console errors: <count>
 
 ## Regression
@@ -62,13 +62,12 @@
 - Tag: vX.Y.Z
 - Branch: main
 
-## Release Asset
-- dist/tam-os-vX.Y.Z.html
+## Release Assets
+- tam-os-vX.Y.Z-package.zip
+- package-manifest.json
 
-## Checksum (optional)
-<!--
-  The release workflow does NOT currently generate checksums. Leave this as "Not generated"
-  unless you produce one manually. If checksum publishing is added to release.yml later, record
-  the SHA-256 of the portable asset here.
--->
-- SHA-256: Not generated (planned; not produced by the current release workflow)
+## Checksum
+<!-- The committed dist/package-manifest.json records the ZIP SHA-256 and every file's SHA-256;
+     the release workflow refuses to publish a ZIP that does not match it. -->
+- ZIP SHA-256: <zip.sha256 from package-manifest.json>
+- Package digest: <packageDigest from package-manifest.json>

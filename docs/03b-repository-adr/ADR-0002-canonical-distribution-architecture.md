@@ -229,3 +229,16 @@ time.
 > precedes backend implementation**, now because the inlined single file cannot carry a strict
 > Content-Security-Policy without broad `'unsafe-inline'` (ADR-0004 §2.8). This record's decision is
 > unchanged.
+
+> **Implementation pointer (Distribution-1, 2026-09-29 — not a rewrite).** Model B is now the canonical
+> distribution, implemented as one change per §6 "Carried forward to Distribution-1":
+> - the deployment package built by `tools/build-package.js`, recorded by `dist/package-manifest.json`;
+> - the `CLAUDE.md` amendment;
+> - the verifier revision (package determinism, manifest and source parity, frozen single-file releases
+>   pinned by digest, strict-CSP invariants);
+> - the CI/release, CODEOWNERS and CodeQL changes;
+> - browser re-acceptance under the real CSP.
+>
+> Model A, the single file, is retired as a build and stays as frozen history; its last release is
+> v2.11.0. The package runs over HTTP only, so the §1 `file://` findings no longer describe a supported
+> mode. Details are in [Milestones.md](../05-milestones/Milestones.md).

@@ -17,6 +17,12 @@
  *   - v2.6.4 Activity Log + payroll audit timeline + post-blocker feedback present.
  * Usage:  node tools/verify-build.js
  *
+ * DISTRIBUTION-1 NOTE: the canonical distribution is the deployment package built by
+ * tools/build-package.js (ADR-0002 Model B). The application under test is the CURRENT
+ * modular source; `dist` below is that source assembled in memory with the historical
+ * single-file algorithm, so every content invariant still inspects exactly what ships.
+ * Released single-file artifacts are frozen history, pinned by digest, never regenerated.
+ *
  * MAINTENANCE NOTE (UX-005B finalization): the current single-file verifier size is
  * ACCEPTABLE and is not to be refactored now. If verification complexity grows
  * substantially (roughly ~2500-3000+ checks), evaluate splitting it into
@@ -38,11 +44,25 @@ const trimLF = (s) => s.replace(/^\n+/, '').replace(/\n+$/, '');
 const meta = readAppMeta();
 
 const orig = read(path.join(root, 'tam-intelligence-os-v2.5.2.html'));
-if (!fs.existsSync(meta.distPath)) {
-  console.error('Expected dist build not found: dist/' + meta.distName + ' — run `node tools/build-single-file.js` first.');
+// DISTRIBUTION-1: assemble the current source in memory (CSS + module JS inlined in manifest
+// order — the historical single-file algorithm). This is the application under test; it is
+// never written to disk and is not a release artifact.
+function assembleApplication() {
+  const html = read(path.join(root, 'index.html'));
+  const order = require('./module-order.js');
+  const cssNames = ['fonts.css', 'tokens.css', 'base.css', 'shell.css', 'components.css', 'charts.css'];
+  const cssLinkBlock = cssNames.map((f) => '<link rel="stylesheet" href="css/' + f + '">').join(LF);
+  const jsTagBlock = order.map((f) => '<script src="js/' + f + '"></script>').join(LF);
+  if (!html.includes(cssLinkBlock) || !html.includes(jsTagBlock)) return null;
+  const cssInline = '<style>' + LF + cssNames.map((f) => read(path.join(root, 'css', f))).join(LF) + LF + '</style>';
+  const jsInline = '<script>' + LF + order.map((f) => read(path.join(root, 'js', f))).join(LF) + LF + '</script>';
+  return html.replace(cssLinkBlock, cssInline).replace(jsTagBlock, jsInline);
+}
+const dist = assembleApplication();
+if (dist === null) {
+  console.error('index.html <link>/<script> blocks are out of sync with css/ + tools/module-order.js — cannot assemble the application.');
   process.exit(1);
 }
-const dist = read(meta.distPath);
 
 let passes = 0; const fails = [];
 const check = (cond, msg) => { if (cond) { passes++; console.log('  [PASS] ' + msg); } else { fails.push(msg); console.log('  [FAIL] ' + msg); } };
@@ -154,27 +174,136 @@ check(tokensDigest === TOKENS_CSS_SHA256,
   'UX-005C: css/tokens.css matches its pinned digest (token values never drift silently)'
   + (tokensDigest === TOKENS_CSS_SHA256 ? '' : ' >> VIOLATION: expected ' + TOKENS_CSS_SHA256 + ', got ' + tokensDigest));
 
-console.log('== BUILD FIDELITY (source -> dist) ==');
-check(trimLF(srcCss) === distCss, 'concat(css/*.css) == dist CSS payload');
-check(trimLF(srcJs) === distJs, 'concat(js/*.js) == dist JS payload');
+console.log('== ASSEMBLY FIDELITY (source -> application under test) ==');
+check(trimLF(srcCss) === distCss, 'concat(css/*.css) == assembled application CSS payload');
+check(trimLF(srcJs) === distJs, 'concat(js/*.js) == assembled application JS payload');
 
-// WHOLE-ARTIFACT FIDELITY (v2.8.5). The two payload comparisons above only inspect the
-// inlined <style> and the main <script>. Anything OUTSIDE those two regions — appended
-// bytes after </html>, an edited <title>, injected markup between the tags — was invisible
-// to them, so a tampered or nondeterministic release asset could still verify clean. This
-// re-assembles the artifact using exactly the builder's algorithm and compares byte-for-byte,
-// which is what a release asset actually has to guarantee.
+// HISTORICAL RELEASE ARTIFACTS (Distribution-1). The single-file build is retired; every
+// published single-file release stays in dist/ as frozen history. It is pinned by digest and
+// size — never regenerated from the (evolving) source — and no new single-file artifact may
+// appear. This replaces the pre-Distribution-1 "dist == fresh assembly" check, which was only
+// meaningful while the single file was the canonical distribution.
+console.log('== HISTORICAL RELEASE ARTIFACTS (frozen, pinned by digest) ==');
+const HISTORICAL_RELEASES = [
+  { file: 'dist/tam-os-v2.11.0.html', bytes: 1676709, sha256: '57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557' },
+];
+for (const h of HISTORICAL_RELEASES) {
+  const p = path.join(root, h.file);
+  const buf = fs.existsSync(p) ? fs.readFileSync(p) : null;
+  check(buf !== null && buf.length === h.bytes && crypto.createHash('sha256').update(buf).digest('hex') === h.sha256,
+    h.file + ' is present and byte-identical to its published release (' + h.bytes + ' B, SHA-256 ' + h.sha256.slice(0, 8) + '…)');
+}
+const histDistHtml = fs.readdirSync(path.join(root, 'dist')).filter((f) => f.endsWith('.html')).map((f) => 'dist/' + f).sort();
+check(JSON.stringify(histDistHtml) === JSON.stringify(HISTORICAL_RELEASES.map((h) => h.file).sort()),
+  'dist/ holds only the pinned historical single-file releases (no new single-file artifact)');
 {
-  const idxHtml = read(path.join(root, 'index.html'));
-  const cssLinkBlock = cssFiles.map((f) => '<link rel="stylesheet" href="css/' + f + '">').join(LF);
-  const jsTagBlock = jsFiles.map((f) => '<script src="js/' + f + '"></script>').join(LF);
-  const cssInline = '<style>' + LF + cssFiles.map((f)=>read(path.join(root,'css',f))).join(LF) + LF + '</style>';
-  const jsInline = '<script>' + LF + jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF) + LF + '</script>';
-  const expected = idxHtml.includes(cssLinkBlock) && idxHtml.includes(jsTagBlock)
-    ? idxHtml.replace(cssLinkBlock, cssInline).replace(jsTagBlock, jsInline)
-    : null;
-  check(expected !== null && expected === dist,
-    'the dist artifact is byte-identical to a fresh assembly of index.html + css/ + js/ (whole-file, not just the inlined payloads)');
+  const retired = read(path.join(root, 'tools', 'build-single-file.js'));
+  check(/RETIRED by Distribution-1/.test(retired) && /process\.exit\(1\)/.test(retired) && !/writeFileSync/.test(retired),
+    'tools/build-single-file.js is retired (refuses to run and cannot overwrite a historical release)');
+}
+
+// DISTRIBUTION-1 PACKAGE (ADR-0002 Model B). The canonical distribution is the static document
+// root produced by tools/build-package.js. Assemble it twice in memory: determinism, manifest
+// agreement, source parity and completeness are all proven here, not assumed.
+console.log('== DISTRIBUTION-1 PACKAGE (deterministic deployment package) ==');
+const pkgTool = require('./build-package.js');
+let pkgA = null, pkgB = null, pkgErr = null;
+try { pkgA = pkgTool.assemblePackage(); pkgB = pkgTool.assemblePackage(); } catch (e) { pkgErr = e.message; }
+check(pkgErr === null, 'the deployment package assembles from source' + (pkgErr ? ' >> ' + pkgErr : ''));
+if (pkgA) {
+check(pkgA.manifestText === pkgB.manifestText && pkgA.zip.equals(pkgB.zip),
+  'package assembly is deterministic (two assemblies: identical manifest and identical ZIP bytes)');
+const committedManifestPath = path.join(root, 'dist', 'package-manifest.json');
+check(fs.existsSync(committedManifestPath) && read(committedManifestPath) === pkgA.manifestText,
+  'committed dist/package-manifest.json matches a fresh assembly (rebuild with `node tools/build-package.js`)');
+const pkgMan = pkgA.manifest;
+check(pkgMan.format === pkgTool.MANIFEST_FORMAT && pkgMan.entry === 'index.html',
+  'manifest format is ' + pkgTool.MANIFEST_FORMAT + ' with entry point index.html');
+check(pkgMan.appVersion === meta.version && pkgMan.appReleaseName === meta.releaseName,
+  'manifest identity is derived from constants.js (APP_VERSION ' + meta.version + ', ' + meta.releaseName + ')');
+check(pkgMan.schemaVersion === 6 && pkgMan.actions === 20, 'manifest records SCHEMA_VERSION 6 and ACTIONS 20');
+check(pkgMan.zip.name === 'tam-os-v' + meta.version + '-package.zip' && pkgMan.zip.sha256 === crypto.createHash('sha256').update(pkgA.zip).digest('hex'),
+  'package ZIP name is derived from APP_VERSION and its digest is recorded in the manifest');
+const pkgPaths = pkgMan.files.map((f) => f.path);
+check(pkgA.files.every((f) => f.data.equals(fs.readFileSync(path.join(root, f.path)))),
+  'every package file is a byte-identical copy of the source file at the same relative path (no transformation)');
+const pkgExpected = ['index.html', 'js/boot/theme-boot.js', 'vendor/sheetjs/xlsx.full.min.js']
+  .concat(cssFiles.map((f) => 'css/' + f), jsFiles.map((f) => 'js/' + f), pkgTool.PACKAGE_LICENSES).sort();
+check(JSON.stringify(pkgPaths) === JSON.stringify(pkgExpected),
+  'package file set is exactly index.html + theme boot + 6 CSS + every module-order JS + vendored SheetJS + licences (' + pkgExpected.length + ' files)');
+check(pkgPaths.every((p) => /^(index\.html|css\/[a-z-]+\.css|js\/[a-z0-9\/-]+\.js|vendor\/sheetjs\/(xlsx\.full\.min\.js|LICENSE)|assets\/fonts\/[A-Za-z0-9]+-OFL\.txt)$/.test(p)),
+  'package holds only runtime files and licence texts (no docs, tools, tests, workflows, raw fonts or history)');
+{
+  const z = pkgA.zip, eocd = z.length - 22;
+  check(z.readUInt32LE(eocd) === 0x06054b50 && z.readUInt16LE(eocd + 10) === pkgPaths.length,
+    'package ZIP is well-formed and lists exactly the manifest files (' + pkgPaths.length + ' entries)');
+}
+}
+
+// STRICT-CSP INVARIANTS (Distribution-1 / SDR-0002 §13.1). The page must run under
+// script-src 'self' with no 'unsafe-inline' and no 'unsafe-eval'.
+console.log('== DISTRIBUTION-1 STRICT-CSP INVARIANTS ==');
+const d1Index = read(path.join(root, 'index.html'));
+const d1Scripts = d1Index.match(/<script\b[^>]*>/gi) || [];
+check(d1Scripts.every((t) => /\ssrc="/.test(t) || /\stype="application\/json"/.test(t)),
+  'index.html has no inline executable <script> (every script is a file; the only inline block is the JSON seed)');
+check(!/<style[\s>]/i.test(d1Index) && !/<[a-z][^>]*\son[a-z]+\s*=/i.test(d1Index),
+  'index.html has no inline <style> element and no inline event-handler attribute');
+check(!/(?:src|href)="(?:[a-z]+:)?\/\//i.test(d1Index) && !/(?:src|href)="https?:/i.test(d1Index),
+  'index.html makes no third-party or absolute-URL reference (every asset is same-origin)');
+{
+  const bodyAt = d1Index.indexOf('<body>'), bootAt = d1Index.indexOf('<script src="js/boot/theme-boot.js"></script>'), appAt = d1Index.indexOf('<div id="app"></div>');
+  check(bodyAt > 0 && bootAt > bodyAt && bootAt < appAt && d1Index.indexOf('<script', bodyAt) === bootAt,
+    'theme boot is the first <body> script and precedes #app (pre-paint appearance preserved)');
+}
+check(/localStorage\.getItem\('tam_settings_v1'\)/.test(read(path.join(root, 'js', 'boot', 'theme-boot.js'))) && !jsFiles.includes('boot/theme-boot.js'),
+  'js/boot/theme-boot.js carries the pre-paint appearance logic and is not an application module');
+{
+  const xlsx = fs.readFileSync(path.join(root, 'vendor', 'sheetjs', 'xlsx.full.min.js'));
+  const sri = 'sha512-' + crypto.createHash('sha512').update(xlsx).digest('base64');
+  check(sri === 'sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==',
+    'vendored SheetJS is the exact pinned 0.18.5 build (SRI sha512 unchanged from the former cdnjs pin)');
+  check(d1Index.includes('<script src="vendor/sheetjs/xlsx.full.min.js" integrity="' + sri + '"></script>'),
+    'index.html loads the vendored SheetJS same-origin with its Subresource Integrity');
+  check(!/new Function|[^A-Za-z_$.]eval\(/.test(xlsx.toString('utf8')), 'vendored SheetJS uses no eval / new Function (compatible without unsafe-eval)');
+  check(/Apache License/.test(read(path.join(root, 'vendor', 'sheetjs', 'LICENSE'))), 'SheetJS Apache-2.0 licence is vendored beside it');
+}
+{
+  const runtimeJs = jsFiles.concat(['boot/theme-boot.js']).map((f) => [f, read(path.join(root, 'js', f))]);
+  const hit = (re) => runtimeJs.filter(([, src]) => re.test(src)).map(([f]) => f);
+  check(hit(/[^A-Za-z_$.]eval\s*\(|new Function\s*\(/).length === 0, 'no eval / new Function in any shipped JS');
+  check(hit(/set(?:Timeout|Interval)\s*\(\s*['"`]/).length === 0, 'no string-evaluated setTimeout/setInterval in any shipped JS');
+  check(hit(/document\.write\s*\(|javascript:/).length === 0, 'no document.write and no javascript: URLs in any shipped JS');
+  check(hit(/<[a-z][^<>]*\son(?:click|change|input|submit|load|error|keydown|keyup|focus|blur|mouseover)\s*=/i).length === 0,
+    'no inline event-handler attributes generated by any shipped JS template');
+}
+{
+  const hdr = require('./package-headers.js');
+  const dir = (name) => (hdr.CSP_DIRECTIVES.find((d) => d.split(' ')[0] === name) || '');
+  check(dir('script-src') === "script-src 'self'", "CSP script-src is exactly 'self' (no unsafe-inline, no unsafe-eval, no CDN)");
+  check(dir('style-src') === "style-src 'self'" && dir('style-src-attr') === "style-src-attr 'unsafe-inline'",
+    "CSP style-src is 'self'; only style ATTRIBUTES are allowed inline (style-src-attr) — <style> elements stay blocked");
+  check((hdr.CSP.match(/'unsafe-[a-z]+'/g) || []).length === 1 && !/unsafe-eval|unsafe-hashes|\*/.test(hdr.CSP),
+    'CSP carries exactly one unsafe token (style-src-attr) and no wildcard / unsafe-eval');
+  check(dir('connect-src') === "connect-src 'self'" && dir('object-src') === "object-src 'none'" && dir('frame-ancestors') === "frame-ancestors 'none'" && dir('base-uri') === "base-uri 'none'",
+    "CSP connect-src 'self' (same-origin /api), object-src/frame-ancestors/base-uri 'none'");
+  check(dir('font-src') === "font-src 'self' data:" && dir('img-src') === "img-src 'self' data:",
+    'CSP allows data: only for fonts (embedded WOFF2) and images (inline favicon)');
+  check(hdr.API_HEADERS['Cache-Control'] === 'no-store, private' && hdr.STATIC_HEADERS['Cache-Control'] === 'no-cache',
+    '/api/* responses are no-store, private; static package files revalidate (no-cache)');
+  check(hdr.STATIC_HEADERS['X-Content-Type-Options'] === 'nosniff' && /strict-origin-when-cross-origin/.test(hdr.STATIC_HEADERS['Referrer-Policy']) && !!hdr.STATIC_HEADERS['Permissions-Policy'],
+    'static header contract carries nosniff, Referrer-Policy and Permissions-Policy');
+  check(!/includeSubDomains|preload/i.test(hdr.HSTS_PRODUCTION), 'production HSTS has no includeSubDomains/preload (SDR-0002 §13.1)');
+}
+{
+  const ciYml = read(path.join(root, '.github', 'workflows', 'ci.yml'));
+  const relYml = read(path.join(root, '.github', 'workflows', 'release.yml'));
+  check(/node tools\/build-package\.js/.test(ciYml) && !/build-single-file/.test(ciYml), 'ci.yml builds the Distribution-1 package (not the retired single file)');
+  check(/node tools\/build-package\.js/.test(relYml) && !/build-single-file/.test(relYml) && /package-manifest\.json/.test(relYml),
+    'release.yml builds and publishes the Distribution-1 package ZIP and manifest');
+  check(/-\s*"vendor\/\*\*"/.test(read(path.join(root, '.github', 'codeql', 'codeql-config.yml'))),
+    'CodeQL excludes vendored third-party code (vendor/**)');
+  check(/^\/vendor\/\s+@fanoryu/m.test(read(path.join(root, '.github', 'CODEOWNERS'))), 'CODEOWNERS covers /vendor/');
 }
 
 console.log('== VERSION IDENTITY (derived from constants.js — no hardcoded version) ==');
@@ -182,7 +311,6 @@ check(dist.includes("const APP_VERSION = '" + meta.version + "';"), 'APP_VERSION
 check(dist.includes("const APP_RELEASE_NAME = '" + meta.releaseName + "';"), 'APP_RELEASE_NAME == "' + meta.releaseName + '" (matches constants.js)');
 check(dist.includes('<title>TAM OS v' + meta.version + '</title>'), '<title> == v' + meta.version);
 check(dist.includes("{v:'" + meta.version + " "), 'Release Notes has a ' + meta.version + ' entry');
-check(path.basename(meta.distPath) === 'tam-os-v' + meta.version + '.html', 'generated dist filename derived from APP_VERSION under TAM OS naming (dist/' + meta.distName + ')');
 // History preserved: prior release entries are permanent and must never disappear.
 check(dist.includes("{v:'2.6.3c ") && dist.includes("{v:'2.6.3b ") && dist.includes("{v:'2.6.3a ") && dist.includes("{v:'2.6.3 "), 'Release Notes still has 2.6.3c/2.6.3b/2.6.3a/2.6.3 entries (history preserved)');
 
@@ -388,7 +516,7 @@ check(changelog.includes('## 2.8.5 — Workspace & Contract Timeline Integrity')
 check(changelog.includes('## 2.8.6 — Navigation Experience & TAM OS Rebrand'), 'CHANGELOG.md retains the historical v2.8.6 entry (history is never rewritten)');
 check(changelog.includes('## 2.9.0 — Workspace Experience'), 'CHANGELOG.md retains the historical v2.9.0 entry (history is never rewritten)');
 check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))), 'SCHEMA_VERSION remains 6 — v2.10.0 carries no data migration');
-check(dist.includes('const SCHEMA_VERSION = 6;'), 'the portable artifact carries SCHEMA_VERSION 6');
+check(dist.includes('const SCHEMA_VERSION = 6;'), 'the application carries SCHEMA_VERSION 6');
 check(relNotes.includes('SCHEMA_VERSION') && /remains \*{0,2}6\*{0,2}|unchanged \(6\)/.test(relNotes), 'RELEASE_NOTES.md states SCHEMA_VERSION remains 6');
 // == v2.10.0 PUBLICATION GUARDRAILS (final release state) ==
 // Current-state product/repository identity and honest release status for the PUBLISHED
@@ -3966,7 +4094,7 @@ check(cssDigest === CSS_GOLDEN_SHA256,
   'UX-005E: CSS golden-master enforcement active (live digest == current pin)');
 // 13. artifact fidelity enforcement remains active (source -> dist equality asserted above).
 check(trimLF(srcCss) === distCss,
-  'UX-005E: portable artifact CSS fidelity remains enforced (concat(css/*.css) == dist CSS)');
+  'UX-005E: application CSS fidelity remains enforced (concat(css/*.css) == assembled CSS)');
 
 // ===== UX-005F — Final Workspace Polish & Accessibility Hardening =====
 // A1 skip-link + main landmark, A2 modal Tab-trap, A3 finance dialog semantics,
@@ -4049,9 +4177,9 @@ check(m1Favicon !== '' && !/href="https?:\/\//.test(m1Favicon),
   'MAINT-001: favicon introduces no external URL dependency');
 // 3. built artifact carries the same inline favicon (self-contained)
 check(/<link rel="icon"[^>]*href="data:image\/png;base64,/.test(dist),
-  'MAINT-001: portable artifact contains the inline favicon (self-contained)');
+  'MAINT-001: the application carries the inline favicon (self-contained)');
 check(!/<link rel="icon"[^>]*href="https?:\/\//.test(dist),
-  'MAINT-001: portable artifact has no external favicon URL');
+  'MAINT-001: the application has no external favicon URL');
 // 4. APP_VERSION / SCHEMA_VERSION unchanged by branding work
 check(indexHtml.includes('<title>TAM OS v' + meta.version + '</title>') && meta.version === '2.11.0',
   'MAINT-001: APP_VERSION/title consistent (v2.11.0)');
@@ -5238,7 +5366,7 @@ const b1ShellJs = read(path.join(root,'js','ui','shell-render.js'));
 
 // 1. No remote webfont dependency anywhere in the portable artifact OR the source head.
 check(!/googleapis|gstatic/.test(dist),
-  'BRAND-1: portable artifact makes no Google Fonts / gstatic request (offline-safe typography)');
+  'BRAND-1: the application makes no Google Fonts / gstatic request (offline-safe typography)');
 check(!/fonts\.googleapis\.com|fonts\.gstatic\.com/.test(b1Index),
   'BRAND-1: index.html no longer links remote Google Fonts');
 

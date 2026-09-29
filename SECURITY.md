@@ -165,8 +165,8 @@ TAM Intelligence OS is client-only. Understanding its data posture helps scope r
 
 - All finance/payroll/employee/contract data is stored **locally** (browser `localStorage` or the
   Claude Artifact storage environment). There is no server, database, or API.
-- The app makes **no network calls that carry user data**. Typography is self-contained (fonts are
-  bundled, not fetched from a CDN); the only external reference is the XLSX parser (CDN). Exports
+- The app makes **no network calls that carry user data**, and no third-party request at all: fonts
+  are embedded and the XLSX parser is vendored (served same-origin, integrity-checked). Exports
   (CSV/JSON) are generated locally and downloaded by the user.
 - Real company data must never be committed to the repository or pasted into issues, PRs, logs, or
   screenshots. See [`docs/DATA-SAFETY.md`](docs/DATA-SAFETY.md) and

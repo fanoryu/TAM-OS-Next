@@ -1,0 +1,446 @@
+{
+  "format": "tam-os-package/1",
+  "appVersion": "2.11.0",
+  "appReleaseName": "Identity Refresh",
+  "schemaVersion": 6,
+  "actions": 20,
+  "entry": "index.html",
+  "packageDigest": "3917b6b12ddfbb3adf6f16fa7029af22e7f4dcc6c6ccba1cab9191323823846f",
+  "zip": {
+    "name": "tam-os-v2.11.0-package.zip",
+    "bytes": 2603051,
+    "sha256": "53cc0f22383da205c6c86d16908adfb46c85eebf61cbd226a388ab3057d4afae"
+  },
+  "files": [
+    {
+      "path": "assets/fonts/Inter-OFL.txt",
+      "bytes": 4377,
+      "sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57"
+    },
+    {
+      "path": "assets/fonts/JetBrainsMono-OFL.txt",
+      "bytes": 4399,
+      "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d"
+    },
+    {
+      "path": "assets/fonts/Sora-OFL.txt",
+      "bytes": 4385,
+      "sha256": "ba0b9729c9428ba79a0459ab8ec575791b51509dbec213e383d0316d37fec299"
+    },
+    {
+      "path": "assets/fonts/SourceSerif4-OFL.txt",
+      "bytes": 4400,
+      "sha256": "5f94c3fd3a23131a417ab5a0c8452de57e70c3cfb9f604d88241f7065ebf9fd9"
+    },
+    {
+      "path": "css/base.css",
+      "bytes": 1619,
+      "sha256": "61ac3a334b86b6aa5ad923240f60e0e077f3f9b87aa8d0f6398ce74e6fed2e7c"
+    },
+    {
+      "path": "css/charts.css",
+      "bytes": 1742,
+      "sha256": "a8730e0a13579cf0b8dececa7f14a7c8fd8bdfceb705be3d60ae841e177d3e11"
+    },
+    {
+      "path": "css/components.css",
+      "bytes": 16873,
+      "sha256": "f89c8b9e90297d9f1a0beae950f775f12f869c810cc20ff6fc37bedaa65d5baa"
+    },
+    {
+      "path": "css/fonts.css",
+      "bytes": 517964,
+      "sha256": "f82c2b2a13ecc4f93d7c777a0d1910d8cf3020712a3241ee55529142d0621dad"
+    },
+    {
+      "path": "css/shell.css",
+      "bytes": 17248,
+      "sha256": "d1ad2b206ed9ba00ef5db35b799a08740b232888c2a0534ab1d331b3c0710924"
+    },
+    {
+      "path": "css/tokens.css",
+      "bytes": 5084,
+      "sha256": "041f9b42219200def7f730e47204d025f1168520e8acb8bee666d0bade15f739"
+    },
+    {
+      "path": "index.html",
+      "bytes": 9224,
+      "sha256": "d0c083310ec1f47cc0dbef77c35e37674079d7282eaad935ce4c2fa7749ed31a"
+    },
+    {
+      "path": "js/analytics/compare.js",
+      "bytes": 7196,
+      "sha256": "8777bff5292ee3104014f9e4bb69912a297a99a12df5e65cc3d65456d815d7a2"
+    },
+    {
+      "path": "js/analytics/executive-dashboard.js",
+      "bytes": 19315,
+      "sha256": "f92bd9118e3e05a600360b6ea32a08e05a8194aa8546eb7edaed9ae62466f7bd"
+    },
+    {
+      "path": "js/analytics/executive-insights.js",
+      "bytes": 5030,
+      "sha256": "7fa2f09ae7328150a6d984fde36b1fcbe8493ab673d35394dce9b92abd384e7f"
+    },
+    {
+      "path": "js/analytics/plan-vs-actual.js",
+      "bytes": 3554,
+      "sha256": "8c09319bc6d0c140b6c733d9aa7b449eeb638930f6418cbe5aced5541768f05c"
+    },
+    {
+      "path": "js/analytics/reports.js",
+      "bytes": 7597,
+      "sha256": "b978d8007b6903325486b9fac01f3d03f5f88d9b25502e34030523f049854a06"
+    },
+    {
+      "path": "js/analytics/trends.js",
+      "bytes": 19769,
+      "sha256": "1bc571f1bdce22582dd020c1d181b55a361812e835dd0fd7dde7ec2919dc782e"
+    },
+    {
+      "path": "js/boot/theme-boot.js",
+      "bytes": 1135,
+      "sha256": "5e1ddde21ccd0ce04c021d09136dfa85d7424b7c602c380d344ae175da973bd7"
+    },
+    {
+      "path": "js/core/app-bootstrap.js",
+      "bytes": 245,
+      "sha256": "0f9347e5a72a51dd1dbccde6c0a8bb3eb4f1807f17ca9a31f3f3dbd59686a5ca"
+    },
+    {
+      "path": "js/core/authz.js",
+      "bytes": 12262,
+      "sha256": "cd3ba3f8369dd8303b49575d19452351cbdba74feb252743985aec659348d542"
+    },
+    {
+      "path": "js/core/constants.js",
+      "bytes": 18134,
+      "sha256": "26b0795139c4b67f766c5f420c5d8e7b0777e8ce6f5946d929271a34ded93003"
+    },
+    {
+      "path": "js/core/data-grid.js",
+      "bytes": 11638,
+      "sha256": "f3113a1a8f0e83400f1d8b1f43e9e6a114e91ec72b25f74f652f2fd69b0af7bb"
+    },
+    {
+      "path": "js/core/domain-services.js",
+      "bytes": 11498,
+      "sha256": "f4fb392382c5c88515fb65dfc89ea14e0055fa52eabefb16f472432a368d7e33"
+    },
+    {
+      "path": "js/core/global-search.js",
+      "bytes": 4341,
+      "sha256": "6a1cd9d35cd02cf294d1af15795cf6d360b4948957fbd2b0d263f127850e6c74"
+    },
+    {
+      "path": "js/core/hr-persistence-portability.js",
+      "bytes": 18564,
+      "sha256": "175f81bb95edfb3b045972e35727910dea48f91332fc24c6480379ac7201c139"
+    },
+    {
+      "path": "js/core/identity.js",
+      "bytes": 8377,
+      "sha256": "62c37dc0b96db598b3e9e690f176af80397d1dff681a023ed5822b5bcccfbb53"
+    },
+    {
+      "path": "js/core/onboarding-reset.js",
+      "bytes": 20819,
+      "sha256": "b043998298e9300640ce99532ff88e00cf1937de8866bccb6b16a553be3e99f1"
+    },
+    {
+      "path": "js/core/stabilization.js",
+      "bytes": 44737,
+      "sha256": "38e8a9905a05c2fe066026754c9ecbc13a2bcf9e047ee7c8b5b54595398f10c2"
+    },
+    {
+      "path": "js/core/state-load-migrations.js",
+      "bytes": 5924,
+      "sha256": "28575218db0c9ea3d885e68d51ddeed3e0bb5ebadd63287c2cbd11759a5233ea"
+    },
+    {
+      "path": "js/core/state.js",
+      "bytes": 5922,
+      "sha256": "3bdf97ab5cfade582f93449fc9799621eb724fcdfb454dedcb9b88ea442f5d12"
+    },
+    {
+      "path": "js/core/storage-adapter.js",
+      "bytes": 4858,
+      "sha256": "d4ce03ddb1176754e70c2e17a864c0099e7c8f325dc588f218375a924bb25e86"
+    },
+    {
+      "path": "js/core/utils.js",
+      "bytes": 4040,
+      "sha256": "f255e08267731314a17b15b4118d5f1ec62714c8c87c2d825a1f752452110c81"
+    },
+    {
+      "path": "js/core/workspace.js",
+      "bytes": 14418,
+      "sha256": "b2ce20aab542d3cc1fe21a8bd3c162fb146614882286bb3e3829891609d6376d"
+    },
+    {
+      "path": "js/domain/aggregate-helpers.js",
+      "bytes": 1931,
+      "sha256": "6fbd57f76def71e22dfb2bea7ce6400bd0c9fdd3bc0c6cb7ac8841568bfbb28a"
+    },
+    {
+      "path": "js/domain/aggregates.js",
+      "bytes": 4135,
+      "sha256": "d1f98245589c67b521814836fa8b7d1e92b37045605a09791ff994e43588f580"
+    },
+    {
+      "path": "js/domain/commands.js",
+      "bytes": 8649,
+      "sha256": "1fec9a5be25a4b64f9775f2856a4152ebc03cfb9543435c988b84dfed1802260"
+    },
+    {
+      "path": "js/domain/contract-core-aggregate.js",
+      "bytes": 11386,
+      "sha256": "8a03a7d9f465ae41743dc5285dc73cfdbd2a786cddb4fe83b92b71482b27ee32"
+    },
+    {
+      "path": "js/domain/contract-date-aggregate.js",
+      "bytes": 5711,
+      "sha256": "765542fc5a475e351f918e3be7a92447535a4efeadcc5a2779fcdf39cc1faac5"
+    },
+    {
+      "path": "js/domain/contract-renewal-aggregate.js",
+      "bytes": 8087,
+      "sha256": "ef8e2e6e27e847f85c1bd1a97c69b5dbcd5d54dc6cab44bbd6352c6e4f572564"
+    },
+    {
+      "path": "js/domain/contract-status-aggregate.js",
+      "bytes": 4487,
+      "sha256": "06e5f5275ab9c2fefb86571ba94d9c53f6923f564bddb5b3d17ec0af28f392c8"
+    },
+    {
+      "path": "js/domain/domain-layer.js",
+      "bytes": 5411,
+      "sha256": "608a959c115a0ba9afab26b9c648af7d7cd7e66bde9f10fee96d4f4168ef0747"
+    },
+    {
+      "path": "js/domain/employee-compensation-aggregate.js",
+      "bytes": 3460,
+      "sha256": "76a156f76122d9c675b3ddeb275e3d23f45d1c27f76e0173c1565529a2e89174"
+    },
+    {
+      "path": "js/domain/employee-contact-aggregate.js",
+      "bytes": 2460,
+      "sha256": "af62ed05956dd1e4636fc129e9ace5917c6224caa01d42c67ffdb704a04877c7"
+    },
+    {
+      "path": "js/domain/employee-employment-aggregate.js",
+      "bytes": 3506,
+      "sha256": "81673765471d4b1f2bed4096798ec27e51553bbf47d008c7efc468fb55c2fe06"
+    },
+    {
+      "path": "js/domain/employee-lifecycle-aggregate.js",
+      "bytes": 3205,
+      "sha256": "3ed4dacf4c2e3846d0fb01c168e259817123172f026338b532ceafc4569c67c2"
+    },
+    {
+      "path": "js/domain/events.js",
+      "bytes": 1527,
+      "sha256": "c9b316d43193e6c086a5226800639385edee4ad475d2b012254d894de329d659"
+    },
+    {
+      "path": "js/domain/payroll-lifecycle-aggregate.js",
+      "bytes": 5564,
+      "sha256": "1e3571b546ea995fb5d1362b52c9a65d9fd6cb3c78d080211e65df9e79398f16"
+    },
+    {
+      "path": "js/domain/queries.js",
+      "bytes": 1370,
+      "sha256": "c60a45f531794b24d26eeec7f2bb2a41527c7f111047ab61e471750974c93638"
+    },
+    {
+      "path": "js/finance/add-upload.js",
+      "bytes": 12226,
+      "sha256": "7a205bce4ae41eae0373d836f9e788cc921fdfa4a578abb84a659fd90d36cdb4"
+    },
+    {
+      "path": "js/finance/budget.js",
+      "bytes": 7194,
+      "sha256": "51334195b1aeb9f7d74d37679c155680b72a5b5f0dacb6e7dc6bf9a54ef8cfa5"
+    },
+    {
+      "path": "js/finance/cashflow.js",
+      "bytes": 4410,
+      "sha256": "d88b35c889d003c22943a3dd19b6cf23a9171b262cdd9c6f348e773d890a575f"
+    },
+    {
+      "path": "js/finance/dashboard.js",
+      "bytes": 10946,
+      "sha256": "ad4d6d37d6a2297f32a1d54e2c693b654c251ec8d270819152fbf4e60f5396f6"
+    },
+    {
+      "path": "js/finance/execution-center.js",
+      "bytes": 18051,
+      "sha256": "1f23fa746e85aa6d855a70520637ac5e762a462a498bd263fef32fd54c8a5c20"
+    },
+    {
+      "path": "js/finance/transaction-modals.js",
+      "bytes": 17368,
+      "sha256": "1a55915039ec49b890823a32db1a7aee30c186f4a2d103a34130e091f99687b1"
+    },
+    {
+      "path": "js/finance/transactions.js",
+      "bytes": 13747,
+      "sha256": "991e8d91937c6462f88de339ff2ed0d82622fd04749d30c6c2f9be739e241368"
+    },
+    {
+      "path": "js/import/import-preview.js",
+      "bytes": 14952,
+      "sha256": "96c4582d0cf0ad67bc33140221f26163cb6cab79fc152bedc3c3e4b2df87d592"
+    },
+    {
+      "path": "js/import/parser.js",
+      "bytes": 23221,
+      "sha256": "0b7d6975625ea3c6da1f68bc25d794dabc4a38a65f3ff69f6e9dd627a2a6f54b"
+    },
+    {
+      "path": "js/import/smart-import-commit.js",
+      "bytes": 28493,
+      "sha256": "b31b8540102a1167dc14d57ea57ecdc20480c29c8d1d5634bae6e04bdd142573"
+    },
+    {
+      "path": "js/import/smart-import-extract.js",
+      "bytes": 7925,
+      "sha256": "f55abcfa9611161f37fe6a803491028173e14434773c8f75f494ee7b7042b9c6"
+    },
+    {
+      "path": "js/import/smart-import-ui.js",
+      "bytes": 22172,
+      "sha256": "b12329d6d1b26499fce1fa9633ae6a8b1d46bc6f778d8412b5152eeb49d3f586"
+    },
+    {
+      "path": "js/people/contracts.js",
+      "bytes": 47731,
+      "sha256": "cc96bf213919534114d9284d8e254d710ae3c821236495110e759f6b0400d819"
+    },
+    {
+      "path": "js/people/employee-dedup.js",
+      "bytes": 13767,
+      "sha256": "4e54d419c4127a8ddc75b6ef08d344e1f56f90666babffe0dbfee7961b901e24"
+    },
+    {
+      "path": "js/people/employees.js",
+      "bytes": 54797,
+      "sha256": "991e627ff5bbf88bc2d337ee7d3250421f3621394bf25f650f6529e85980afdd"
+    },
+    {
+      "path": "js/people/hr-dashboard-reports.js",
+      "bytes": 17041,
+      "sha256": "5ee8476bfa89a9cda1ab0a9cfdb828415ce078b1caae351054f790041ad0ff61"
+    },
+    {
+      "path": "js/people/legacy-mapping.js",
+      "bytes": 5776,
+      "sha256": "47d9f5a7425aa4628e3d32e167d56f33ca33d8a0dfc32f6cf48c91dd33c5f747"
+    },
+    {
+      "path": "js/people/monthly-plan.js",
+      "bytes": 21654,
+      "sha256": "db66e912952c05a15831fd7b8f609cb26d0a9e180f11e0c231fc1d68e7923ca1"
+    },
+    {
+      "path": "js/people/overtime.js",
+      "bytes": 36981,
+      "sha256": "f8dee99e65e09c1d5db402d2674859d05309207f7fc405eec2033ad9a83437b9"
+    },
+    {
+      "path": "js/people/payroll-ops-engine.js",
+      "bytes": 57937,
+      "sha256": "0ee515fbac0da3270ac8a0f88b65880575bd2f7b2abefcc667983f1db1ef9308"
+    },
+    {
+      "path": "js/people/payroll-planning.js",
+      "bytes": 2975,
+      "sha256": "2d464a4d4b0023651efd925dfd264f55f25ad85f693047e358c32ffb410f556c"
+    },
+    {
+      "path": "js/people/payroll-workspace.js",
+      "bytes": 48921,
+      "sha256": "4876e15eda2d22d9d2bf7ae551af0a34f70141535d8b168c29f338fc47f76de9"
+    },
+    {
+      "path": "js/people/people-core.js",
+      "bytes": 19373,
+      "sha256": "eb11e43a4fa56021e774e9bb96fbf1360c33319188f6384333948bc1a1a3eaef"
+    },
+    {
+      "path": "js/people/recurring-expenses.js",
+      "bytes": 7977,
+      "sha256": "291ce71dbe9ec5d29f9503089ec9dfbceb5b0051934fb1246cab536e98b57ec3"
+    },
+    {
+      "path": "js/people/supplemental-engine.js",
+      "bytes": 47093,
+      "sha256": "e95380b9cae31e57d418e5651395df9e56bfc9011cf0c7d5fb08a33e233e241d"
+    },
+    {
+      "path": "js/platform/application-gateway.js",
+      "bytes": 6794,
+      "sha256": "bce15d8c0c2ddf869a6a4fe7ce6b60609536575df4c08fb6b04973792950da7e"
+    },
+    {
+      "path": "js/repository/contract-repository.js",
+      "bytes": 2772,
+      "sha256": "4f70797f25bbdf26fc2ca053a92280e1b1159e8786597d23891985635fec12d3"
+    },
+    {
+      "path": "js/repository/employee-repository.js",
+      "bytes": 3712,
+      "sha256": "a3717fd21741f894ab5af66c1424590106e8deaf2e0e0b492f34e41ebd1475b2"
+    },
+    {
+      "path": "js/repository/payroll-repository.js",
+      "bytes": 5209,
+      "sha256": "3adf6c972b09e962f0ff15d3b98d88527e9092cee2082d3a94dc584fd60743ce"
+    },
+    {
+      "path": "js/transport/transport-adapter.js",
+      "bytes": 6100,
+      "sha256": "d46ae385c314a4718ce106fddbf81becc641c216896eb97a3cf5041534fe0755"
+    },
+    {
+      "path": "js/ui/activity-log.js",
+      "bytes": 13300,
+      "sha256": "70cb745fb59972c17065d02c3fd1e9e77e9dce03178db6173a64ef949a7f56ad"
+    },
+    {
+      "path": "js/ui/charts.js",
+      "bytes": 20071,
+      "sha256": "1c1e0d92e8ea62b4f40e74e319ec3e84ec320ceabcd15acea5042ca79b8c8b49"
+    },
+    {
+      "path": "js/ui/global-search-ui.js",
+      "bytes": 11627,
+      "sha256": "c8abf4c844a82764ce95db5718893fe7434e96a6a47d19d06b5beee7f9481946"
+    },
+    {
+      "path": "js/ui/identity-selector.js",
+      "bytes": 11883,
+      "sha256": "028d690d49b7bd9fa3db8a0fd6d9b432d30e54932d2e0794a9fb2e8ba86b72bd"
+    },
+    {
+      "path": "js/ui/settings-about.js",
+      "bytes": 104733,
+      "sha256": "9ba02661d25b4fab4641c472c13b0526f9bc7b2b6a5288bf559450194a3f006f"
+    },
+    {
+      "path": "js/ui/shell-render.js",
+      "bytes": 42369,
+      "sha256": "1dcb504eedef94e521ad08211b751d7b8b2f919027aa1c941eb57f9f816517fe"
+    },
+    {
+      "path": "vendor/sheetjs/LICENSE",
+      "bytes": 11355,
+      "sha256": "4d2a38ac35cda06a555c84074a819d413339cd3691b822cae50f8f322fe01f64"
+    },
+    {
+      "path": "vendor/sheetjs/xlsx.full.min.js",
+      "bytes": 881727,
+      "sha256": "c9506197caf809a075b6dee1da0d36fb19da7158ffe8a88e7b0c96c5d8623c99"
+    }
+  ]
+}

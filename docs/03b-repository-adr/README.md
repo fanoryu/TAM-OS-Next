@@ -46,6 +46,9 @@ add it to the register below, and link it from any related record.
   separately paid managed backend); the backend becomes a same-origin PHP 8.3 + MariaDB API on the
   existing Hostinger hosting. ADR-0003's architecture-neutral decisions are carried forward; its text
   is preserved, with only its status marked Superseded. Authorizes no implementation.
+- **2026-09-29** — ADR-0002 Model B **implemented** by Distribution-1 (strict-CSP deployment package;
+  single-file build retired, published single files frozen). An implementation pointer was appended to
+  ADR-0002; its decision is unchanged.
 
 *Security decisions live in [`../security/`](../security/README.md) as SDRs. Engineering decision
 records (EDR) referenced from workflows are tracked in their originating decision packages.*

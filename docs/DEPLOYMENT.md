@@ -9,8 +9,9 @@ module map see [`ARCHITECTURE.md`](../ARCHITECTURE.md), for data rules see
 
 ## 1. Two layers
 
-**Source core (this repository)** — application source (`index.html`, `css/`, `js/`), the
-build/verify tooling (`tools/`), the tracked portable release (`dist/*.html`), the golden-master
+**Source core (this repository)** — application source (`index.html`, `css/`, `js/`, vendored
+`vendor/`), the build/verify tooling (`tools/`), the committed package manifest
+(`dist/package-manifest.json`) and frozen single-file releases (`dist/*.html`), the golden-master
 reference HTML, documentation, CI/release workflows, and issue/PR templates. It contains **no company
 data** and ships an **empty data seed** (a fresh install starts with zero records; the verifier
 asserts the embedded `seed-data` JSON is `[]`).
@@ -28,15 +29,22 @@ deployment-specific configuration or secrets. A ready-to-use template for this l
 
 ## 2. Running the app
 
-The app is a single-page, client-only application with **no backend, database, API, or runtime
-dependencies**. Two equivalent forms:
+The app is a single-page, client-only application with **no backend, database or API**; its only
+runtime dependency is the vendored, pinned SheetJS parser. It is distributed as the **deployment
+package** (Distribution-1, [ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)
+Model B) and runs **over HTTP**:
 
-- **Modular source** — serve the project root over HTTP (`python -m http.server 8000`) and open it.
-- **Portable build** — open `dist/tam-os-v<version>.html` directly in a browser.
+```bash
+node tools/build-package.js     # dist/package/ + ZIP + dist/package-manifest.json
+node tools/serve-package.js     # http://127.0.0.1:8765/ under the production header contract
+```
+
+`file://` is not a supported way to run TAM OS. Earlier single-file releases (`dist/*.html`) are
+frozen history, kept byte-identical and never rebuilt.
 
 All data is stored **locally** in the browser's `localStorage` (or the Claude Artifact storage
-environment). Nothing is transmitted to a server. Typography is embedded; the only external network
-reference is the spreadsheet parser loaded from a CDN, and no user data is sent to it. Two browsers —
+environment). Nothing is transmitted to a server. The page makes **no third-party network request**:
+typography is embedded and the spreadsheet parser is served from the package itself. Two browsers —
 including two visitors to the same hosted copy — hold two independent datasets.
 
 ## 3. Local / offline data handling
@@ -70,9 +78,11 @@ These read models are pure display logic; they do not change persistence, financ
 ## 6. Release & verification
 
 Releases are tag-driven and guarded; the tag must equal the source `APP_VERSION` or the workflow
-publishes nothing. Every change is built (`node tools/build-single-file.js`) and verified
-(`node tools/verify-build.js`) — the verifier enforces build fidelity, version identity, the schema
-version, the storage-key set, the empty seed, and the reporting invariants. Full steps:
+publishes nothing. Every change is verified (`node tools/verify-build.js`) and built
+(`node tools/build-package.js`) — the verifier enforces package determinism and fidelity, the frozen
+historical releases, the strict-CSP shape, version identity, the schema version, the storage-key set,
+the empty seed, and the reporting invariants. The release assets are the package ZIP and its
+manifest. Full steps:
 [`RELEASE-PROCESS.md`](RELEASE-PROCESS.md); QA gate: [`QA-CHECKLIST.md`](QA-CHECKLIST.md).
 
 ## 7. Maintaining the private layer (PT Total Asset Manajemen)
@@ -123,15 +133,49 @@ belong in the private layer (§1), never in this repository.
 **Governed deployment flow:**
 
 1. Canonical `main` at the release commit/tag (per [`RELEASE-PROCESS.md`](RELEASE-PROCESS.md)).
-2. Deterministic build and a passing verifier.
-3. Record the SHA-256 of the verified `dist/` output.
-4. Upload that output over SFTP (currently via WinSCP) to the Hostinger web root.
-5. Confirm the deployed file's SHA-256 matches, then run a production smoke test.
+2. A passing verifier, then `node tools/build-package.js`; the rebuilt `dist/package-manifest.json`
+   must equal the committed one.
+3. Take the package ZIP (or `dist/package/`) and confirm its SHA-256 equals the manifest's
+   `zip.sha256`.
+4. Upload the **contents** of the package over SFTP (currently via WinSCP) to the Hostinger document
+   root, so `index.html` sits at `/`. Nothing else from the repository is uploaded.
+5. Spot-check deployed files against the manifest's per-file SHA-256, then run a production smoke
+   test.
 
-Today the output is the single-file `dist/tam-os-v<version>.html`. Same-origin needs no frontend
-runtime configuration, but the multi-user frontend is still expected to ship as a package
-(Distribution-1, [ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)): the
-inlined single file cannot carry a strict Content-Security-Policy without broad `'unsafe-inline'`.
+**The package (Distribution-1).** Every file is a byte-identical copy of its source file at the same
+relative path: `index.html`, the six stylesheets, the pre-paint `js/boot/theme-boot.js`, every
+module-order script, vendored SheetJS, and the licence texts. It has no inline executable script and
+no third-party request, so it runs under a strict Content-Security-Policy. The API base is the
+relative same-origin `/api` — there is no runtime configuration file, key or absolute URL (ADR-0004
+§2.5).
+
+**Response-header contract.** The headers the host must send are defined once, in
+[`tools/package-headers.js`](../tools/package-headers.js), which `tools/serve-package.js` applies
+locally and the verifier checks. In summary:
+
+- **CSP:** `script-src 'self'` with no `'unsafe-inline'` / `'unsafe-eval'`; `style-src 'self'`;
+  `connect-src 'self'`; `object-src`, `base-uri`, `frame-ancestors` `'none'`; `data:` only for fonts and
+  images.
+- **Security headers:** `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`,
+  `Cross-Origin-Opener-Policy`; HSTS only per SDR-0002 §13.1.
+- **Documented exception — inline style attributes.** `style-src-attr 'unsafe-inline'` is the one
+  relaxation. About 457 `style="…"` attributes in UI templates across 33 modules (420 static layout
+  values, 37 runtime-computed) predate Distribution-1. Moving them into classes is a broad UI and
+  CSS-golden-master change, so it is **tracked follow-up work**, not part of this package change.
+  `<style>` elements and style URLs stay restricted to `'self'`, and scripts are unaffected.
+
+Applying these headers on Hostinger (for example via `.htaccess`) is a deployment step for the backend
+readiness milestones; nothing here configures the host.
+
+**Cache model.**
+
+| Path | Cache-Control | Why |
+|---|---|---|
+| `/` and every package file | `no-cache` (revalidate) | Filenames are not content-hashed, so no file may be cached as immutable; a stale script beside a fresh `index.html` must be impossible |
+| `/api/*` | `no-store, private` | Never cached by the browser or the CDN (SDR-0002 §13.3) |
+
+The Hostinger CDN must honour both before real data (SDR-0002 E5). Content-hashed filenames with
+long-lived caching are a possible later optimization, not a requirement.
 
 **Mandatory pre-deployment verifications (backend):**
 

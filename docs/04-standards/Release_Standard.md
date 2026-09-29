@@ -12,7 +12,8 @@ procedure is [`docs/RELEASE-PROCESS.md`](../RELEASE-PROCESS.md). This standard s
 - **Version is derived, single-sourced.** `APP_VERSION` / `APP_RELEASE_NAME` live once in the source
   constants; the tooling derives the output filename and identity. Never type a version into tooling.
 - **Tag-driven and guarded.** Publishing is triggered by a version tag; automation refuses to publish
-  unless the tag equals the source version and the portable build exists.
+  unless the tag equals the source version and the deployment package builds, reproduces the
+  committed manifest, and matches it.
 - **Idempotent.** Re-running a release must not create duplicate releases or corrupt the asset.
 - **Immutable once shipped.** A published tag, release, and asset are never rewritten; corrections go
   into a new version or a documentation-only follow-up.

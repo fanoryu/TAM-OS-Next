@@ -222,8 +222,39 @@ Reviews the pilot's outcome and evidence to determine whether the product may pr
 pilot toward general-use hardening, remain in pilot, or roll back. **Its result is not pre-declared
 here** — this milestone records only that the review must happen and what it decides.
 
-## Distribution-1 — Modular Distribution Migration — **Upcoming (after SDR-0002)**
+## Distribution-1 — Modular Distribution Migration — **Completed (2026-09-29) · unreleased**
 **Theme:** Canonical distribution moves from the generated single file to the application package.
+
+**Delivered (one change, not staged).**
+- **Package:** `tools/build-package.js` builds the static document root (`index.html`, 6 stylesheets,
+  `js/boot/theme-boot.js`, every module-order script, vendored SheetJS 0.18.5 with its Apache-2.0
+  licence, and the font OFL texts) as byte-identical copies of the source, plus a deterministic ZIP.
+  The committed `dist/package-manifest.json` records every file's SHA-256, the package digest and the
+  ZIP digest.
+- **Strict CSP:**
+  - The pre-paint theme script moved verbatim into `js/boot/theme-boot.js`.
+  - SheetJS is served same-origin (the same bytes as the former cdnjs pin, still SRI-checked).
+  - The page has no inline executable script and no third-party request.
+  - The header contract lives in `tools/package-headers.js`: `script-src 'self'`, and one documented
+    relaxation — `style-src-attr 'unsafe-inline'` for about 457 legacy inline style attributes.
+    Removing that relaxation is tracked follow-up work.
+- **Verifier:**
+  - Single-file fidelity was replaced by package determinism, manifest parity and source parity.
+  - The published `dist/tam-os-v2.11.0.html` is pinned by digest as frozen history.
+  - Strict-CSP invariants were added.
+  - `tools/build-single-file.js` is retired.
+- **CI, release and governance:**
+  - CI and release verify, build and check the manifest, then publish the ZIP and manifest.
+  - CodeQL ignores `vendor/**`; CODEOWNERS covers `/vendor/`.
+  - `CLAUDE.md` §3, §4.3, §5, §6.2, §10, §11, §12, §13, §15 and §19 were amended.
+- **Browser re-acceptance:** done on the package served under its real CSP, with fabricated data:
+  - boot with zero console errors and zero violations
+  - CEO and Employee principal selection, with Employee privacy (a CEO-created employee is not visible)
+  - Finance, Payroll, Employees and Dashboard navigation
+  - the real `.xlsx` file-input flow
+  - Complete Backup export → restore
+  - reload persistence and the light/dark pre-paint theme
+- **Release status:** unreleased. The next version is the first to ship the package.
 
 Authorized by [ADR-0002](../03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) (**Accepted**),
 which approves `index.html` + application assets as the **preferred future distribution
@@ -312,7 +343,7 @@ against a hostile client.
 
 - SDR-0002 (PHP + MariaDB) — ✅ Accepted 2026-09-29;
 - the data-residency answer;
-- Distribution-1 completed (a strict CSP needs more than one inlined file);
+- Distribution-1 — ✅ completed 2026-09-29 (strict-CSP deployment package; unreleased until the next version);
 - the mandatory pre-deployment host verifications in [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8;
 - a per-milestone Sprint Assignment.
 
