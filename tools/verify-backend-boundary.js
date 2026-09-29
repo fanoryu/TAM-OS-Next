@@ -140,9 +140,39 @@ function isProductionPhp(file) {
   return file.startsWith('server/src/') || file.startsWith('server/public/') || file.startsWith('server/dev/') || file.startsWith('server/config/');
 }
 
+// `<?php`, at least one whitespace character, then any number of `/* … */` or `// …\n`
+// comments (each optionally followed by whitespace), then exactly `declare(strict_types=1);`.
+// An index scanner rather than a regex: every step moves forward, so the cost is linear in the
+// prefix length (a repeated regex group here backtracked exponentially — CodeQL
+// js/redos). Anything else before the declare — code, `#` comments, another declare, an
+// unterminated comment — fails closed.
+const STRICT_TYPES = 'declare(strict_types=1);';
+function hasStrictTypesFirst(src) {
+  const skipSpace = (k) => {
+    while (k < src.length && /\s/.test(src[k])) k++;
+    return k;
+  };
+  if (!src.startsWith('<?php')) return false;
+  let i = skipSpace(5);
+  if (i === 5) return false;
+  for (;;) {
+    if (src.startsWith('/*', i)) {
+      const end = src.indexOf('*/', i + 2);
+      if (end === -1) return false;
+      i = skipSpace(end + 2);
+    } else if (src.startsWith('//', i)) {
+      const end = src.indexOf('\n', i + 2);
+      if (end === -1) return false;
+      i = skipSpace(end + 1);
+    } else {
+      return src.startsWith(STRICT_TYPES, i);
+    }
+  }
+}
+
 function checkPhp(file, src) {
   const out = [];
-  if (!/^<\?php\s+(\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n\s*)*declare\(strict_types=1\);/.test(src)) {
+  if (!hasStrictTypesFirst(src)) {
     out.push('missing declare(strict_types=1) as the first statement');
   }
   for (const re of SECRET_RULES) if (re.test(src)) out.push('secret-shaped value: ' + re);
@@ -311,6 +341,36 @@ function selftest() {
 
   dirty('missing strict_types is caught', 'server/src/X.php', "<?php\nfinal class X {}\n", 'strict_types');
   dirty('strict_types after code is caught', 'server/src/X.php', "<?php\necho 1;\ndeclare(strict_types=1);\n", 'strict_types');
+
+  // The strict_types prefix scanner, case by case (the rule's accepted and rejected shapes).
+  const D = 'declare(strict_types=1);';
+  const strictCase = (name, src, ok) => cases.push({ name: 'strict_types: ' + name, run: () => (hasStrictTypesFirst(src) ? [] : ['strict_types missing']), expect: ok ? 0 : 'strict_types' });
+  strictCase('declare right after the tag', '<?php ' + D, true);
+  strictCase('whitespace before declare', "<?php \n\t  \n" + D, true);
+  strictCase('one line comment', "<?php\n// note\n" + D, true);
+  strictCase('several line comments', "<?php\n// a\n// b\n//\n" + D, true);
+  strictCase('one block comment', "<?php\n/* a */\n" + D, true);
+  strictCase('mixed block, docblock and line comments', "<?php\n/**\n * doc */\n// x\n/* y */" + D, true);
+  strictCase('whitespace between comments and declare', "<?php\n/* a */\n\n\t// b\n   \n" + D, true);
+  strictCase('missing declare', "<?php\nfinal class X {}\n", false);
+  strictCase('statement before declare', "<?php\necho 1;\n" + D, false);
+  strictCase('another declare first', "<?php\ndeclare(ticks=1);\n" + D, false);
+  strictCase('strict_types=0', "<?php\ndeclare(strict_types=0);\n", false);
+  strictCase('spaced declare is not the governed form', "<?php\ndeclare(strict_types = 1);\n", false);
+  strictCase('unterminated block comment', "<?php\n/* never closed\n" + D, false);
+  strictCase('line comment at end of file', '<?php\n// only a comment', false);
+  strictCase('# comment is not an accepted prefix', "<?php\n# note\n" + D, false);
+  strictCase('no whitespace after the tag', '<?php' + D, false);
+  strictCase('short open tag', '<? ' + D, false);
+  strictCase('text before the tag', ' <?php\n' + D, false);
+  strictCase('empty file', '', false);
+  // ReDoS regression (CodeQL js/redos): the attack shape for the former regex — many `*/` —
+  // must be decided by syntax. The scanner is linear, so these finish immediately; no timing
+  // assertion is needed or made.
+  strictCase('adversarial: 50k "*/" inside one comment, no declare', '<?php /*' + '*/'.repeat(50000), false);
+  strictCase('adversarial: 50k "*/" after an unclosed comment start', '<?php\n/* ' + '*/'.repeat(50000) + '\necho 1;', false);
+  strictCase('adversarial: 20k empty block comments then declare', '<?php\n' + '/**/ '.repeat(20000) + D, true);
+  strictCase('adversarial: 20k empty block comments then code', '<?php\n' + '/**/'.repeat(20000) + 'echo 1;', false);
   dirty('eval is caught', 'server/src/X.php', S + "eval('1');\n", 'eval');
   dirty('EVAL in any case is caught', 'server/src/X.php', S + "EVAL ('1');\n", 'eval');
   for (const fn of ['exec', 'shell_exec', 'system', 'passthru', 'proc_open', 'popen']) dirty(fn + ' is caught', 'server/src/X.php', S + fn + "('ls');\n", 'process');
