@@ -278,7 +278,7 @@ composite/irreversible operations, and an **online-required** client. The browse
 |---|---|
 | `CLAUDE.md` §4.3 client-only **MUST** amendment | ✅ **Performed by ARCH-GOV-1 (2026-09-29)**, then **re-amended by ARCH-GOV-2** — §1, §4.3, §6.2 and §7 now permit **only** the ADR-0004 same-origin PHP + MariaDB backend; authorizes no implementation |
 | ADR-0003 | **Superseded** (2026-09-29) by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) — Accepted 2026-08-12; its architecture-neutral decisions carry forward |
-| SDR-0002 (security decision record) | **Not created** — to be drafted for PHP + MariaDB; required before backend work |
+| SDR-0002 (security decision record) | ✅ **Accepted** (2026-09-29) — [PHP + MariaDB security architecture](../security/SDR-0002-php-mariadb-security-architecture.md); authorizes no implementation |
 | Data-residency answer | **Open** — now concerns the hosting location (ADR-0004 §5, trigger 3) |
 | Per-milestone authorization | **None issued** — each MU milestone needs its own Sprint Assignment |
 
@@ -310,7 +310,7 @@ against a hostile client.
 
 **Remaining prerequisites (none authorized yet):**
 
-- SDR-0002 (PHP + MariaDB) created and Accepted;
+- SDR-0002 (PHP + MariaDB) — ✅ Accepted 2026-09-29;
 - the data-residency answer;
 - Distribution-1 completed (a strict CSP needs more than one inlined file);
 - the mandatory pre-deployment host verifications in [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8;

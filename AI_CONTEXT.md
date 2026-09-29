@@ -926,8 +926,8 @@ Directions (no committed release numbers unless already approved):
   existing Hostinger hosting, enforced by a central policy and data-access layer (there is no database
   RLS backstop). ADR-0003's architecture-neutral decisions carry forward, and `CLAUDE.md` §4.3, §6.2 and
   §7 now permit only that backend, with governed Composer dependencies, a nightly encrypted off-host
-  dump, and no PITR requirement. It still **authorizes no implementation**. **SDR-0002 has not been
-  created**; it will be drafted for PHP + MariaDB and is required before backend work. **PILOT-1** — real
+  dump, and no PITR requirement. It still **authorizes no implementation**. **SDR-0002 is
+  Accepted** (2026-09-29, [PHP + MariaDB security architecture](docs/security/SDR-0002-php-mariadb-security-architecture.md)); it authorizes no implementation. **PILOT-1** — real
   operational use with company data — is **ON HOLD** by maintainer direction until the multi-user
   readiness gate is met; no real company data has been entered. The maintainer's **2026-09-29
   sequencing ruling** resolved the resulting circular dependency, and ARCH-GOV-2 refined it to:
