@@ -613,7 +613,7 @@ Also complete since then:
 
 Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2):
 
-1. **SDR-0002** — the security decision record for the PHP + MariaDB backend.
+1. ✅ **SDR-0002** — the [security decision record](docs/security/SDR-0002-php-mariadb-security-architecture.md) for the PHP + MariaDB backend (Accepted 2026-09-29).
 2. **Distribution-1** — modular distribution migration
    ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md), revalidated: no
    longer post-pilot; it precedes the backend so TAM OS can carry a strict Content-Security-Policy).
