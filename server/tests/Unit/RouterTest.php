@@ -9,14 +9,22 @@ use function TamOs\Tests\assertSame;
 use function TamOs\Tests\assertThrows;
 use function TamOs\Tests\assertTrue;
 
-$router = new Router(Routes::production());
+$production = static fn (): array => Routes::production(new \TamOs\Data\Readiness(\TamOs\Tests\testConfig(), \TamOs\Tests\tempDir() . '/none'));
+$router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly one route: GET /api/health' => static function (): void {
-        $routes = Routes::production();
-        assertSame(1, count($routes));
+    'production has exactly two routes: GET /api/health and GET /api/ready' => static function () use ($production): void {
+        $routes = $production();
+        assertSame(2, count($routes));
         assertSame(['GET', '/api/health', []], [$routes[0]->method, $routes[0]->path, $routes[0]->queryKeys]);
+        assertSame(['GET', '/api/ready', []], [$routes[1]->method, $routes[1]->path, $routes[1]->queryKeys]);
+    },
+    'GET and HEAD reach ready; other methods are 405 with Allow: GET, HEAD' => static function () use ($router): void {
+        assertSame('/api/ready', $router->match('GET', '/api/ready')->path);
+        assertSame('/api/ready', $router->match('HEAD', '/api/ready')->path);
+        $e = assertThrows(ApiError::class, static fn () => $router->match('POST', '/api/ready'));
+        assertSame([ErrorCode::MethodNotAllowed, ['GET', 'HEAD']], [$e->errorCode, $e->allow]);
     },
     'GET and HEAD reach health' => static function () use ($router): void {
         assertSame('/api/health', $router->match('GET', '/api/health')->path);
@@ -30,7 +38,7 @@ return [
         }
     },
     'unknown canonical paths are 404' => static function () use ($code): void {
-        foreach (['/api', '/api/ready', '/api/login', '/api/health-check'] as $path) {
+        foreach (['/api', '/api/readiness', '/api/login', '/api/health-check', '/api/migrate'] as $path) {
             assertSame(ErrorCode::NotFound, $code('GET', $path), $path);
         }
     },

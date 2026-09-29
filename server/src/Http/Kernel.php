@@ -41,6 +41,7 @@ final class Kernel
         $startedNs ??= hrtime(true);
         $route = null;
         $error = null;
+        $reason = null;
         try {
             $route = $this->router->match($request->method, $request->path);
             $json = $request->isMutation() ? $this->guardMutation($request) : [];
@@ -49,6 +50,7 @@ final class Kernel
             $response = Response::success(($route->handler)($request, $principal, $json), $requestId);
         } catch (ApiError $e) {
             $error = $e->errorCode->value;
+            $reason = $e->logReason;
             $response = Response::error($e->errorCode, $requestId, $e);
         } catch (DatabaseError $e) {
             // Unreachable or transient (deadlock, lock wait) → 503; any other database failure → 500.
@@ -72,6 +74,7 @@ final class Kernel
             $response->status,
             intdiv(hrtime(true) - $startedNs, 1000000),
             $error,
+            $reason,
         );
         return $response;
     }

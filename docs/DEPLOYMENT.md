@@ -111,7 +111,8 @@ The same host will serve both halves of TAM OS from one origin:
 - `/api/*` — a PHP 8.3 backend over MariaDB/MySQL (InnoDB).
 
 The browser never reaches the database. **No separate managed backend service and no VPS are
-required.** The backend is **not implemented**; see [`Milestones.md`](05-milestones/Milestones.md)
+required.** The backend is **not deployed** and only its foundation (HTTP, data layer, migration
+machinery — no authentication or application schema) exists in source; see [`Milestones.md`](05-milestones/Milestones.md)
 for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
@@ -176,6 +177,12 @@ readiness milestones; nothing here configures the host.
 
 The Hostinger CDN must honour both before real data (SDR-0002 E5). Content-hashed filenames with
 long-lived caching are a possible later optimization, not a requirement.
+
+**Schema changes.** The database schema changes only through `php server/bin/migrate.php apply`
+(`status` reports without changing anything); there is no migration endpoint and nothing migrates at
+start-up. `/api/ready` answers 503 until the schema is exactly current. How that command will be run on
+Hostinger — SSH is currently inactive — is a pre-deployment decision, as is whether migrations use
+separate database credentials from the runtime API.
 
 **Mandatory pre-deployment verifications (backend):**
 

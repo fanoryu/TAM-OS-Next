@@ -68,7 +68,7 @@ return [
         assertSame(200, kernel()->handle($get('/api/health', '', 'HEAD'), requestId())->status);
     },
     'unknown and malformed paths are 404 not_found' => static function () use ($get, $code): void {
-        foreach (['/api/ready', '/api/../index.html', '/api/%2e%2e/', '/api/health/', '/api/HEALTH'] as $path) {
+        foreach (['/api/readiness', '/api/../index.html', '/api/%2e%2e/', '/api/health/', '/api/HEALTH'] as $path) {
             $r = kernel()->handle($get($path), requestId());
             assertSame([404, 'not_found'], [$r->status, $code($r)], $path);
             assertApiHeaders($r, requestId());

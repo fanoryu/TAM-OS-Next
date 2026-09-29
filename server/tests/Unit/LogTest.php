@@ -47,7 +47,8 @@ return [
         $log->access(requestId(), 'GET', '/api/health', 200, 3, null);
         $log->access(requestId(), "GET\r\nX: 1", null, 404, 1, 'not_found');
         [$a, $b] = $lines($file);
-        assertSame(['ts', 'level', 'event', 'requestId', 'method', 'route', 'status', 'durationMs', 'error'], array_keys($a));
+        assertSame(['ts', 'level', 'event', 'requestId', 'method', 'route', 'status', 'durationMs', 'error', 'reason'], array_keys($a));
+        assertSame(null, $a['reason']);
         assertSame(['info', 'request', requestId(), 'GET', '/api/health', 200], [$a['level'], $a['event'], $a['requestId'], $a['method'], $a['route'], $a['status']]);
         assertSame(['INVALID', '-', 'not_found'], [$b['method'], $b['route'], $b['error']]);
         assertTrue(preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', $a['ts']) === 1, 'UTC timestamp');

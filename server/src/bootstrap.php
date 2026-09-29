@@ -12,6 +12,7 @@ namespace TamOs;
 
 use TamOs\Config\ConfigError;
 use TamOs\Config\ConfigLoader;
+use TamOs\Data\Readiness;
 use TamOs\Http\ErrorCode;
 use TamOs\Http\Kernel;
 use TamOs\Http\Request;
@@ -91,6 +92,8 @@ function run(): void
 
     $logger = new Logger($config->logPath, $config->env);
     $request = Request::fromGlobals($config->bodyLimitBytes);
-    $kernel = new Kernel(Routes::production(), new NullPrincipalResolver(), $config, $logger);
+    // Readiness connects lazily, only when /api/ready runs.
+    $readiness = new Readiness($config, dirname(__DIR__) . '/migrations');
+    $kernel = new Kernel(Routes::production($readiness), new NullPrincipalResolver(), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');
 }

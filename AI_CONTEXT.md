@@ -20,7 +20,10 @@ static boundary tool (`tools/verify-backend-boundary.js`), backend tests and a `
 has no database, SQL, authentication or business endpoint, is not deployed, and the frontend does not
 call it (see `ARCHITECTURE.md` → Backend foundation). **BF-2A** adds the data layer under
 `server/src/Data/` (lazy PDO connection, prepared statements, transactions, classified database errors)
-and a MariaDB-backed CI job; it creates no table, migration or database-backed endpoint. v2.10.0 remains
+and a MariaDB-backed CI job; it creates no table, migration or database-backed endpoint. **BF-2B** adds
+the migration machinery (`server/bin/migrate.php status|apply`, a runner-owned `schema_migrations`
+history with drift detection and fail-closed incomplete markers) and `GET /api/ready`; no production
+migration exists yet. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

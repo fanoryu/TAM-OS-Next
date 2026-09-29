@@ -42,6 +42,16 @@ database (`TAMOS_TEST_DB_HOST` / `_PORT` / `_NAME` / `_USER` / `_PASS`: loopback
 `_test`). Otherwise it is reported **NOT RUN**, never passed. CI (`backend.yml` → `backend-db`) runs it
 against a MariaDB 10.11 service container with `php server/tests/run.php --require-db`.
 
+Schema migrations (BF-2B) run only through the CLI runner, never over HTTP:
+
+```bash
+php server/bin/migrate.php status   # locked, read-only: current / pending / reason
+php server/bin/migrate.php apply    # create and verify history, then run pending migrations
+```
+
+Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
+is a test fixture.
+
 ### Build
 
 ```bash
