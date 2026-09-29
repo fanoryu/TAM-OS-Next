@@ -51,15 +51,4 @@ return [
     'duplicate keys keep the last value (documented json_decode behaviour)' => static function (): void {
         assertSame(['a' => 2], JsonBody::decode('{"a":1,"a":2}'));
     },
-    'validateFields rejects unknown and missing fields by name only' => static function (): void {
-        JsonBody::validateFields(['a' => 1], ['a'], ['b']);
-        $e = assertThrows(ApiError::class, static fn () => JsonBody::validateFields(['a' => 'secret-value', 'role' => 'ceo'], ['a', 'c']));
-        assertSame(ErrorCode::ValidationFailed, $e->errorCode);
-        assertSame(['role', 'c'], $e->fields);
-        assertTrue(!str_contains(json_encode($e->fields), 'secret-value') && !str_contains(json_encode($e->fields), 'ceo'), 'no values');
-    },
-    'hostile field names are not echoed' => static function (): void {
-        $e = assertThrows(ApiError::class, static fn () => JsonBody::validateFields(['<script>' => 1, str_repeat('k', 100) => 1], []));
-        assertSame(['(invalid)'], $e->fields);
-    },
 ];

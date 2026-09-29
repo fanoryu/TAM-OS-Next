@@ -370,7 +370,8 @@ function selftest() {
   cases.push({ name: 'an ignored server file is caught (the *secret* trap)', run: () => checkGitHygiene(['server/src/SecretStore.php'], ['server/src/SecretStore.php'], []), expect: 'ignored' });
   cases.push({ name: 'an untracked server file is caught', run: () => checkGitHygiene(['server/src/New.php'], [], ['server/src/New.php']), expect: 'not tracked' });
   cases.push({ name: 'the ignored local config is permitted', run: () => checkGitHygiene(['server/config/config.local.php'], ['server/config/config.local.php'], []), expect: 0 });
-  cases.push({ name: 'the real .gitignore ignores a *secret* file name (trap is real)', run: () => (gitIgnored(['server/src/SecretStore.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
+  // Lower-case on purpose: `*secret*` matches case-sensitively on Linux, case-insensitively on Windows.
+  cases.push({ name: 'the real .gitignore ignores a *secret* file name (trap is real)', run: () => (gitIgnored(['server/src/client_secret.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
   cases.push({ name: 'the real .gitignore ignores the local config', run: () => (gitIgnored(['server/config/config.local.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
 
   let passed = 0;
