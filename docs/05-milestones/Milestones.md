@@ -115,7 +115,8 @@ recorded in [RDR-011](../99-archive/RDR/RDR-011-epsilon-repository-snapshot.md);
 TAM OS **v2.11.0 — Identity Refresh** is **published and marked Latest** in `fanoryu/TAM-OS-Next`, from
 annotated tag `v2.11.0` (peeling to `04c1503d`); asset `tam-os-v2.11.0.html` (1,676,709 B, SHA-256
 `57d8b0c2…2358557`). Presentation/identity only — no authorization, schema, data or backend change
-(`SCHEMA_VERSION` 6, `ACTIONS` 20). **PILOT-1 remains ON HOLD PENDING VPS**; backend **NOT STARTED**.
+(`SCHEMA_VERSION` 6, `ACTIONS` 20). **PILOT-1 remains ON HOLD** pending the multi-user readiness gate
+(the earlier "pending VPS" assumption was retired by HOSTING-0 — no VPS is required); backend **NOT STARTED**.
 
 ## v2.10.0 Official Release — **Completed · Published (prior release)**
 **Theme:** the Governed Workspace release ships.
@@ -159,12 +160,30 @@ participants, results, findings or exit decision may be recorded before they exi
 | Maintainer approval | **YES** |
 | Technical readiness | **GO** |
 | Product released | **YES — v2.11.0 (Identity Refresh) published and Latest; v2.10.0 prior** |
-| Launch status | **NOT YET LAUNCHED** |
+| Launch status | **NOT YET LAUNCHED — ON HOLD (PILOT-1)** |
 | Audience | **1–3 named internal operators** (desktop Chromium, controlled profile) — not to be broadened |
 | Canonical artifact | `tam-os-v2.10.0.html` — **published and frozen**, 1,151,267 B, SHA-256 `60382271…2c7fa704` |
 | Pilot limitations | **accepted, not fixed** (no strong authentication; manual single-device backups; mouse-only disabled-reason discoverability; CDN-dependent `.xlsx`; no multi-device sync) |
 
-**Next operational step:** pilot handoff, verifying the artifact SHA-256 before distribution.
+**PILOT-1 is ON HOLD (maintainer direction, recorded by ARCH-GOV-1 on 2026-09-29).** Real operational
+use with company data begins only after the multi-user readiness gate — authentication, shared
+persistence, server-side authorization and the production cutover gate in
+[`DEPLOYMENT.md`](../DEPLOYMENT.md) §8. **No real company data has been entered.** The currently hosted
+TAM OS copy is **pre-operational**; local prototype testing and internal technical preview with
+fabricated data are not PILOT-1. The sign-off above remains on record; it is not a launch
+instruction while the hold stands.
+
+**Sequencing ruling (maintainer, 2026-09-29).** The hold made the recorded order circular:
+Distribution-1 waited on the pilot concluding, Multi-User waited on Distribution-1, and PILOT-1 now
+waits on Multi-User. The maintainer resolved it — **Distribution-1 is no longer gated on PILOT-1**
+(an [ADR-0002](../03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) §5 revalidation,
+recorded there as a forward-pointer note; the ADR's decision is unchanged). The binding sequence is:
+
+**ARCH-GOV-1 → SDR-0002 → Distribution-1 → Multi-User implementation** (Supabase Auth, shared
+persistence, RLS, authoritative identity integration, authenticated authorization E2E, removal of
+production "Acting as") **→ production readiness validation → `finance.reliabilityindonesia.com`
+cutover → PILOT-1**, followed by the recorded Post-Pilot Findings & Remediation, Pilot Exit Review and
+General-Use Readiness.
 
 ## Post-Pilot Findings & Remediation — **Upcoming**
 **Theme:** what the pilot actually surfaces.
@@ -191,7 +210,7 @@ Reviews the pilot's outcome and evidence to determine whether the product may pr
 pilot toward general-use hardening, remain in pilot, or roll back. **Its result is not pre-declared
 here** — this milestone records only that the review must happen and what it decides.
 
-## Distribution-1 — Modular Distribution Migration — **Upcoming (post-pilot)**
+## Distribution-1 — Modular Distribution Migration — **Upcoming (after SDR-0002)**
 **Theme:** Canonical distribution moves from the generated single file to the application package.
 
 Authorized by [ADR-0002](../03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) (**Accepted**),
@@ -202,7 +221,7 @@ attempted inside a release-candidate PR, and **not** partially.
 The audit behind ADR-0002 found **zero `REQUIRED`** dependencies on the single-file artifact — Model A
 is retained for the v2.10.0 pilot on release-risk sequencing grounds alone. It also established that
 the single file is **not** fully offline: SheetJS and Google Fonts remain external CDN dependencies
-in both models.
+in both models (fonts have since been embedded, in v2.11.0; SheetJS remains).
 
 **Scope (one change, not staged):**
 - `index.html` + application assets as the canonical package
@@ -217,8 +236,10 @@ in both models.
   covering boot with zero console errors, principal selection, Employee privacy, Finance, Payroll,
   real `.xlsx` file-input flow, backup export/restore, and reload persistence
 
-**Prerequisite:** the v2.10.0 controlled pilot has concluded. **Distribution-1 does not block the
-controlled pilot** — the pilot ships on the retained Model A artifact.
+**Prerequisite (revised by the 2026-09-29 sequencing ruling):** SDR-0002 and its own authorization.
+The former prerequisite — "the v2.10.0 controlled pilot has concluded" — is superseded: PILOT-1 now
+follows Multi-User, which needs Distribution-1 first. Model A remains canonical until Distribution-1
+lands.
 
 ## Multi-User-0 — Shared Multi-User Architecture Decision — **Completed · accepted baseline · FROZEN**
 **Theme:** deciding how TAM OS becomes a genuine multi-user system — **without building any of it**.
@@ -243,7 +264,7 @@ composite/irreversible operations, and an **online-required** client. The browse
 
 | Gate | State |
 |---|---|
-| `CLAUDE.md` §4.3 client-only **MUST** amendment | **NOT performed** — maintainer authority only. **This is the standing blocker** |
+| `CLAUDE.md` §4.3 client-only **MUST** amendment | ✅ **Performed by ARCH-GOV-1 (2026-09-29)** — §1, §4.3 and §7 now permit **only** the ADR-0003 managed backend; authorizes no implementation |
 | ADR-0003 | ✅ **Accepted** (2026-08-12) — direction only; authorizes no implementation |
 | SDR-0002 (security decision record) | **Not created** — required before MU-1 |
 | Data-residency answer | **Open** — may change the vendor/region choice |
@@ -273,6 +294,14 @@ throughout. **MU-5 is the first irreversible step**, and it is deliberately gate
 sole acceptance criterion is proving that an authenticated Employee **cannot** fetch a colleague's
 payroll through the raw API. Confidential data does not move until the privacy boundary is proven
 against a hostile client.
+
+**Remaining prerequisites (none authorized yet):** SDR-0002 created and Accepted; the data-residency
+answer; Distribution-1 completed (a multi-user client needs public runtime configuration, so it
+cannot ship as one inlined file); and a per-milestone Sprint Assignment. The frontend host is
+settled — the existing Hostinger web hosting at `finance.reliabilityindonesia.com`, with the cutover
+gate in [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8 — and **no VPS is required**. "Acting as" is removed
+from production only after authenticated E2E passes, with no automatic CEO/Employee fallback (see
+[`ARCHITECTURE.md`](../../ARCHITECTURE.md), security boundary).
 
 ## General-Use Readiness / Hardening — **Future**
 **Theme:** the work between "a controlled pilot succeeded" and "anyone may use this".

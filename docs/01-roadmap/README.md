@@ -26,16 +26,18 @@ release** (Identity Refresh; the prior v2.10.0 release remains published and int
 | 5 | Controlled Pilot Sign-off | **APPROVED** (`df76ec20`) |
 | 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST — in both repositories** — **originally published** from annotated tag `v2.10.0` on predecessor release commit `335d53ed` in `fanoryu/TAM-OS`, and **canonically re-published unchanged** from annotated tag `v2.10.0` here, peeling to `856e3ca6`. Asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical across both Releases and to `dist/`. Not a new product version |
 | 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12). **Implementation NOT authorized** |
-| 8 | **Controlled Pilot** | **NEXT — approved to start, NOT YET LAUNCHED** |
+| 8 | **Controlled Pilot** (PILOT-1) | **APPROVED, NOT YET LAUNCHED — ON HOLD** until the multi-user readiness gate |
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |
 | 10 | Pilot Exit Review | **UPCOMING** |
-| 11 | Distribution-1 — Modular Distribution Migration | **UPCOMING / POST-PILOT** |
-| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (blocked on the `CLAUDE.md` §4.3 amendment, which remains **unperformed**) |
+| 11 | Distribution-1 — Modular Distribution Migration | **UPCOMING — after SDR-0002, before Multi-User** (no longer post-pilot) |
+| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (`CLAUDE.md` §4.3 amendment **performed by ARCH-GOV-1**; still blocked on SDR-0002 and per-milestone authorization) |
 | 13 | General-Use Readiness / Hardening | **FUTURE** |
 | 14 | UX-006F / v3.0.0 | **FUTURE** |
 
-**Sequence:** Controlled Pilot → Pilot Findings / Triage → Post-Pilot Remediation → Pilot Exit Review
-→ Distribution-1 → **Multi-User-1…8** → General-Use Readiness → v3.0.0.
+**Sequence (maintainer ruling, 2026-09-29):** ARCH-GOV-1 → SDR-0002 → Distribution-1 →
+**Multi-User-1…8** → production readiness validation → `finance.reliabilityindonesia.com` cutover →
+**PILOT-1** → Pilot Findings / Remediation → Pilot Exit Review → General-Use Readiness → v3.0.0. Detail:
+[Milestones](../05-milestones/Milestones.md); cutover gate: [`DEPLOYMENT.md`](../DEPLOYMENT.md) §8.
 
 Four points the ordering is there to make unambiguous:
 
@@ -48,9 +50,10 @@ Four points the ordering is there to make unambiguous:
   has not started and no launch date is set.** It launches only when the artifact is actually handed
   to the 1–3 named internal operators. Until then this milestone must not be marked
   active / live / in progress.
-- **Distribution-1 does not block the controlled pilot.** Model A is retained for v2.10.0 per
-  [ADR-0002](../03b-repository-adr/ADR-0002-canonical-distribution-architecture.md); Model B is the approved future
-  architecture and its migration is post-pilot work with its own implementation and re-acceptance.
+- **Distribution-1 now precedes Multi-User, not the pilot's conclusion.** Model A remains canonical
+  until it lands; Model B is the approved future architecture per
+  [ADR-0002](../03b-repository-adr/ADR-0002-canonical-distribution-architecture.md), revalidated on
+  2026-09-29 because PILOT-1 (real company data) now follows the multi-user work.
 - **Neither v2.10.0 nor the controlled pilot is multi-user, and Multi-User-0 does not change that.**
   The released product runs on the **current local, single-device, trust-based** architecture; two
   computers running v2.10.0 hold **two independent datasets**.

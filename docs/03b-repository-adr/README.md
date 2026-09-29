@@ -35,6 +35,12 @@ add it to the register below, and link it from any related record.
   settles the direction only: it authorizes **no** implementation, backend provisioning, migration,
   runtime or schema change, and **no** `CLAUDE.md` amendment. `CLAUDE.md` §4.3 remains fully operative
   and continues to **block implementation** until amended through its own milestone.
+- **2026-09-29** — `CLAUDE.md` §1, §4.3 and §7 amended by **ARCH-GOV-1** to permit **only** the ADR-0003
+  managed backend. ADR-0003 itself is unchanged; the amendment authorizes **no** implementation, and
+  SDR-0002 plus per-milestone authorization remain required before Multi-User-1.
+- **2026-09-29** — ADR-0002 **revalidated** (§5 triggers occurred; forward-pointer note appended, decision
+  unchanged): Distribution-1 is no longer gated on the pilot concluding and now precedes Multi-User
+  implementation, per maintainer ruling.
 
 *Security decisions live in [`../security/`](../security/README.md) as SDRs. Engineering decision
 records (EDR) referenced from workflows are tracked in their originating decision packages.*

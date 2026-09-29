@@ -210,3 +210,15 @@ The migration is tracked as **Distribution-1 — Modular Distribution Migration*
 The audit's classification of which old assertions are **LEGACY** versus still architecturally
 meaningful is recorded in §1 and §4 of this record and must be revisited, not assumed, at migration
 time.
+
+> **Revalidation note (ARCH-GOV-1, 2026-09-29 — a forward pointer, not a rewrite).** Two §5 triggers
+> have occurred: the v2.10.0 controlled pilot as scoped here was never launched and is replaced by
+> **PILOT-1** — real operational use with real company data, gated on the multi-user architecture
+> ([ADR-0003](ADR-0003-shared-multi-user-architecture.md)) — and distribution is moving to hosted HTTP
+> (`docs/DEPLOYMENT.md` §8). The maintainer ruled that **Distribution-1 is no longer gated on the pilot
+> concluding**: it now follows SDR-0002 and precedes Multi-User implementation, because the multi-user
+> client needs runtime configuration and cannot remain one fully inlined file. The decision above is
+> **unchanged** — Model A remains the canonical distribution until Distribution-1 lands, Model B is the
+> target, and the migration is one dedicated, non-partial milestone. Only the "post-pilot" timing is
+> revalidated; the ruling and full sequence are recorded in
+> [Milestones.md](../05-milestones/Milestones.md).
