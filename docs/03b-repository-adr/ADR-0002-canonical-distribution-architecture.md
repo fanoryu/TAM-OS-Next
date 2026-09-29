@@ -222,3 +222,10 @@ time.
 > target, and the migration is one dedicated, non-partial milestone. Only the "post-pilot" timing is
 > revalidated; the ruling and full sequence are recorded in
 > [Milestones.md](../05-milestones/Milestones.md).
+
+> **Forward pointer (ARCH-GOV-2, 2026-09-29 — not a rewrite).** The runtime-configuration rationale
+> above was Supabase-specific. [ADR-0004](ADR-0004-hostinger-same-origin-backend.md) replaced that
+> backend with a same-origin API that needs no frontend runtime configuration. **Distribution-1 still
+> precedes backend implementation**, now because the inlined single file cannot carry a strict
+> Content-Security-Policy without broad `'unsafe-inline'` (ADR-0004 §2.8). This record's decision is
+> unchanged.

@@ -149,13 +149,14 @@ Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v
 shared database in this release.
 
 A future shared multi-user architecture has been **decided but not built**: Multi-User-0 is
-**merged/frozen** and [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) is **Accepted** as
-the architecture *baseline*. `CLAUDE.md` §4.3 has been amended to permit **only** that managed backend
-(Supabase Auth, PostgreSQL with Row-Level Security), but **implementation has not started and is not
-authorized**. The planned frontend host is the existing company web hosting at
-`finance.reliabilityindonesia.com`, which does **not** serve TAM OS yet and will not until the production
-cutover gate in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8 is met. Nothing in that direction ships in
-v2.11.0.
+**merged/frozen**, and the current decision is
+[ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) (**Accepted**; it superseded
+the Supabase-based [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md)). It
+places a same-origin PHP + MariaDB backend at `/api/*` on the existing company web hosting at
+`finance.reliabilityindonesia.com`, beside the frontend. `CLAUDE.md` §4.3 permits **only** that
+backend, but **implementation has not started and is not authorized**. The hostname does **not** serve
+TAM OS yet, and will not until the production cutover gate in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+§8 is met. Nothing in that direction ships in v2.11.0.
 
 ### Running it
 
@@ -606,16 +607,20 @@ Also complete since then:
 - ✅ **Controlled Pilot Sign-off** — maintainer approval **granted**.
 - ✅ **Multi-User-0** — shared multi-user architecture decision, **merged and frozen**
   ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** as the architecture
-  *baseline*). **Implementation has not started and is not authorized.**
+  *baseline*, since superseded by
+  [ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) — same-origin PHP + MariaDB on
+  the existing Hostinger hosting). **Implementation has not started and is not authorized.**
 
-Next, in order (maintainer sequencing ruling, 2026-09-29):
+Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2):
 
-1. **SDR-0002** — the multi-user security decision record.
+1. **SDR-0002** — the security decision record for the PHP + MariaDB backend.
 2. **Distribution-1** — modular distribution migration
    ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md), revalidated: no
-   longer post-pilot, because the multi-user client needs runtime configuration).
-3. **Multi-User-1…8**, then production readiness validation and the `finance.reliabilityindonesia.com`
-   cutover ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8).
+   longer post-pilot; it precedes the backend so TAM OS can carry a strict Content-Security-Policy).
+3. **Multi-User implementation** — backend foundation, authentication/session, authoritative identity,
+   authorization/data scope, audit/backup, authenticated E2E, "Acting as" removal — then production
+   readiness with an external security review, and the `finance.reliabilityindonesia.com` cutover
+   ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8).
 4. **PILOT-1** — real operational use with company data. The v2.10.0 controlled pilot was approved but
    **never launched** and is **ON HOLD** until this point; no real company data has been entered.
    Publishing v2.10.0 made the verified artifact obtainable; **it did not launch the pilot**.

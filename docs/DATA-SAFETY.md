@@ -58,5 +58,5 @@ change is an **intentional, documented migration**:
 
 - No network calls carry user data; the app runs entirely client-side (an external CDN is used only for
   the XLSX parser; fonts are embedded). The future multi-user backend permitted by `CLAUDE.md` §4.3
-  (ADR-0003) is not implemented; when it is, user data travels only to that backend.
+  (ADR-0004: a same-origin PHP API) is not implemented; when it is, user data travels only to that API.
 - Exports (CSV / JSON) are generated locally and downloaded by the user; they are never transmitted.

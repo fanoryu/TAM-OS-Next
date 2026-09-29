@@ -25,9 +25,11 @@ repository (no longer skipped — it runs and its analysis/SARIF upload succeed)
 `fanoryu/TAM-OS` **remains private**, retained only as historical provenance and not resolvable by
 public visitors. Publication changed no application behavior — **PILOT-1 remains ON HOLD** and
 **backend remains NOT STARTED**. HOSTING-0 (2026-09-29) retired the earlier "pending VPS" assumption:
-no VPS is required. The frontend target is the existing Hostinger managed web hosting at
-`finance.reliabilityindonesia.com` (not yet cut over), the backend is ADR-0003's Supabase direction,
-and real company data enters only after the multi-user readiness gate — see
+no VPS is required. The target is the existing Hostinger Premium Web Hosting at
+`finance.reliabilityindonesia.com` (not yet cut over), serving both the frontend and — per
+[ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md), which superseded the
+Supabase-based ADR-0003 — a same-origin PHP + MariaDB backend at `/api/*`. Real company data enters
+only after the multi-user readiness gate — see
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8.
 
 **v2.10.0 is PUBLISHED** (now the prior release, no longer Latest). It was **originally published** on 2026-08-11 from the
@@ -910,21 +912,31 @@ Directions (no committed release numbers unless already approved):
   enforcement boundary, Supabase Auth for verified identity, an online-required client, and the browser
   treated as **untrusted** (`ACTIONS` stays 20; existing record IDs preserved). See
   [`docs/01-roadmap/Multi-User-0-Shared-Multi-User-Architecture-Decision.md`](docs/01-roadmap/Multi-User-0-Shared-Multi-User-Architecture-Decision.md)
-  and [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md). **ADR-0003 is `Accepted`
-  (2026-08-12) as the architecture *baseline* — Multi-User-0 is MERGED / FROZEN.** Acceptance settles
+  and [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md). **ADR-0003 was `Accepted`
+  (2026-08-12) as the architecture *baseline* (superseded 2026-09-29 by ADR-0004) — Multi-User-0 is MERGED / FROZEN.** Acceptance settles
   the **direction only**: it authorizes **no** implementation, backend provisioning, migration, runtime
   or schema change, and **no `CLAUDE.md` amendment**. **ARCH-GOV-1 (2026-09-29) then amended
   `CLAUDE.md` §1, §4.3 and §7** to permit **only** the ADR-0003 managed backend (browser untrusted), to
   make the shared PostgreSQL store the future single authoritative store, and to admit managed
   backups/PITR as the future recovery contract. The amendment removes the constitutional blocker but
   **authorizes no implementation**: Multi-User-1…8 have **not begun**, each still needs its own
-  authorization, and **SDR-0002 has not been created** (required before MU-1). **PILOT-1** — real
+  authorization. **ARCH-GOV-2 (2026-09-29): the maintainer rejected Supabase** (no separately paid
+  managed backend), and **[ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md)
+  superseded ADR-0003**. The backend becomes a same-origin PHP 8.3 API over MariaDB/MySQL on the
+  existing Hostinger hosting, enforced by a central policy and data-access layer (there is no database
+  RLS backstop). ADR-0003's architecture-neutral decisions carry forward, and `CLAUDE.md` §4.3, §6.2 and
+  §7 now permit only that backend, with governed Composer dependencies, a nightly encrypted off-host
+  dump, and no PITR requirement. It still **authorizes no implementation**. **SDR-0002 has not been
+  created**; it will be drafted for PHP + MariaDB and is required before backend work. **PILOT-1** — real
   operational use with company data — is **ON HOLD** by maintainer direction until the multi-user
   readiness gate is met; no real company data has been entered. The maintainer's **2026-09-29
-  sequencing ruling** resolved the resulting circular dependency: ARCH-GOV-1 → SDR-0002 →
-  Distribution-1 → Multi-User implementation → production readiness validation →
-  `finance.reliabilityindonesia.com` cutover → PILOT-1. Distribution-1 is no longer gated on the pilot
-  (ADR-0002 revalidated by an appended note; its decision is unchanged) — see
+  sequencing ruling** resolved the resulting circular dependency, and ARCH-GOV-2 refined it to:
+  ARCH-GOV-2 → SDR-0002 → Distribution-1 → backend foundation → authentication/session →
+  authoritative identity → authorization/data scope → audit/backup → authenticated E2E → "Acting as"
+  removal → production readiness/security review → `finance.reliabilityindonesia.com` cutover →
+  PILOT-1. Distribution-1 is no longer gated on the pilot, and now precedes the backend because the
+  inlined single file cannot carry a strict CSP (ADR-0002 carries appended notes; its decision is
+  unchanged) — see
   [`docs/05-milestones/Milestones.md`](docs/05-milestones/Milestones.md).
 
 The canonical roadmap lives in [`README.md`](README.md#roadmap).
