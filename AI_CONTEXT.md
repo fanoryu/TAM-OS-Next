@@ -40,9 +40,16 @@ bootstrap, migrations `0009`–`0010` (a minimal `employees` authorization ancho
 the same-company, RESTRICT binding FK from `memberships`), `ScopedDatabase` (company and self scope
 injected, never taken from input) and the `EmployeeStore` anchor, proven by a hostile-principal suite.
 It adds no production business endpoint; each business domain becomes server-enforced only when it gets
-its own backend store and routes. Next, once an SMTP provider is chosen, comes **BF-3D** (password
-recovery, governed mail). All of this is source only and **not production-ready**: the frontend does not
-call it, and "Acting as" is unchanged. v2.10.0 remains
+its own backend store and routes. **BF-3D** adds self-service password recovery and governed mail
+(SDR-0003: owner decisions D-D1 — Resend over its HTTPS API behind the provider-neutral `MailTransport`,
+no SMTP, no Composer — and D-D3 — database outbox plus cron worker): migrations `0011`–`0013` (recovery
+token purpose, recovery and mail events, `mail_outbox` holding delivery intent only),
+`POST /api/auth/forgot-password` (one generic answer for every address, per-address and per-IP quotas)
+and `POST /api/auth/reset-password` (single use, every session and open token revoked, no auto-login),
+and `server/bin/mail.php`, which issues a fresh 30-minute token and sends outside any transaction. The
+recovery link is `<configured origin>/#recovery=<token>`; the page that reads it is future frontend
+work, and no provider account, key or DNS record exists yet. All of this is source only and **not
+production-ready**: the frontend does not call it, and "Acting as" is unchanged. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

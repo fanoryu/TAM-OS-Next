@@ -192,7 +192,12 @@ separate database credentials from the runtime API.
 - `/api/*` responses are never publicly cached by the CDN (for example `Cache-Control: no-store,
   private`);
 - the required PHP extensions are present;
-- cron is available for the nightly database dump;
+- cron is available for the nightly database dump and for the BF-3D mail worker
+  (`php server/bin/mail.php run`, at a recorded interval);
+- (BF-3D) the governed-mail evidence of [SDR-0003](security/SDR-0003-governed-mail-transport.md) §7:
+  outbound HTTPS to the provider with a trusted CA bundle, the sender domain verified with SPF, DKIM
+  and DMARC published, a delivery test to an owner-controlled mailbox with fabricated content, and the
+  send-only key stored only in the configuration file outside the web root;
 - database transactions (InnoDB) behave as designed;
 - (BF-3A) the server engine and version enforce the schema's CHECK constraints; Argon2id is available
   (or the bcrypt fallback is recorded) and its 64 MiB per verification fits the host's limits; the

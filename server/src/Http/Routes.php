@@ -10,9 +10,10 @@ use TamOs\Data\Readiness;
 
 /**
  * The production route table: liveness (never touches the database), readiness (read-only
- * database and schema check), the BF-3A session endpoints and the BF-3B self-service account
- * lifecycle. Only logout, me, change-password and logout-all resolve a session; health, ready,
- * login and activate are RouteAuth::None whatever cookie is sent.
+ * database and schema check), the BF-3A session endpoints, the BF-3B self-service account
+ * lifecycle and BF-3D password recovery. Only logout, me, change-password and logout-all resolve
+ * a session; health, ready, login, activate, forgot-password and reset-password are
+ * RouteAuth::None whatever cookie is sent.
  *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
@@ -28,6 +29,8 @@ final class Routes
         'POST /api/auth/activate',
         'POST /api/auth/change-password',
         'POST /api/auth/logout-all',
+        'POST /api/auth/forgot-password',
+        'POST /api/auth/reset-password',
     ];
 
     /** @return list<Route> */
@@ -44,6 +47,10 @@ final class Routes
             new Route('POST', '/api/auth/activate', $auth->activate(...)),
             new Route('POST', '/api/auth/change-password', $auth->changePassword(...), [], RouteAuth::Required),
             new Route('POST', '/api/auth/logout-all', $auth->logoutAll(...), [], RouteAuth::Required),
+            // BF-3D: recovery is not session-bound (origin check and rate limiting instead, like
+            // activate); neither route ever resolves a session or sets a cookie.
+            new Route('POST', '/api/auth/forgot-password', $auth->forgotPassword(...)),
+            new Route('POST', '/api/auth/reset-password', $auth->resetPassword(...)),
         ]);
     }
 

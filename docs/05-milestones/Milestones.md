@@ -350,14 +350,17 @@ scope — the start of the MU-4 work: the 20 ACTIONS with CI parity to the front
 principal-derived Scope, action-aware routes, migrations `0009`–`0010` for the employee authorization
 anchor and binding FK *(owner decision D-C1 = A, 2026-09-30)*, the scoped data layer and the first
 hostile-principal suite, over the anchor) is implemented as source only on the same terms, with no
-production business endpoint; **BF-3D** (password recovery and governed mail) follows once
-the SMTP provider (SDR-0002 O5) is decided. Cross-account administration (additional and Employee
+production business endpoint; **BF-3D** (password recovery and governed mail — migrations
+`0011`–`0013`, forgot/reset endpoints, the provider-neutral mail boundary with the Resend HTTPS adapter,
+the database outbox and cron worker; *owner decisions D-D1 and D-D3, 2026-10-01, recorded in SDR-0003,
+which resolves SDR-0002 O5*) is implemented as source only on the same terms, backend only, with no
+provider account or real mail. Cross-account administration (additional and Employee
 accounts, disable/enable) comes after BF-3C. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.
 See `ARCHITECTURE.md` → Backend foundation, Data foundation, Authentication and sessions, Account
-lifecycle, and Authorization and data scope.
+lifecycle, Authorization and data scope, and Password recovery and governed mail.
 
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today
 throughout. **MU-5 is the first irreversible step**, and it is deliberately gated behind MU-4, whose

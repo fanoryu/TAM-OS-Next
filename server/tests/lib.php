@@ -127,7 +127,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
     $auth ??= \TamOs\Data\Auth\AuthData::fromConfig($config);
     return Routes::production(
         new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'),
-        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth)),
+        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth), new \TamOs\Auth\AccountRecovery($auth)),
     );
 }
 

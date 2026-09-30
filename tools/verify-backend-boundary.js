@@ -43,7 +43,8 @@
  *     server/src/Mail/, or the provider endpoint appears outside the adapter; mail_outbox is
  *     written outside server/src/Data/Auth/MailOutboxStore.php; a token or link variable is
  *     printed, written or logged anywhere but the operator account CLI; a Resend-shaped key
- *     appears anywhere (server/bin/mail.php joins the allowed CLI files);
+ *     appears anywhere; the `#recovery=` link is built outside server/src/Mail/RecoveryMail.php;
+ *     the Host or a forwarding header is read anywhere (server/bin/mail.php joins the CLI files);
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -103,6 +104,7 @@ const FRONTEND_AUTHZ = 'js/core/authz.js';
 const OUTBOX_STORE = 'server/src/Data/Auth/MailOutboxStore.php';
 const MAIL_DIR = 'server/src/Mail/';
 const MAIL_ADAPTER = 'server/src/Mail/ResendTransport.php';
+const RECOVERY_MAIL = 'server/src/Mail/RecoveryMail.php';
 // The only production place a raw one-time token is printed: the operator CLI, once, by design.
 const TOKEN_PRINTERS = new Set(['server/bin/account.php']);
 
@@ -218,6 +220,8 @@ const STRING_RULES = [
   { id: 'token-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?account_tokens\b/i, msg: 'account_tokens is written only by ' + TOKEN_STORE, allow: (f) => f === TOKEN_STORE },
   { id: 'outbox-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?mail_outbox\b/i, msg: 'mail_outbox is written only by ' + OUTBOX_STORE, allow: (f) => f === OUTBOX_STORE },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
+  { id: 'recovery-link', re: /#recovery=/, msg: 'the recovery link is built only by ' + RECOVERY_MAIL + ' (from the configured origin)', allow: (f) => f === RECOVERY_MAIL },
+  { id: 'host-header', re: /^(HTTP_HOST|SERVER_NAME|HTTP_X_FORWARDED_HOST|HTTP_X_FORWARDED_PROTO|HTTP_FORWARDED)$/, msg: 'the Host and forwarding headers are never read: URLs come only from the configured origin' },
 ];
 // A CSRF token is compared only with hash_equals(): an ordinary comparison (or strcmp) against
 // anything but null is a timing leak. The kernel's comparison must be the hash_equals() one.
@@ -916,6 +920,12 @@ function selftest() {
   tenant('the real mail outbox migration passes (a system table)', fs.readFileSync(path.join(root, 'server/migrations/0013_create_mail_outbox.sql'), 'utf8'), 0);
   dirty('a Resend-shaped API key is caught (tests too)', 'server/tests/Unit/T.php', S + "$k = 're_" + 'Ab3'.repeat(9) + "';\n", 'secret');
   clean('a test key with separators is not key-shaped', 'server/tests/Unit/T.php', S + "$k = 're_test_not_a_real_key';\n");
+  clean('RecoveryMail builds the recovery link', RECOVERY_MAIL, S + "const FRAGMENT = '/#recovery=';\n");
+  dirty('a recovery link built elsewhere is caught', 'server/src/Auth/AccountRecovery.php', S + "$l = $origin . '/#recovery=' . $t;\n", 'recovery link is built only');
+  for (const h of ['HTTP_HOST', 'SERVER_NAME', 'HTTP_X_FORWARDED_HOST', 'HTTP_FORWARDED']) {
+    dirty('reading ' + h + ' is caught', REQUEST_FILE, S + "$h = $header('" + h + "');\n", 'Host and forwarding headers');
+  }
+  clean('a comment naming HTTP_HOST passes', REQUEST_FILE, S + "// HTTP_HOST is never read\n");
 
   // BF-3C: business stores use ScopedDatabase and name the scope; company tables stay inside them.
   const STORE = 'server/src/Data/Employee/EmployeeStore.php';

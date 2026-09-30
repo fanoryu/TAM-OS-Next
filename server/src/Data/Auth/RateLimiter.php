@@ -84,6 +84,51 @@ final class RateLimiter
         );
     }
 
+    /**
+     * BF-3D request quota (password-recovery requests, SDR-0002 §4): counts every request, not
+     * failures, in a fixed window of $windowSeconds, and admits at most $limit per window — no
+     * backoff lock. A refused request is not counted. Uses the same row as the failure counter
+     * (failures = requests in the window), on a bucket whose row this transaction has locked.
+     *
+     * @param array{failures: int, windowStartedAt: string, lockedUntil: ?string, now: string} $locked the state lock() returned
+     * @return int 0 when admitted (and counted); otherwise the whole seconds until the window ends
+     */
+    public function consumeQuota(string $bucket, array $locked, int $limit, int $windowSeconds): int
+    {
+        $next = self::afterRequest($locked, $limit, $windowSeconds);
+        if ($next['retryAfter'] > 0) {
+            return $next['retryAfter'];
+        }
+        $this->db->execute(
+            'UPDATE auth_rate_limits SET failures = ?, window_started_at = ?, locked_until = NULL WHERE bucket = ?',
+            [$next['failures'], $next['windowStartedAt'], $bucket],
+        );
+        return 0;
+    }
+
+    /**
+     * The pure quota transition for one request.
+     *
+     * @param array{failures: int, windowStartedAt: string, lockedUntil: ?string, now: string} $state
+     * @return array{failures: int, windowStartedAt: string, retryAfter: int}
+     */
+    public static function afterRequest(array $state, int $limit, int $windowSeconds): array
+    {
+        if ($limit < 1 || $windowSeconds < 1) {
+            throw new \LogicException('limit and window must be positive');
+        }
+        $now = self::time($state['now']);
+        $windowEnd = self::time($state['windowStartedAt'])->modify('+' . $windowSeconds . ' seconds');
+        if ($windowEnd <= $now) {
+            return ['failures' => 1, 'windowStartedAt' => $state['now'], 'retryAfter' => 0];
+        }
+        if ($state['failures'] >= $limit) {
+            $micros = ((int) $windowEnd->format('U') - (int) $now->format('U')) * 1000000 + ((int) $windowEnd->format('u') - (int) $now->format('u'));
+            return ['failures' => $state['failures'], 'windowStartedAt' => $state['windowStartedAt'], 'retryAfter' => max(1, intdiv($micros + 999999, 1000000))];
+        }
+        return ['failures' => $state['failures'] + 1, 'windowStartedAt' => $state['windowStartedAt'], 'retryAfter' => 0];
+    }
+
     public function reset(string $bucket): void
     {
         $this->db->execute('DELETE FROM auth_rate_limits WHERE bucket = ?', [$bucket]);

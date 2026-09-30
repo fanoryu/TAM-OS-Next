@@ -945,7 +945,7 @@ only in `Http/Request.php`; `$_COOKIE` nowhere; resolvers only `NullPrincipalRes
 
 **Not production-ready.** Before any real login: the BF-3B account lifecycle (next section), BF-3C
 server-side authorization and data scope (its framework is below; each business domain still needs its
-own scoped store and routes), BF-3D if self-service recovery is needed, the Hostinger
+own scoped store and routes), BF-3D recovery's own evidence (SDR-0003 §7) and frontend page, the Hostinger
 evidence run (engine and CHECK support, Argon2id and its memory use, `Secure` / `Set-Cookie` through
 LiteSpeed and the CDN, a trustworthy client IP, CDN `no-store`, config outside the web root, database
 grants), retention for sessions, rate-limit rows and events, an external security review, frontend
@@ -966,7 +966,8 @@ IS NULL` (used and revoked are final and exclusive) and CHECK `used_at < expires
 `0008_replace_auth_events_event_check` — one `ALTER TABLE` that drops `auth_events_event` and adds
 `auth_events_event_v2` over the BF-3A events plus `ceo_bootstrap`, `credential_reset`, `activation_ok`,
 `activation_fail`, `password_change`, `password_fail` and `logout_all`. BF-3B left the backend migration
-head at `0008` (BF-3C moves it to `0010`); the frontend `SCHEMA_VERSION` is unrelated and unchanged.
+head at `0008` (BF-3C moves it to `0010`, BF-3D to `0013`); the frontend `SCHEMA_VERSION` is unrelated
+and unchanged.
 
 **Tokens.** 32 bytes from `random_bytes()`, base64url (43 characters), SHA-256 at rest, 72 hours on the
 database clock; live while not used, not revoked and `expires_at > UTC_TIMESTAMP(6)` (equality is
@@ -1045,8 +1046,8 @@ the `memberships.employee_id` domain, global primary key), `company_id` (NOT NUL
 seeded rows. `0010_add_memberships_employee_fk` — `memberships (company_id, employee_id) → employees
 (company_id, id)`, `ON DELETE RESTRICT ON UPDATE RESTRICT`: a binding must name an employee of the same
 company; a bound employee cannot be deleted, renamed or moved; a NULL (CEO) binding stays valid and an
-Employee still needs one (CHECK from `0003`). The backend migration head is `0010`; the frontend
-`SCHEMA_VERSION` is unrelated and stays 6.
+Employee still needs one (CHECK from `0003`). BF-3C left the backend migration head at `0010` (BF-3D
+moves it to `0013`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
 
 **Routes.** `Route` may declare its `Action`; one that does must be a mutation with `RouteAuth::Required`.
 `Routes::validate()` fails the production table at bootstrap unless every mutation declares an `Action` or
@@ -1088,6 +1089,69 @@ personal data; optimistic `version` columns; create candidates for record-bearin
 (`overtime.createSelfDraft`); CEO/Employee account administration and Employee provisioning; frontend
 integration and the Acting-as retirement gate (SDR-0002 §22, still open: production login, Employee
 provisioning, E11 for every endpoint, authenticated workspace derivation and end-to-end tests).
+
+### Password recovery and governed mail — BF-3D (source only; not deployed, not production-ready)
+
+BF-3D adds self-service password recovery (SDR-0002 §4, §5) and the governed mail foundation
+([SDR-0003](docs/security/SDR-0003-governed-mail-transport.md), owner decisions D-D1 and D-D3). It is
+backend only: the page that reads a recovery link is future frontend work, no provider account, key or
+DNS record exists, and no real mail has been sent. "Acting as" is unchanged.
+
+**Schema.** `0011_replace_account_tokens_purpose_check` — token purposes `activation` and `recovery`.
+`0012_replace_auth_events_event_check` — adds `recovery_req`, `recovery_ok`, `recovery_fail`,
+`mail_fail`. `0013_create_mail_outbox` — `mail_outbox` holds **delivery intent only** (user, kind,
+status `pending`/`sending`/`sent`/`failed`/`cancelled`, attempts ≤ 5, next attempt, request id): never an
+address, token, link or body. Migration head `0013`; the frontend `SCHEMA_VERSION` stays 6.
+
+**Tokens.** Recovery tokens are 32 random bytes, base64url, SHA-256 at rest, 30 minutes on the database
+clock, single use. Every lookup names its purpose, so a recovery token never activates and an
+activation token never resets. Every credential event — activation, password change, the operator
+reset, a recovery reset — revokes **every** open token of the user, of every purpose.
+
+**Endpoints** (both `RouteAuth::None`, Origin and JSON enforced, no CSRF token, no session, no cookie;
+both are account self-service routes, not business actions — ACTIONS stays 20):
+
+| Route | Behaviour |
+|---|---|
+| `POST /api/auth/forgot-password` | body exactly `{"email"}`; one transaction: IP quota (10 per hour, else 429 + `Retry-After`) → address quota (3 per hour, counted for every address, known or not) → if the account can recover and is under quota, queue delivery intent (one open per user) → `recovery_req` (user id when recoverable, else the email hash). Always `200 {"requested":true}`, byte-identical for known, unknown, invalid, disabled, pending and over-quota addresses. No provider I/O |
+| `POST /api/auth/reset-password` | body exactly `{"token","password"}`; the activation pipeline: `PasswordPolicy` first (a violation consumes nothing) → IP gate (20 failures / 15 min) → non-locking token read → hash outside any transaction → one transaction: lock user, then token, re-check, compare-and-swap the password, consume, revoke every open token and every session → `recovery_ok`. `200 {"reset":true}`; every token or account problem is the same `400 [token]` + `recovery_fail` |
+
+Only an account that could log in today recovers: active user, a password set, exactly one active
+membership with a known role. A pending account uses the operator reset; a disabled one never
+recovers. Both are refused silently.
+
+**Mail boundary (`server/src/Mail/`).** `MailTransport` is the only interface application code uses;
+`ResendTransport` is the one governed adapter — `POST https://api.resend.com/emails` over bundled
+`curl`, Bearer key, JSON `{from, to, subject, text}`, `Idempotency-Key`, TLS verified, HTTPS only, no
+redirects, 10 s timeout; only `200` with an `id` is accepted and error bodies are never interpreted.
+`RecoveryMail` builds a plain-text message whose link is `<configured origin>/#recovery=<token>`: the
+origin comes only from server configuration and the token sits in the fragment, so no server, CDN,
+proxy or Referer ever sees it. `MailConfig` validates the `mail` configuration section (`transport`,
+`from`, `api_key` — a secret outside the web root) only when the worker needs it.
+
+**Worker.** `php server/bin/mail.php run` (cron; `GET_LOCK('tamos_mail', 0)`, one at a time) delivers
+up to 20 due rows: transaction 1 claims the row, re-checks that the account can recover (else
+`cancelled`), revokes open tokens and issues a fresh recovery token, marks `sending`; the provider is
+called **outside any transaction**; transaction 2 marks `sent`, or revokes that attempt's token and
+retries after 1, 5, 15 and 60 minutes, ending `failed` with `mail_fail` after five attempts. A row left
+in `sending` for 10 minutes is reclaimed.
+
+**Proof.** Unit tests pin the provider contract, the link, the configuration, the outbox statements and
+the quota rule; HTTP tests pin Origin, body shapes and session-free routes; MariaDB tests cover generic
+responses, quotas, the worker state machine and its transaction boundary, purpose isolation, token and
+session revocation, password policy, IP throttling, log and event redaction, and single use under two
+concurrent worker processes. No test touches a network or sends mail.
+
+**Enforcement added to `tools/verify-backend-boundary.js`.** Network and mail I/O only in
+`Mail/ResendTransport.php`; the adapter named only inside `server/src/Mail/`; the provider endpoint only
+in the adapter; `mail_outbox` written only by `Data/Auth/MailOutboxStore.php`; no token or link printed,
+written or logged outside the operator account CLI; the `#recovery=` link built only by
+`Mail/RecoveryMail.php`; the Host and forwarding headers never read; a Resend-shaped key refused
+anywhere; `server/bin/mail.php` allowed and SAPI-guarded.
+
+**Not production-ready.** Before real recovery mail: SDR-0003 §7 evidence (egress, sender-domain
+verification with SPF/DKIM/DMARC, a delivery test, cron, the key's placement and scope), the frontend
+recovery page, and everything BF-3A–BF-3C already list.
 
 ### Release engineering
 

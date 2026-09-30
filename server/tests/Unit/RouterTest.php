@@ -17,7 +17,7 @@ $router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly eight routes; activate never resolves a session, change-password and logout-all require one' => static function () use ($production): void {
+    'production has exactly ten routes; activate, forgot-password and reset-password never resolve a session, change-password and logout-all require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -29,19 +29,21 @@ return [
             ['POST', '/api/auth/activate', [], RouteAuth::None],
             ['POST', '/api/auth/change-password', [], RouteAuth::Required],
             ['POST', '/api/auth/logout-all', [], RouteAuth::Required],
+            ['POST', '/api/auth/forgot-password', [], RouteAuth::None],
+            ['POST', '/api/auth/reset-password', [], RouteAuth::None],
         ], $summary);
     },
-    'auth routes: POST-only login, logout and the BF-3B lifecycle routes, GET/HEAD-only me' => static function () use ($router): void {
+    'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {
         assertSame('/api/auth/me', $router->match('HEAD', '/api/auth/me')->path);
-        foreach (['/api/auth/login', '/api/auth/logout', '/api/auth/activate', '/api/auth/change-password', '/api/auth/logout-all'] as $path) {
+        foreach (['/api/auth/login', '/api/auth/logout', '/api/auth/activate', '/api/auth/change-password', '/api/auth/logout-all', '/api/auth/forgot-password', '/api/auth/reset-password'] as $path) {
             $e = assertThrows(ApiError::class, static fn () => $router->match('GET', $path));
             assertSame([ErrorCode::MethodNotAllowed, ['POST']], [$e->errorCode, $e->allow], $path);
         }
         $e = assertThrows(ApiError::class, static fn () => $router->match('POST', '/api/auth/me'));
         assertSame([ErrorCode::MethodNotAllowed, ['GET', 'HEAD']], [$e->errorCode, $e->allow]);
-        // No signup, no recovery, no account administration and no CLI command over HTTP (BF-3B).
+        // No signup, no account administration and no CLI command over HTTP; recovery only as the two BF-3D routes.
         foreach (['/api/auth', '/api/auth/login/', '/api/auth/Login', '/api/auth/session', '/api/auth/register', '/api/auth/signup',
-            '/api/auth/forgot-password', '/api/auth/reset-password', '/api/auth/reset-credentials', '/api/auth/create-ceo',
+            '/api/auth/forgot', '/api/auth/recover', '/api/auth/reset-credentials', '/api/auth/create-ceo', '/api/mail', '/api/auth/mail-worker',
             '/api/auth/accounts', '/api/accounts', '/api/auth/activate/', '/api/auth/logoutall'] as $path) {
             assertTrue(in_array(assertThrows(ApiError::class, static fn () => $router->match('POST', $path))->errorCode, [ErrorCode::NotFound], true), $path);
         }

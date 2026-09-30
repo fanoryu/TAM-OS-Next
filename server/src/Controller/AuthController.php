@@ -4,10 +4,12 @@ declare(strict_types=1);
 namespace TamOs\Controller;
 
 use TamOs\Auth\AccountLifecycle;
+use TamOs\Auth\AccountRecovery;
 use TamOs\Auth\ActivationResult;
 use TamOs\Auth\Authenticator;
 use TamOs\Auth\LoginResult;
 use TamOs\Auth\PasswordChangeResult;
+use TamOs\Auth\RecoveryResult;
 use TamOs\Http\ApiError;
 use TamOs\Http\CookieResult;
 use TamOs\Http\ErrorCode;
@@ -16,9 +18,10 @@ use TamOs\Http\SessionCookie;
 use TamOs\Identity\AuthSession;
 
 /**
- * POST /api/auth/login, POST /api/auth/logout, GET /api/auth/me (BF-3A) and the BF-3B
+ * POST /api/auth/login, POST /api/auth/logout, GET /api/auth/me (BF-3A), the BF-3B
  * self-service lifecycle: POST /api/auth/activate, POST /api/auth/change-password,
- * POST /api/auth/logout-all.
+ * POST /api/auth/logout-all, and BF-3D recovery: POST /api/auth/forgot-password,
+ * POST /api/auth/reset-password.
  *
  * The client projection is userId, membershipId, role, employeeId and csrfToken — never
  * companyId, an email, a status, the session token or any hash. The session token travels
@@ -31,7 +34,53 @@ final class AuthController
     public function __construct(
         private readonly Authenticator $authenticator,
         private readonly AccountLifecycle $lifecycle,
+        private readonly AccountRecovery $recovery,
     ) {
+    }
+
+    /**
+     * BF-3D: asks for a password-recovery mail. The answer is the same 200 for every address —
+     * known, unknown, disabled, pending or over its hourly quota — so it reveals nothing about
+     * which accounts exist; only the client IP's own throttle answers 429. No mail is sent here:
+     * the request records delivery intent and the cron worker sends it.
+     *
+     * @param array<string, mixed> $json
+     * @return array{requested: true}
+     */
+    public function forgotPassword(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        if (array_keys($json) !== ['email'] || !is_string($json['email'])) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'forgot-password body shape', fields: ['email']);
+        }
+        $result = $this->recovery->request($json['email'], $request->remoteAddr, $requestId);
+        if ($result->outcome === RecoveryResult::LOCKED) {
+            throw new ApiError(ErrorCode::RateLimited, retryAfter: $result->retryAfter, logReason: 'recovery_locked');
+        }
+        return ['requested' => true];
+    }
+
+    /**
+     * BF-3D: sets a new password from a one-time recovery token. Every session of the user ends;
+     * no session is created and no cookie is set: the user logs in afterwards. Every token or
+     * account failure is the same 400 naming the field "token".
+     *
+     * @param array<string, mixed> $json
+     * @return array{reset: true}
+     */
+    public function resetPassword(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        $keys = array_keys($json);
+        sort($keys);
+        if ($keys !== ['password', 'token'] || !is_string($json['token']) || !is_string($json['password'])) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'reset-password body shape', fields: ['token', 'password']);
+        }
+        $result = $this->recovery->reset($json['token'], $json['password'], $request->remoteAddr, $requestId);
+        return match ($result->outcome) {
+            RecoveryResult::SUCCESS => ['reset' => true],
+            RecoveryResult::LOCKED => throw new ApiError(ErrorCode::RateLimited, retryAfter: $result->retryAfter, logReason: 'reset_locked'),
+            RecoveryResult::INVALID_PASSWORD => throw new ApiError(ErrorCode::ValidationFailed, fields: ['password'], logReason: 'password_policy'),
+            default => throw new ApiError(ErrorCode::ValidationFailed, fields: ['token'], logReason: 'reset_rejected'),
+        };
     }
 
     /** @param array<string, mixed> $json */
