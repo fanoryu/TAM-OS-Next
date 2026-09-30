@@ -944,7 +944,8 @@ only in `Http/Request.php`; `$_COOKIE` nowhere; resolvers only `NullPrincipalRes
 (and the kernel must do so); no destructive SQL on `auth_events`; no seed rows in migrations.
 
 **Not production-ready.** Before any real login: the BF-3B account lifecycle (next section), BF-3C
-server-side authorization and data scope, BF-3D if self-service recovery is needed, the Hostinger
+server-side authorization and data scope (its framework is below; each business domain still needs its
+own scoped store and routes), BF-3D if self-service recovery is needed, the Hostinger
 evidence run (engine and CHECK support, Argon2id and its memory use, `Secure` / `Set-Cookie` through
 LiteSpeed and the CDN, a trustworthy client IP, CDN `no-store`, config outside the web root, database
 grants), retention for sessions, rate-limit rows and events, an external security review, frontend
@@ -964,8 +965,8 @@ forgot-password (BF-3D). The frontend does not call these endpoints and "Acting 
 IS NULL` (used and revoked are final and exclusive) and CHECK `used_at < expires_at`.
 `0008_replace_auth_events_event_check` — one `ALTER TABLE` that drops `auth_events_event` and adds
 `auth_events_event_v2` over the BF-3A events plus `ceo_bootstrap`, `credential_reset`, `activation_ok`,
-`activation_fail`, `password_change`, `password_fail` and `logout_all`. The backend migration head is
-`0008`; the frontend `SCHEMA_VERSION` is unrelated and unchanged.
+`activation_fail`, `password_change`, `password_fail` and `logout_all`. BF-3B left the backend migration
+head at `0008` (BF-3C moves it to `0010`); the frontend `SCHEMA_VERSION` is unrelated and unchanged.
 
 **Tokens.** 32 bytes from `random_bytes()`, base64url (43 characters), SHA-256 at rest, 72 hours on the
 database clock; live while not used, not revoked and `expires_at > UTC_TIMESTAMP(6)` (equality is
@@ -1007,6 +1008,86 @@ the HTTP path cannot deadlock each other.
 **Enforcement added to `tools/verify-backend-boundary.js`.** `server/bin/` may hold `migrate.php` and
 `account.php` only, each SAPI-guarded; SQL that writes `companies`, `users` or `memberships` only in
 `Data/Auth/AccountStore.php`, and `account_tokens` only in `Data/Auth/AccountTokenStore.php`.
+
+### Authorization and data scope — BF-3C (source only; not deployed, not production-ready)
+
+BF-3C makes the authenticated principal an authoritative authorization and data-scope boundary
+(SDR-0002 §7, §8). It adds **no production business endpoint**, no frontend change and no HTTP account
+administration; "Acting as" is unchanged. What it makes enforceable now is the framework and one real
+scoped table (the employee anchor); each business domain becomes server-secure only when it moves to a
+backend store and routes of its own. Data still held only in the browser is exactly as insecure as before.
+
+**Policy (`server/src/Policy/`).**
+
+| Class | Role |
+|---|---|
+| `Action` | enum of exactly the 20 `js/core/authz.js` ACTIONS, each with its `rule()` and resource `entity()` (both exhaustive `match`es, no default). An unknown string has no `Action`, and `Policy` accepts only an `Action` |
+| `Rule` | `CeoOnly` (16 actions) or `CeoOrOwnDraft` (the four overtime self actions: CEO always; an Employee only on their own Draft) — nothing broader exists |
+| `Scope` | built only by `Scope::of(Principal)`: `companyId` always; `selfEmployeeId` only for the Employee role. A CEO is company-wide even with an employee binding |
+| `Policy` | `authorize(Principal, Action, ?ScopedRecord)` → `Authorization`, else 403 `forbidden` (`action_denied`). A record-bearing action needs a record of its entity read under the principal's own scope (server AZ-1); a record-free action takes none. No fallback to CEO |
+| `Authorization` | the capability every scoped write requires; minted only by `Policy` |
+
+**Scoped data (`server/src/Data/Scope/`, `server/src/Data/Employee/`).** `ScopedDatabase` is the only
+database capability a business store receives. Parameters are named; it binds `:company_id` — and, under a
+self scope, `:self_employee_id` — from the `Scope`, and refuses a caller that passes either. It refuses a
+statement without `:company_id`, an Employee scope on a statement without `:self_employee_id` (so an
+Employee cannot reach company-wide rows through another store method) and a company scope on a self
+statement. Every row read must project `company_id` and `owner_employee_id`; a row outside the scope fails
+the whole read, returning nothing. Writes take an `Authorization`, and one authorized against a record
+may only target that record's `:id`. `find()` returns a `ScopedRecord` (minted only here) or null — absent
+and out of scope alike. `Database` gained named binding (positional unchanged, native prepares, each name
+once). `EmployeeStore` is the anchor store (`find`, `listIds`, `create` under `employee.create`); it is not
+an HR API, and its production callers arrive with the Employee domain migration.
+
+**Schema.** `0009_create_employees` — the employee authorization anchor: `id` (`VARCHAR(64)` ascii_bin,
+the `memberships.employee_id` domain, global primary key), `company_id` (NOT NULL, FK `companies`),
+`created_at`; `UNIQUE (company_id, id)` as the tenant key; CHECK non-empty id; no personal data, no
+seeded rows. `0010_add_memberships_employee_fk` — `memberships (company_id, employee_id) → employees
+(company_id, id)`, `ON DELETE RESTRICT ON UPDATE RESTRICT`: a binding must name an employee of the same
+company; a bound employee cannot be deleted, renamed or moved; a NULL (CEO) binding stays valid and an
+Employee still needs one (CHECK from `0003`). The backend migration head is `0010`; the frontend
+`SCHEMA_VERSION` is unrelated and stays 6.
+
+**Routes.** `Route` may declare its `Action`; one that does must be a mutation with `RouteAuth::Required`.
+`Routes::validate()` fails the production table at bootstrap unless every mutation declares an `Action` or
+is one of the five account self-service routes in `Routes::ACCOUNT_SELF_SERVICE` (login, logout,
+activate, change-password, logout-all), which never claim a business action. The kernel decides a
+record-free action after the origin, session and CSRF gates and before the handler; a record-bearing
+action is decided by the handler after its scoped load.
+
+**Status order.** 401 — no valid principal on a Required route (none, expired, revoked, disabled user or
+membership, unknown role, unbound Employee). 403 — CSRF failure; a record-free action the role lacks; an
+in-scope record whose action the principal lacks. 404 — a record that is absent, in another company or
+outside the Employee's self scope, byte-identical in every case. 400 — a query key or body field outside
+the route's contract, which is how a forged `company_id`, `employee_id`, `role`, `user_id` or
+`permissions` is answered; none is ever read as scope.
+
+**Proof.** Unit tests for `Action`, `Policy`, `Scope`, `ScopedDatabase` refusals and the route table; HTTP
+status-order tests; MariaDB tests for the anchor schema and binding FK, named binding and scoped reads and
+writes; and a hostile-principal suite (`tests/Db/HostilePrincipalTest.php`) that logs in real CEO and
+Employee accounts in two companies and drives test-only routes through the real resolver, kernel, Policy
+and scoped store. Overtime has no table yet, so its own-Draft rules are proven on Policy with principals
+resolved from real sessions.
+
+**Enforcement added to `tools/verify-backend-boundary.js`.** `server/src/Policy` is un-gated;
+`Authorization` is constructed only in `Policy/Policy.php` and `ScopedRecord` only in
+`Data/Scope/ScopedDatabase.php`; a business store (`Data/<Domain>/`, other than Auth, Migration and Scope)
+never references `Database`, `DatabaseConfig` or `AuthData`, and every statement it holds names
+`:company_id` with named parameters only, every `*_SELF_SQL` also `:self_employee_id`; the company tables
+(`employees`) are named in SQL only by business stores; a migration may create only an auth/system table
+or a registered company table with the tenant key, and no migration foreign key may cascade, set null or
+set default; and `Action.php` must equal `js/core/authz.js` — the 20 values, each rule class (the frontend
+`POLICY` predicates are probed in an isolated `vm` context) and each resource entity — failing closed if
+either side cannot be read. These are heuristic shape checks, not a proof of tenant isolation: isolation
+rests on construction (`Scope` from the principal only, `ScopedDatabase` injection and row checks), the
+MariaDB tests, the hostile-principal suite and the mutation proofs.
+
+**Deferred.** Business-domain stores and endpoints (contracts, payroll, overtime, finance, import,
+settings), including period-level `payroll.manage` operations that act on no single record; employee
+personal data; optimistic `version` columns; create candidates for record-bearing creates
+(`overtime.createSelfDraft`); CEO/Employee account administration and Employee provisioning; frontend
+integration and the Acting-as retirement gate (SDR-0002 §22, still open: production login, Employee
+provisioning, E11 for every endpoint, authenticated workspace derivation and end-to-end tests).
 
 ### Release engineering
 

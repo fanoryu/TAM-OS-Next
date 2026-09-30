@@ -8,8 +8,11 @@ namespace TamOs\Data;
  * use and never by /api/health.
  *
  * Every statement is prepared and executed with bound parameters; there is no raw query or
- * exec path. Parameters are positional and limited to int, string, bool and null — floats
- * are refused so money never passes through binary floating point.
+ * exec path. Parameters are either a positional list or, for the scoped data layer (BF-3C), a
+ * map of lower-case names to :name placeholders — never a mix — and are limited to int, string,
+ * bool and null; floats are refused so money never passes through binary floating point. Named
+ * placeholders are bound by PDO under native (non-emulated) prepares, so each name appears once
+ * in a statement.
  *
  * transaction() runs its callback exactly once: nested transactions are refused, any
  * throwable rolls back, and nothing is retried.
@@ -24,7 +27,7 @@ final class Database
     }
 
     /**
-     * @param list<int|string|bool|null> $params
+     * @param array<int|string, int|string|bool|null> $params
      * @return list<array<string, mixed>>
      * @throws DatabaseError
      */
@@ -39,7 +42,7 @@ final class Database
     }
 
     /**
-     * @param list<int|string|bool|null> $params
+     * @param array<int|string, int|string|bool|null> $params
      * @return int the affected row count
      * @throws DatabaseError
      */
@@ -82,11 +85,16 @@ final class Database
         }
     }
 
-    /** @param list<int|string|bool|null> $params */
+    /** @param array<int|string, int|string|bool|null> $params */
     private function run(string $sql, array $params, string $operation): \PDOStatement
     {
-        if (!array_is_list($params)) {
-            throw new \LogicException('database parameters must be a positional list');
+        $named = !array_is_list($params);
+        if ($named) {
+            foreach (array_keys($params) as $name) {
+                if (!is_string($name) || preg_match('/^[a-z][a-z0-9_]{0,63}$/', $name) !== 1) {
+                    throw new \LogicException('database parameters must be a positional list or a map of lower-case names');
+                }
+            }
         }
         foreach ($params as $value) {
             if (!is_int($value) && !is_string($value) && !is_bool($value) && $value !== null) {
@@ -96,8 +104,8 @@ final class Database
         $pdo = $this->pdo();
         try {
             $statement = $pdo->prepare($sql);
-            foreach ($params as $i => $value) {
-                $statement->bindValue($i + 1, $value, match (true) {
+            foreach ($params as $key => $value) {
+                $statement->bindValue($named ? ':' . $key : $key + 1, $value, match (true) {
                     is_int($value) => \PDO::PARAM_INT,
                     is_bool($value) => \PDO::PARAM_BOOL,
                     $value === null => \PDO::PARAM_NULL,

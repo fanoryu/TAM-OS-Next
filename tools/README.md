@@ -22,7 +22,7 @@ All commands are run from the repository root.
 | [`integration-surface-manifest.js`](integration-surface-manifest.js) | The frozen UX-006C3 integration surface (43 entries), consumed by the verifier and the authorization harness |
 | [`check-commit-attribution.js`](check-commit-attribution.js) | Owner-only authorship guard — the single source of attribution policy, shared by the tracked hook and CI (`CLAUDE.md` §15.7) |
 | [`install-hooks.js`](install-hooks.js) | Points this repository at the tracked `.githooks/` directory (repository-local; never global) |
-| [`verify-backend-boundary.js`](verify-backend-boundary.js) | Static boundary check for the PHP backend under `server/` (data-access boundary, forbidden APIs, API-header parity, `.gitignore` traps) |
+| [`verify-backend-boundary.js`](verify-backend-boundary.js) | Static boundary check for the PHP backend under `server/` (data-access boundary, forbidden APIs, API-header parity, `.gitignore` traps; BF-3C: capability construction, scoped business stores, company-table confinement, migration tenant key, and ACTION parity with `js/core/authz.js`) |
 
 ### Backend (BF-1)
 
@@ -51,7 +51,9 @@ php server/bin/migrate.php apply    # create and verify history, then run pendin
 
 Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
 is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`; BF-3B:
-`0007`–`0008`); the boundary tool refuses any migration that inserts, updates or deletes rows.
+`0007`–`0008`; BF-3C: `0009`–`0010`); the boundary tool refuses any migration that inserts, updates or
+deletes rows, any cascading foreign key, and any new table that is not an auth/system table or a
+registered company table carrying the tenant key.
 
 Accounts (BF-3B) come into existence only through the operator CLI, never over HTTP and never from seed
 data. Neither command takes a password; each prints a one-time activation token once:

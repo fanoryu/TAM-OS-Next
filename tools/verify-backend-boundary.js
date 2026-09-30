@@ -33,7 +33,11 @@
  *     (parity fails closed when either side cannot be read); a migration creates a table that is
  *     neither an auth/system table nor a registered company table with the tenant key
  *     (company_id NOT NULL, FK to companies, UNIQUE (company_id, id)), or any migration foreign
- *     key cascades, nulls or defaults;
+ *     key cascades, nulls or defaults; a business store (server/src/Data/<Domain>/) references the
+ *     Database handle or AuthData instead of ScopedDatabase, or holds a statement without
+ *     :company_id, with a positional ?, or a *_SELF_SQL without :self_employee_id; or a company
+ *     table (employees) is named in SQL outside a business store. Heuristic shape checks only —
+ *     tenant isolation is proven by construction, the MariaDB and hostile-principal tests;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -324,6 +328,39 @@ function checkPhp(file, src) {
   // Request.php reads $_SERVER; not even it may read $_COOKIE (PHP URL-decodes and renames names).
   if (/\$_COOKIE\b/.test(lex.code)) out.push('$_COOKIE is never read: the session cookie comes from HTTP_COOKIE in Request.php');
   for (const v of checkCsrfComparison(lex.code)) out.push(v);
+  for (const v of checkScopedData(file, src, lex)) out.push(v);
+  return out;
+}
+
+// BF-3C scoped data access. A business store is any file in a domain folder of the data layer
+// (server/src/Data/<Domain>/, other than Auth, Migration and Scope). It receives only
+// ScopedDatabase — never the Database handle — and every statement it holds names :company_id
+// (named parameters only), with every *_SELF_SQL also naming :self_employee_id. The company
+// tables are named in SQL only by business stores. Heuristic shape checks: they cannot prove a
+// predicate is correct; ScopedDatabase's run-time refusals and the hostile-principal tests do.
+const SCOPED_STORE = /^server\/src\/Data\/(?!Auth\/|Migration\/|Scope\/)[A-Z][A-Za-z0-9]*\/[A-Za-z0-9]+\.php$/;
+function companyTableSql(s) {
+  const names = [...COMPANY_TABLES].join('|');
+  return new RegExp('\\b(FROM|JOIN|INTO|UPDATE|TABLE)\\s+`?(' + names + ')\\b', 'i').test(s);
+}
+// Wider than SQL_STRING (which needs a clause keyword right after the table, so an aliased
+// `FROM t a JOIN …` escapes it): any literal holding an upper-case statement verb and clause.
+const SQL_VERB = /\b(SELECT|INSERT|UPDATE|DELETE|REPLACE)\b/;
+function checkScopedData(file, src, lex) {
+  const out = [];
+  const sql = lex.strings.filter((s) => SQL_STRING.test(s) || (SQL_VERB.test(s) && SQL_KEYWORD.test(s.replace(SQL_VERB, ''))));
+  if (SCOPED_STORE.test(file)) {
+    if (/\bDatabase(Config)?\b|\bAuthData\b/.test(lex.code)) out.push('a business store receives only ScopedDatabase, never the Database handle (' + file + ')');
+    for (const s of sql) {
+      if (!/:company_id\b/.test(s)) out.push('a business store statement must name :company_id: "' + s.slice(0, 40) + '"');
+      if (s.includes('?')) out.push('a business store statement uses named parameters only: "' + s.slice(0, 40) + '"');
+    }
+    const selfSql = /\bconst\s+(\w+_SELF_SQL)\s*=\s*'([^']*)'/g;
+    let m;
+    while ((m = selfSql.exec(src))) if (!/:self_employee_id\b/.test(m[2])) out.push(m[1] + ' must name :self_employee_id');
+  } else if (sql.some(companyTableSql)) {
+    out.push('the company tables (' + [...COMPANY_TABLES].join(', ') + ') are read and written only by business stores under ScopedDatabase');
+  }
   return out;
 }
 
@@ -829,6 +866,21 @@ function selftest() {
   dirty('a controller building a ScopedRecord is caught', 'server/src/Controller/X.php', S + "$r = new ScopedRecord($s, 'overtime', $id, $mine, 'Draft');\n", 'ScopedRecord is constructed only');
   dirty('Policy building a ScopedRecord is caught', POLICY_FILE, S + "$r = new \\TamOs\\Data\\Scope\\ScopedRecord($s, 'x', 'y', null, null);\n", 'ScopedRecord is constructed only');
   clean('a method named newAuthorization() is not construction', 'server/src/Controller/X.php', S + '$a = $this->newAuthorization(); $r = ScopedRecord::class;\n');
+
+  // BF-3C: business stores use ScopedDatabase and name the scope; company tables stay inside them.
+  const STORE = 'server/src/Data/Employee/EmployeeStore.php';
+  const realStore = fs.readFileSync(path.join(root, STORE), 'utf8');
+  clean('the real EmployeeStore passes', STORE, realStore);
+  clean('a new domain store over ScopedDatabase passes', 'server/src/Data/Contract/ContractStore.php', S + "final class ContractStore { public function __construct(private readonly ScopedDatabase $db) {}\n  public const LIST_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM contracts WHERE company_id = :company_id';\n  public const LIST_SELF_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM contracts WHERE company_id = :company_id AND employee_id = :self_employee_id';\n}\n");
+  dirty('a business store taking the Database handle is caught', STORE, realStore.replace('private readonly ScopedDatabase $db', 'private readonly Database $db'), 'receives only ScopedDatabase');
+  dirty('a business store reaching AuthData is caught', 'server/src/Data/Contract/ContractStore.php', S + 'function f(AuthData $d): void {}\n', 'receives only ScopedDatabase');
+  dirty('a business statement without :company_id is caught', STORE, realStore.replace("FROM employees WHERE company_id = :company_id ORDER BY id'", "FROM employees ORDER BY id'"), 'must name :company_id');
+  dirty('a business statement with a positional ? is caught', STORE, realStore.replace('WHERE id = :id AND company_id = :company_id\'', 'WHERE id = ? AND company_id = :company_id\''), 'named parameters only');
+  dirty('a *_SELF_SQL without :self_employee_id is caught', STORE, realStore.replace(' AND id = :self_employee_id ORDER BY id', ' ORDER BY id'), 'LIST_SELF_SQL must name :self_employee_id');
+  dirty('employees SQL in an auth store is caught', 'server/src/Data/Auth/AccountStore.php', S + "$this->db->select('SELECT id FROM employees WHERE id = ?', [$e]);\n", 'read and written only by business stores');
+  dirty('employees SQL joined from a session read is caught', 'server/src/Data/Auth/SessionStore.php', S + "const Q = 'SELECT s.user_id FROM sessions s JOIN employees e ON e.id = s.user_id WHERE s.token_hash = ?';\n", 'read and written only by business stores');
+  dirty('an employees write in ScopedDatabase itself is caught', SCOPED_DATABASE, S + "$this->db->execute('INSERT INTO employees (id, company_id, created_at) VALUES (?, ?, UTC_TIMESTAMP(6))', [$a, $b]);\n", 'read and written only by business stores');
+  clean('prose naming employees is not SQL', 'server/src/Data/Auth/AccountStore.php', S + "// the employees table is scoped\n$m = 'employees are anchors';\n");
 
   // BF-3C: ACTION parity against the real js/core/authz.js and the real Action.php, then each drift.
   const realAction = fs.readFileSync(path.join(root, ACTION_FILE), 'utf8');

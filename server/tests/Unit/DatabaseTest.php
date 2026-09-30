@@ -117,9 +117,10 @@ return [
         assertSame([DatabaseError::UNAVAILABLE, 'connect'], [$e->kind, $e->operation]);
         assertTrue(!str_contains($e->getMessage(), '127.0.0.1') && !str_contains($e->getMessage(), 'hunter2'), 'value-free');
     },
-    'parameters must be a positional list of int, string, bool or null (checked before connecting)' => static function () use ($valid): void {
+    'parameters must be a positional list or a lower-case name map of int, string, bool or null (checked before connecting)' => static function () use ($valid): void {
         $db = new Database(DatabaseConfig::fromArray($valid(['port' => 1])));
-        foreach ([[1.5], [['x']], [new stdClass()], ['a' => 1]] as $params) {
+        foreach ([[1.5], [['x']], [new stdClass()], ['a' => 1.5], ['A' => 1], [1 => 'x'], ['a' => 1, 0 => 2], [':a' => 1], ['a-b' => 1],
+            [str_repeat('a', 65) => 1], ['' => 1]] as $params) {
             assertThrows(LogicException::class, static fn () => $db->select('SELECT ? AS v', $params), json_encode($params) ?: 'object');
         }
     },
