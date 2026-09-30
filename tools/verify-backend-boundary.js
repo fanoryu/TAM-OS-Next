@@ -15,7 +15,14 @@
  *     class allowed to read them;
  *   - a PHP file lacks declare(strict_types=1);
  *   - a Composer manifest, vendor tree, .sql file or .env appears under server/;
- *   - more than one PrincipalResolver implementation exists (BF-1: NullPrincipalResolver only);
+ *   - a PrincipalResolver other than NullPrincipalResolver / SessionPrincipalResolver exists;
+ *   - (BF-3A) PHP's password API is called outside server/src/Auth/Passwords.php; the session
+ *     cookie name appears outside server/src/Http/SessionCookie.php, a Set-Cookie header name
+ *     outside server/src/Http/Kernel.php, or HTTP_COOKIE outside Request.php; $_COOKIE is read
+ *     anywhere; Principal::fromAccount() is called outside the resolver and the Authenticator,
+ *     or a Principal / AuthSession is constructed outside server/src/Identity/; a CSRF token is
+ *     compared with anything but hash_equals(); SQL rewrites or removes auth_events rows; or a
+ *     migration seeds rows (INSERT / UPDATE / DELETE / REPLACE / LOAD DATA);
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -47,7 +54,15 @@ const HEADER_EMITTERS = new Set(['server/src/Http/Response.php', 'server/src/boo
 const INI_WRITERS = new Set(['server/src/bootstrap.php']);
 // The autoloader (validated class path) and the config loader are the only variable includes.
 const INCLUDE_ALLOWED = new Set(['server/src/bootstrap.php', 'server/src/Config/ConfigLoader.php']);
-const RESOLVER_ALLOWED = 'server/src/Identity/NullPrincipalResolver.php';
+// BF-3A: the test-only null resolver and the one authoritative, database-backed resolver.
+const RESOLVERS_ALLOWED = new Set(['server/src/Identity/NullPrincipalResolver.php', 'server/src/Identity/SessionPrincipalResolver.php']);
+const PASSWORDS_FILE = 'server/src/Auth/Passwords.php';
+const SESSION_COOKIE_FILE = 'server/src/Http/SessionCookie.php';
+const KERNEL_FILE = 'server/src/Http/Kernel.php';
+const REQUEST_FILE = 'server/src/Http/Request.php';
+// Principal::fromAccount() is the only way to build an identity; only these may call it.
+const PRINCIPAL_BUILDERS = new Set(['server/src/Identity/SessionPrincipalResolver.php', 'server/src/Auth/Authenticator.php']);
+const IDENTITY_DIR = 'server/src/Identity/';
 const LOCAL_CONFIG = /^server\/config\/config\.local\.php$/;
 
 // ---------------------------------------------------------------------------------------------
@@ -121,7 +136,10 @@ const CODE_RULES = [
   { id: 'extract', re: /(?<![\w$>:])extract\s*\(/i, msg: 'extract() is forbidden' },
   { id: 'debug-output', re: /(?<![\w$>:])(phpinfo|var_dump|print_r|debug_zval_dump|debug_print_backtrace)\s*\(/i, msg: 'debug/introspection output is forbidden' },
   { id: 'session', re: /(?<![\w$>:])session_[a-z_]+\s*\(/i, msg: 'PHP native sessions are forbidden (SDR-0002 §3.1)' },
-  { id: 'cookie', re: /(?<![\w$>:])set(raw)?cookie\s*\(/i, msg: 'setting cookies is not authorized in BF-1' },
+  { id: 'cookie', re: /(?<![\w$>:])set(raw)?cookie\s*\(/i, msg: 'setting cookies with setcookie() is forbidden: the session cookie is built by Http/SessionCookie and emitted through Response' },
+  { id: 'password-api', re: /(?<![\w$>:])password_(hash|verify|needs_rehash|get_info|algos)\s*\(/i, msg: 'the password API is called only in ' + PASSWORDS_FILE, allow: (f) => f === PASSWORDS_FILE },
+  { id: 'principal-builder', re: /\bPrincipal\s*::\s*fromAccount\s*\(/, msg: 'Principal::fromAccount() is called only by the session resolver and the Authenticator', allow: (f) => PRINCIPAL_BUILDERS.has(f) },
+  { id: 'identity-construction', re: /\bnew\s+\\?(?:TamOs\\Identity\\)?(Principal|AuthSession)\s*\(/, msg: 'a Principal or AuthSession is constructed only inside ' + IDENTITY_DIR, allow: (f) => f.startsWith(IDENTITY_DIR) },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
 ];
 // Banned in every production file, the data layer included.
@@ -146,7 +164,34 @@ const SQL_STRING = /^\s*(SELECT\s+[\s\S]+?\s+FROM\s+[`\w.]+\s*(;|$|\b(WHERE|JOIN
 const STRING_RULES = [
   { id: 'cors', re: /access-control-allow/i, msg: 'CORS headers are forbidden (SDR-0002 §13.2)' },
   { id: 'php-input', re: /^php:\/\/input$/i, msg: 'php://input is read only by server/src/Http/Request.php', allow: (f) => f === 'server/src/Http/Request.php' },
+  { id: 'session-cookie-name', re: /__Host-tamos_session/i, msg: 'the session cookie name appears only in ' + SESSION_COOKIE_FILE, allow: (f) => f === SESSION_COOKIE_FILE },
+  { id: 'set-cookie', re: /^\s*set-cookie\s*:?\s*$/i, msg: 'the Set-Cookie header is added only by ' + KERNEL_FILE, allow: (f) => f === KERNEL_FILE },
+  { id: 'http-cookie', re: /^HTTP_COOKIE$/, msg: 'HTTP_COOKIE is read only by ' + REQUEST_FILE, allow: (f) => f === REQUEST_FILE },
+  { id: 'auth-events-rewrite', re: /\bauth_events\b[\s\S]*\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b|\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b[\s\S]*\bauth_events\b/i, msg: 'auth_events is append-only: no UPDATE, DELETE, REPLACE, TRUNCATE, ALTER or DROP' },
 ];
+// A CSRF token is compared only with hash_equals(): an ordinary comparison (or strcmp) against
+// anything but null is a timing leak. The kernel's comparison must be the hash_equals() one.
+const CSRF_COMPARE = [
+  /csrfToken\s*(?:===|!==|==|!=|<>)\s*(?!null\b)[$\w'"(]/i,
+  /[$\w'")\]]\s*(?:===|!==|==|!=|<>)\s*\$[\w$>-]*csrfToken\b/i,
+  /(?<![\w$>:])(strcmp|strcasecmp|strncmp|substr_compare)\s*\([^;]*csrfToken/i,
+];
+const KERNEL_CSRF = /hash_equals\s*\(\s*\$session->csrfToken\s*,\s*\$request->csrfToken\s*\)/;
+function checkCsrfComparison(code) {
+  // `null !== $x->csrfToken` is a presence check, not a comparison of secrets.
+  const stripped = code.replace(/\bnull\s*(?:===|!==|==|!=)\s*/gi, '');
+  return CSRF_COMPARE.some((re) => re.test(stripped)) ? ['a CSRF token is compared only with hash_equals()'] : [];
+}
+// Run on the real Kernel.php: the synchronizer-token check must exist, in its hash_equals form.
+function checkKernelCsrf(src) {
+  return KERNEL_CSRF.test(lexPhp(src).code) ? [] : ['the kernel must compare the session CSRF token with hash_equals($session->csrfToken, $request->csrfToken)'];
+}
+// A migration changes structure only: seed rows (a default CEO, credentials, business data)
+// never ship in server/migrations/.
+const MIGRATION_SEED = /\b(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|DELETE\s+FROM|LOAD\s+DATA|UPDATE\s+[`\w.]+\s+SET)\b/i;
+function checkMigrationSql(src) {
+  return MIGRATION_SEED.test(src) ? ['a migration must not insert, update or delete rows (no seed data)'] : [];
+}
 const SECRET_RULES = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /\bAKIA[0-9A-Z]{16}\b/,
@@ -223,9 +268,12 @@ function checkPhp(file, src) {
   if (CLI_FILES.has(file) && !(/\bPHP_SAPI\b/.test(lex.code) && lex.strings.includes('cli'))) {
     out.push('a CLI entry point must refuse any non-CLI SAPI (PHP_SAPI !== \'cli\')');
   }
-  if (file !== RESOLVER_ALLOWED && /\bimplements\b[^{]*\bPrincipalResolver\b/.test(lex.code)) {
-    out.push('BF-1 permits exactly one PrincipalResolver (NullPrincipalResolver); an identity-producing resolver needs the authentication milestone');
+  if (!RESOLVERS_ALLOWED.has(file) && /\bimplements\b[^{]*\bPrincipalResolver\b/.test(lex.code)) {
+    out.push('the only PrincipalResolver implementations are NullPrincipalResolver and SessionPrincipalResolver');
   }
+  // Request.php reads $_SERVER; not even it may read $_COOKIE (PHP URL-decodes and renames names).
+  if (/\$_COOKIE\b/.test(lex.code)) out.push('$_COOKIE is never read: the session cookie comes from HTTP_COOKIE in Request.php');
+  for (const v of checkCsrfComparison(lex.code)) out.push(v);
   return out;
 }
 
@@ -360,12 +408,14 @@ function run() {
     php++;
     for (const v of checkPhp(f, fs.readFileSync(path.join(root, f), 'utf8'))) failures.push(f + ': ' + v);
   }
-  // Migration files are data, not PHP: they are only scanned for secret-shaped values here;
-  // MigrationSet validates their bytes at run time.
+  // Migration files are data, not PHP: they are scanned for secret-shaped values and seed rows
+  // here; MigrationSet validates their bytes at run time.
   for (const f of files.filter((x) => x.endsWith('.sql'))) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
     for (const re of SECRET_RULES) if (re.test(src)) failures.push(f + ': secret-shaped value: ' + re);
+    for (const v of checkMigrationSql(src)) failures.push(f + ': ' + v);
   }
+  for (const v of checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8'))) failures.push(KERNEL_FILE + ': ' + v);
   const contract = require('./package-headers.js');
   for (const v of checkParity(fs.readFileSync(path.join(root, 'server/src/Http/ApiHeaders.php'), 'utf8'), contract)) failures.push(v);
   const ignored = gitIgnored(onDisk);
@@ -399,7 +449,8 @@ function selftest() {
   clean('tests may spawn the server and dump values', 'server/tests/Http/T.php', S + "proc_open(['php'], [], \$p); var_export(1, true); \$h = 'Access-Control-Allow-Origin';\n");
   clean('Request.php may read $_SERVER and php://input', 'server/src/Http/Request.php', S + "\$s = \$_SERVER; \$h = fopen('php://input', 'rb');\n");
   clean('the data layer may use PDO', 'server/src/Data/Database.php', S + "\$pdo = new \\PDO('x'); \$pdo->prepare('SELECT a FROM b WHERE c = ?');\n");
-  clean('NullPrincipalResolver is the one resolver', RESOLVER_ALLOWED, S + 'final class NullPrincipalResolver implements PrincipalResolver {}\n');
+  clean('NullPrincipalResolver is an allowed resolver', 'server/src/Identity/NullPrincipalResolver.php', S + 'final class NullPrincipalResolver implements PrincipalResolver {}\n');
+  clean('SessionPrincipalResolver is an allowed resolver (BF-3A)', 'server/src/Identity/SessionPrincipalResolver.php', S + 'final class SessionPrincipalResolver implements PrincipalResolver {}\n');
 
   dirty('missing strict_types is caught', 'server/src/X.php', "<?php\nfinal class X {}\n", 'strict_types');
   dirty('strict_types after code is caught', 'server/src/X.php', "<?php\necho 1;\ndeclare(strict_types=1);\n", 'strict_types');
@@ -460,7 +511,57 @@ function selftest() {
   dirty('php://input outside Request.php is caught', 'server/src/X.php', S + "\$b = file_get_contents('php://input');\n", 'php://input');
   dirty('header() outside Response.php is caught', 'server/src/Controller/X.php', S + "header('X: 1');\n", 'headers');
   dirty('ini_set outside bootstrap is caught', 'server/src/X.php', S + "ini_set('display_errors', '1');\n", 'runtime configuration');
-  dirty('a second PrincipalResolver is caught', 'server/src/Identity/CeoResolver.php', S + 'final class CeoResolver implements PrincipalResolver {}\n', 'PrincipalResolver');
+  dirty('a third PrincipalResolver is caught', 'server/src/Identity/CeoResolver.php', S + 'final class CeoResolver implements PrincipalResolver {}\n', 'PrincipalResolver');
+  dirty('a resolver outside Identity is caught', 'server/src/Auth/HeaderResolver.php', S + 'final class HeaderResolver implements \\TamOs\\Identity\\PrincipalResolver {}\n', 'PrincipalResolver');
+
+  // BF-3A authentication boundary: each rule passes its approved location and catches a violation.
+  clean('Passwords.php may call the password API', 'server/src/Auth/Passwords.php', S + "$h = password_hash($p, PASSWORD_ARGON2ID); $ok = password_verify($p, $h); password_needs_rehash($h, 1); password_get_info($h);\n");
+  for (const fn of ['password_hash', 'password_verify', 'password_needs_rehash', 'password_get_info', 'PASSWORD_VERIFY']) {
+    dirty(fn + ' outside Passwords.php is caught', 'server/src/Auth/Authenticator.php', S + '$x = ' + fn + "($p, $h);\n", 'password API');
+  }
+  dirty('\\password_verify in a controller is caught', 'server/src/Controller/X.php', S + '$x = \\password_verify($p, $h);\n', 'password API');
+  clean('a method named verify() is not the password API', 'server/src/Auth/Authenticator.php', S + '$ok = Passwords::verify($p, $h); $o->password_hash_len();\n');
+  clean('SessionCookie.php holds the cookie name', SESSION_COOKIE_FILE, S + "const NAME = '__Host-tamos_session';\n");
+  dirty('the cookie name in Request.php is caught', REQUEST_FILE, S + "$n = '__Host-tamos_session';\n", 'cookie name');
+  dirty('the cookie name in a controller is caught', 'server/src/Controller/X.php', S + "$h = \"__Host-tamos_session=\" . $t;\n", 'cookie name');
+  clean('the cookie name in a comment passes', 'server/src/Http/Request.php', S + "// reads the __Host-tamos_session cookie\n");
+  clean('Kernel adds Set-Cookie', KERNEL_FILE, S + "$r = $r->withHeader('Set-Cookie', $c);\nreturn hash_equals($session->csrfToken, $request->csrfToken);\n");
+  dirty('Set-Cookie outside Kernel is caught', 'server/src/Controller/X.php', S + "$r = $r->withHeader('Set-Cookie', $c);\n", 'Set-Cookie');
+  dirty('set-cookie in Response is caught', 'server/src/Http/Response.php', S + "$h['set-cookie'] = $c;\n", 'Set-Cookie');
+  clean('Request.php reads HTTP_COOKIE', REQUEST_FILE, S + "$c = $header('HTTP_COOKIE');\n");
+  dirty('HTTP_COOKIE outside Request.php is caught', 'server/src/Identity/X.php', S + "$c = getenv('HTTP_COOKIE');\n", 'HTTP_COOKIE');
+  dirty('$_COOKIE in Request.php is caught', REQUEST_FILE, S + '$c = $_COOKIE[\'x\'] ?? null;\n', '$_COOKIE');
+  dirty('$_COOKIE in the data layer is caught', 'server/src/Data/Auth/SessionStore.php', S + '$c = $_COOKIE;\n', '$_COOKIE');
+  clean('the resolver may build a principal', 'server/src/Identity/SessionPrincipalResolver.php', S + '$p = Principal::fromAccount($u, $m); return new AuthSession($p, $c);\n');
+  clean('the Authenticator may build a principal', 'server/src/Auth/Authenticator.php', S + '$p = Principal::fromAccount($u, $m);\n');
+  dirty('a controller building a principal is caught', 'server/src/Controller/X.php', S + '$p = Principal::fromAccount($json, []);\n', 'fromAccount');
+  dirty('Kernel building a principal is caught', KERNEL_FILE, S + "$p = \\TamOs\\Identity\\Principal::fromAccount($u, $m);\nreturn hash_equals($session->csrfToken, $request->csrfToken);\n", 'fromAccount');
+  dirty('new AuthSession outside Identity is caught', 'server/src/Auth/Authenticator.php', S + '$s = new AuthSession($p, $c);\n', 'constructed only inside');
+  dirty('new \\TamOs\\Identity\\Principal outside Identity is caught', 'server/src/Controller/X.php', S + '$p = new \\TamOs\\Identity\\Principal($a, $b, $c, $d, $e);\n', 'constructed only inside');
+  clean('Kernel compares CSRF with hash_equals and checks presence against null', KERNEL_FILE, S + 'return $request->csrfToken !== null && hash_equals($session->csrfToken, $request->csrfToken);\n');
+  dirty('Kernel comparing CSRF with === is caught', KERNEL_FILE, S + 'return $request->csrfToken === $session->csrfToken;\n', 'hash_equals');
+  dirty('Kernel comparing CSRF with == is caught', KERNEL_FILE, S + 'return $session->csrfToken == $request->csrfToken;\n', 'hash_equals');
+  cases.push({ name: 'Kernel without the hash_equals comparison is caught', run: () => checkKernelCsrf(S + 'return true;\n'), expect: 'hash_equals' });
+  cases.push({ name: 'Kernel with the comparison only in a comment is caught', run: () => checkKernelCsrf(S + '// hash_equals($session->csrfToken, $request->csrfToken)\nreturn true;\n'), expect: 'hash_equals' });
+  cases.push({ name: 'the real Kernel compares CSRF with hash_equals', run: () => checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8')), expect: 0 });
+  dirty('strcmp on a CSRF token is caught', 'server/src/Controller/X.php', S + 'return strcmp($a->csrfToken, $b) === 0;\n', 'hash_equals');
+  dirty('a literal compared to a CSRF token is caught', 'server/src/Controller/X.php', S + "return 'x' !== $s->csrfToken;\n", 'hash_equals');
+  clean('a null check on a CSRF token is not a comparison', 'server/src/Controller/X.php', S + 'return $r->csrfToken === null || null !== $s->csrfToken;\n');
+  clean('appending to auth_events passes', 'server/src/Data/Auth/AuthEvents.php', S + "$this->db->execute('INSERT INTO auth_events (occurred_at, event, request_id) VALUES (UTC_TIMESTAMP(6), ?, ?)', [$e, $r]);\n");
+  for (const sql of ['UPDATE auth_events SET event = ?', 'DELETE FROM auth_events WHERE id = ?', 'REPLACE INTO auth_events VALUES (1)', 'TRUNCATE auth_events',
+    'TRUNCATE TABLE auth_events', 'ALTER TABLE auth_events DROP COLUMN ip', 'DROP TABLE auth_events', 'DELETE e FROM auth_events e', 'update auth_events set ip = null']) {
+    dirty('auth_events rewrite "' + sql + '" is caught', 'server/src/Data/Auth/AuthEvents.php', S + "$this->db->execute('" + sql + "');\n", 'append-only');
+  }
+  cases.push({ name: 'a CREATE TABLE migration passes the seed rule', run: () => checkMigrationSql('CREATE TABLE users (\n  id CHAR(32) NOT NULL,\n  CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id) ON DELETE RESTRICT ON UPDATE CASCADE\n) ENGINE=InnoDB;\n'), expect: 0 });
+  for (const sql of ["INSERT INTO users (id) VALUES ('ceo')", 'insert ignore into companies VALUES (1)', "REPLACE INTO users VALUES ('x')", 'DELETE FROM users',
+    "UPDATE users SET status = 'active'", "LOAD DATA INFILE 'x' INTO TABLE users"]) {
+    cases.push({ name: 'a seeding migration is caught: ' + sql.slice(0, 24), run: () => checkMigrationSql('CREATE TABLE t (a INT);\n' + sql + ';\n'), expect: 'no seed data' });
+  }
+  for (const dir of ['Auth', 'Identity', 'Controller', 'Http']) {
+    dirty('Database handle in ' + dir + ' is caught', 'server/src/' + dir + '/X.php', S + 'function f(Database $db): void {}\n', 'DAL bypass');
+    dirty('SQL in ' + dir + ' is caught (BF-3A)', 'server/src/' + dir + '/X.php', S + "$q = 'UPDATE sessions SET revoked_at = UTC_TIMESTAMP(6) WHERE token_hash = ?';\n", 'SQL');
+  }
+  dirty('PDO in Auth is caught', 'server/src/Auth/X.php', S + "$p = new \\PDO('mysql:');\n", 'PDO');
   dirty('heredoc is caught', 'server/src/X.php', S + "\$a = <<<EOT\nSELECT 1\nEOT;\n", 'heredoc');
   dirty('a private key is caught (tests too)', 'server/tests/T.php', S + "\$k = '-----BEGIN RSA PRIVATE KEY-----';\n", 'secret');
   dirty('a GitHub token is caught', 'server/config/config.example.php', S + "return ['t' => 'ghp_" + 'a'.repeat(36) + "'];\n", 'secret');

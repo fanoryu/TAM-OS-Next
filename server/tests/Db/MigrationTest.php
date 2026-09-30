@@ -140,14 +140,19 @@ return [
         $file = writeConfigFile($config);
         $status = runMigrateCli(['status'], $file);
         assertSame([1, "migrations: history_missing\n"], [$status['exit'], $status['stderr']]);
+        // BF-3A: the real server/migrations set is 0001–0006 (the auth schema).
         $apply = runMigrateCli(['apply'], $file);
-        assertSame([0, "migrations: current\n"], [$apply['exit'], $apply['stdout']]);
-        assertSame(['schema_migrations'], $tables($db));
+        assertSame([0, "applied: 0001_create_companies\napplied: 0002_create_users\napplied: 0003_create_memberships\n"
+            . "applied: 0004_create_sessions\napplied: 0005_create_auth_rate_limits\napplied: 0006_create_auth_events\nmigrations: current\n"],
+            [$apply['exit'], $apply['stdout']]);
+        assertSame(['auth_events', 'auth_rate_limits', 'companies', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
         $again = runMigrateCli(['status'], $file);
         assertSame([0, "migrations: current\n"], [$again['exit'], $again['stdout']]);
-        $db->execute('INSERT INTO schema_migrations (version, name, sha256, started_at, applied_at) VALUES (1, ?, ?, UTC_TIMESTAMP(6), NULL)', ['x', str_repeat('0', 64)]);
+        $noop = runMigrateCli(['apply'], $file);
+        assertSame([0, "migrations: current\n"], [$noop['exit'], $noop['stdout']], 'second apply is a no-op');
+        $db->execute('UPDATE schema_migrations SET applied_at = NULL WHERE version = ?', [6]);
         $broken = runMigrateCli(['apply'], $file);
-        assertSame([1, "migrations: schema_incomplete (version 0001)\n"], [$broken['exit'], $broken['stderr']]);
+        assertSame([1, "migrations: schema_incomplete (version 0006)\n"], [$broken['exit'], $broken['stderr']]);
         $wrong = runMigrateCli(['status'], writeConfigFile(\TamOs\Tests\testConfig(['db' => ['pass' => 'wrong-password-value'] + $config->db])));
         assertSame([1, "database: unavailable during connect\n"], [$wrong['exit'], $wrong['stderr']]);
         foreach ([$status, $apply, $again, $broken, $wrong] as $out) {

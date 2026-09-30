@@ -16,6 +16,7 @@ use TamOs\Http\Response;
 use TamOs\Http\Route;
 use TamOs\Http\Routes;
 use TamOs\Identity\NullPrincipalResolver;
+use TamOs\Identity\PrincipalResolver;
 use TamOs\Log\Logger;
 
 final class AssertionFailed extends \RuntimeException
@@ -81,11 +82,36 @@ function testConfig(array $overrides = []): Config
  * @param list<Route>|null $routes production routes when null
  * @param string|null $migrationsDir readiness' migration directory (an absent one = zero migrations)
  */
-function kernel(?Config $config = null, ?array $routes = null, ?string $migrationsDir = null): Kernel
+function kernel(?Config $config = null, ?array $routes = null, ?string $migrationsDir = null, ?PrincipalResolver $resolver = null): Kernel
 {
     $config ??= testConfig();
-    $routes ??= Routes::production(new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'));
-    return new Kernel($routes, new NullPrincipalResolver(), $config, new Logger($config->logPath, $config->env));
+    $routes ??= productionRoutes($config, $migrationsDir);
+    return new Kernel($routes, $resolver ?? new NullPrincipalResolver(), $config, new Logger($config->logPath, $config->env));
+}
+
+/**
+ * The production route table over lazily connecting auth data, exactly as bootstrap builds it.
+ *
+ * @return list<Route>
+ */
+function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs\Data\Auth\AuthData $auth = null): array
+{
+    $auth ??= \TamOs\Data\Auth\AuthData::fromConfig($config);
+    return Routes::production(
+        new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'),
+        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth)),
+    );
+}
+
+/** A kernel wired like production (SessionPrincipalResolver) over the given auth data. */
+function authKernel(Config $config, \TamOs\Data\Auth\AuthData $auth, ?string $migrationsDir = null): Kernel
+{
+    return new Kernel(
+        productionRoutes($config, $migrationsDir, $auth),
+        new \TamOs\Identity\SessionPrincipalResolver($auth),
+        $config,
+        new Logger($config->logPath, $config->env),
+    );
 }
 
 function requestId(): string
@@ -101,8 +127,11 @@ function envelope(Response $response): array
     return $decoded;
 }
 
-/** Asserts the governed API headers and the request-ID echo on any response. */
-function assertApiHeaders(Response $response, string $requestId): void
+/**
+ * Asserts the governed API headers and the request-ID echo on any response. Set-Cookie is
+ * refused unless the caller expects the session cookie (auth routes only).
+ */
+function assertApiHeaders(Response $response, string $requestId, bool $allowSessionCookie = false): void
 {
     foreach (\TamOs\Http\ApiHeaders::HEADERS as $name => $value) {
         assertSame($value, $response->headers[$name] ?? null, 'header ' . $name);
@@ -111,7 +140,7 @@ function assertApiHeaders(Response $response, string $requestId): void
     assertSame($requestId, $response->headers['X-Request-Id'] ?? null, 'X-Request-Id');
     foreach (array_keys($response->headers) as $name) {
         assertTrue(!str_starts_with(strtolower($name), 'access-control-'), 'no CORS header (' . $name . ')');
-        assertTrue(strtolower($name) !== 'set-cookie', 'no Set-Cookie');
+        assertTrue($allowSessionCookie || strtolower($name) !== 'set-cookie', 'no Set-Cookie');
     }
 }
 
@@ -191,12 +220,23 @@ function testDatabase(): \TamOs\Data\Database
     if ($current !== $config->db['name']) {
         fail('database test guard refused: connected schema is not the configured test database');
     }
-    foreach ($db->select('SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()') as $row) {
-        $table = (string) $row['t'];
-        if (preg_match('/^[a-z0-9_]{1,64}$/', $table) !== 1) {
-            fail('database test guard refused: unexpected table name');
+    // BF-3A tables reference each other by foreign key, so the reset turns FK checks off for
+    // this session only — here, in the guarded test helper, never in production code — and
+    // always turns them back on, even when a drop fails.
+    $db->execute('SET SESSION foreign_key_checks = 0');
+    try {
+        foreach ($db->select('SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()') as $row) {
+            $table = (string) $row['t'];
+            if (preg_match('/^[a-z0-9_]{1,64}$/', $table) !== 1) {
+                fail('database test guard refused: unexpected table name');
+            }
+            $db->execute('DROP TABLE `' . $table . '`');
         }
-        $db->execute('DROP TABLE `' . $table . '`');
+    } finally {
+        $db->execute('SET SESSION foreign_key_checks = 1');
+    }
+    if ((int) ($db->select('SELECT @@SESSION.foreign_key_checks AS f')[0]['f'] ?? 0) !== 1) {
+        fail('database test guard: foreign_key_checks was not restored');
     }
     return $db;
 }
@@ -267,4 +307,80 @@ function jsonPost(string $path, string $body, array $overrides = []): Request
         'origin' => 'https://tamos.test', 'referer' => null, 'body' => $body, 'bodyTooLarge' => false, 'isHttps' => true,
     ];
     return new Request(...$args);
+}
+
+/** server/migrations — the real, production migration set. */
+function productionMigrationsDir(): string
+{
+    return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'migrations';
+}
+
+/** The guarded, emptied test database with the production migrations (0001…) applied. */
+function authDatabase(): \TamOs\Data\Database
+{
+    $db = testDatabase();
+    (new \TamOs\Data\Migration\Migrator($db, productionMigrationsDir()))->apply();
+    return $db;
+}
+
+/**
+ * Inserts one test account — company, user and (unless 'membership' => false) membership —
+ * with per-run random identifiers, email and password. Test-only SQL: production code has no
+ * account-creation path in BF-3A. Options: role, employeeId, userStatus, membershipStatus,
+ * companyId (reuse), password (null = not activated), passwordHash (raw override), membership.
+ *
+ * @param array<string, mixed> $o
+ * @return array{companyId: string, userId: string, membershipId: string, email: string, password: ?string}
+ */
+function authFixture(\TamOs\Data\Database $db, array $o = []): array
+{
+    $companyId = $o['companyId'] ?? bin2hex(random_bytes(16));
+    if (!isset($o['companyId'])) {
+        $db->execute('INSERT INTO companies (id, created_at) VALUES (?, UTC_TIMESTAMP(6))', [$companyId]);
+    }
+    $userId = bin2hex(random_bytes(16));
+    $membershipId = bin2hex(random_bytes(16));
+    $email = 'u-' . bin2hex(random_bytes(6)) . '@example.test';
+    $password = array_key_exists('password', $o) ? $o['password'] : 'pw-' . bin2hex(random_bytes(10));
+    $hash = array_key_exists('passwordHash', $o) ? $o['passwordHash'] : ($password === null ? null : \TamOs\Auth\Passwords::hash($password));
+    $db->execute(
+        'INSERT INTO users (id, email, password_hash, status, created_at, updated_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+        [$userId, $email, $hash, $o['userStatus'] ?? 'active'],
+    );
+    if ($o['membership'] ?? true) {
+        $db->execute(
+            'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+            [$membershipId, $userId, $companyId, $o['role'] ?? 'ceo', $o['employeeId'] ?? null, $o['membershipStatus'] ?? 'active'],
+        );
+    }
+    return ['companyId' => $companyId, 'userId' => $userId, 'membershipId' => $membershipId, 'email' => $email, 'password' => $password];
+}
+
+/** A same-origin JSON login request from a fixed documentation IP (RFC 5737). */
+function loginRequest(string $email, string $password, array $overrides = []): Request
+{
+    return jsonPost('/api/auth/login', json_encode(['email' => $email, 'password' => $password], JSON_THROW_ON_ERROR), $overrides + ['remoteAddr' => '203.0.113.7']);
+}
+
+/** The session token a response's Set-Cookie carries (null when it sets none or clears). */
+function sessionCookieToken(Response $response): ?string
+{
+    $header = $response->headers['Set-Cookie'] ?? null;
+    if (!is_string($header) || preg_match('/^__Host-tamos_session=([A-Za-z0-9_-]{43});/', $header, $m) !== 1) {
+        return null;
+    }
+    return $m[1];
+}
+
+/** A request carrying a session cookie (and optionally a CSRF header) from the canonical origin. */
+function sessionRequest(string $method, string $path, ?string $token, ?string $csrf = null, string $body = '', array $overrides = []): Request
+{
+    $mutation = in_array($method, Request::MUTATION_METHODS, true);
+    return new Request(...($overrides + [
+        'method' => $method, 'path' => $path, 'query' => '',
+        'contentType' => $mutation ? 'application/json' : null,
+        'origin' => $mutation ? 'https://tamos.test' : null, 'referer' => null,
+        'body' => $mutation && $body === '' ? '{}' : $body, 'bodyTooLarge' => false, 'isHttps' => true,
+        'sessionToken' => $token, 'csrfToken' => $csrf, 'remoteAddr' => '203.0.113.7',
+    ]));
 }

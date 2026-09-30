@@ -50,7 +50,14 @@ php server/bin/migrate.php apply    # create and verify history, then run pendin
 ```
 
 Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
-is a test fixture.
+is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`); the boundary
+tool refuses any migration that inserts, updates or deletes rows.
+
+BF-3A authentication tests create their accounts per run inside the guarded test database
+(`server/tests/lib.php` → `authFixture`); no credential is stored in the repository. The boundary tool
+also confines the password API, the session cookie name, `Set-Cookie`, `HTTP_COOKIE`, principal
+construction and CSRF comparison to their approved files (see `ARCHITECTURE.md` → Authentication and
+sessions).
 
 ### Build
 

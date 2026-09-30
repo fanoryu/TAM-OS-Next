@@ -22,8 +22,13 @@ call it (see `ARCHITECTURE.md` → Backend foundation). **BF-2A** adds the data 
 `server/src/Data/` (lazy PDO connection, prepared statements, transactions, classified database errors)
 and a MariaDB-backed CI job; it creates no table, migration or database-backed endpoint. **BF-2B** adds
 the migration machinery (`server/bin/migrate.php status|apply`, a runner-owned `schema_migrations`
-history with drift detection and fail-closed incomplete markers) and `GET /api/ready`; no production
-migration exists yet. v2.10.0 remains
+history with drift detection and fail-closed incomplete markers) and `GET /api/ready`; it shipped no
+production migration. **BF-3A** adds the authentication schema (migrations `0001`–`0006`: companies,
+users, memberships, sessions, auth rate limits, auth events — no seeded rows), password verification,
+database-backed sessions with an authoritative server principal, per-route session resolution (health
+and ready never resolve), `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, CSRF,
+login rate limiting and security events. It is source only and **not production-ready**: no account
+can be created yet (BF-3B), the frontend does not call it, and "Acting as" is unchanged. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

@@ -770,8 +770,8 @@ automatic CEO or Employee fallback at any step. Frontend hosting and the product
 
 BF-1 added the first slice of the ADR-0004 backend under `server/`: the HTTP foundation. The backend has
 **no authentication, sessions, policy, business endpoint or production migration** (BF-2A and BF-2B below
-add the data layer and migration machinery, but no application schema), and the frontend makes no call
-to it. The shipped application is unchanged and still
+add the data layer and migration machinery; BF-3A adds the authentication schema and session endpoints),
+and the frontend makes no call to it. The shipped application is unchanged and still
 client-only.
 
 | Path | Role |
@@ -831,8 +831,8 @@ NOT RUN.
 ### Migrations and readiness — BF-2B (machinery only; zero production migrations)
 
 Schema changes run only through `php server/bin/migrate.php status|apply` (CLI only; it does nothing
-under any other SAPI). There is no migration endpoint and nothing migrates at start-up. No numbered
-migration exists yet; `server/migrations/` appears with the first one, `0001`.
+under any other SAPI). There is no migration endpoint and nothing migrates at start-up. BF-2B shipped
+no numbered migration; the first ones, `0001`–`0006`, arrive with BF-3A below.
 
 | Class | Role |
 |---|---|
@@ -853,6 +853,100 @@ two-statement file is refused before either statement runs.
 
 **Readiness is read-only.** It takes no lock and never creates, alters or writes anything: before the
 first `apply` it reports `history_missing`. `/api/health` stays independent of the database.
+
+### Authentication and sessions — BF-3A (source only; not deployed, not production-ready)
+
+BF-3A adds the first production schema and the authoritative server-side identity. It has **no account
+creation, activation, password change, recovery, e-mail, authorization policy or business endpoint**
+(BF-3B / BF-3C and later milestones). No company, user or CEO is seeded; the frontend does not call these
+endpoints and still uses its local "Acting as" identity.
+
+**Schema** (`server/migrations/`, one `CREATE TABLE` per file, InnoDB, table default
+`utf8mb4_unicode_ci`, every character column `ascii` / `ascii_bin`, every time `DATETIME(6)` on the
+database clock, no rows):
+
+| Migration | Table | Notes |
+|---|---|---|
+| `0001_create_companies` | `companies` | `id`, `created_at` only |
+| `0002_create_users` | `users` | `email` `VARCHAR(254)` unique, CHECK normalized (trimmed, lower-case); `password_hash` NULL = not activated, never authenticates; `status` `active`/`disabled` |
+| `0003_create_memberships` | `memberships` | FKs to `users` and `companies`; `UNIQUE(user_id)` (one membership per user in this phase); `role` `ceo`/`employee`; `employee_id` NULL or non-empty, required for `employee`; `UNIQUE(company_id, employee_id)` (NULLs never collide) |
+| `0004_create_sessions` | `sessions` | keyed by SHA-256 of the session token; `csrf_token`; `last_seen_at`, `absolute_expires_at`, `revoked_at` |
+| `0005_create_auth_rate_limits` | `auth_rate_limits` | `bucket` (SHA-256 key), `failures`, `window_started_at`, `locked_until` |
+| `0006_create_auth_events` | `auth_events` | append-only security events; no FK, so retention never blocks or cascades |
+
+`UNIQUE(company_id, employee_id)` covers disabled memberships too — stricter than SDR-0002 §6 ("unique
+among active memberships"); rebinding a departed Employee's record is a BF-3B concern.
+
+**Routes and pipeline.** `Route` carries a `RouteAuth` (`None` / `Optional` / `Required`). The kernel
+resolves a session only when it is not `None`, so **`/api/health` and `/api/ready` never resolve identity
+or touch the database for it, whatever cookie is sent.** For a mutation, the origin check still runs
+first — a cross-origin request never reaches a session lookup — and any mutation made with a resolved
+session must carry a matching `X-CSRF-Token` (compared with `hash_equals`), else 403.
+
+| Route | RouteAuth | Behaviour |
+|---|---|---|
+| `POST /api/auth/login` | None | body exactly `{"email","password"}`; 200 `{userId, membershipId, role, employeeId, csrfToken}` + session cookie; every credential/account/membership failure the same 401; throttled 429 + `Retry-After` |
+| `POST /api/auth/logout` | Optional | body `{}`; with a session: CSRF required, session revoked and `logout` recorded; without one: nothing written; always 200 `{"loggedOut":true}` + cookie cleared |
+| `GET /api/auth/me` | Required | the same projection; 401 without a valid session |
+
+No response carries `companyId`, an e-mail, a status, the session token or any hash.
+
+| Class | Role |
+|---|---|
+| `Http/Request` | adds exactly `sessionToken` (the single well-formed `__Host-tamos_session` value from `HTTP_COOKIE`; duplicates, quoting and encoding yield none), `csrfToken` (`X-CSRF-Token` in token shape) and `remoteAddr` (`REMOTE_ADDR`, canonical). No forwarding or identity header is captured |
+| `Http/SessionCookie`, `Http/CookieResult` | the one place the cookie is built: `__Host-tamos_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict` (session cookie, no Domain); cleared with `Max-Age=0` and a 1970 `Expires` |
+| `Auth/Passwords` | the only caller of PHP's password API: Argon2id (`m=65536, t=4, p=1`) when available, else bcrypt cost 12; input over 72 bytes, empty or containing NUL is never accepted; exactly one `password_verify` per attempt, against a fixed public dummy hash when there is no usable hash |
+| `Auth/SessionToken`, `Auth/EmailAddress`, `Auth/LoginKeys` | 32-byte base64url tokens (43 chars) and their SHA-256; ASCII e-mail normalization (D3); rate-limit and audit keys |
+| `Auth/Authenticator`, `Auth/LoginResult` | login and logout ordering and transaction boundaries; no SQL |
+| `Identity/Principal`, `Identity/Role`, `Identity/AuthSession` | `Principal::fromAccount()` fails closed unless there is one active user with a password, exactly one active membership, a known role, and an employee binding for `employee`; `AuthSession` = principal + CSRF token, no token hash |
+| `Identity/SessionPrincipalResolver` | cookie → shape → SHA-256 → one read of session + user + memberships (validity on `UTC_TIMESTAMP(6)`) → `Principal::fromAccount` → throttled touch |
+| `Data/Auth/*` | `AuthData` (lazy shared connection, `atomically()`), `AccountStore`, `SessionStore`, `RateLimiter`, `AuthEvents` — all auth SQL |
+| `Controller/AuthController` | the three endpoints |
+
+**Sessions.** Valid only while `revoked_at IS NULL`, `absolute_expires_at > UTC_TIMESTAMP(6)` (12 h after
+login) and `last_seen_at > UTC_TIMESTAMP(6) − 30 min`; equality at either boundary is expired. The touch
+runs at most once per 60 s and repeats every validity predicate, so it can never revive a revoked or
+expired session. Role, statuses and employee binding are read on every request. A request that resolved
+just before its session was revoked completes; the next one fails (a one-request window).
+
+**Login transaction.** One transaction per attempt: lock the account bucket (held through verification,
+so attempts on one account serialize) → read the IP bucket → if either is locked, record `login_locked`
+→ look up the account → one password verification → `Principal::fromAccount` → on failure, count the
+account and IP failures and record `login_failure`; on success, revoke any session this browser
+presented, create a new one, rehash an outdated hash (compare-and-swap on the verified hash), reset the
+account bucket and record `login_success`. The 401 / 429 is raised only after commit. A database error
+rolls everything back and answers 503 / 500 — never a credential failure. The IP bucket row is created
+in its own autocommit statement before the transaction and locked only for its final update, so a shared
+client IP never serializes all logins and the failure path never inserts into a gap (no insert
+deadlock that could roll back, and so not count, a failed attempt).
+
+**Throttling.** Account bucket `sha256("acct:" + candidate)`, computed before the address is validated
+so invalid and unknown addresses behave exactly like real ones; IP bucket from `REMOTE_ADDR` only (IPv6
+by /64). Thresholds: 5 failures per account and 20 per IP within 15 minutes; each multiple of the
+threshold locks for 1, 2, 4, 8, then at most 15 minutes. Success resets the account bucket only.
+Concurrent requests from one IP can overshoot its threshold by the number of workers (accepted residual).
+Behind a CDN, `REMOTE_ADDR` may be a shared edge address — deployment evidence debt, not solved here.
+
+**Security events.** `auth_events` records `login_success`, `login_failure`, `login_locked` and `logout`
+with the database time, user / membership where known, the IP, the request ID and, for failures,
+`sha256("email:" + candidate)` — never a raw address, password or token. That unkeyed hash lets anyone
+holding the table confirm a guessed address (accepted, documented dictionary risk). The application can
+only insert; the boundary check rejects any SQL that updates, deletes or rewrites the table. Database
+grants that enforce the same are Hostinger evidence.
+
+**Enforcement added to `tools/verify-backend-boundary.js`.** Password API only in `Auth/Passwords.php`;
+the cookie name only in `Http/SessionCookie.php`; `Set-Cookie` only in `Http/Kernel.php`; `HTTP_COOKIE`
+only in `Http/Request.php`; `$_COOKIE` nowhere; resolvers only `NullPrincipalResolver` and
+`SessionPrincipalResolver`; `Principal::fromAccount()` only from the resolver and the Authenticator;
+`Principal` / `AuthSession` constructed only in `Identity/`; CSRF tokens compared only with `hash_equals`
+(and the kernel must do so); no destructive SQL on `auth_events`; no seed rows in migrations.
+
+**Not production-ready.** Before any real login: BF-3B account lifecycle, BF-3C if recovery is needed,
+server-side authorization and data scoping, the Hostinger evidence run (engine and CHECK support,
+Argon2id and its memory use, `Secure` / `Set-Cookie` through LiteSpeed and the CDN, a trustworthy client
+IP, CDN `no-store`, config outside the web root, database grants), retention for sessions, rate-limit
+rows and events, an external security review, frontend integration and end-to-end tests, and the
+Acting-as retirement gate (SDR-0002 §22).
 
 ### Release engineering
 
