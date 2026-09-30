@@ -8,6 +8,7 @@ use TamOs\Data\DatabaseError;
 use TamOs\Identity\AuthSession;
 use TamOs\Identity\PrincipalResolver;
 use TamOs\Log\Logger;
+use TamOs\Policy\Policy;
 
 /**
  * The request pipeline and the single exception boundary.
@@ -15,7 +16,8 @@ use TamOs\Log\Logger;
  *   route (404 / 405) → mutation guards: origin (403), Content-Type (415), size (413),
  *   JSON object (400) → query allow-list (400) → session (only when the route's RouteAuth is
  *   not None; Required without one → 401) → CSRF (a mutation with a session: 403 unless
- *   X-CSRF-Token matches) → handler → envelope (+ Set-Cookie for a CookieResult)
+ *   X-CSRF-Token matches) → record-free Action (403 unless Policy allows) → handler → envelope
+ *   (+ Set-Cookie for a CookieResult)
  *
  * The origin check runs before any session lookup, so a cross-origin request never reaches
  * the database. /api/health and /api/ready are RouteAuth::None: no cookie ever makes them
@@ -59,6 +61,12 @@ final class Kernel
             }
             if ($session !== null && $request->isMutation() && !self::csrfMatches($session, $request)) {
                 throw new ApiError(ErrorCode::Forbidden, 'csrf check failed', logReason: 'csrf_failed');
+            }
+            // A record-free action is decided here, before the handler runs, so no handler can
+            // forget it. A record-bearing action is decided by the handler after its scoped load
+            // (404 before 403, SDR-0002 §8.3). A route with an Action always has a session.
+            if ($route->action !== null && $route->action->entity() === null && $session !== null) {
+                Policy::authorize($session->principal, $route->action);
             }
             $result = ($route->handler)($request, $session, $json, $requestId);
             $response = $result instanceof CookieResult

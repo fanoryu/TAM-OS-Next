@@ -32,8 +32,15 @@ login rate limiting and security events. **BF-3B** adds the account lifecycle: m
 `server/bin/account.php` (`create-ceo` — the only way the first company and CEO come to exist, with no
 password — and break-glass `reset-credentials`), `POST /api/auth/activate`, `POST /api/auth/change-password`
 and `POST /api/auth/logout-all`. It is self-service plus operator CLI only — no HTTP account
-administration, no Employee accounts, no SMTP or forgot-password. Next come **BF-3C** (server
-Policy/ACTIONS, authorization and data scope) and, once an SMTP provider is chosen, **BF-3D** (password
+administration, no Employee accounts, no SMTP or forgot-password. **BF-3C** adds the server
+authorization and data-scope framework: `server/src/Policy` (the 20 ACTIONS with their rules and
+entities, parity-checked against `js/core/authz.js` in CI; `Scope` derived only from the principal;
+default-deny `Policy`; the `Authorization` capability), action-aware routes that fail closed at
+bootstrap, migrations `0009`–`0010` (a minimal `employees` authorization anchor — no personal data — and
+the same-company, RESTRICT binding FK from `memberships`), `ScopedDatabase` (company and self scope
+injected, never taken from input) and the `EmployeeStore` anchor, proven by a hostile-principal suite.
+It adds no production business endpoint; each business domain becomes server-enforced only when it gets
+its own backend store and routes. Next, once an SMTP provider is chosen, comes **BF-3D** (password
 recovery, governed mail). All of this is source only and **not production-ready**: the frontend does not
 call it, and "Acting as" is unchanged. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.

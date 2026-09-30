@@ -2,9 +2,9 @@
 declare(strict_types=1);
 
 /*
- * The production schema (server/migrations 0001–0006 BF-3A, 0007–0008 BF-3B) against the
- * real, guarded CI MariaDB: it applies, seeds nothing, is ready, and its constraints are
- * actually enforced.
+ * The production schema (server/migrations 0001–0006 BF-3A, 0007–0008 BF-3B, 0009–0010 BF-3C)
+ * against the real, guarded CI MariaDB: it applies, seeds nothing, is ready, and its constraints
+ * are actually enforced. The employee anchor and binding FK are proven in EmployeeSchemaTest.
  */
 
 use TamOs\Data\Database;
@@ -26,7 +26,7 @@ use function TamOs\Tests\requestId;
 use function TamOs\Tests\testDatabase;
 use function TamOs\Tests\testDbConfig;
 
-$authTables = ['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'memberships', 'sessions', 'users'];
+$authTables = ['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'memberships', 'sessions', 'users'];
 $tables = static fn (Database $db): array => array_map(
     static fn (array $r): string => (string) $r['t'],
     $db->select('SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name'),
@@ -42,13 +42,14 @@ $insertUser = 'INSERT INTO users (id, email, password_hash, status, created_at, 
 $insertMembership = 'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))';
 
 return [
-    'production migrations 0001–0008 apply in order, create exactly the auth tables and seed nothing' => static function () use ($tables, $authTables): void {
+    'production migrations 0001–0010 apply in order, create exactly the auth tables and the employee anchor, and seed nothing' => static function () use ($tables, $authTables): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events',
-            '0007_create_account_tokens', '0008_replace_auth_events_event_check'],
+            '0007_create_account_tokens', '0008_replace_auth_events_event_check', '0009_create_employees', '0010_add_memberships_employee_fk'],
             array_map(static fn ($m): string => $m->label(), $applied));
-        assertSame(['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM employees')[0]['n'], 'no employee');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM account_tokens')[0]['n'], 'no token');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM companies')[0]['n'], 'no company');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM users')[0]['n'], 'no user, no default CEO');
@@ -72,21 +73,21 @@ return [
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
             $files[basename($path)] = (string) file_get_contents($path);
         }
-        assertSame(8, count($files));
+        assertSame(10, count($files));
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());
         $r = kernel(testDbConfig(), null, $dir)->handle(new Request('GET', '/api/ready'), requestId());
         assertSame(503, $r->status);
     },
-    'every auth table is InnoDB utf8mb4_unicode_ci; character columns are ascii_bin; datetimes are DATETIME(6)' => static function () use ($authTables): void {
+    'every table (auth and the employee anchor) is InnoDB utf8mb4_unicode_ci; character columns are ascii_bin; datetimes are DATETIME(6)' => static function () use ($authTables): void {
         $db = authDatabase();
         foreach ($authTables as $t) {
             $info = $db->select('SELECT ENGINE AS engine, TABLE_COLLATION AS collation FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', [$t])[0];
             assertSame(['InnoDB', 'utf8mb4_unicode_ci'], [(string) $info['engine'], (string) $info['collation']], $t);
         }
         $columns = $db->select("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS type, CHARACTER_SET_NAME AS cs, COLLATION_NAME AS coll, DATETIME_PRECISION AS prec FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME <> 'schema_migrations'");
-        assertTrue(count($columns) === 42, 'expected 42 auth columns, got ' . count($columns));
+        assertTrue(count($columns) === 45, 'expected 45 columns (42 auth, 3 employees), got ' . count($columns));
         foreach ($columns as $c) {
             $label = $c['t'] . '.' . $c['c'];
             if (in_array($c['type'], ['char', 'varchar'], true)) {
@@ -103,12 +104,12 @@ return [
         $checks = array_map(static fn (array $r): string => (string) $r['n'],
             $db->select('SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY CONSTRAINT_NAME'));
         assertSame(['account_tokens_expiry', 'account_tokens_final', 'account_tokens_purpose', 'account_tokens_used_in_time',
-            'auth_events_event_v2', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
+            'auth_events_event_v2', 'employees_id', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
             'users_email_normalized', 'users_password_hash', 'users_status'], $checks);
         $fks = array_map(static fn (array $r): string => $r['t'] . '.' . $r['n'] . '->' . $r['r'],
             $db->select('SELECT TABLE_NAME AS t, CONSTRAINT_NAME AS n, REFERENCED_TABLE_NAME AS r FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY TABLE_NAME, CONSTRAINT_NAME'));
-        assertSame(['account_tokens.account_tokens_user_fk->users', 'memberships.memberships_company_fk->companies', 'memberships.memberships_user_fk->users',
-            'sessions.sessions_user_fk->users'], $fks, 'auth_events has no FK');
+        assertSame(['account_tokens.account_tokens_user_fk->users', 'employees.employees_company_fk->companies', 'memberships.memberships_company_fk->companies',
+            'memberships.memberships_employee_fk->employees', 'memberships.memberships_user_fk->users', 'sessions.sessions_user_fk->users'], $fks, 'auth_events has no FK');
     },
     'CHECK constraints are enforced by MariaDB' => static function () use ($refused, $id, $insertUser, $insertMembership): void {
         $db = authDatabase();
@@ -152,7 +153,7 @@ return [
         $e = $refused($db, 'DELETE FROM users WHERE id = ?', [$a['userId']], 'delete referenced user');
         assertSame(1451, $e->driverCode);
     },
-    'uniqueness: email; one membership per user; (company, employee) with any number of unbound memberships' => static function () use ($refused, $id, $insertUser, $insertMembership): void {
+    'uniqueness: email; one membership per user; one binding per employee; any number of unbound memberships' => static function () use ($refused, $id, $insertUser, $insertMembership): void {
         $db = authDatabase();
         $a = authFixture($db);
         assertSame(1062, $refused($db, $insertUser, [$id(), $a['email'], null, 'active'], 'duplicate email')->driverCode);
@@ -164,7 +165,9 @@ return [
         authFixture($db, ['companyId' => $a['companyId'], 'role' => 'employee', 'employeeId' => 'emp-1']);
         $u = authFixture($db, ['companyId' => $a['companyId'], 'membership' => false]);
         assertSame(1062, $refused($db, $insertMembership, [$id(), $u['userId'], $a['companyId'], 'employee', 'emp-1', 'active'], 'binding reused in the company')->driverCode);
-        $other = authFixture($db, ['role' => 'employee', 'employeeId' => 'emp-1']);
-        assertTrue($other['companyId'] !== $a['companyId'], 'same employee id in another company is allowed');
+        // BF-3C: an employee id is one anchor row in one company (global primary key), so another
+        // company binds its own employee; the cross-company binding refusal is in EmployeeSchemaTest.
+        $other = authFixture($db, ['role' => 'employee', 'employeeId' => 'emp-2']);
+        assertTrue($other['companyId'] !== $a['companyId'], 'another company binds its own employee');
     },
 ];
