@@ -70,7 +70,10 @@ final class SessionStore
         return $this->db->execute('UPDATE sessions SET revoked_at = UTC_TIMESTAMP(6) WHERE token_hash = ? AND revoked_at IS NULL', [$tokenHash]);
     }
 
-    /** Store primitive for BF-3B (password change, disable, privilege change, revoke-all). */
+    /**
+     * Revokes every live session of the user. BF-3B: activation, password change, operator reset
+     * and logout-all; later, disable and privilege changes.
+     */
     public function revokeAllForUser(string $userId): int
     {
         return $this->db->execute('UPDATE sessions SET revoked_at = UTC_TIMESTAMP(6) WHERE user_id = ? AND revoked_at IS NULL', [$userId]);

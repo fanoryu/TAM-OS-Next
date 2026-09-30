@@ -4,7 +4,8 @@ declare(strict_types=1);
 namespace TamOs\Auth;
 
 /**
- * Keys derived for login throttling and the security-event log. Pure functions: no I/O.
+ * Keys derived for login, activation and password-change throttling and the security-event
+ * log. Pure functions: no I/O.
  *
  * The client IP is REMOTE_ADDR only (no forwarding header is trusted until deployment
  * evidence establishes one). IPv6 addresses share a /64 bucket, because a single host can
@@ -30,6 +31,18 @@ final class LoginKeys
     public static function emailHash(string $emailCandidate): string
     {
         return hash('sha256', 'email:' . $emailCandidate);
+    }
+
+    /** BF-3B: failed activation redemptions per client IP (the token itself names no account). */
+    public static function activationIpBucket(?string $remoteAddr): string
+    {
+        return hash('sha256', 'activate-ip:' . self::ipKey($remoteAddr));
+    }
+
+    /** BF-3B: wrong current passwords per authenticated user on password change. */
+    public static function passwordChangeBucket(string $userId): string
+    {
+        return hash('sha256', 'pwchange:' . $userId);
     }
 
     /** "4:<address>", "6:<first 64 bits, hex>" or "none". */
