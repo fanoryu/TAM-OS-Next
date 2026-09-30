@@ -14,6 +14,7 @@ use TamOs\Http\Request;
 use function TamOs\Tests\assertSame;
 use function TamOs\Tests\assertTrue;
 use function TamOs\Tests\authDatabase;
+use function TamOs\Tests\employeeAnchor;
 use function TamOs\Tests\authFixture;
 use function TamOs\Tests\authKernel;
 use function TamOs\Tests\envelope;
@@ -81,6 +82,8 @@ return [
     },
     'role and employee-binding changes are observed on the next request; an unknown role denies' => static function () use ($session, $me): void {
         [$db, $k, $a, $token] = $session(['role' => 'ceo']);
+        employeeAnchor($db, $a['companyId'], 'emp-9');
+        employeeAnchor($db, $a['companyId'], 'emp-10');
         $db->execute("UPDATE memberships SET role = 'employee', employee_id = 'emp-9' WHERE user_id = ?", [$a['userId']]);
         $now = $me($k, $token);
         assertSame([200, 'employee', 'emp-9'], [$now[0], $now[1]['role'] ?? null, $now[1]['employeeId'] ?? null]);

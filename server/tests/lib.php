@@ -348,7 +348,8 @@ function authDatabase(): \TamOs\Data\Database
  * with per-run random identifiers, email and password. Test-only SQL: production creates only
  * the pending bootstrap CEO (BF-3B, pendingCeo()), and tests need other shapes — activated,
  * Employee, disabled, several per company. Options: role, employeeId, userStatus, membershipStatus,
- * companyId (reuse), password (null = not activated), passwordHash (raw override), membership.
+ * companyId (reuse), password (null = not activated), passwordHash (raw override), membership,
+ * employeeRow (false = do not create the employee anchor a binding references).
  *
  * @param array<string, mixed> $o
  * @return array{companyId: string, userId: string, membershipId: string, email: string, password: ?string}
@@ -368,6 +369,9 @@ function authFixture(\TamOs\Data\Database $db, array $o = []): array
         'INSERT INTO users (id, email, password_hash, status, created_at, updated_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
         [$userId, $email, $hash, $o['userStatus'] ?? 'active'],
     );
+    if (($o['membership'] ?? true) && ($o['employeeId'] ?? null) !== null && ($o['employeeRow'] ?? true)) {
+        employeeAnchor($db, $companyId, $o['employeeId']);
+    }
     if ($o['membership'] ?? true) {
         $db->execute(
             'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
@@ -375,6 +379,17 @@ function authFixture(\TamOs\Data\Database $db, array $o = []): array
         );
     }
     return ['companyId' => $companyId, 'userId' => $userId, 'membershipId' => $membershipId, 'email' => $email, 'password' => $password];
+}
+
+/**
+ * The employee anchor row (BF-3C, migration 0009) that an employee binding must reference —
+ * created once per company. Test-only SQL; fabricated identifiers only.
+ */
+function employeeAnchor(\TamOs\Data\Database $db, string $companyId, string $employeeId): void
+{
+    if ($db->select('SELECT id FROM employees WHERE company_id = ? AND id = ?', [$companyId, $employeeId]) === []) {
+        $db->execute('INSERT INTO employees (id, company_id, created_at) VALUES (?, ?, UTC_TIMESTAMP(6))', [$employeeId, $companyId]);
+    }
 }
 
 /**

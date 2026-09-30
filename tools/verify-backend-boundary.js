@@ -30,7 +30,10 @@
  *   - (BF-3C) an Authorization is constructed outside server/src/Policy/Policy.php or a
  *     ScopedRecord outside server/src/Data/Scope/ScopedDatabase.php; or server/src/Policy/Action.php
  *     differs from js/core/authz.js in its 20 action values, a rule class or a resource entity
- *     (parity fails closed when either side cannot be read);
+ *     (parity fails closed when either side cannot be read); a migration creates a table that is
+ *     neither an auth/system table nor a registered company table with the tenant key
+ *     (company_id NOT NULL, FK to companies, UNIQUE (company_id, id)), or any migration foreign
+ *     key cascades, nulls or defaults;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -215,6 +218,29 @@ function checkKernelCsrf(src) {
 const MIGRATION_SEED = /\b(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|DELETE\s+FROM|LOAD\s+DATA|UPDATE\s+[`\w.]+\s+SET)\b/i;
 function checkMigrationSql(src) {
   return MIGRATION_SEED.test(src) ? ['a migration must not insert, update or delete rows (no seed data)'] : [];
+}
+// BF-3C tenant-key convention. The auth/system tables are not company-owned business data; every
+// other table a migration creates must be registered in COMPANY_TABLES and carry the tenant key:
+// `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
+// tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
+const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations']);
+const COMPANY_TABLES = new Set(['employees']);
+function checkMigrationTenantKey(src) {
+  const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
+  if (!created) return [];
+  const table = created[1].toLowerCase();
+  if (SYSTEM_TABLES.has(table)) return [];
+  const out = [];
+  if (!COMPANY_TABLES.has(table)) out.push('table ' + table + ' is neither an auth/system table nor registered in COMPANY_TABLES');
+  if (!/^\s*company_id\s+CHAR\(32\)\s+CHARACTER SET ascii COLLATE ascii_bin\s+NOT NULL,\s*$/im.test(src)) out.push('company table ' + table + ' needs `company_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL`');
+  if (!/\bUNIQUE\s+KEY\s+\w+\s*\(\s*company_id\s*,\s*id\s*\)/i.test(src)) out.push('company table ' + table + ' needs UNIQUE KEY (company_id, id) for composite tenant FKs');
+  if (!/\bFOREIGN\s+KEY\s*\(\s*company_id\s*\)\s*REFERENCES\s+companies\s*\(\s*id\s*\)/i.test(src)) out.push('company table ' + table + ' needs FOREIGN KEY (company_id) REFERENCES companies (id)');
+  return out;
+}
+// No migration foreign key cascades, nulls or defaults: identity and tenant rows are never
+// silently detached or moved (BF-3C, migration 0010 is RESTRICT).
+function checkMigrationNoCascade(src) {
+  return /\bON\s+(DELETE|UPDATE)\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT)\b/i.test(src) ? ['a migration foreign key may not CASCADE, SET NULL or SET DEFAULT'] : [];
 }
 const SECRET_RULES = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
@@ -548,6 +574,8 @@ function run() {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
     for (const re of SECRET_RULES) if (re.test(src)) failures.push(f + ': secret-shaped value: ' + re);
     for (const v of checkMigrationSql(src)) failures.push(f + ': ' + v);
+    for (const v of checkMigrationTenantKey(src)) failures.push(f + ': ' + v);
+    for (const v of checkMigrationNoCascade(src)) failures.push(f + ': ' + v);
   }
   for (const v of checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8'))) failures.push(KERNEL_FILE + ': ' + v);
   const contract = require('./package-headers.js');
@@ -710,6 +738,22 @@ function selftest() {
   cases.push({ name: 'server/bin/migrate.php is authorized since BF-2B', run: () => checkTree(['server/bin/migrate.php'], ['server/bin']), expect: 0 });
   cases.push({ name: 'a valid migration file name passes', run: () => checkTree(['server/migrations/0001_create_probe.sql', 'server/migrations/0002_a1_b2.sql'], ['server/migrations']), expect: 0 });
   treeCase('an extra file under server/bin is caught', ['server/bin/seed.php'], 'only migrate.php');
+
+  // BF-3C: the tenant-key convention for company-owned tables, and no cascading foreign keys.
+  const realEmployees = fs.readFileSync(path.join(root, 'server/migrations/0009_create_employees.sql'), 'utf8');
+  const realBinding = fs.readFileSync(path.join(root, 'server/migrations/0010_add_memberships_employee_fk.sql'), 'utf8');
+  const tenant = (name, src, needle) => cases.push({ name: 'tenant key: ' + name, run: () => [...checkMigrationTenantKey(src), ...checkMigrationNoCascade(src)], expect: needle });
+  tenant('the real employees migration passes', realEmployees, 0);
+  tenant('the real binding FK migration passes', realBinding, 0);
+  tenant('an auth/system table is exempt', 'CREATE TABLE sessions (\n  token_hash CHAR(64) NOT NULL\n) ENGINE=InnoDB;\n', 0);
+  tenant('an unregistered business table is caught', realEmployees.replace('CREATE TABLE employees', 'CREATE TABLE contracts'), 'nor registered in COMPANY_TABLES');
+  tenant('a company table without company_id is caught', realEmployees.replace(/^ {2}company_id .*\n/m, ''), 'needs `company_id');
+  tenant('a nullable company_id is caught', realEmployees.replace('COLLATE ascii_bin NOT NULL,\n  created_at', 'COLLATE ascii_bin NULL,\n  created_at'), 'needs `company_id');
+  tenant('a company table without UNIQUE (company_id, id) is caught', realEmployees.replace(/^ {2}UNIQUE KEY .*\n/m, ''), 'UNIQUE KEY (company_id, id)');
+  tenant('a company table without its company FK is caught', realEmployees.replace(/^ {2}CONSTRAINT employees_company_fk .*\n/m, ''), 'REFERENCES companies (id)');
+  tenant('ON DELETE CASCADE is caught', realBinding.replace('ON DELETE RESTRICT', 'ON DELETE CASCADE'), 'may not CASCADE');
+  tenant('ON DELETE SET NULL is caught', realBinding.replace('ON DELETE RESTRICT', 'ON DELETE SET NULL'), 'may not CASCADE');
+  tenant('ON UPDATE CASCADE is caught', realBinding.replace('ON UPDATE RESTRICT', 'ON UPDATE CASCADE'), 'may not CASCADE');
   for (const bad of ['server/migrations/1_x.sql', 'server/migrations/0001-x.sql', 'server/migrations/0001_X.sql', 'server/migrations/0001_x_.sql',
     'server/migrations/0001_.sql', 'server/migrations/README.md', 'server/migrations/0001_x.sql.bak', 'server/migrations/sub/0001_x.sql',
     'server/migrations/0001_' + 'a'.repeat(65) + '.sql']) {
