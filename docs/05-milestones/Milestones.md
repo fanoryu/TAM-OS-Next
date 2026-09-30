@@ -338,9 +338,14 @@ error contract, request ID, `GET /api/health`, logging, null identity seam, boun
 and CI) is implemented as source only — no database, authentication, deployment or
 frontend change. **BF-2** is split in two: **BF-2A** (data layer, transactions, MariaDB CI) is
 implemented as source only, with no table or migration; **BF-2B** (migration runner, `schema_migrations`,
-`/api/ready`) is implemented as source only, with zero production migrations. The hostile-principal
-harness waits for the first scoped repository.
-See `ARCHITECTURE.md` → Backend foundation and Data foundation.
+`/api/ready`) is implemented as source only, with zero production migrations. **BF-3** is split in
+three: **BF-3A** (auth schema `0001`–`0006`, password verification, database sessions, authoritative
+principal, route-level session resolution, login / logout / me, CSRF, login rate limiting, security
+events) is implemented as source only — not deployed, not production-ready, no frontend change;
+**BF-3B** (first-account bootstrap, activation, account administration, password change, revoke-all)
+and **BF-3C** (password recovery, governed mail) follow. The hostile-principal harness waits for the
+first scoped repository.
+See `ARCHITECTURE.md` → Backend foundation, Data foundation and Authentication and sessions.
 
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today
 throughout. **MU-5 is the first irreversible step**, and it is deliberately gated behind MU-4, whose

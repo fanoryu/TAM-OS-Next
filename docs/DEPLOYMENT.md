@@ -112,7 +112,8 @@ The same host will serve both halves of TAM OS from one origin:
 
 The browser never reaches the database. **No separate managed backend service and no VPS are
 required.** The backend is **not deployed** and only its foundation (HTTP, data layer, migration
-machinery — no authentication or application schema) exists in source; see [`Milestones.md`](05-milestones/Milestones.md)
+machinery, and the BF-3A authentication schema and session endpoints — no account lifecycle,
+authorization or business schema) exists in source; it is **not production-ready**. See [`Milestones.md`](05-milestones/Milestones.md)
 for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
@@ -191,7 +192,13 @@ separate database credentials from the runtime API.
   private`);
 - the required PHP extensions are present;
 - cron is available for the nightly database dump;
-- database transactions (InnoDB) behave as designed.
+- database transactions (InnoDB) behave as designed;
+- (BF-3A) the server engine and version enforce the schema's CHECK constraints; Argon2id is available
+  (or the bcrypt fallback is recorded) and its 64 MiB per verification fits the host's limits; the
+  `__Host-tamos_session` cookie (`Secure`, `HttpOnly`, `SameSite=Strict`) passes LiteSpeed and the CDN
+  unchanged; which client address `REMOTE_ADDR` carries behind the CDN (a shared edge address would
+  make the per-IP login limit global); and whether the runtime database user can be denied
+  `UPDATE`/`DELETE` on `auth_events`.
 
 **Backup target:**
 

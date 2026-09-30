@@ -5,6 +5,7 @@ namespace TamOs\Http;
 
 use TamOs\Config\Config;
 use TamOs\Data\DatabaseError;
+use TamOs\Identity\AuthSession;
 use TamOs\Identity\PrincipalResolver;
 use TamOs\Log\Logger;
 
@@ -12,7 +13,13 @@ use TamOs\Log\Logger;
  * The request pipeline and the single exception boundary.
  *
  *   route (404 / 405) → mutation guards: origin (403), Content-Type (415), size (413),
- *   JSON object (400) → query allow-list (400) → principal → handler → envelope
+ *   JSON object (400) → query allow-list (400) → session (only when the route's RouteAuth is
+ *   not None; Required without one → 401) → CSRF (a mutation with a session: 403 unless
+ *   X-CSRF-Token matches) → handler → envelope (+ Set-Cookie for a CookieResult)
+ *
+ * The origin check runs before any session lookup, so a cross-origin request never reaches
+ * the database. /api/health and /api/ready are RouteAuth::None: no cookie ever makes them
+ * resolve identity or depend on the database.
  *
  * Any ApiError becomes its fixed envelope; a DatabaseError becomes service_unavailable or
  * internal_error by kind; any other Throwable becomes internal_error. Failures are logged,
@@ -46,8 +53,17 @@ final class Kernel
             $route = $this->router->match($request->method, $request->path);
             $json = $request->isMutation() ? $this->guardMutation($request) : [];
             $this->checkQuery($request->query, $route->queryKeys);
-            $principal = $this->principals->resolve($request);
-            $response = Response::success(($route->handler)($request, $principal, $json), $requestId);
+            $session = $route->auth === RouteAuth::None ? null : $this->principals->resolve($request);
+            if ($route->auth === RouteAuth::Required && $session === null) {
+                throw new ApiError(ErrorCode::Unauthenticated, logReason: 'no_session');
+            }
+            if ($session !== null && $request->isMutation() && !self::csrfMatches($session, $request)) {
+                throw new ApiError(ErrorCode::Forbidden, 'csrf check failed', logReason: 'csrf_failed');
+            }
+            $result = ($route->handler)($request, $session, $json, $requestId);
+            $response = $result instanceof CookieResult
+                ? Response::success($result->data, $requestId)->withHeader('Set-Cookie', $result->setCookie)
+                : Response::success($result, $requestId);
         } catch (ApiError $e) {
             $error = $e->errorCode->value;
             $reason = $e->logReason;
@@ -92,6 +108,12 @@ final class Kernel
             throw new ApiError(ErrorCode::PayloadTooLarge);
         }
         return JsonBody::decode($request->body);
+    }
+
+    /** The session's synchronizer token, compared in constant time (SDR-0002 §3.4). */
+    private static function csrfMatches(AuthSession $session, Request $request): bool
+    {
+        return $request->csrfToken !== null && hash_equals($session->csrfToken, $request->csrfToken);
     }
 
     /** @param list<string> $allowedKeys */

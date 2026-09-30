@@ -164,6 +164,29 @@ return [
             ($s['stop'])();
         }
     },
+    'real server: a well-formed session cookie never makes health or ready resolve identity (unreachable database)' => static function () use ($startServer, $writeConfig, $assertEnvelope): void {
+        $config = $writeConfig([
+            'env' => 'production', 'origin' => 'https://tamos.test', 'log_path' => tempDir() . DIRECTORY_SEPARATOR . 'api.log',
+            'db' => ['host' => '127.0.0.1', 'port' => 1, 'name' => 'tamos_prod', 'user' => 'tamos_ci', 'pass' => 'hunter2-password'],
+        ]);
+        $s = $startServer($config);
+        try {
+            $cookie = 'Cookie: __Host-tamos_session=' . str_repeat('A', 43) . '; theme=dark';
+            $assertEnvelope(($s['send'])('GET', '/api/health', [$cookie, 'X-CSRF-Token: ' . str_repeat('c', 43)]), 200, null);
+            $head = ($s['send'])('HEAD', '/api/health', [$cookie]);
+            assertSame(200, $head['status'], 'HEAD health');
+            // Ready reports the unreachable database as it always has — through readiness, not identity.
+            $assertEnvelope(($s['send'])('GET', '/api/ready', [$cookie]), 503, 'service_unavailable');
+            // The same cookie on an auth route does resolve, so the unreachable database shows there.
+            $assertEnvelope(($s['send'])('GET', '/api/auth/me', [$cookie]), 503, 'service_unavailable');
+            // Without a well-formed cookie, me answers 401 without touching the database.
+            $assertEnvelope(($s['send'])('GET', '/api/auth/me', ['Cookie: __Host-tamos_session=forged']), 401, 'unauthenticated');
+            $log = (string) file_get_contents($s['logs'] . '/err.txt') . (string) file_get_contents($s['logs'] . '/out.txt');
+            assertTrue(!str_contains($log, str_repeat('A', 43)), 'token never logged by the server process');
+        } finally {
+            ($s['stop'])();
+        }
+    },
     'real server: /api/health is 200 with no, a broken or an unreachable db section' => static function () use ($startServer, $writeConfig, $assertEnvelope): void {
         $base = ['env' => 'production', 'origin' => 'https://tamos.test', 'log_path' => tempDir() . DIRECTORY_SEPARATOR . 'api.log'];
         foreach ([

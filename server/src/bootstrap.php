@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /*
- * TAM OS backend bootstrap (BF-1).
+ * TAM OS backend bootstrap (BF-1; session wiring BF-3A).
  * Registers the internal autoloader (no Composer) and defines run(), the production
  * request entry. Including this file has no other side effect, so the test harness can
  * load the classes without dispatching a request.
@@ -10,8 +10,11 @@ declare(strict_types=1);
 
 namespace TamOs;
 
+use TamOs\Auth\Authenticator;
 use TamOs\Config\ConfigError;
 use TamOs\Config\ConfigLoader;
+use TamOs\Controller\AuthController;
+use TamOs\Data\Auth\AuthData;
 use TamOs\Data\Readiness;
 use TamOs\Http\ErrorCode;
 use TamOs\Http\Kernel;
@@ -19,7 +22,7 @@ use TamOs\Http\Request;
 use TamOs\Http\RequestId;
 use TamOs\Http\Response;
 use TamOs\Http\Routes;
-use TamOs\Identity\NullPrincipalResolver;
+use TamOs\Identity\SessionPrincipalResolver;
 use TamOs\Log\Logger;
 
 spl_autoload_register(static function (string $class): void {
@@ -92,8 +95,11 @@ function run(): void
 
     $logger = new Logger($config->logPath, $config->env);
     $request = Request::fromGlobals($config->bodyLimitBytes);
-    // Readiness connects lazily, only when /api/ready runs.
+    // Readiness connects lazily, only when /api/ready runs. AuthData connects lazily, only
+    // when an auth route needs it — never for /api/health or /api/ready (RouteAuth::None).
     $readiness = new Readiness($config, dirname(__DIR__) . '/migrations');
-    $kernel = new Kernel(Routes::production($readiness), new NullPrincipalResolver(), $config, $logger);
+    $auth = AuthData::fromConfig($config);
+    $routes = Routes::production($readiness, new AuthController(new Authenticator($auth)));
+    $kernel = new Kernel($routes, new SessionPrincipalResolver($auth), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');
 }

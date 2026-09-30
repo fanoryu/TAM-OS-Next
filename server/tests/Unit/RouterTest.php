@@ -3,22 +3,42 @@ declare(strict_types=1);
 
 use TamOs\Http\ApiError;
 use TamOs\Http\ErrorCode;
+use TamOs\Http\RouteAuth;
 use TamOs\Http\Router;
-use TamOs\Http\Routes;
 use function TamOs\Tests\assertSame;
 use function TamOs\Tests\assertThrows;
 use function TamOs\Tests\assertTrue;
+use function TamOs\Tests\productionRoutes;
+use function TamOs\Tests\tempDir;
+use function TamOs\Tests\testConfig;
 
-$production = static fn (): array => Routes::production(new \TamOs\Data\Readiness(\TamOs\Tests\testConfig(), \TamOs\Tests\tempDir() . '/none'));
+$production = static fn (): array => productionRoutes(testConfig(), tempDir() . '/none');
 $router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly two routes: GET /api/health and GET /api/ready' => static function () use ($production): void {
+    'production has exactly five routes, and only the auth routes resolve a session' => static function () use ($production): void {
         $routes = $production();
-        assertSame(2, count($routes));
-        assertSame(['GET', '/api/health', []], [$routes[0]->method, $routes[0]->path, $routes[0]->queryKeys]);
-        assertSame(['GET', '/api/ready', []], [$routes[1]->method, $routes[1]->path, $routes[1]->queryKeys]);
+        $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
+        assertSame([
+            ['GET', '/api/health', [], RouteAuth::None],
+            ['GET', '/api/ready', [], RouteAuth::None],
+            ['POST', '/api/auth/login', [], RouteAuth::None],
+            ['POST', '/api/auth/logout', [], RouteAuth::Optional],
+            ['GET', '/api/auth/me', [], RouteAuth::Required],
+        ], $summary);
+    },
+    'auth routes: POST-only login and logout, GET/HEAD-only me' => static function () use ($router): void {
+        assertSame('/api/auth/me', $router->match('HEAD', '/api/auth/me')->path);
+        foreach (['/api/auth/login', '/api/auth/logout'] as $path) {
+            $e = assertThrows(ApiError::class, static fn () => $router->match('GET', $path));
+            assertSame([ErrorCode::MethodNotAllowed, ['POST']], [$e->errorCode, $e->allow], $path);
+        }
+        $e = assertThrows(ApiError::class, static fn () => $router->match('POST', '/api/auth/me'));
+        assertSame([ErrorCode::MethodNotAllowed, ['GET', 'HEAD']], [$e->errorCode, $e->allow]);
+        foreach (['/api/auth', '/api/auth/login/', '/api/auth/Login', '/api/auth/session', '/api/auth/register'] as $path) {
+            assertTrue(in_array(assertThrows(ApiError::class, static fn () => $router->match('POST', $path))->errorCode, [ErrorCode::NotFound], true), $path);
+        }
     },
     'GET and HEAD reach ready; other methods are 405 with Allow: GET, HEAD' => static function () use ($router): void {
         assertSame('/api/ready', $router->match('GET', '/api/ready')->path);
