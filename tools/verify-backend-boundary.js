@@ -23,6 +23,10 @@
  *     or a Principal / AuthSession is constructed outside server/src/Identity/; a CSRF token is
  *     compared with anything but hash_equals(); SQL rewrites or removes auth_events rows; or a
  *     migration seeds rows (INSERT / UPDATE / DELETE / REPLACE / LOAD DATA);
+ *   - (BF-3B) a file other than migrate.php and account.php appears under server/bin/, or a CLI
+ *     entry point lacks its SAPI guard; SQL writing companies, users or memberships appears
+ *     outside server/src/Data/Auth/AccountStore.php, or SQL writing account_tokens outside
+ *     server/src/Data/Auth/AccountTokenStore.php;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -46,8 +50,9 @@ const DATA_DIR = 'server/src/Data/';
 // milestone for Policy). Remove an entry only in that slice. server/src/Data was un-gated by
 // BF-2A; server/migrations and server/bin by BF-2B, each narrowly (see checkTree).
 const NOT_YET_AUTHORIZED = ['server/src/Policy'];
-// The only file allowed under server/bin/, and the only shape a migration file may have.
-const CLI_FILES = new Set(['server/bin/migrate.php']);
+// The only files allowed under server/bin/ (BF-2B migrate, BF-3B account), and the only
+// shape a migration file may have.
+const CLI_FILES = new Set(['server/bin/migrate.php', 'server/bin/account.php']);
 const MIGRATION_FILE = /^server\/migrations\/\d{4}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 const SUPERGLOBAL_READERS = new Set(['server/src/Http/Request.php', 'server/dev/router.php']);
 const HEADER_EMITTERS = new Set(['server/src/Http/Response.php', 'server/src/bootstrap.php']);
@@ -63,6 +68,10 @@ const REQUEST_FILE = 'server/src/Http/Request.php';
 // Principal::fromAccount() is the only way to build an identity; only these may call it.
 const PRINCIPAL_BUILDERS = new Set(['server/src/Identity/SessionPrincipalResolver.php', 'server/src/Auth/Authenticator.php']);
 const IDENTITY_DIR = 'server/src/Identity/';
+// BF-3B: accounts and account tokens are written by exactly one store each, so no HTTP path can
+// create a company, user or membership outside the advisory-locked operator bootstrap.
+const ACCOUNT_STORE = 'server/src/Data/Auth/AccountStore.php';
+const TOKEN_STORE = 'server/src/Data/Auth/AccountTokenStore.php';
 const LOCAL_CONFIG = /^server\/config\/config\.local\.php$/;
 
 // ---------------------------------------------------------------------------------------------
@@ -168,6 +177,8 @@ const STRING_RULES = [
   { id: 'set-cookie', re: /^\s*set-cookie\s*:?\s*$/i, msg: 'the Set-Cookie header is added only by ' + KERNEL_FILE, allow: (f) => f === KERNEL_FILE },
   { id: 'http-cookie', re: /^HTTP_COOKIE$/, msg: 'HTTP_COOKIE is read only by ' + REQUEST_FILE, allow: (f) => f === REQUEST_FILE },
   { id: 'auth-events-rewrite', re: /\bauth_events\b[\s\S]*\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b|\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b[\s\S]*\bauth_events\b/i, msg: 'auth_events is append-only: no UPDATE, DELETE, REPLACE, TRUNCATE, ALTER or DROP' },
+  { id: 'account-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?(companies|users|memberships)\b/i, msg: 'companies, users and memberships are written only by ' + ACCOUNT_STORE, allow: (f) => f === ACCOUNT_STORE },
+  { id: 'token-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?account_tokens\b/i, msg: 'account_tokens is written only by ' + TOKEN_STORE, allow: (f) => f === TOKEN_STORE },
 ];
 // A CSRF token is compared only with hash_equals(): an ordinary comparison (or strcmp) against
 // anything but null is a timing leak. The kernel's comparison must be the hash_equals() one.
@@ -318,7 +329,7 @@ function checkTree(files, dirs = []) {
     const isMigration = MIGRATION_FILE.test(f) && base.length - '0000_'.length - '.sql'.length <= 64;
     if (f.startsWith('server/migrations/') && !isMigration) out.push(f + ': server/migrations/ holds only NNNN_name.sql migration files');
     if (/\.sql$/i.test(f) && !f.startsWith('server/migrations/')) out.push(f + ': .sql files belong only in server/migrations/');
-    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php');
+    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php and account.php');
     if (/^\.env/.test(base) || /\.(phar|pem|key)$/i.test(base)) out.push(f + ': forbidden file type');
     if (!/\.php$/.test(f) && f !== 'server/public/api/.htaccess' && !isMigration && !f.startsWith('server/migrations/')) out.push(f + ': unexpected file type under server/');
   }
@@ -590,6 +601,27 @@ function selftest() {
   dirty('->exec inside Data/Migration is caught', 'server/src/Data/Migration/Migrator.php', S + "$pdo->exec('CREATE TABLE t (a INT)');\n", 'exec');
   dirty('concatenated SQL inside Data/Migration is caught', 'server/src/Data/Migration/MigrationHistory.php', S + "const Q = 'SELECT a ' . 'FROM t';\n", 'concatenation');
   clean('fixed SQL literals inside Data/Migration pass', 'server/src/Data/Migration/MigrationHistory.php', S + "$this->db->select(\"SELECT GET_LOCK('tamos_migrate', 0) AS acquired\");\n");
+
+  // BF-3B: the account CLI and the confinement of account and token writes.
+  const ACLI = 'server/bin/account.php';
+  cases.push({ name: 'server/bin/account.php is authorized since BF-3B', run: () => checkTree([CLI, ACLI], ['server/bin']), expect: 0 });
+  treeCase('a third file under server/bin is still caught', [CLI, ACLI, 'server/bin/reissue.php'], 'server/bin/ holds only');
+  clean('account.php with its CLI guard passes', ACLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\nrequire dirname(__DIR__) . '/src/bootstrap.php';\n$l = AccountLifecycle::fromConfig($c);\n");
+  dirty('account.php without the CLI guard is caught', ACLI, S + "require dirname(__DIR__) . '/src/bootstrap.php';\n$l = AccountLifecycle::fromConfig($c);\n", 'non-CLI SAPI');
+  dirty('account.php checking the wrong SAPI is caught', ACLI, S + "if (PHP_SAPI === 'cli-server') { exit(1); }\n", 'non-CLI SAPI');
+  dirty('SQL inside account.php is caught', ACLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$q = 'INSERT INTO companies (id, created_at) VALUES (?, UTC_TIMESTAMP(6))';\n", 'SQL');
+  dirty('Database inside account.php is caught', ACLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$d = new Database($c);\n", 'DAL bypass');
+  dirty('PDO inside account.php is caught', ACLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$p = new \\PDO('x');\n", 'PDO');
+  clean('AccountStore writes accounts', ACCOUNT_STORE, S + "$this->db->execute('INSERT INTO companies (id, created_at) VALUES (?, UTC_TIMESTAMP(6))', [$id]);\n$this->db->execute('UPDATE users SET password_hash = NULL WHERE id = ?', [$u]);\n");
+  clean('AccountTokenStore writes tokens', TOKEN_STORE, S + "$this->db->execute('UPDATE account_tokens SET used_at = UTC_TIMESTAMP(6) WHERE token_hash = ?', [$h]);\n");
+  clean('reading accounts elsewhere in Data passes', 'server/src/Data/Auth/SessionStore.php', S + "$this->db->select('SELECT u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?', [$h]);\n");
+  for (const [sql, table] of [['INSERT INTO companies (id, created_at) VALUES (?, UTC_TIMESTAMP(6))', 'companies'], ['insert ignore into users (id) values (?)', 'users'],
+    ['UPDATE memberships SET role = ? WHERE id = ?', 'memberships'], ['DELETE FROM users WHERE id = ?', 'users'], ['REPLACE INTO `memberships` VALUES (?)', 'memberships']]) {
+    dirty('an account write outside AccountStore is caught: ' + sql.slice(0, 24), 'server/src/Data/Auth/SessionStore.php', S + "$this->db->execute('" + sql + "');\n", 'written only by ' + ACCOUNT_STORE);
+  }
+  dirty('a token write outside AccountTokenStore is caught', ACCOUNT_STORE, S + "$this->db->execute('INSERT INTO account_tokens (token_hash) VALUES (?)');\n", 'written only by ' + TOKEN_STORE);
+  dirty('a token revoke outside AccountTokenStore is caught', 'server/src/Data/Auth/SessionStore.php', S + "$this->db->execute('UPDATE account_tokens SET revoked_at = UTC_TIMESTAMP(6)');\n", 'written only by ' + TOKEN_STORE);
+  dirty('an account write in the token store is caught', TOKEN_STORE, S + "$this->db->execute('UPDATE users SET password_hash = NULL WHERE id = ?');\n", 'written only by ' + ACCOUNT_STORE);
 
   // BF-2A data-layer boundary.
   const DB = 'server/src/Data/Database.php';
