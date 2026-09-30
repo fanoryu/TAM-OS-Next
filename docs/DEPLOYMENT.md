@@ -112,8 +112,9 @@ The same host will serve both halves of TAM OS from one origin:
 
 The browser never reaches the database. **No separate managed backend service and no VPS are
 required.** The backend is **not deployed** and only its foundation (HTTP, data layer, migration
-machinery, and the BF-3A authentication schema and session endpoints — no account lifecycle,
-authorization or business schema) exists in source; it is **not production-ready**. See [`Milestones.md`](05-milestones/Milestones.md)
+machinery, the BF-3A authentication schema and session endpoints, and the BF-3B account lifecycle and
+operator CLI — no authorization policy or business schema) exists in source; it is **not
+production-ready**. See [`Milestones.md`](05-milestones/Milestones.md)
 for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
@@ -198,7 +199,11 @@ separate database credentials from the runtime API.
   `__Host-tamos_session` cookie (`Secure`, `HttpOnly`, `SameSite=Strict`) passes LiteSpeed and the CDN
   unchanged; which client address `REMOTE_ADDR` carries behind the CDN (a shared edge address would
   make the per-IP login limit global); and whether the runtime database user can be denied
-  `UPDATE`/`DELETE` on `auth_events`.
+  `UPDATE`/`DELETE` on `auth_events`;
+- (BF-3B) the server engine applies `0008` (`ALTER TABLE … DROP CONSTRAINT …, ADD CONSTRAINT …`) and
+  honours `GET_LOCK`; how `php server/bin/account.php` (the first-CEO bootstrap and break-glass reset) is
+  run on the host, by whom, and how its one-time activation token reaches the CEO out of band without
+  being stored in a log or ticket.
 
 **Backup target:**
 

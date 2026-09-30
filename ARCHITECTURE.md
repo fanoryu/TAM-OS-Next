@@ -858,8 +858,9 @@ first `apply` it reports `history_missing`. `/api/health` stays independent of t
 
 BF-3A adds the first production schema and the authoritative server-side identity. It has **no account
 creation, activation, password change, recovery, e-mail, authorization policy or business endpoint**
-(BF-3B / BF-3C and later milestones). No company, user or CEO is seeded; the frontend does not call these
-endpoints and still uses its local "Acting as" identity.
+(account lifecycle: BF-3B, below; authorization policy and data scope: BF-3C; recovery and governed
+mail: BF-3D; business endpoints: later milestones). No company, user or CEO is seeded; the frontend does
+not call these endpoints and still uses its local "Acting as" identity.
 
 **Schema** (`server/migrations/`, one `CREATE TABLE` per file, InnoDB, table default
 `utf8mb4_unicode_ci`, every character column `ascii` / `ascii_bin`, every time `DATETIME(6)` on the
@@ -875,7 +876,8 @@ database clock, no rows):
 | `0006_create_auth_events` | `auth_events` | append-only security events; no FK, so retention never blocks or cascades |
 
 `UNIQUE(company_id, employee_id)` covers disabled memberships too — stricter than SDR-0002 §6 ("unique
-among active memberships"); rebinding a departed Employee's record is a BF-3B concern.
+among active memberships"); rebinding a departed Employee's record belongs to Employee account
+administration, which follows BF-3C (owner decision D4).
 
 **Routes and pipeline.** `Route` carries a `RouteAuth` (`None` / `Optional` / `Required`). The kernel
 resolves a session only when it is not `None`, so **`/api/health` and `/api/ready` never resolve identity
@@ -941,12 +943,70 @@ only in `Http/Request.php`; `$_COOKIE` nowhere; resolvers only `NullPrincipalRes
 `Principal` / `AuthSession` constructed only in `Identity/`; CSRF tokens compared only with `hash_equals`
 (and the kernel must do so); no destructive SQL on `auth_events`; no seed rows in migrations.
 
-**Not production-ready.** Before any real login: BF-3B account lifecycle, BF-3C if recovery is needed,
-server-side authorization and data scoping, the Hostinger evidence run (engine and CHECK support,
-Argon2id and its memory use, `Secure` / `Set-Cookie` through LiteSpeed and the CDN, a trustworthy client
-IP, CDN `no-store`, config outside the web root, database grants), retention for sessions, rate-limit
-rows and events, an external security review, frontend integration and end-to-end tests, and the
-Acting-as retirement gate (SDR-0002 §22).
+**Not production-ready.** Before any real login: the BF-3B account lifecycle (next section), BF-3C
+server-side authorization and data scope, BF-3D if self-service recovery is needed, the Hostinger
+evidence run (engine and CHECK support, Argon2id and its memory use, `Secure` / `Set-Cookie` through
+LiteSpeed and the CDN, a trustworthy client IP, CDN `no-store`, config outside the web root, database
+grants), retention for sessions, rate-limit rows and events, an external security review, frontend
+integration and end-to-end tests, and the Acting-as retirement gate (SDR-0002 §22).
+
+### Account lifecycle — BF-3B (source only; not deployed, not production-ready)
+
+BF-3B lets the first account exist and manage its own credentials. It is **self-service plus operator
+CLI only** (owner decision D4): there is no HTTP account administration, no second account, no Employee
+account, no disable/enable and no authorization policy — cross-account administration waits for BF-3C's
+server Policy/ACTIONS and data scope and for an authoritative Employee schema. There is no SMTP and no
+forgot-password (BF-3D). The frontend does not call these endpoints and "Acting as" is unchanged.
+
+**Schema.** `0007_create_account_tokens` — one-time account tokens keyed by the SHA-256 of the token
+(the raw token is never stored), `user_id` (FK), `purpose` (CHECK `activation` only), `created_at`,
+`expires_at` (CHECK after `created_at`), `used_at`, `revoked_at`; CHECK `used_at IS NULL OR revoked_at
+IS NULL` (used and revoked are final and exclusive) and CHECK `used_at < expires_at`.
+`0008_replace_auth_events_event_check` — one `ALTER TABLE` that drops `auth_events_event` and adds
+`auth_events_event_v2` over the BF-3A events plus `ceo_bootstrap`, `credential_reset`, `activation_ok`,
+`activation_fail`, `password_change`, `password_fail` and `logout_all`. The backend migration head is
+`0008`; the frontend `SCHEMA_VERSION` is unrelated and unchanged.
+
+**Tokens.** 32 bytes from `random_bytes()`, base64url (43 characters), SHA-256 at rest, 72 hours on the
+database clock; live while not used, not revoked and `expires_at > UTC_TIMESTAMP(6)` (equality is
+expired). Final states are written only over non-final rows, so no path can set both.
+
+**Operator CLI** — `php server/bin/account.php create-ceo|reset-credentials --email=<address>` (CLI
+only, SAPI-guarded; exit 0 / 1 / 2; stderr carries reason codes only). Both require an exactly current
+schema, serialize on `GET_LOCK('tamos_account', 0)` — an InnoDB locking read on an empty table would not
+serialize them (gap locks do not conflict, READ COMMITTED takes none) — and run in one transaction; the
+lock is released in `finally` and by any disconnect. Neither takes a password or a `--force`, and each
+prints the raw activation token exactly once, on stdout, after commit.
+
+| Command | Behaviour |
+|---|---|
+| `create-ceo` | refuses if any company or user exists; creates one company (no name field), one pending CEO user (`password_hash` NULL), its active CEO membership, one activation token and `ceo_bootstrap` |
+| `reset-credentials` | break-glass recovery, CEO only: refuses an unknown email, a disabled user or membership, zero or several memberships and any non-CEO; sets `password_hash` NULL, revokes every session and every open token, issues a new token, records `credential_reset`. On a pending account it is the reissue path for an expired bootstrap token — there is no separate reissue command |
+
+**Endpoints.**
+
+| Route | RouteAuth | Behaviour |
+|---|---|---|
+| `POST /api/auth/activate` | None | body exactly `{"token","password"}`; origin check, no session, no CSRF, no cookie; password rule first (400 `[password]`, nothing consumed) → IP gate (429) → non-locking token read (unknown / dead: count + `activation_fail`, no hashing) → rule against the stored email → hash outside any transaction → one transaction: lock user + membership, then the token row, re-check on the database clock, set the first password (compare-and-swap on NULL), consume, revoke other tokens and every session, `activation_ok`. Every token or account problem is the same 400 `[token]`. 200 `{"activated":true}` — **no auto-login** |
+| `POST /api/auth/change-password` | Required | body exactly `{"currentPassword","newPassword"}`; CSRF; rule against the stored email (400 `[newPassword]`) → hash the new password outside any transaction → one transaction: lock the user's password-change bucket (429) → consistent read, principal re-derived → one verification (400 `[currentPassword]`, counted, `password_fail`) → compare-and-swap on the verified hash (409 `conflict` if it changed; the users row is locked only from here to commit) → revoke every session → one new session → `password_change`. 200 = projection + new `csrfToken` + new cookie |
+| `POST /api/auth/logout-all` | Required | body `{}`; CSRF; revokes every session of the user, the current one included; `logout_all`; 200 `{"loggedOut":true}` + cookie cleared |
+
+**Password rule** (`Auth/PasswordPolicy`, one rule for activation, change and future recovery): valid
+UTF-8, no Unicode control character (NUL included), at least 12 code points and at most 72 bytes, not the
+account's own stored email (ASCII case-insensitive), not in a short common-password list (≤ 100 entries of
+12+ code points — a small speed bump, kept because SDR-0002 §2.2 names it). Nothing is trimmed or
+normalized. Anything it accepts, login's `Passwords::isAcceptableInput` accepts (a tested invariant).
+
+**Throttling.** Activation failures per client IP `sha256("activate-ip:" + ipKey)`, 20 per 15 minutes;
+wrong current passwords per user `sha256("pwchange:" + userId)`, 5 per 15 minutes, reset on success;
+the BF-3A backoff; login unchanged; `REMOTE_ADDR` only.
+
+**Locks** are always taken user row first, token row second — in activation and in reset — so the CLI and
+the HTTP path cannot deadlock each other.
+
+**Enforcement added to `tools/verify-backend-boundary.js`.** `server/bin/` may hold `migrate.php` and
+`account.php` only, each SAPI-guarded; SQL that writes `companies`, `users` or `memberships` only in
+`Data/Auth/AccountStore.php`, and `account_tokens` only in `Data/Auth/AccountTokenStore.php`.
 
 ### Release engineering
 

@@ -6,14 +6,19 @@ namespace TamOs\Data\Auth;
 use TamOs\Data\Database;
 
 /**
- * Authentication security events (SDR-0002 §9.2) — append-only. This class is the only
+ * Authentication and account-lifecycle security events (SDR-0002 §9.2) — append-only. This class is the only
  * writer of auth_events and it only inserts; no update, delete or other rewrite of the table
  * exists anywhere in the application (tools/verify-backend-boundary.js rejects one). The time
  * is the database clock. No password, session token, CSRF token or raw email is ever stored.
  */
 final class AuthEvents
 {
-    public const EVENTS = ['login_success', 'login_failure', 'login_locked', 'logout'];
+    // Must equal the CHECK auth_events_event_v2 vocabulary (migration 0008); a unit test compares them.
+    public const EVENTS = [
+        'login_success', 'login_failure', 'login_locked', 'logout',
+        // BF-3B account lifecycle
+        'ceo_bootstrap', 'credential_reset', 'activation_ok', 'activation_fail', 'password_change', 'password_fail', 'logout_all',
+    ];
 
     public function __construct(private readonly Database $db)
     {

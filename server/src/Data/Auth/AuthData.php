@@ -6,12 +6,14 @@ namespace TamOs\Data\Auth;
 use TamOs\Config\Config;
 use TamOs\Data\Database;
 use TamOs\Data\DatabaseConfig;
+use TamOs\Data\DatabaseError;
 
 /**
  * The authentication data access point: one lazily opened, request-scoped Database shared by
- * the four auth stores, and atomically() for the transaction boundaries the Authenticator
- * owns. Nothing is validated or connected until a store is first used, so constructing it
- * never makes /api/health (or anything else) depend on the database.
+ * the auth stores, atomically() for the transaction boundaries the Authenticator and the
+ * account lifecycle own, and the account advisory lock the operator CLI serializes on.
+ * Nothing is validated or connected until a store is first used, so constructing it never
+ * makes /api/health (or anything else) depend on the database.
  */
 final class AuthData
 {
@@ -20,6 +22,7 @@ final class AuthData
     private ?SessionStore $sessions = null;
     private ?RateLimiter $rateLimits = null;
     private ?AuthEvents $events = null;
+    private ?AccountTokenStore $tokens = null;
 
     /** @param \Closure(): Database $connect */
     private function __construct(private readonly \Closure $connect)
@@ -55,6 +58,39 @@ final class AuthData
     public function events(): AuthEvents
     {
         return $this->events ??= new AuthEvents($this->db());
+    }
+
+    public function tokens(): AccountTokenStore
+    {
+        return $this->tokens ??= new AccountTokenStore($this->db());
+    }
+
+    /**
+     * Takes the server-wide advisory lock 'tamos_account' on this connection without waiting:
+     * true when acquired, false when another session holds it. It serializes every operator
+     * account command (bootstrap, reset); an InnoDB locking read on an empty table would not
+     * (gap locks do not conflict, and READ COMMITTED takes none). A transaction never releases
+     * it — releaseAccountLock() does, and so does closing the connection.
+     *
+     * @throws DatabaseError on a lock error (NULL) or a database failure
+     */
+    public function acquireAccountLock(): bool
+    {
+        $result = $this->db()->select("SELECT GET_LOCK('tamos_account', 0) AS acquired")[0]['acquired'] ?? null;
+        if ($result === null) {
+            throw new DatabaseError(DatabaseError::FAILURE, 'lock');
+        }
+        return (int) $result === 1;
+    }
+
+    /** Best effort: the lock dies with the (non-persistent) connection anyway. */
+    public function releaseAccountLock(): void
+    {
+        try {
+            $this->db()->select("SELECT RELEASE_LOCK('tamos_account') AS released");
+        } catch (DatabaseError) {
+            // Released when the connection closes.
+        }
     }
 
     /**

@@ -2,8 +2,9 @@
 declare(strict_types=1);
 
 /*
- * The BF-3A production schema (server/migrations 0001–0006) against the real, guarded CI
- * MariaDB: it applies, seeds nothing, is ready, and its constraints are actually enforced.
+ * The production schema (server/migrations 0001–0006 BF-3A, 0007–0008 BF-3B) against the
+ * real, guarded CI MariaDB: it applies, seeds nothing, is ready, and its constraints are
+ * actually enforced.
  */
 
 use TamOs\Data\Database;
@@ -25,7 +26,7 @@ use function TamOs\Tests\requestId;
 use function TamOs\Tests\testDatabase;
 use function TamOs\Tests\testDbConfig;
 
-$authTables = ['auth_events', 'auth_rate_limits', 'companies', 'memberships', 'sessions', 'users'];
+$authTables = ['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'memberships', 'sessions', 'users'];
 $tables = static fn (Database $db): array => array_map(
     static fn (array $r): string => (string) $r['t'],
     $db->select('SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name'),
@@ -41,12 +42,14 @@ $insertUser = 'INSERT INTO users (id, email, password_hash, status, created_at, 
 $insertMembership = 'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))';
 
 return [
-    'production migrations 0001–0006 apply in order, create exactly the auth tables and seed nothing' => static function () use ($tables, $authTables): void {
+    'production migrations 0001–0008 apply in order, create exactly the auth tables and seed nothing' => static function () use ($tables, $authTables): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events'],
+        assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events',
+            '0007_create_account_tokens', '0008_replace_auth_events_event_check'],
             array_map(static fn ($m): string => $m->label(), $applied));
-        assertSame(['auth_events', 'auth_rate_limits', 'companies', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM account_tokens')[0]['n'], 'no token');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM companies')[0]['n'], 'no company');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM users')[0]['n'], 'no user, no default CEO');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM memberships')[0]['n'], 'no membership');
@@ -69,7 +72,7 @@ return [
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
             $files[basename($path)] = (string) file_get_contents($path);
         }
-        assertSame(6, count($files));
+        assertSame(8, count($files));
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());
@@ -83,7 +86,7 @@ return [
             assertSame(['InnoDB', 'utf8mb4_unicode_ci'], [(string) $info['engine'], (string) $info['collation']], $t);
         }
         $columns = $db->select("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS type, CHARACTER_SET_NAME AS cs, COLLATION_NAME AS coll, DATETIME_PRECISION AS prec FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME <> 'schema_migrations'");
-        assertTrue(count($columns) === 35, 'expected 35 auth columns, got ' . count($columns));
+        assertTrue(count($columns) === 42, 'expected 42 auth columns, got ' . count($columns));
         foreach ($columns as $c) {
             $label = $c['t'] . '.' . $c['c'];
             if (in_array($c['type'], ['char', 'varchar'], true)) {
@@ -99,11 +102,13 @@ return [
         $db = authDatabase();
         $checks = array_map(static fn (array $r): string => (string) $r['n'],
             $db->select('SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY CONSTRAINT_NAME'));
-        assertSame(['auth_events_event', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
+        assertSame(['account_tokens_expiry', 'account_tokens_final', 'account_tokens_purpose', 'account_tokens_used_in_time',
+            'auth_events_event_v2', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
             'users_email_normalized', 'users_password_hash', 'users_status'], $checks);
         $fks = array_map(static fn (array $r): string => $r['t'] . '.' . $r['n'] . '->' . $r['r'],
             $db->select('SELECT TABLE_NAME AS t, CONSTRAINT_NAME AS n, REFERENCED_TABLE_NAME AS r FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY TABLE_NAME, CONSTRAINT_NAME'));
-        assertSame(['memberships.memberships_company_fk->companies', 'memberships.memberships_user_fk->users', 'sessions.sessions_user_fk->users'], $fks, 'auth_events has no FK');
+        assertSame(['account_tokens.account_tokens_user_fk->users', 'memberships.memberships_company_fk->companies', 'memberships.memberships_user_fk->users',
+            'sessions.sessions_user_fk->users'], $fks, 'auth_events has no FK');
     },
     'CHECK constraints are enforced by MariaDB' => static function () use ($refused, $id, $insertUser, $insertMembership): void {
         $db = authDatabase();

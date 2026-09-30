@@ -24,11 +24,26 @@ use TamOs\Identity\Principal;
  * The IP bucket is locked only for its short final update, never across verification, so a
  * shared client IP never becomes a global login mutex. A database error rolls everything back
  * and surfaces as 503/500 — never as a credential failure.
+ *
+ * BF-3B adds the two other session-issuing / session-ending operations on the caller's own
+ * account. A password change is:
+ *
+ *   policy → hash the new password (outside any transaction, no row locked) → one transaction:
+ *   lock the user's password-change bucket (held through verification, so attempts serialize)
+ *   → locked? 429 → consistent read of the account → Principal must still be the session's
+ *   membership → exactly one password_verify of the current password → failure: count +
+ *   password_fail → success: compare-and-swap on the verified hash (the users row is locked
+ *   only from here to commit; a concurrent change means conflict and nothing is written) →
+ *   revoke every session of the user → one new session for the caller → reset the bucket →
+ *   password_change
+ *
+ * logoutAll revokes every session of the user, the caller's included, and records logout_all.
  */
 final class Authenticator
 {
     public const ACCOUNT_THRESHOLD = 5;
     public const IP_THRESHOLD = 20;
+    public const PASSWORD_CHANGE_THRESHOLD = 5;
 
     public function __construct(private readonly AuthData $data)
     {
@@ -107,6 +122,71 @@ final class Authenticator
         $this->data->atomically(function () use ($session, $hash, $remoteAddr, $requestId): void {
             $this->data->sessions()->revoke($hash);
             $this->data->events()->append('logout', $session->principal->userId, $session->principal->membershipId, null, $remoteAddr, $requestId);
+        });
+    }
+
+    public function changePassword(
+        AuthSession $session,
+        #[\SensitiveParameter] string $currentPassword,
+        #[\SensitiveParameter] string $newPassword,
+        ?string $remoteAddr,
+        string $requestId,
+    ): PasswordChangeResult {
+        if (PasswordPolicy::check($newPassword) !== null) {
+            return PasswordChangeResult::failure(PasswordChangeResult::INVALID_NEW);
+        }
+        $userId = $session->principal->userId;
+        $account = $this->data->accounts()->findById($userId);
+        if ($account === null) {
+            return PasswordChangeResult::failure(PasswordChangeResult::UNAUTHENTICATED);
+        }
+        // The email the rule compares against is the stored one, never a client value.
+        if (PasswordPolicy::checkForAccount($newPassword, $account['email']) !== null) {
+            return PasswordChangeResult::failure(PasswordChangeResult::INVALID_NEW);
+        }
+        $newHash = Passwords::hash($newPassword);
+        $bucket = LoginKeys::passwordChangeBucket($userId);
+        $token = SessionToken::generate();
+        $csrf = SessionToken::generateCsrf();
+        $this->data->rateLimits()->ensure($bucket);
+
+        return $this->data->atomically(function () use ($session, $userId, $currentPassword, $newHash, $bucket, $token, $csrf, $remoteAddr, $requestId): PasswordChangeResult {
+            $limits = $this->data->rateLimits();
+            $state = $limits->lock($bucket);
+            $wait = RateLimiter::lockedFor($state);
+            if ($wait > 0) {
+                return PasswordChangeResult::locked($wait);
+            }
+            $account = $this->data->accounts()->findById($userId);
+            $principal = $account === null ? null : Principal::fromAccount($account['user'], $account['memberships']);
+            if ($account === null || $principal === null || $principal->membershipId !== $session->principal->membershipId) {
+                return PasswordChangeResult::failure(PasswordChangeResult::UNAUTHENTICATED);
+            }
+            $hash = $account['passwordHash'];
+            if ($hash === null || !Passwords::verify($currentPassword, $hash)) {
+                $limits->recordFailure($bucket, $state, self::PASSWORD_CHANGE_THRESHOLD);
+                $this->data->events()->append('password_fail', $userId, $principal->membershipId, null, $remoteAddr, $requestId);
+                return PasswordChangeResult::failure(PasswordChangeResult::WRONG_CURRENT);
+            }
+            if (!$this->data->accounts()->replacePasswordHash($userId, $hash, $newHash)) {
+                // Changed concurrently (another change, a reset or a login rehash): nothing written.
+                return PasswordChangeResult::failure(PasswordChangeResult::CONFLICT);
+            }
+            $sessions = $this->data->sessions();
+            $sessions->revokeAllForUser($userId);
+            $sessions->create(SessionToken::hash($token), $userId, $csrf);
+            $limits->reset($bucket);
+            $this->data->events()->append('password_change', $userId, $principal->membershipId, null, $remoteAddr, $requestId);
+            return PasswordChangeResult::success($principal, $token, $csrf);
+        });
+    }
+
+    /** Revokes every session of the caller's user — the current one included — and records it. */
+    public function logoutAll(AuthSession $session, ?string $remoteAddr, string $requestId): void
+    {
+        $this->data->atomically(function () use ($session, $remoteAddr, $requestId): void {
+            $this->data->sessions()->revokeAllForUser($session->principal->userId);
+            $this->data->events()->append('logout_all', $session->principal->userId, $session->principal->membershipId, null, $remoteAddr, $requestId);
         });
     }
 }
