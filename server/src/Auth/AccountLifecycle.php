@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TamOs\Auth;
 
 use TamOs\Config\Config;
+use TamOs\Data\Auth\AccountTokenStore;
 use TamOs\Data\Auth\AuthData;
 use TamOs\Data\Auth\RateLimiter;
 use TamOs\Identity\Role;
@@ -20,7 +21,8 @@ use TamOs\Identity\Role;
  *                       ceo_bootstrap → commit → the raw token, once
  *   resetCredentials    advisory lock → one transaction: lock the account → refuse unless it
  *                       is an active CEO with exactly one active membership → password NULL,
- *                       revoke every session, revoke open tokens, new token, credential_reset
+ *                       revoke every session, revoke every open token (activation and
+ *                       recovery), new activation token, credential_reset
  *
  * resetCredentials on an account that has no password yet is how an expired bootstrap token
  * is replaced; there is no separate reissue command.
@@ -31,7 +33,7 @@ use TamOs\Identity\Role;
  *   activation_fail → account-aware policy → hash the password (outside any transaction)
  *   → one transaction: lock user + membership rows, then the token row, re-check everything
  *   on the database clock → set the first password (compare-and-swap on NULL), consume the
- *   token, revoke the user's other tokens and every session → activation_ok
+ *   token, revoke the user's other tokens (every purpose) and every session → activation_ok
  *
  * Locks are always taken user row first, token row second — here and in resetCredentials —
  * so the CLI and the HTTP path cannot deadlock each other. A policy failure never consumes the
@@ -69,7 +71,7 @@ final class AccountLifecycle
             $accounts->createPendingUser($userId, $candidate);
             $accounts->createCeoMembership($membershipId, $userId, $companyId);
             $tokens = $this->data->tokens();
-            $tokens->issue($hash, $userId);
+            $tokens->issue($hash, $userId, AccountTokenStore::ACTIVATION);
             $this->data->events()->append('ceo_bootstrap', $userId, $membershipId, null, null, $requestId);
             return new IssuedActivation($userId, $token, $tokens->expiresAt($hash));
         }));
@@ -94,8 +96,8 @@ final class AccountLifecycle
             $tokens = $this->data->tokens();
             $this->data->accounts()->clearPasswordHash($userId);
             $this->data->sessions()->revokeAllForUser($userId);
-            $tokens->revokeOpenForUser($userId);
-            $tokens->issue($hash, $userId);
+            $tokens->revokeAllOpenForUser($userId);
+            $tokens->issue($hash, $userId, AccountTokenStore::ACTIVATION);
             $this->data->events()->append('credential_reset', $userId, $account['memberships'][0]['membership_id'], null, null, $requestId);
             return new IssuedActivation($userId, $token, $tokens->expiresAt($hash));
         }));
@@ -122,7 +124,7 @@ final class AccountLifecycle
 
         // Fast path: an unknown or dead token costs no password hashing.
         $hash = SessionToken::isWellFormed($token) ? SessionToken::hash($token) : null;
-        $peek = $hash === null ? null : $this->data->tokens()->peek($hash);
+        $peek = $hash === null ? null : $this->data->tokens()->peek($hash, AccountTokenStore::ACTIVATION);
         $account = $peek !== null && $peek['live'] ? $this->data->accounts()->findById($peek['userId']) : null;
         if ($hash === null || $peek === null || $account === null || !self::isActivatable($account)) {
             $userId = $peek['userId'] ?? null;
@@ -137,7 +139,7 @@ final class AccountLifecycle
         return $this->data->atomically(function () use ($hash, $userId, $password, $newHash, $bucket, $remoteAddr, $requestId): ActivationResult {
             $locked = $this->data->accounts()->lockById($userId);
             $tokens = $this->data->tokens();
-            if ($locked === null || !self::isActivatable($locked) || !$tokens->lockLive($hash, $userId)) {
+            if ($locked === null || !self::isActivatable($locked) || !$tokens->lockLive($hash, $userId, AccountTokenStore::ACTIVATION)) {
                 return $this->activationFailure($bucket, $userId, $remoteAddr, $requestId);
             }
             if (PasswordPolicy::checkForAccount($password, $locked['email']) !== null) {
@@ -147,10 +149,10 @@ final class AccountLifecycle
             if (!$this->data->accounts()->setInitialPasswordHash($userId, $newHash)) {
                 throw new \LogicException('activation: account already has a password');
             }
-            if ($tokens->consume($hash) !== 1) {
+            if ($tokens->consume($hash, AccountTokenStore::ACTIVATION) !== 1) {
                 throw new \LogicException('activation: token no longer live');
             }
-            $tokens->revokeOpenForUser($userId);
+            $tokens->revokeAllOpenForUser($userId);
             $this->data->sessions()->revokeAllForUser($userId);
             $this->data->events()->append('activation_ok', $userId, $locked['memberships'][0]['membership_id'], null, $remoteAddr, $requestId);
             return ActivationResult::success();
