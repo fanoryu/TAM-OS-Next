@@ -99,7 +99,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
     $auth ??= \TamOs\Data\Auth\AuthData::fromConfig($config);
     return Routes::production(
         new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'),
-        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth)),
+        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth)),
     );
 }
 
@@ -277,6 +277,26 @@ function writeConfigFile(Config $config): string
  */
 function runMigrateCli(array $args, ?string $configFile): array
 {
+    return runCli('migrate.php', $args, $configFile);
+}
+
+/**
+ * Runs server/bin/account.php (BF-3B) in a child process with the given config file.
+ *
+ * @param list<string> $args
+ * @return array{exit: int, stdout: string, stderr: string}
+ */
+function runAccountCli(array $args, ?string $configFile): array
+{
+    return runCli('account.php', $args, $configFile);
+}
+
+/**
+ * @param list<string> $args
+ * @return array{exit: int, stdout: string, stderr: string}
+ */
+function runCli(string $script, array $args, ?string $configFile): array
+{
     $env = getenv();
     unset($env['TAMOS_CONFIG']);
     if ($configFile !== null) {
@@ -286,10 +306,10 @@ function runMigrateCli(array $args, ?string $configFile): array
     if (php_ini_loaded_file() === false) {
         $cmd[] = '-n';
     }
-    array_push($cmd, dirname(__DIR__) . '/bin/migrate.php', ...$args);
+    array_push($cmd, dirname(__DIR__) . '/bin/' . $script, ...$args);
     $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
     if (!is_resource($proc)) {
-        fail('cannot start migrate.php');
+        fail('cannot start ' . $script);
     }
     fclose($pipes[0]);
     $stdout = (string) stream_get_contents($pipes[1]);
@@ -325,8 +345,9 @@ function authDatabase(): \TamOs\Data\Database
 
 /**
  * Inserts one test account — company, user and (unless 'membership' => false) membership —
- * with per-run random identifiers, email and password. Test-only SQL: production code has no
- * account-creation path in BF-3A. Options: role, employeeId, userStatus, membershipStatus,
+ * with per-run random identifiers, email and password. Test-only SQL: production creates only
+ * the pending bootstrap CEO (BF-3B, pendingCeo()), and tests need other shapes — activated,
+ * Employee, disabled, several per company. Options: role, employeeId, userStatus, membershipStatus,
  * companyId (reuse), password (null = not activated), passwordHash (raw override), membership.
  *
  * @param array<string, mixed> $o
@@ -354,6 +375,53 @@ function authFixture(\TamOs\Data\Database $db, array $o = []): array
         );
     }
     return ['companyId' => $companyId, 'userId' => $userId, 'membershipId' => $membershipId, 'email' => $email, 'password' => $password];
+}
+
+/**
+ * BF-3B: the bootstrap CEO, created through the real lifecycle (not test SQL) on this
+ * connection. The account is pending: no password until the returned token is redeemed.
+ *
+ * @return array{userId: string, membershipId: string, companyId: string, email: string, token: string}
+ */
+function pendingCeo(\TamOs\Data\Database $db, ?string $email = null): array
+{
+    $email ??= 'ceo-' . bin2hex(random_bytes(6)) . '@example.test';
+    $issued = (new \TamOs\Auth\AccountLifecycle(\TamOs\Data\Auth\AuthData::fromDatabase($db)))->createCeo($email, requestId());
+    $m = $db->select('SELECT id, company_id FROM memberships WHERE user_id = ?', [$issued->userId])[0];
+    return ['userId' => $issued->userId, 'membershipId' => (string) $m['id'], 'companyId' => (string) $m['company_id'], 'email' => $email, 'token' => $issued->token];
+}
+
+/** A same-origin JSON activation request from the fixed documentation IP. */
+function activateRequest(string $token, string $password, array $overrides = []): Request
+{
+    return jsonPost('/api/auth/activate', json_encode(['token' => $token, 'password' => $password], JSON_THROW_ON_ERROR), $overrides + ['remoteAddr' => '203.0.113.7']);
+}
+
+/** A second, independent connection to the guarded test database (never resets it). */
+function secondConnection(): \TamOs\Data\Database
+{
+    return new \TamOs\Data\Database(\TamOs\Data\DatabaseConfig::fromConfig(testDbConfig()));
+}
+
+/**
+ * Waits — bounded, polling a condition, never a fixed sleep — until exactly $count other
+ * connections of this database user are executing a statement that starts with $statement
+ * (i.e. are blocked on a lock the caller holds). Fails the test when the deadline passes.
+ */
+function awaitBlockedStatements(\TamOs\Data\Database $observer, string $statement, int $count, float $deadlineSeconds = 30.0): void
+{
+    $until = microtime(true) + $deadlineSeconds;
+    do {
+        $n = (int) $observer->select(
+            'SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND DB = DATABASE() AND INFO LIKE ?',
+            [$statement . '%'],
+        )[0]['n'];
+        if ($n === $count) {
+            return;
+        }
+        usleep(20000);
+    } while (microtime(true) < $until);
+    fail('expected ' . $count . ' connection(s) blocked on "' . $statement . '", saw ' . $n);
 }
 
 /** A same-origin JSON login request from a fixed documentation IP (RFC 5737). */

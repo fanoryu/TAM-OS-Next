@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace TamOs;
 
+use TamOs\Auth\AccountLifecycle;
 use TamOs\Auth\Authenticator;
 use TamOs\Config\ConfigError;
 use TamOs\Config\ConfigLoader;
@@ -99,7 +100,7 @@ function run(): void
     // when an auth route needs it — never for /api/health or /api/ready (RouteAuth::None).
     $readiness = new Readiness($config, dirname(__DIR__) . '/migrations');
     $auth = AuthData::fromConfig($config);
-    $routes = Routes::production($readiness, new AuthController(new Authenticator($auth)));
+    $routes = Routes::production($readiness, new AuthController(new Authenticator($auth), new AccountLifecycle($auth)));
     $kernel = new Kernel($routes, new SessionPrincipalResolver($auth), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');
 }
