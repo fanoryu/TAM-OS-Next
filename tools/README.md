@@ -50,14 +50,23 @@ php server/bin/migrate.php apply    # create and verify history, then run pendin
 ```
 
 Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
-is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`); the boundary
-tool refuses any migration that inserts, updates or deletes rows.
+is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`; BF-3B:
+`0007`–`0008`); the boundary tool refuses any migration that inserts, updates or deletes rows.
 
-BF-3A authentication tests create their accounts per run inside the guarded test database
-(`server/tests/lib.php` → `authFixture`); no credential is stored in the repository. The boundary tool
-also confines the password API, the session cookie name, `Set-Cookie`, `HTTP_COOKIE`, principal
-construction and CSRF comparison to their approved files (see `ARCHITECTURE.md` → Authentication and
-sessions).
+Accounts (BF-3B) come into existence only through the operator CLI, never over HTTP and never from seed
+data. Neither command takes a password; each prints a one-time activation token once:
+
+```bash
+php server/bin/account.php create-ceo --email=<address>          # once: first company + pending CEO
+php server/bin/account.php reset-credentials --email=<address>   # break-glass, CEO only; also reissues an expired token
+```
+
+Authentication tests create their accounts per run inside the guarded test database
+(`server/tests/lib.php` → `authFixture`, and `pendingCeo` through the real lifecycle); no credential is
+stored in the repository. The boundary tool also confines the password API, the session cookie name,
+`Set-Cookie`, `HTTP_COOKIE`, principal construction and CSRF comparison to their approved files, and
+account and account-token writes to their two stores (see `ARCHITECTURE.md` → Authentication and
+sessions, Account lifecycle).
 
 ### Build
 

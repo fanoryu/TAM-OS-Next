@@ -339,13 +339,20 @@ and CI) is implemented as source only — no database, authentication, deploymen
 frontend change. **BF-2** is split in two: **BF-2A** (data layer, transactions, MariaDB CI) is
 implemented as source only, with no table or migration; **BF-2B** (migration runner, `schema_migrations`,
 `/api/ready`) is implemented as source only, with zero production migrations. **BF-3** is split in
-three: **BF-3A** (auth schema `0001`–`0006`, password verification, database sessions, authoritative
+four: **BF-3A** (auth schema `0001`–`0006`, password verification, database sessions, authoritative
 principal, route-level session resolution, login / logout / me, CSRF, login rate limiting, security
 events) is implemented as source only — not deployed, not production-ready, no frontend change;
-**BF-3B** (first-account bootstrap, activation, account administration, password change, revoke-all)
-and **BF-3C** (password recovery, governed mail) follow. The hostile-principal harness waits for the
-first scoped repository.
-See `ARCHITECTURE.md` → Backend foundation, Data foundation and Authentication and sessions.
+**BF-3B** (account lifecycle: migrations `0007`–`0008`, operator CLI `create-ceo` bootstrap and
+break-glass `reset-credentials`, one-time activation, password change, logout-all, lifecycle events and
+throttling — self-service plus operator CLI only, no HTTP account administration) is implemented as
+source only on the same terms; **BF-3C** (server Policy/ACTIONS and authoritative authorization and data
+scope — the start of the MU-4 work) follows; **BF-3D** (password recovery and governed mail) follows once
+the SMTP provider (SDR-0002 O5) is decided. Cross-account administration (additional and Employee
+accounts, disable/enable) comes after BF-3C. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+recovery and mail to Policy; recovery and mail became BF-3D.)* The hostile-principal harness waits for
+the first scoped repository.
+See `ARCHITECTURE.md` → Backend foundation, Data foundation, Authentication and sessions, and Account
+lifecycle.
 
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today
 throughout. **MU-5 is the first irreversible step**, and it is deliberately gated behind MU-4, whose

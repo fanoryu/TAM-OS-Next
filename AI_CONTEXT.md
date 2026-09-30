@@ -27,8 +27,15 @@ production migration. **BF-3A** adds the authentication schema (migrations `0001
 users, memberships, sessions, auth rate limits, auth events — no seeded rows), password verification,
 database-backed sessions with an authoritative server principal, per-route session resolution (health
 and ready never resolve), `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, CSRF,
-login rate limiting and security events. It is source only and **not production-ready**: no account
-can be created yet (BF-3B), the frontend does not call it, and "Acting as" is unchanged. v2.10.0 remains
+login rate limiting and security events. **BF-3B** adds the account lifecycle: migrations `0007`–`0008`
+(hashed one-time account tokens; the lifecycle event vocabulary), the operator CLI
+`server/bin/account.php` (`create-ceo` — the only way the first company and CEO come to exist, with no
+password — and break-glass `reset-credentials`), `POST /api/auth/activate`, `POST /api/auth/change-password`
+and `POST /api/auth/logout-all`. It is self-service plus operator CLI only — no HTTP account
+administration, no Employee accounts, no SMTP or forgot-password. Next come **BF-3C** (server
+Policy/ACTIONS, authorization and data scope) and, once an SMTP provider is chosen, **BF-3D** (password
+recovery, governed mail). All of this is source only and **not production-ready**: the frontend does not
+call it, and "Acting as" is unchanged. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
