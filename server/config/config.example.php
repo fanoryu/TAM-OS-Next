@@ -12,7 +12,7 @@ declare(strict_types=1);
  *
  * Unknown keys are rejected, so a typo fails closed instead of being ignored.
  *
- * `db` is optional. It is validated only when the database is first used, so without it
+ * `db` and `mail` are optional. `db` is validated only when the database is first used, so without it
  * (or with a broken one) the API still boots and /api/health still answers; database-backed
  * operations answer 503 instead. Use a dedicated TAM OS database and user.
  */
@@ -38,5 +38,15 @@ return [
         'name' => 'CHANGE_ME',
         'user' => 'CHANGE_ME',
         'pass' => 'CHANGE_ME',
+    ],
+
+    // Governed mail (BF-3D, SDR-0003), used only by the outbox worker (server/bin/mail.php),
+    // never by an HTTP request. Optional: without it the API runs and recovery requests are
+    // queued, but nothing is sent. Exactly these three keys. The API key is a secret: it lives
+    // only in the real config file outside the web root, never in the repository or a log.
+    'mail' => [
+        'transport' => 'resend',
+        'from' => 'TAM OS <CHANGE_ME@example.invalid>',
+        'api_key' => 'CHANGE_ME',
     ],
 ];

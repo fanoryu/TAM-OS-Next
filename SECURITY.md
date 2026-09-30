@@ -183,6 +183,7 @@ Engineering justifications for standing security decisions — such as the dispo
 
 - [`SDR-0001 — CodeQL Baseline Disposition`](docs/security/SDR-0001-codeql-baseline-disposition.md) (Accepted)
 - [`SDR-0002 — PHP + MariaDB Multi-User Security Architecture`](docs/security/SDR-0002-php-mariadb-security-architecture.md) (Accepted)
+- [`SDR-0003 — Governed Mail Transport`](docs/security/SDR-0003-governed-mail-transport.md) (Accepted)
 
 An SDR documents *why* a finding is accepted or classified as a false positive and what future change
 would require it to be re-examined. An SDR does not, by itself, dismiss any alert.

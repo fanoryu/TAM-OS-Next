@@ -16,7 +16,7 @@ final class ConfigLoader
 {
     public const DEFAULT_BODY_LIMIT = 65536;
     public const MAX_BODY_LIMIT = 1048576;
-    private const KEYS = ['env', 'origin', 'log_path', 'body_limit_bytes', 'db'];
+    private const KEYS = ['env', 'origin', 'log_path', 'body_limit_bytes', 'db', 'mail'];
     private const PLACEHOLDER = 'CHANGE_ME';
 
     public static function resolvePath(): string
@@ -91,7 +91,7 @@ final class ConfigLoader
             throw new ConfigError('invalid_body_limit');
         }
 
-        return new Config($env, $origin, $logPath, $limit, $data['db'] ?? null);
+        return new Config($env, $origin, $logPath, $limit, $data['db'] ?? null, $data['mail'] ?? null);
     }
 
     private static function isAbsolute(string $path): bool

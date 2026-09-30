@@ -100,7 +100,7 @@ return [
         }
         (new Migrator($db, migrationFixture($files)))->apply();
         $out = runAccountCli(['create-ceo', '--email=ceo@example.test'], $file);
-        assertSame([1, '', "account: schema_not_current\n"], [$out['exit'], $out['stdout'], $out['stderr']], '0007–0012 pending');
+        assertSame([1, '', "account: schema_not_current\n"], [$out['exit'], $out['stdout'], $out['stderr']], '0007–0013 pending');
         assertSame(0, $count($db, 'users'));
     },
     'the advisory lock: a held lock makes both commands refuse at once with nothing written; each run releases it' => static function () use ($issued, $count): void {
