@@ -27,6 +27,10 @@
  *     entry point lacks its SAPI guard; SQL writing companies, users or memberships appears
  *     outside server/src/Data/Auth/AccountStore.php, or SQL writing account_tokens outside
  *     server/src/Data/Auth/AccountTokenStore.php;
+ *   - (BF-3C) an Authorization is constructed outside server/src/Policy/Policy.php or a
+ *     ScopedRecord outside server/src/Data/Scope/ScopedDatabase.php; or server/src/Policy/Action.php
+ *     differs from js/core/authz.js in its 20 action values, a rule class or a resource entity
+ *     (parity fails closed when either side cannot be read);
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -46,10 +50,10 @@ const { execFileSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const SERVER = 'server';
 const DATA_DIR = 'server/src/Data/';
-// Slice gate: these arrive with later, separately authorized slices (the authorization
-// milestone for Policy). Remove an entry only in that slice. server/src/Data was un-gated by
-// BF-2A; server/migrations and server/bin by BF-2B, each narrowly (see checkTree).
-const NOT_YET_AUTHORIZED = ['server/src/Policy'];
+// Slice gate: directories that arrive with later, separately authorized slices. Remove an entry
+// only in that slice. server/src/Data was un-gated by BF-2A; server/migrations and server/bin by
+// BF-2B, each narrowly (see checkTree); server/src/Policy by BF-3C.
+const NOT_YET_AUTHORIZED = [];
 // The only files allowed under server/bin/ (BF-2B migrate, BF-3B account), and the only
 // shape a migration file may have.
 const CLI_FILES = new Set(['server/bin/migrate.php', 'server/bin/account.php']);
@@ -73,6 +77,13 @@ const IDENTITY_DIR = 'server/src/Identity/';
 const ACCOUNT_STORE = 'server/src/Data/Auth/AccountStore.php';
 const TOKEN_STORE = 'server/src/Data/Auth/AccountTokenStore.php';
 const LOCAL_CONFIG = /^server\/config\/config\.local\.php$/;
+// BF-3C: the capability objects. An Authorization is minted only by Policy::authorize(), and a
+// ScopedRecord only by the scoped data layer, so neither can be forged by a controller.
+const POLICY_FILE = 'server/src/Policy/Policy.php';
+const SCOPED_DATABASE = 'server/src/Data/Scope/ScopedDatabase.php';
+// BF-3C: the server ACTION vocabulary and the frontend one it must equal.
+const ACTION_FILE = 'server/src/Policy/Action.php';
+const FRONTEND_AUTHZ = 'js/core/authz.js';
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -149,6 +160,8 @@ const CODE_RULES = [
   { id: 'password-api', re: /(?<![\w$>:])password_(hash|verify|needs_rehash|get_info|algos)\s*\(/i, msg: 'the password API is called only in ' + PASSWORDS_FILE, allow: (f) => f === PASSWORDS_FILE },
   { id: 'principal-builder', re: /\bPrincipal\s*::\s*fromAccount\s*\(/, msg: 'Principal::fromAccount() is called only by the session resolver and the Authenticator', allow: (f) => PRINCIPAL_BUILDERS.has(f) },
   { id: 'identity-construction', re: /\bnew\s+\\?(?:TamOs\\Identity\\)?(Principal|AuthSession)\s*\(/, msg: 'a Principal or AuthSession is constructed only inside ' + IDENTITY_DIR, allow: (f) => f.startsWith(IDENTITY_DIR) },
+  { id: 'authorization-construction', re: /\bnew\s+\\?(?:TamOs\\Policy\\)?Authorization\s*\(/, msg: 'an Authorization is constructed only by ' + POLICY_FILE, allow: (f) => f === POLICY_FILE },
+  { id: 'scoped-record-construction', re: /\bnew\s+\\?(?:TamOs\\Data\\Scope\\)?ScopedRecord\s*\(/, msg: 'a ScopedRecord is constructed only by ' + SCOPED_DATABASE, allow: (f) => f === SCOPED_DATABASE },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
 ];
 // Banned in every production file, the data layer included.
@@ -372,6 +385,116 @@ function checkParity(phpSrc, contract) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// ACTION parity (BF-3C): server/src/Policy/Action.php must hold exactly the frontend vocabulary
+// of js/core/authz.js, with the same rule class and resource entity for every action.
+//
+// The frontend side is read by evaluating the repository's own authz.js in an empty vm context
+// (two constant stubs, no require, no timers, a time limit) and taking ACTIONS, POLICY and
+// ACTION_RESOURCE_ENTITY from it — the canonical values, never display text. Each POLICY
+// predicate is classified by probing it with fixed principals: CeoOnly admits only the CEO;
+// CeoOrOwnDraft also admits an Employee on a Draft. Any other shape is a failure, so a broadened
+// Employee rule turns the check red. The server side is parsed from Action.php, which must keep
+// its one-entry-per-line form; anything the parser cannot account for fails closed.
+// ---------------------------------------------------------------------------------------------
+const RULE_PROBES = [
+  { principal: 'ceo', resource: { status: 'Approved' } },
+  { principal: 'employee', resource: { status: 'Draft' } },
+  { principal: 'employee', resource: { status: 'Submitted' } },
+  { principal: 'employee', resource: null },
+  { principal: null, resource: { status: 'Draft' } },
+];
+const RULE_SHAPES = { 'true,false,false,false,false': 'CeoOnly', 'true,true,false,false,false': 'CeoOrOwnDraft' };
+
+/** @returns {{ actions: Map<string, {rule: string, entity: string|null}>|null, errors: string[] }} */
+function readFrontendActions(src) {
+  const vm = require('vm');
+  let rt;
+  try {
+    const context = vm.createContext({ PRINCIPAL_TYPES: Object.freeze({ CEO: 'ceo', EMPLOYEE: 'employee' }) });
+    rt = vm.runInContext(src + '\n;({ ACTIONS: ACTIONS, POLICY: POLICY, ENTITY: ACTION_RESOURCE_ENTITY, TYPES: PRINCIPAL_TYPES });', context, { timeout: 1000 });
+  } catch (e) {
+    return { actions: null, errors: ['js/core/authz.js could not be evaluated for ACTION parity: ' + e.message] };
+  }
+  const errors = [];
+  const values = Object.keys(rt.ACTIONS || {}).map((k) => rt.ACTIONS[k]);
+  if (new Set(values).size !== values.length) errors.push('frontend ACTIONS has duplicate values');
+  const actions = new Map();
+  for (const value of values) {
+    const predicate = rt.POLICY ? rt.POLICY[value] : undefined;
+    if (typeof predicate !== 'function') { errors.push('frontend POLICY has no predicate for ' + value); continue; }
+    if (!rt.ENTITY || !Object.prototype.hasOwnProperty.call(rt.ENTITY, value)) { errors.push('frontend ACTION_RESOURCE_ENTITY has no entry for ' + value); continue; }
+    const shape = RULE_PROBES.map((p) => {
+      const principal = p.principal === null ? null : { principalType: p.principal === 'ceo' ? rt.TYPES.CEO : rt.TYPES.EMPLOYEE };
+      try { return predicate(principal, p.resource, undefined) === true; } catch (_e) { return 'throws'; }
+    }).join(',');
+    const rule = RULE_SHAPES[shape];
+    if (!rule) { errors.push('frontend POLICY for ' + value + ' is neither CeoOnly nor CeoOrOwnDraft (probe ' + shape + ')'); continue; }
+    actions.set(value, { rule, entity: rt.ENTITY[value] });
+  }
+  for (const k of Object.keys(rt.POLICY || {})) if (!values.includes(k)) errors.push('frontend POLICY has an entry outside ACTIONS: ' + k);
+  for (const k of Object.keys(rt.ENTITY || {})) if (!values.includes(k)) errors.push('frontend ACTION_RESOURCE_ENTITY has an entry outside ACTIONS: ' + k);
+  return { actions, errors };
+}
+
+// One match block of Action.php: every non-blank line between `return match ($this) {` and `};`
+// must be exactly `self::Case => <value>,`.
+function readActionMatch(src, method, valueRe) {
+  const block = new RegExp('public function ' + method + '\\(\\): \\??\\w+\\s*\\{\\s*return match \\(\\$this\\) \\{\\n([\\s\\S]*?)\\n\\s*\\};').exec(src);
+  if (!block) return null;
+  const out = new Map();
+  for (const line of block[1].split('\n')) {
+    if (line.trim() === '') continue;
+    const m = new RegExp('^\\s*self::(\\w+) => ' + valueRe + ',\\s*$').exec(line);
+    if (!m || out.has(m[1])) return null;
+    out.set(m[1], m[2]);
+  }
+  return out;
+}
+
+/** @returns {{ actions: Map<string, {rule: string, entity: string|null}>|null, errors: string[] }} */
+function readServerActions(src) {
+  const unparseable = { actions: null, errors: ['server/src/Policy/Action.php is not in the parseable one-entry-per-line form'] };
+  const body = /\benum Action: string\s*\{\n([\s\S]*?)\n\s*public function rule\(\)/.exec(src);
+  if (!body || /\bdefault\s*=>/.test(src)) return unparseable;
+  const cases = new Map();
+  for (const line of body[1].split('\n')) {
+    if (line.trim() === '') continue;
+    const m = /^\s*case (\w+) = '([a-zA-Z.]+)';\s*$/.exec(line);
+    if (!m || cases.has(m[1])) return unparseable;
+    cases.set(m[1], m[2]);
+  }
+  const rules = readActionMatch(src, 'rule', 'Rule::(CeoOnly|CeoOrOwnDraft)');
+  const entities = readActionMatch(src, 'entity', "('[a-zA-Z]+'|null)");
+  if (!rules || !entities || rules.size !== cases.size || entities.size !== cases.size) return unparseable;
+  const errors = [];
+  const actions = new Map();
+  for (const [name, value] of cases) {
+    if (!rules.has(name) || !entities.has(name)) return unparseable;
+    if (actions.has(value)) errors.push('server Action has a duplicate value: ' + value);
+    const entity = entities.get(name);
+    actions.set(value, { rule: rules.get(name), entity: entity === 'null' ? null : entity.slice(1, -1) });
+  }
+  return { actions, errors };
+}
+
+function checkActionParity(phpSrc, jsSrc) {
+  const front = readFrontendActions(jsSrc);
+  const server = readServerActions(phpSrc);
+  const out = [...front.errors, ...server.errors];
+  if (!front.actions || !server.actions) return out.length ? out : ['ACTION parity could not be established'];
+  if (front.actions.size !== 20) out.push('frontend ACTIONS has ' + front.actions.size + ' actions, not 20');
+  if (server.actions.size !== 20) out.push('server Action has ' + server.actions.size + ' actions, not 20');
+  for (const [value, f] of front.actions) {
+    const s = server.actions.get(value);
+    if (!s) { out.push('server Action is missing ' + value); continue; }
+    if (s.rule !== f.rule) out.push('ACTION rule drift for ' + value + ': frontend ' + f.rule + ', server ' + s.rule);
+    if (s.entity !== f.entity) out.push('ACTION entity drift for ' + value + ': frontend ' + f.entity + ', server ' + s.entity);
+  }
+  for (const value of server.actions.keys()) if (!front.actions.has(value)) out.push('server Action has an action the frontend lacks: ' + value);
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Git hygiene: nothing under server/ may be ignored (except the local config) or untracked.
 // ---------------------------------------------------------------------------------------------
 function git(args, input) {
@@ -429,6 +552,9 @@ function run() {
   for (const v of checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8'))) failures.push(KERNEL_FILE + ': ' + v);
   const contract = require('./package-headers.js');
   for (const v of checkParity(fs.readFileSync(path.join(root, 'server/src/Http/ApiHeaders.php'), 'utf8'), contract)) failures.push(v);
+  const actionFile = path.join(root, ACTION_FILE);
+  if (!fs.existsSync(actionFile)) failures.push(ACTION_FILE + ': missing — ACTION parity cannot be established');
+  else for (const v of checkActionParity(fs.readFileSync(actionFile, 'utf8'), fs.readFileSync(path.join(root, FRONTEND_AUTHZ), 'utf8'))) failures.push(v);
   const ignored = gitIgnored(onDisk);
   const untracked = git(['ls-files', '--others', '--exclude-standard', '--', SERVER]).split('\n').filter(Boolean);
   for (const v of checkGitHygiene(onDisk, ignored, untracked)) failures.push(v);
@@ -439,7 +565,7 @@ function run() {
     for (const v of dedup) console.error('  - ' + v);
     process.exit(1);
   }
-  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js.');
+  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (20 actions, rules, entities).');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -648,7 +774,42 @@ function selftest() {
   dirty('SQL appended with .= is caught', DB, S + "$sql .= ' WHERE id = ?';\n", 'concatenation');
   dirty('SQL assembled with sprintf is caught', DB, S + "$sql = sprintf('SELECT %s FROM t', $col);\n", 'string builder');
   dirty('SQL assembled with implode is caught', DB, S + "$sql = implode(' AND ', $parts) ;$w = implode(' WHERE ', $x);\n", 'string builder');
-  cases.push({ name: 'server/src/Policy is gated', run: () => checkTree([], ['server/src/Policy']), expect: 'not authorized' });
+  cases.push({ name: 'server/src/Policy is authorized since BF-3C', run: () => checkTree(['server/src/Policy/Policy.php'], ['server/src/Policy']), expect: 0 });
+
+  // BF-3C: capability construction.
+  clean('Policy mints an Authorization', POLICY_FILE, S + 'return new Authorization($action, Scope::of($p), $record);\n');
+  dirty('a controller minting an Authorization is caught', 'server/src/Controller/X.php', S + '$a = new Authorization(Action::DataReset, $s, null);\n', 'Authorization is constructed only');
+  dirty('a fully-qualified Authorization outside Policy is caught', 'server/src/Data/Employee/EmployeeStore.php', S + '$a = new \\TamOs\\Policy\\Authorization($x, $s, null);\n', 'Authorization is constructed only');
+  dirty('Scope.php minting an Authorization is caught', 'server/src/Policy/Scope.php', S + '$a = new Authorization($x, $s, null);\n', 'Authorization is constructed only');
+  clean('ScopedDatabase builds a ScopedRecord', SCOPED_DATABASE, S + 'return new ScopedRecord($scope, $entity, $id, $owner, $status);\n');
+  dirty('a controller building a ScopedRecord is caught', 'server/src/Controller/X.php', S + "$r = new ScopedRecord($s, 'overtime', $id, $mine, 'Draft');\n", 'ScopedRecord is constructed only');
+  dirty('Policy building a ScopedRecord is caught', POLICY_FILE, S + "$r = new \\TamOs\\Data\\Scope\\ScopedRecord($s, 'x', 'y', null, null);\n", 'ScopedRecord is constructed only');
+  clean('a method named newAuthorization() is not construction', 'server/src/Controller/X.php', S + '$a = $this->newAuthorization(); $r = ScopedRecord::class;\n');
+
+  // BF-3C: ACTION parity against the real js/core/authz.js and the real Action.php, then each drift.
+  const realAction = fs.readFileSync(path.join(root, ACTION_FILE), 'utf8');
+  const realAuthz = fs.readFileSync(path.join(root, FRONTEND_AUTHZ), 'utf8');
+  const parity = (name, php, js, needle) => cases.push({ name: 'ACTION parity: ' + name, run: () => checkActionParity(php, js), expect: needle });
+  const swap = (src, from, to) => { if (!src.includes(from)) throw new Error('selftest fixture not found: ' + from); return src.replace(from, to); };
+  parity('the real Action.php equals the real authz.js', realAction, realAuthz, 0);
+  parity('a missing server action is caught', swap(swap(swap(realAction, "    case DataReset = 'data.reset';\n", ''), '            self::DataReset => Rule::CeoOnly,\n', ''), '            self::DataReset => null,\n', ''), realAuthz, 'missing data.reset');
+  parity('an extra server action is caught', swap(swap(swap(realAction, "    case DataReset = 'data.reset';\n", "    case DataReset = 'data.reset';\n    case EmployeeMerge = 'employee.merge';\n"),
+    '            self::DataReset => Rule::CeoOnly,\n', '            self::DataReset => Rule::CeoOnly,\n            self::EmployeeMerge => Rule::CeoOnly,\n'),
+    '            self::DataReset => null,\n', '            self::DataReset => null,\n            self::EmployeeMerge => null,\n'), realAuthz, 'frontend lacks: employee.merge');
+  parity('a renamed server action is caught', swap(realAction, "'settings.manage'", "'settings.admin'"), realAuthz, 'missing settings.manage');
+  parity('a broadened server Employee rule is caught', swap(realAction, 'self::EmployeeDelete => Rule::CeoOnly,', 'self::EmployeeDelete => Rule::CeoOrOwnDraft,'), realAuthz, 'rule drift for employee.delete');
+  parity('a narrowed server Self rule is caught', swap(realAction, 'self::OvertimeSubmitSelf => Rule::CeoOrOwnDraft,', 'self::OvertimeSubmitSelf => Rule::CeoOnly,'), realAuthz, 'rule drift for overtime.submitSelf');
+  parity('a changed server entity is caught', swap(realAction, "self::ContractUpdate => 'contract',", "self::ContractUpdate => 'employee',"), realAuthz, 'entity drift for contract.update');
+  parity('a record-free action made record-bearing is caught', swap(realAction, 'self::ImportCommit => null,', "self::ImportCommit => 'transaction',"), realAuthz, 'entity drift for import.commit');
+  parity('a default arm is caught (unparseable)', swap(realAction, '            self::DataReset => Rule::CeoOnly,\n', '            default => Rule::CeoOnly,\n'), realAuthz, 'parseable');
+  parity('grouped match arms are caught (unparseable)', swap(swap(realAction, '            self::EmployeeUpdate => Rule::CeoOnly,\n', ''), 'self::EmployeeCreate => Rule::CeoOnly,', 'self::EmployeeCreate, self::EmployeeUpdate => Rule::CeoOnly,'), realAuthz, 'parseable');
+  parity('a duplicated case is caught (unparseable)', swap(realAction, "    case DataReset = 'data.reset';\n", "    case DataReset = 'data.reset';\n    case DataReset = 'data.reset';\n"), realAuthz, 'parseable');
+  parity('an unparseable Action.php is caught', S + "enum Action: string { case A = 'a'; }\n", realAuthz, 'parseable');
+  parity('a frontend action the server lacks is caught', realAction, swap(realAuthz, "  DATA_RESET:         'data.reset'\n", "  DATA_RESET:         'data.reset',\n  EMPLOYEE_MERGE:     'employee.merge'\n"), 'employee.merge');
+  parity('a broadened frontend Employee rule is caught', realAction, swap(realAuthz, "  'employee.create':     ceoOnly,", "  'employee.create':     selfDraftOnly,"), 'rule drift for employee.create');
+  parity('an allow-all frontend rule is caught', realAction, swap(realAuthz, "  'data.reset':          ceoOnly,", "  'data.reset':          function(){ return true; },"), 'neither CeoOnly nor CeoOrOwnDraft');
+  parity('a changed frontend entity is caught', realAction, swap(realAuthz, "  'overtime.manage':     'overtime',", "  'overtime.manage':     'payrollPlan',"), 'entity drift for overtime.manage');
+  parity('an authz.js that cannot be evaluated fails closed', realAction, 'const ACTIONS = ;', 'could not be evaluated');
   dirty('a variable include outside the allow-list is caught', 'server/src/Http/X.php', S + 'require $file;\n', 'include');
   clean('prose that reads like SELECT…FROM is not SQL', 'server/src/X.php', S + "\$m = 'Select a principal from the list above';\n");
   treeCase('composer.json is caught', ['server/composer.json'], 'Composer');
