@@ -119,6 +119,12 @@ $get = static fn (array $w, string $who, string $path, string $query = ''): Resp
 $post = static fn (array $w, string $who, string $path, string $body, ?string $csrf = null): Response
     => $w['k']->handle(sessionRequest('POST', $path, $who === '' ? null : $w['s'][$who]['token'], $csrf ?? ($who === '' ? null : $w['s'][$who]['csrf']), $body), requestId());
 $status = static fn (Response $r): array => [$r->status, $r->status === 200 ? envelope($r)['data'] : (envelope($r)['error']['code'] ?? null)];
+// BF-4a1: the production route table over the same connection and the same real sessions.
+$prodKernel = static fn (array $w): Kernel => authKernel(testDbConfig(), AuthData::fromDatabase($w['db']), productionMigrationsDir());
+$prodGet = static fn (array $w, string $who, string $path, string $query = ''): Response
+    => $prodKernel($w)->handle(sessionRequest('GET', $path, $w['s'][$who]['token'], null, '', ['query' => $query]), requestId());
+$prodPost = static fn (array $w, string $who, string $path, string $body): Response
+    => $prodKernel($w)->handle(sessionRequest('POST', $path, $w['s'][$who]['token'], $w['s'][$who]['csrf'], $body), requestId());
 $principalOf = static function (array $w, string $who): Principal {
     $session = (new SessionPrincipalResolver(AuthData::fromDatabase($w['db'])))->resolve(sessionRequest('GET', '/api/auth/me', $w['s'][$who]['token']));
     return ($session ?? throw new \LogicException('no session for ' . $who))->principal;
@@ -277,5 +283,55 @@ return [
             assertTrue(Policy::allows($ceo, $a, $ot($ceo, 'e_a2', 'Approved')), 'CEO pass-through ' . $a->value);
         }
         assertTrue(!Policy::allows($emp, Action::OvertimeManage, $ot($emp, 'e_a1', 'Draft')), 'overtime.manage is CEO-only');
+    },
+
+    // ----- BF-4a1: the same matrix against the PRODUCTION Employee routes -----
+    'BF-4a1 production routes: a CEO of another company cannot read, list or mutate the employee (404, unchanged)' => static function () use ($world, $prodGet, $prodPost, $status): void {
+        $w = $world();
+        assertSame([404, 'not_found'], $status($prodGet($w, 'ceoA', '/api/employee', 'id=e_b1')), 'read');
+        assertSame([404, 'not_found'], $status($prodPost($w, 'ceoA', '/api/employees/update', '{"id":"e_b1","expectedVersion":1,"jobTitle":"x"}')), 'update');
+        assertSame([404, 'not_found'], $status($prodPost($w, 'ceoA', '/api/employees/archive', '{"id":"e_b1","expectedVersion":1}')), 'archive');
+        assertSame([404, 'not_found'], $status($prodPost($w, 'ceoB', '/api/employees/update', '{"id":"e_a1","expectedVersion":1,"jobTitle":"x"}')), 'reversed');
+        $r = $w['db']->select('SELECT job_title, archived_at, version FROM employees WHERE id = ?', ['e_b1'])[0];
+        assertSame([null, null, 1], [$r['job_title'], $r['archived_at'], (int) $r['version']], 'e_b1 unchanged');
+        $list = envelope($prodGet($w, 'ceoA', '/api/employees'))['data']['employees'];
+        assertSame(['e_a1', 'e_a2', 'e_a3'], array_column($list, 'id'), 'company A lists only its own');
+    },
+    'BF-4a1 production routes: an Employee cannot enumerate, read a colleague, or mutate anyone' => static function () use ($world, $prodGet, $prodPost, $status): void {
+        $w = $world();
+        assertSame([403, 'forbidden'], $status($prodGet($w, 'empA1', '/api/employees')), 'no enumeration');
+        assertSame(200, $prodGet($w, 'empA1', '/api/employee', 'id=e_a1')->status, 'own record');
+        foreach (['e_a2' => 'colleague', 'e_a3' => 'unbound record', 'e_b1' => 'other company', 'e_none' => 'absent'] as $id => $label) {
+            assertSame([404, 'not_found'], $status($prodGet($w, 'empA1', '/api/employee', 'id=' . $id)), 'read ' . $label);
+            assertSame([404, 'not_found'], $status($prodPost($w, 'empA1', '/api/employees/update', '{"id":"' . $id . '","expectedVersion":1,"jobTitle":"x"}')), 'update ' . $label);
+            assertSame([404, 'not_found'], $status($prodPost($w, 'empA1', '/api/employees/archive', '{"id":"' . $id . '","expectedVersion":1}')), 'archive ' . $label);
+        }
+        assertSame([403, 'forbidden'], $status($prodPost($w, 'empA1', '/api/employees/update', '{"id":"e_a1","expectedVersion":1,"jobTitle":"x"}')), 'own record, CEO-only update');
+        assertSame([403, 'forbidden'], $status($prodPost($w, 'empA1', '/api/employees/archive', '{"id":"e_a1","expectedVersion":1}')), 'own record, CEO-only archive');
+        assertSame([403, 'forbidden'], $status($prodPost($w, 'empA1', '/api/employees/create', '{"employeeCode":"MINE","fullName":"Mine"}')), 'create');
+        assertSame([], $w['db']->select("SELECT id FROM employees WHERE employee_code = 'MINE'"), 'nothing created');
+        $own = $w['db']->select('SELECT job_title, version FROM employees WHERE id = ?', ['e_a1'])[0];
+        assertSame([null, 1], [$own['job_title'], (int) $own['version']], 'own record unchanged');
+    },
+    'BF-4a1 production routes: forged scope fields are 400; a create lands in the session company only' => static function () use ($world, $prodGet, $prodPost, $status): void {
+        $w = $world();
+        assertSame([400, 'validation_failed'], $status($prodPost($w, 'ceoA', '/api/employees/create', '{"employeeCode":"X1","fullName":"N","company_id":"' . $w['b'] . '"}')), 'forged company on create');
+        assertSame([400, 'validation_failed'], $status($prodPost($w, 'empA1', '/api/employees/update', '{"id":"e_a1","expectedVersion":1,"employee_id":"e_a2"}')), 'forged binding');
+        assertSame([400, 'invalid_query'], $status($prodGet($w, 'empA1', '/api/employee', 'id=e_a1&employee_id=e_a2')), 'forged query');
+        $created = envelope($prodPost($w, 'ceoA', '/api/employees/create', '{"employeeCode":"X1","fullName":"N"}'))['data']['employee'];
+        assertSame([$w['a']], array_map(static fn (array $r): string => (string) $r['company_id'], $w['db']->select('SELECT company_id FROM employees WHERE id = ?', [$created['id']])), 'company A');
+        assertSame([404, 'not_found'], $status($prodGet($w, 'ceoB', '/api/employee', 'id=' . $created['id'])), 'invisible to company B');
+    },
+    'BF-4a1 production routes: absent and out-of-scope employees answer byte-identical 404s' => static function () use ($world, $prodGet, $prodPost): void {
+        $w = $world();
+        $pairs = [
+            [$prodGet($w, 'empA1', '/api/employee', 'id=e_a2'), $prodGet($w, 'empA1', '/api/employee', 'id=e_none')],
+            [$prodGet($w, 'ceoA', '/api/employee', 'id=e_b1'), $prodGet($w, 'ceoA', '/api/employee', 'id=e_none')],
+            [$prodPost($w, 'ceoA', '/api/employees/archive', '{"id":"e_b1","expectedVersion":1}'), $prodPost($w, 'ceoA', '/api/employees/archive', '{"id":"e_none","expectedVersion":1}')],
+        ];
+        foreach ($pairs as $i => [$foreign, $absent]) {
+            assertSame([404, $absent->body, $absent->headers], [$foreign->status, $foreign->body, $foreign->headers], 'pair ' . $i);
+            assertNoLeak($foreign->body, ['e_a2', 'e_b1', $w['b']]);
+        }
     },
 ];

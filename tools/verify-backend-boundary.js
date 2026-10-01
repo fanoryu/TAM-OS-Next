@@ -107,6 +107,10 @@ const MAIL_ADAPTER = 'server/src/Mail/ResendTransport.php';
 const RECOVERY_MAIL = 'server/src/Mail/RecoveryMail.php';
 // The only production place a raw one-time token is printed: the operator CLI, once, by design.
 const TOKEN_PRINTERS = new Set(['server/bin/account.php']);
+// BF-4a1: the Employee record and the append-only business audit trail.
+const EMPLOYEE_STORE = 'server/src/Data/Employee/EmployeeStore.php';
+const AUDIT_LOG = 'server/src/Data/Audit/AuditLog.php';
+const ROUTES_FILE = 'server/src/Http/Routes.php';
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -219,6 +223,12 @@ const STRING_RULES = [
   { id: 'account-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?(companies|users|memberships)\b/i, msg: 'companies, users and memberships are written only by ' + ACCOUNT_STORE, allow: (f) => f === ACCOUNT_STORE },
   { id: 'token-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?account_tokens\b/i, msg: 'account_tokens is written only by ' + TOKEN_STORE, allow: (f) => f === TOKEN_STORE },
   { id: 'outbox-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?mail_outbox\b/i, msg: 'mail_outbox is written only by ' + OUTBOX_STORE, allow: (f) => f === OUTBOX_STORE },
+  // BF-4a1: employee.delete is a soft archive — no statement anywhere hard-deletes an employee;
+  // the audit trail is append-only — nothing updates, deletes, replaces or truncates it.
+  { id: 'employee-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?employees\b/i, msg: 'employees is written only by ' + EMPLOYEE_STORE, allow: (f) => f === EMPLOYEE_STORE },
+  { id: 'employee-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?employees\b/i, msg: 'an employee is never hard-deleted (employee.delete is a soft archive)' },
+  { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
+  { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
   { id: 'recovery-link', re: /#recovery=/, msg: 'the recovery link is built only by ' + RECOVERY_MAIL + ' (from the configured origin)', allow: (f) => f === RECOVERY_MAIL },
   { id: 'host-header', re: /^(HTTP_HOST|SERVER_NAME|HTTP_X_FORWARDED_HOST|HTTP_X_FORWARDED_PROTO|HTTP_FORWARDED)$/, msg: 'the Host and forwarding headers are never read: URLs come only from the configured origin' },
@@ -269,6 +279,59 @@ function checkMigrationTenantKey(src) {
 function checkMigrationNoCascade(src) {
   return /\bON\s+(DELETE|UPDATE)\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT)\b/i.test(src) ? ['a migration foreign key may not CASCADE, SET NULL or SET DEFAULT'] : [];
 }
+// BF-4a1: migration versions are contiguous from 0001 (MigrationSet enforces it at run time; this
+// catches a gap or a duplicate before review).
+function checkMigrationContinuity(files) {
+  const versions = files.filter((f) => MIGRATION_FILE.test(f)).map((f) => parseInt(path.posix.basename(f).slice(0, 4), 10)).sort((a, b) => a - b);
+  for (let i = 0; i < versions.length; i++) {
+    if (versions[i] !== i + 1) return ['migration versions must run 0001…' + String(versions.length).padStart(4, '0') + ' without a gap or a duplicate (found ' + String(versions[i]).padStart(4, '0') + ' at position ' + (i + 1) + ')'];
+  }
+  return [];
+}
+
+// BF-4a1 route metadata: every mutation route in Routes.php is either account self-service
+// (listed in ACCOUNT_SELF_SERVICE, no Action) or declares its Action:: (Routes::validate also
+// refuses it at bootstrap; this catches it before review).
+function checkRouteActions(src) {
+  const list = /ACCOUNT_SELF_SERVICE\s*=\s*\[([\s\S]*?)\];/.exec(src);
+  if (!list) return ['Routes.php: ACCOUNT_SELF_SERVICE is not parseable'];
+  const selfService = new Set([...list[1].matchAll(/'([A-Z]+ \/api\/[^']+)'/g)].map((m) => m[1]));
+  const out = [];
+  for (const m of src.matchAll(/new Route\('(POST|PUT|PATCH|DELETE)', '([^']+)'([^\n]*)/g)) {
+    const key = m[1] + ' ' + m[2];
+    const declares = /\bAction::[A-Z]\w*/.test(m[3]);
+    if (selfService.has(key) && declares) out.push('Routes.php: self-service route ' + key + ' must not declare an Action');
+    if (!selfService.has(key) && !declares) out.push('Routes.php: business mutation ' + key + ' must declare its Action::');
+  }
+  return out;
+}
+
+// BF-4a1, SDR-0002 §9.2: a business mutation and its audit row commit in one transaction. Every
+// ->audit()->append( call sits inside an ->atomically( closure (parentheses matched on the lexed
+// code, where strings are blanked and comments removed). A shape check; the DB rollback test proves it.
+function checkAuditInTransaction(lex) {
+  const code = lex.code;
+  const ranges = [];
+  const open = /->\s*atomically\s*\(/g;
+  let m;
+  while ((m = open.exec(code))) {
+    let depth = 0;
+    let i = m.index + m[0].length - 1;
+    for (; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')' && --depth === 0) break;
+    }
+    ranges.push([m.index, i]);
+  }
+  const out = [];
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append\s*\(/g;
+  while ((m = append.exec(code))) {
+    const at = m.index;
+    if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
+  }
+  return out;
+}
+
 const SECRET_RULES = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /\bAKIA[0-9A-Z]{16}\b/,
@@ -354,6 +417,7 @@ function checkPhp(file, src) {
   if (/\$_COOKIE\b/.test(lex.code)) out.push('$_COOKIE is never read: the session cookie comes from HTTP_COOKIE in Request.php');
   for (const v of checkCsrfComparison(lex.code)) out.push(v);
   for (const v of checkScopedData(file, src, lex)) out.push(v);
+  for (const v of checkAuditInTransaction(lex)) out.push(v);
   return out;
 }
 
@@ -639,6 +703,8 @@ function run() {
     for (const v of checkMigrationTenantKey(src)) failures.push(f + ': ' + v);
     for (const v of checkMigrationNoCascade(src)) failures.push(f + ': ' + v);
   }
+  for (const v of checkMigrationContinuity(files)) failures.push(v);
+  for (const v of checkRouteActions(fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8'))) failures.push(v);
   for (const v of checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8'))) failures.push(KERNEL_FILE + ': ' + v);
   const contract = require('./package-headers.js');
   for (const v of checkParity(fs.readFileSync(path.join(root, 'server/src/Http/ApiHeaders.php'), 'utf8'), contract)) failures.push(v);
@@ -941,6 +1007,38 @@ function selftest() {
   dirty('employees SQL joined from a session read is caught', 'server/src/Data/Auth/SessionStore.php', S + "const Q = 'SELECT s.user_id FROM sessions s JOIN employees e ON e.id = s.user_id WHERE s.token_hash = ?';\n", 'read and written only by business stores');
   dirty('an employees write in ScopedDatabase itself is caught', SCOPED_DATABASE, S + "$this->db->execute('INSERT INTO employees (id, company_id, created_at) VALUES (?, ?, UTC_TIMESTAMP(6))', [$a, $b]);\n", 'read and written only by business stores');
   clean('prose naming employees is not SQL', 'server/src/Data/Auth/AccountStore.php', S + "// the employees table is scoped\n$m = 'employees are anchors';\n");
+
+  // BF-4a1: Employee writes stay in EmployeeStore and never hard-delete; the audit trail is
+  // append-only and has one writer; migrations stay contiguous; mutation routes declare Actions.
+  const realAudit = fs.readFileSync(path.join(root, AUDIT_LOG), 'utf8');
+  const inStore = (src, extra) => src.replace('    public const ENTITY', '    ' + extra + '\n    public const ENTITY');
+  clean('the real AuditLog passes', AUDIT_LOG, realAudit);
+  dirty('an audit UPDATE in AuditLog itself is caught', AUDIT_LOG, realAudit.replace('    public const ACTIONS', "    public const BAD_SQL = 'UPDATE audit_events SET fields = NULL WHERE company_id = :company_id';\n    public const ACTIONS"), 'append-only');
+  dirty('an audit DELETE in a business store is caught', STORE, inStore(realStore, "public const PURGE_SQL = 'DELETE FROM audit_events WHERE company_id = :company_id';"), 'append-only');
+  dirty('an audit TRUNCATE is caught', AUDIT_LOG, realAudit.replace('    public const ACTIONS', "    public const T_SQL = 'TRUNCATE TABLE audit_events';\n    public const ACTIONS"), 'append-only');
+  dirty('an audit REPLACE is caught', AUDIT_LOG, realAudit.replace('    public const ACTIONS', "    public const R_SQL = 'REPLACE INTO audit_events (company_id) VALUES (:company_id)';\n    public const ACTIONS"), 'append-only');
+  dirty('an audit insert outside AuditLog is caught', STORE, inStore(realStore, "public const LOG_SQL = 'INSERT INTO audit_events (company_id) VALUES (:company_id)';"), 'written only by ' + AUDIT_LOG);
+  dirty('an employees write outside EmployeeStore is caught', AUDIT_LOG, realAudit.replace('    public const ACTIONS', "    public const BAD_SQL = 'UPDATE employees SET notes = NULL WHERE company_id = :company_id';\n    public const ACTIONS"), 'written only by ' + EMPLOYEE_STORE);
+  dirty('a hard DELETE of an employee in EmployeeStore is caught', STORE, inStore(realStore, "public const DELETE_SQL = 'DELETE FROM employees WHERE id = :id AND company_id = :company_id';"), 'never hard-deleted');
+  dirty('an employee TRUNCATE is caught', STORE, inStore(realStore, "public const T_SQL = 'TRUNCATE TABLE employees';"), 'never hard-deleted');
+  const SERVICE = 'server/src/Employee/EmployeeService.php';
+  const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
+  clean('the real EmployeeService appends audit rows inside its transactions', SERVICE, realService);
+  dirty('an audit append moved after the transaction is caught', SERVICE, realService.replace(
+    "            $this->data->employees()->create($auth, $id, $profile);\n            $this->data->audit()->append(",
+    "            $this->data->employees()->create($auth, $id, $profile);\n        }));\n        $this->writing(fn () => $this->data->atomically(function (): void {\n        }));\n        $this->data->audit()->append("), 'inside the transaction');
+  dirty('an audit append with no transaction is caught', 'server/src/Overtime/OvertimeService.php', S + "$this->data->audit()->append($auth, $actor, 'employee', $id, [], $rid);\n", 'inside the transaction');
+  clean('an audit append inside atomically passes', 'server/src/Overtime/OvertimeService.php', S + "$this->data->atomically(function () use ($auth): void { $x = '())('; $this->data->audit()->append($auth, $a, 'employee', $i, [], $r); });\n");
+  const realAuditMigration = fs.readFileSync(path.join(root, 'server/migrations/0015_create_audit_events.sql'), 'utf8');
+  tenant('the real audit migration passes (a registered company table)', realAuditMigration, 0);
+  tenant('an audit table without its tenant UNIQUE is caught', realAuditMigration.replace('  UNIQUE KEY audit_events_company_id (company_id, id),\n', ''), 'UNIQUE KEY');
+  cases.push({ name: 'contiguous migrations pass', run: () => checkMigrationContinuity(['server/migrations/0001_a.sql', 'server/migrations/0002_b.sql']), expect: 0 });
+  cases.push({ name: 'a migration gap is caught', run: () => checkMigrationContinuity(['server/migrations/0001_a.sql', 'server/migrations/0003_c.sql']), expect: 'without a gap' });
+  cases.push({ name: 'a duplicate migration version is caught', run: () => checkMigrationContinuity(['server/migrations/0001_a.sql', 'server/migrations/0001_b.sql']), expect: 'without a gap' });
+  const realRoutes = fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8');
+  cases.push({ name: 'the real Routes.php declares every Action', run: () => checkRouteActions(realRoutes), expect: 0 });
+  cases.push({ name: 'a business mutation without an Action is caught', run: () => checkRouteActions(realRoutes.replace(', [], RouteAuth::Required, Action::EmployeeDelete)', ', [], RouteAuth::Required)')), expect: 'must declare its Action' });
+  cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 
   // BF-3C: ACTION parity against the real js/core/authz.js and the real Action.php, then each drift.
   const realAction = fs.readFileSync(path.join(root, ACTION_FILE), 'utf8');
