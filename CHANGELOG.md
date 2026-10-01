@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **AFI-4a2 SESSION Employee create, edit and archive (frontend; CEO only, SESSION mode only, not shipped).**
+  A CEO signed in through the backend session can add an Employee record, edit it (only the changed fields are
+  sent, with the record version) and archive it after an inline confirmation. Archive is a soft archive — the
+  record moves to "Including archived"; there is no delete and no unarchive. The server decides every result;
+  if TAM OS cannot confirm whether a change was saved, it never sends it again on its own but re-reads the record
+  or list and says so. An Employee's own profile stays read-only. No account controls yet; the shipped
+  `AUTH_MODE` stays **LOCAL**; no backend, schema, storage-key, ACTIONS (**21**) or CSS change.
 - **AFI-4a1 read-only SESSION Employee workspace (frontend; SESSION mode only, not shipped).** When signed in
   through the backend session, a CEO sees the server Employee list (with archived records on request) and a
   record's detail with its account state, and an Employee sees their own profile — read-only, from the server only,
