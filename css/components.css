@@ -229,3 +229,16 @@ td.num, th.num{text-align:right;font-family:var(--sans);font-variant-numeric:tab
    80px. `break-word` only engages when a word would otherwise overflow, so wider
    viewports and normal copy are visually unchanged. Presentation only. */
 .card li, .card p, .card .desc{overflow-wrap:break-word;}
+/* AFI-2 (owner decision D4) — SESSION-mode auth views (js/ui/auth-view.js): checking,
+   sign-in, signed-in holding and unavailable. Additive; existing tokens only, so dark
+   and light follow the theme. A single centred column with the 16px gutter on phones. */
+.auth-screen{flex:1;min-width:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--space-4);box-sizing:border-box;}
+.auth-card{width:100%;max-width:400px;display:flex;flex-direction:column;gap:var(--space-3);}
+.auth-title{font-family:var(--sans);font-size:var(--fs-5);font-weight:650;margin:0;color:var(--text);}
+.auth-title:focus{outline:none;}
+.auth-title:focus-visible{outline:2px solid var(--interactive);outline-offset:2px;}
+.auth-form{display:flex;flex-direction:column;gap:var(--space-3);}
+.auth-lead, .auth-notice{margin:0;color:var(--text-dim);}
+.auth-message{margin:0;min-height:1.2em;font-size:var(--fs-2);color:var(--text-dim);}
+.auth-message-warn{color:var(--warn);}
+.auth-actions{display:flex;justify-content:flex-end;gap:var(--space-2);}

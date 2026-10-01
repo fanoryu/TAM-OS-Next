@@ -140,6 +140,11 @@ module.exports = [
   //     gateway it delegates to (and only to) and before bootstrap. Owns no
   //     business behavior. ---
   'transport/transport-adapter.js',
+  // --- AFI-2 authenticated boot: the SESSION-mode state machine and its views. Both
+  //     define functions/frozen objects only; app-bootstrap.js starts AuthBoot only when
+  //     AUTH_MODE is SESSION (LOCAL — the shipped default — never touches them). ---
+  'core/auth-boot.js',
+  'ui/auth-view.js',
   // --- bootstrap (19) ---
   'core/app-bootstrap.js'
 ];

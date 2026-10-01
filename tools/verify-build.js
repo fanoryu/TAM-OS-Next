@@ -153,12 +153,16 @@ const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
 //     deliberately UNCHANGED (palette strategy P1: identity/UI separation). No schema,
 //     storage-key, migration, type-scale or spacing change. Old CSS golden pin was
 //     6d9c2137…3b4b96; old tokens pin was 60dde600…1a7d1.
-//   BRAND-1 refinement (current) — AUTHORIZED golden revision, css/shell.css only. Owner
+//   BRAND-1 refinement — AUTHORIZED golden revision, css/shell.css only. Owner
 //     optical ruling: the expanded-sidebar monogram grows 30px→34px so it reads as a brand
 //     mark; the collapsed rail keeps it at 30px (size intentionally differs by state);
 //     hover-peek and the mobile drawer show the expanded 34px mark. Presentation only; no
 //     token change (tokens.css pin unchanged). Prior CSS golden pin was 742164ea…4e0a7d8a.
-const CSS_GOLDEN_SHA256 = '84c3434fe6b1f9c571462fa42bce0f62d550851f7b8605bcd9998f4b500f7bae';
+//   AFI-2 (current) — AUTHORIZED golden revision (owner decision D4), css/components.css
+//     only: additive .auth-* rules for the SESSION-mode auth views, appended at the end of
+//     the file; no existing rule changed, no token change (tokens.css pin unchanged).
+//     Prior CSS golden pin was 84c3434f…4b500f7bae.
+const CSS_GOLDEN_SHA256 = 'be5eea17f71a9af7e4c28243d950be14e4385bb4c362318efcd24f095e230067';
 // UX-005C — tokens.css anti-drift pin. The design tokens are the single source of truth
 // for spacing/type/radius/color; this pin fails loudly if any token VALUE is changed,
 // so a "consistency" edit can never silently move the scale it normalizes onto.
@@ -4261,9 +4265,14 @@ check(overrideLeak.length === 0,
   'UX-006A: the internal test-only provider override is not used by any application module');
 // The canonical seam delegates through a single mutable active-provider handle,
 // so it is genuinely testable while still exposing only getCurrentUser().
-check(/let activeIdentityProvider = LocalIdentityProvider;/.test(idSrc)
-  && /getCurrentUser\(\)\{\s*return activeIdentityProvider\.getCurrentUser\(\);/.test(idSrc),
-  'UX-006A: canonical seam delegates via a single active-provider indirection (LocalIdentityProvider default)');
+// AFI-2 authorized revision: the single indirection now resolves the provider from the
+// explicit AUTH_MODE at call time (LOCAL -> LocalIdentityProvider, SESSION ->
+// SessionIdentityProvider, anything else -> a null provider), with the test seam taking
+// precedence while set. Was: `let activeIdentityProvider = LocalIdentityProvider;`.
+check(/const modeIdentityProvider = function\(\)\{\s*if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;\s*if\(AUTH_MODE === AUTH_MODES\.SESSION && typeof SessionIdentityProvider !== 'undefined'\) return SessionIdentityProvider;\s*return NO_IDENTITY_PROVIDER;\s*\};/.test(idSrc)
+  && /getCurrentUser\(\)\{\s*return \(testIdentityProvider \|\| modeIdentityProvider\(\)\)\.getCurrentUser\(\);/.test(idSrc)
+  && /const NO_IDENTITY_PROVIDER = Object\.freeze\(\{ getCurrentUser\(\)\{ return null; \} \}\);/.test(idSrc),
+  'UX-006A/AFI-2: canonical seam delegates via a single indirection resolved from AUTH_MODE (LOCAL -> LocalIdentityProvider; never the local adapter in SESSION)');
 // The following boundary guards scan CODE only (comments stripped), so the
 // module's own trust-boundary prose does not trip them.
 const idCode = idSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
@@ -5499,16 +5508,93 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1: the principal is built from userId / role / employeeId only (the CSRF token is not part of it)');
 
   // INERT: nothing outside the two modules uses them; boot and the canonical seam are unchanged.
-  const users = offenders(/\b(SessionIdentityProvider|CsrfHolder|mapSessionProjection)\b/, ['core/session-identity.js', 'transport/api-client.js']);
-  check(users.length === 0, 'AFI-1: no other module references SessionIdentityProvider / CsrfHolder (inert foundation)' + (users.length ? ' >> VIOLATION: ' + users.join(', ') : ''));
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js']);
-  check(apiUsers.length === 0, 'AFI-1: no other module calls ApiClient (no request during normal boot)' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
-  check(!/\/api\//.test(prodFiles.filter((f) => f !== 'transport/api-client.js' && f !== 'core/session-identity.js').map((f) => prodCode[f]).join('\n')),
-    'AFI-1: no other production module names an /api/ path');
-  check(/let activeIdentityProvider = LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
-    'AFI-1: LocalIdentityProvider is still the default active provider (mode stays LOCAL, owner decision D1)');
+  // AFI-2 authorized revision: the foundation is now reached ONLY by the SESSION-mode boot
+  // (core/auth-boot.js) and, for the provider name alone, by identity.js's mode resolution.
+  // Was: no module outside the two AFI-1 files.
+  const users = offenders(/\b(SessionIdentityProvider|CsrfHolder|mapSessionProjection)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/identity.js']);
+  check(users.length === 0 && !/\b(CsrfHolder|mapSessionProjection)\b/.test(prodCode['core/identity.js']),
+    'AFI-1/AFI-2: SessionIdentityProvider / CsrfHolder are referenced only by auth-boot.js (and the provider name by identity.js)' + (users.length ? ' >> VIOLATION: ' + users.join(', ') : ''));
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js']);
+  check(apiUsers.length === 0, 'AFI-1/AFI-2: only session-identity.js and auth-boot.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+    && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'",
+    'AFI-1/AFI-2: /api/ paths are named only by the session modules; auth-boot.js names only /api/auth/login and /api/auth/logout');
+  check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
+    'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
   check(/u\.employeeId !== null/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1: the identity contract accepts a server CEO employee binding (absent / null / non-empty string)');
+}
+
+// ===== AFI-2 — AUTHENTICATED BOOT (explicit mode, SESSION boot firewall) =====
+// STRUCTURE only; behaviour is proven by tools/verify-auth-boot-runtime.js. Pins: one
+// explicit source constant that ships LOCAL; LOCAL boot unchanged; SESSION boot checks the
+// session first and never loads local state, the shell or "Acting as"; login/logout only
+// through AuthBoot; no persistence, logging or environment inference in the auth modules;
+// the test-only auth stub stays out of the package.
+console.log('== AFI-2 — AUTHENTICATED BOOT ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? read(p) : ''; };
+  const constCode = code(rd('core/constants.js'));
+  const bootCode = code(rd('core/app-bootstrap.js'));
+  const abCode = code(rd('core/auth-boot.js'));
+  const avCode = code(rd('ui/auth-view.js'));
+  const shellCode = code(rd('ui/shell-render.js'));
+  const gsCode = code(rd('ui/global-search-ui.js'));
+  const iBoot = jsFiles.indexOf('core/app-bootstrap.js');
+  check(jsFiles.indexOf('core/auth-boot.js') === iBoot - 2 && jsFiles.indexOf('ui/auth-view.js') === iBoot - 1 && iBoot === jsFiles.length - 1
+    && indexHtml.includes('<script src="js/core/auth-boot.js"></script>\n<script src="js/ui/auth-view.js"></script>\n<script src="js/core/app-bootstrap.js"></script>'),
+    'AFI-2: auth-boot.js and auth-view.js load immediately before app-bootstrap.js (manifest and index.html)');
+  // D1 — one explicit source constant, shipped LOCAL.
+  check(/const AUTH_MODES = Object\.freeze\(\{ LOCAL: 'local', SESSION: 'session' \}\);/.test(constCode)
+    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(constCode),
+    'AFI-2: AUTH_MODES is exactly { LOCAL, SESSION } and the shipped AUTH_MODE is LOCAL');
+  const modeAssign = jsFiles.concat(['boot/theme-boot.js']).filter((f) => /\bAUTH_MODE\s*=[^=]/.test(code(rd(f))));
+  check(modeAssign.join() === 'core/constants.js', 'AFI-2: AUTH_MODE is assigned exactly once, in constants.js' + (modeAssign.join() === 'core/constants.js' ? '' : ' >> ' + modeAssign.join(', ')));
+  [['core/app-bootstrap.js', bootCode], ['core/auth-boot.js', abCode], ['ui/auth-view.js', avCode], ['core/constants.js', constCode]].forEach(([name, c]) => {
+    check(!/\blocation\b|hostname|document\s*\.\s*cookie|localStorage|sessionStorage|StorageAdapter|URLSearchParams|navigator\s*\.\s*onLine/.test(c),
+      'AFI-2: ' + name + ' infers nothing from the URL, hostname, cookies, storage or connectivity');
+  });
+  // LOCAL boot unchanged; SESSION boot starts AuthBoot and nothing else.
+  check(/if\(AUTH_MODE === AUTH_MODES\.LOCAL\)\{\s*await loadState\(\);\s*applyTheme\(\);\s*installGlobalUIHandlers\(\);\s*render\(\);\s*maybeShowFirstRunChoice\(\);\s*return;\s*\}\s*AuthBoot\.start\(\);\s*\}\)\(\);/.test(bootCode),
+    'AFI-2: app-bootstrap.js keeps the LOCAL boot sequence verbatim and only starts AuthBoot otherwise');
+  check(/function render\(\)\{\s*closeFloatingMenu\(\);\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\)\{\s*if\(typeof renderAuthView === 'function'\) renderAuthView\(\);\s*return;\s*\}/.test(shellCode),
+    'AFI-2: render() shows only the auth views outside LOCAL mode until a workspace is granted');
+  check(/function openGlobalSearch\(\)\{\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\) return;/.test(gsCode),
+    'AFI-2: Global Search (Ctrl/Cmd+K) is gated the same way');
+  check(/allowsWorkspace\(\)\{ return false; \}/.test(abCode), 'AFI-2: AuthBoot grants no workspace in any state (D-A)');
+  // Firewall + authority inside the auth modules.
+  [['core/auth-boot.js', abCode], ['ui/auth-view.js', avCode]].forEach(([name, c]) => {
+    check(!/\b(loadState|maybeShowFirstRunChoice|meaningfulDataCounts|renderShell|renderIdentitySelectorHTML|LocalIdentityProvider|selectPrincipal|FIXTURE_PRINCIPALS|setIdentityProviderForTesting)\b/.test(c),
+      'AFI-2: ' + name + ' never loads local state, the shell, "Acting as" or the local identity');
+    check(!/\bconsole\s*\.|\bfetch\s*\(|XMLHttpRequest|\bState\b|setInterval/.test(c), 'AFI-2: ' + name + ' does not log, fetch directly, touch State or poll');
+  });
+  check(!/setTimeout|while\s*\(/.test(abCode), 'AFI-2: AuthBoot schedules nothing and has no loop (no automatic retry)');
+  check((abCode.match(/ApiClient\.request\(/g) || []).length === 3
+    && /ApiClient\.request\('\/api\/auth\/login', \{ method: 'POST', body: \{ email: email, password: password \} \}\)/.test(abCode)
+    && (abCode.match(/ApiClient\.request\(path, \{ method: 'POST', body: body, csrf: true \}\)/g) || []).length === 2
+    && /authSessionMutation\('\/api\/auth\/logout', \{\}\)/.test(abCode),
+    'AFI-2: login is a CSRF-free POST; logout goes through the bounded recovery (one send, at most one replay), with CSRF');
+  check(/if\(!samePrincipal\(principal, SessionIdentityProvider\.getCurrentUser\(\)\)\) return/.test(abCode)
+    && /if\(CsrfHolder\.get\(\) === token\) return/.test(abCode) && /first\.kind !== API_RESULT_KINDS\.DENIED/.test(abCode),
+    'AFI-2: a 403 is replayed only for the same principal with a changed CSRF token');
+  check(/const me = await SessionIdentityProvider\.refresh\(\);/.test(abCode) && !/res\.data/.test(abCode),
+    'AFI-2: identity after login comes from /me; the login response body is never read');
+  // The views.
+  check(/type="email" autocomplete="username"/.test(avCode) && /type="password" autocomplete="current-password"/.test(avCode)
+    && /method="post" novalidate/.test(avCode) && /e\.preventDefault\(\);/.test(avCode) && /passEl\.value = ''/.test(avCode),
+    'AFI-2: sign-in form: username/current-password autocomplete, method="post", submit intercepted, password field cleared');
+  check(/escapeHtml\(/.test(avCode) && !/password/.test(avCode.replace(/authPassword|type="password"|current-password|name="password"|const password = passEl \? passEl\.value : '';|AuthBoot\.signIn\(email, password\)|'Enter your email address and password\.'|Email or password|passEl/g, '')),
+    'AFI-2: auth-view.js escapes dynamic values and keeps the password only as a submit-time local');
+  // The test-only stub.
+  const stubPath = path.join(root, 'tools', 'serve-auth-stub.js');
+  const stubSrc = fs.existsSync(stubPath) ? read(stubPath) : '';
+  check(!!stubSrc && /\.listen\(port, '127\.0\.0\.1'/.test(stubSrc) && !/writeFileSync|https?:\/\/(?!127\.0\.0\.1)/.test(stubSrc.replace(/\/\*[\s\S]*?\*\//, '')),
+    'AFI-2: tools/serve-auth-stub.js is loopback-only, writes nothing to disk and calls nothing external');
+  check(!jsFiles.some((f) => /stub/.test(f)) && !/serve-auth-stub/.test(indexHtml), 'AFI-2: the auth stub is not part of the application or the package');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-auth-boot-runtime.js')), 'AFI-2: runtime harness present — tools/verify-auth-boot-runtime.js');
+  check(/\.auth-screen\{/.test(read(path.join(root, 'css', 'components.css'))), 'AFI-2: auth-view styles live in css/components.css (authorized golden revision)');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

@@ -153,6 +153,9 @@ function runGlobalSearchQuery(){
 }
 
 function openGlobalSearch(){
+  // AFI-2 — outside LOCAL mode Global Search opens only where AuthBoot grants a
+  // workspace (never in AFI-2), so Ctrl/Cmd+K does nothing on the auth screens.
+  if(AUTH_MODE !== AUTH_MODES.LOCAL && !(typeof AuthBoot !== 'undefined' && AuthBoot.allowsWorkspace())) return;
   if(__gsearch){ __gsearch.input.focus(); __gsearch.input.select(); return; }
   const returnFocus = document.activeElement;
   /* SCOPE SEAM (Readiness-1 — now wired). The search ENGINE stays source-agnostic and

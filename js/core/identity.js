@@ -113,14 +113,23 @@ const LocalIdentityProvider = (function(){
   });
 })();
 
-/* ---------- active provider indirection ----------
-   The canonical seam delegates to whatever provider is currently active. The
-   default (and only production) provider is LocalIdentityProvider. This
-   indirection exists so the canonical seam is genuinely testable: a harness can
-   install an alternative provider and observe that getCurrentUser() re-validates
-   and fails closed. It is NOT a product provider-selection API — there is no
-   public setter and no runtime switch UI. */
-let activeIdentityProvider = LocalIdentityProvider;
+/* ---------- active provider: chosen by the explicit AUTH_MODE (AFI-2) ----------
+   The canonical seam delegates to the provider of the CURRENT mode, resolved at
+   call time from the single source constant AUTH_MODE (js/core/constants.js):
+     LOCAL   -> LocalIdentityProvider (the shipped default; "Acting as" unchanged)
+     SESSION -> SessionIdentityProvider (js/core/session-identity.js), never the
+                local adapter — there is no fallback from one mode to the other
+     anything else, or SESSION before its provider exists -> NO_IDENTITY_PROVIDER
+   It is NOT a product provider-selection API: there is no public setter and no
+   runtime switch UI. A harness may still install an alternative provider through
+   the internal test seam below, which wins over the mode while it is set. */
+const NO_IDENTITY_PROVIDER = Object.freeze({ getCurrentUser(){ return null; } });
+const modeIdentityProvider = function(){
+  if(AUTH_MODE === AUTH_MODES.LOCAL) return LocalIdentityProvider;
+  if(AUTH_MODE === AUTH_MODES.SESSION && typeof SessionIdentityProvider !== 'undefined') return SessionIdentityProvider;
+  return NO_IDENTITY_PROVIDER;
+};
+let testIdentityProvider = null;    // set only through setIdentityProviderForTesting
 
 /* ---------- IdentityProvider (CANONICAL seam) ----------
    The ONLY identity contract application consumers may depend on. In the
@@ -128,7 +137,7 @@ let activeIdentityProvider = LocalIdentityProvider;
    exposes ONLY the universal getCurrentUser() — never enumeration or selection.
    A future backend/authenticated provider implements exactly this one method. */
 const IdentityProvider = Object.freeze({
-  getCurrentUser(){ return activeIdentityProvider.getCurrentUser(); }
+  getCurrentUser(){ return (testIdentityProvider || modeIdentityProvider()).getCurrentUser(); }
 });
 
 /* INTERNAL TEST SEAM — installs an alternative provider behind the canonical
@@ -140,7 +149,7 @@ const IdentityProvider = Object.freeze({
    Application modules must never call this — it is a test seam, not a
    provider-selection API. */
 const setIdentityProviderForTesting = function(provider){
-  activeIdentityProvider = provider || LocalIdentityProvider;
+  testIdentityProvider = provider || null;   // null restores the mode's provider
 };
 
 /* ---------- getCurrentUser() — the single canonical consumer entry point ----------
