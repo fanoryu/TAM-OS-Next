@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 20,
   "entry": "index.html",
-  "packageDigest": "e861a225d1e86c99e9c31817abbacfb3d954dc2aa218091154e4189f14d2b657",
+  "packageDigest": "2749cd37a2342e7bc4261a3b45565189d58cb68c74671d82ff8e9f292c80c92a",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2620690,
-    "sha256": "13d86ea6e1ef62a2bd21ef308b75adaa204c4f4bdb453aa23f3e225c809dc3bd"
+    "bytes": 2631678,
+    "sha256": "b78e533f468337e6d811fd9cdc7d37b2652114577bbfc92326514f3b4a640350"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9327,
-      "sha256": "f8dc45edcee911448efdb7d8051beb97046d1f8dfca92e61dc5de850445a8be0"
+      "bytes": 9372,
+      "sha256": "bfc76778a6c50836a2408ff88318203a182d3de8d6135ccdac4b40a37e90b03b"
     },
     {
       "path": "js/analytics/compare.js",
@@ -104,8 +104,13 @@
     },
     {
       "path": "js/core/app-bootstrap.js",
-      "bytes": 245,
-      "sha256": "0f9347e5a72a51dd1dbccde6c0a8bb3eb4f1807f17ca9a31f3f3dbd59686a5ca"
+      "bytes": 567,
+      "sha256": "41001dfb98760570c4b706e6b3096d54283a34e4935ec9c1939cf23c99b71859"
+    },
+    {
+      "path": "js/core/auth-boot.js",
+      "bytes": 8179,
+      "sha256": "2e7dfff7f8045ad9f8dc6fc7ab7b1ecf55103a04e42cfb3811dd93fb7b41f9c8"
     },
     {
       "path": "js/core/authz.js",
@@ -114,8 +119,8 @@
     },
     {
       "path": "js/core/constants.js",
-      "bytes": 18134,
-      "sha256": "26b0795139c4b67f766c5f420c5d8e7b0777e8ce6f5946d929271a34ded93003"
+      "bytes": 18991,
+      "sha256": "ad639d797de84243abc0291a21539c2db7811d38b19defc9d93dbfee12d70141"
     },
     {
       "path": "js/core/data-grid.js",
@@ -139,8 +144,8 @@
     },
     {
       "path": "js/core/identity.js",
-      "bytes": 8755,
-      "sha256": "d966d7ab5edb3f104cd4b4f8e74b907b46525ae7694cb09a04c7e1d3c84f6645"
+      "bytes": 9498,
+      "sha256": "ceb8ebcb348ccea2260bd3d559d77a7a2a2613b37fc0251c2b3176c8d67ede32"
     },
     {
       "path": "js/core/onboarding-reset.js",
@@ -424,8 +429,8 @@
     },
     {
       "path": "js/ui/global-search-ui.js",
-      "bytes": 11627,
-      "sha256": "c8abf4c844a82764ce95db5718893fe7434e96a6a47d19d06b5beee7f9481946"
+      "bytes": 11904,
+      "sha256": "2ba274257e2b5c7399c97712c507e13bd398b6f3e4da321b72bc9d5eda05a36c"
     },
     {
       "path": "js/ui/identity-selector.js",
@@ -439,8 +444,8 @@
     },
     {
       "path": "js/ui/shell-render.js",
-      "bytes": 42369,
-      "sha256": "1dcb504eedef94e521ad08211b751d7b8b2f919027aa1c941eb57f9f816517fe"
+      "bytes": 42818,
+      "sha256": "df702da40136ef4221dda0ed10ebe090eff43a33ffd1a553ce44c0d776e22570"
     },
     {
       "path": "vendor/sheetjs/LICENSE",

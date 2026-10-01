@@ -4261,9 +4261,14 @@ check(overrideLeak.length === 0,
   'UX-006A: the internal test-only provider override is not used by any application module');
 // The canonical seam delegates through a single mutable active-provider handle,
 // so it is genuinely testable while still exposing only getCurrentUser().
-check(/let activeIdentityProvider = LocalIdentityProvider;/.test(idSrc)
-  && /getCurrentUser\(\)\{\s*return activeIdentityProvider\.getCurrentUser\(\);/.test(idSrc),
-  'UX-006A: canonical seam delegates via a single active-provider indirection (LocalIdentityProvider default)');
+// AFI-2 authorized revision: the single indirection now resolves the provider from the
+// explicit AUTH_MODE at call time (LOCAL -> LocalIdentityProvider, SESSION ->
+// SessionIdentityProvider, anything else -> a null provider), with the test seam taking
+// precedence while set. Was: `let activeIdentityProvider = LocalIdentityProvider;`.
+check(/const modeIdentityProvider = function\(\)\{\s*if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;\s*if\(AUTH_MODE === AUTH_MODES\.SESSION && typeof SessionIdentityProvider !== 'undefined'\) return SessionIdentityProvider;\s*return NO_IDENTITY_PROVIDER;\s*\};/.test(idSrc)
+  && /getCurrentUser\(\)\{\s*return \(testIdentityProvider \|\| modeIdentityProvider\(\)\)\.getCurrentUser\(\);/.test(idSrc)
+  && /const NO_IDENTITY_PROVIDER = Object\.freeze\(\{ getCurrentUser\(\)\{ return null; \} \}\);/.test(idSrc),
+  'UX-006A/AFI-2: canonical seam delegates via a single indirection resolved from AUTH_MODE (LOCAL -> LocalIdentityProvider; never the local adapter in SESSION)');
 // The following boundary guards scan CODE only (comments stripped), so the
 // module's own trust-boundary prose does not trip them.
 const idCode = idSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
@@ -5499,14 +5504,20 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1: the principal is built from userId / role / employeeId only (the CSRF token is not part of it)');
 
   // INERT: nothing outside the two modules uses them; boot and the canonical seam are unchanged.
-  const users = offenders(/\b(SessionIdentityProvider|CsrfHolder|mapSessionProjection)\b/, ['core/session-identity.js', 'transport/api-client.js']);
-  check(users.length === 0, 'AFI-1: no other module references SessionIdentityProvider / CsrfHolder (inert foundation)' + (users.length ? ' >> VIOLATION: ' + users.join(', ') : ''));
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js']);
-  check(apiUsers.length === 0, 'AFI-1: no other module calls ApiClient (no request during normal boot)' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
-  check(!/\/api\//.test(prodFiles.filter((f) => f !== 'transport/api-client.js' && f !== 'core/session-identity.js').map((f) => prodCode[f]).join('\n')),
-    'AFI-1: no other production module names an /api/ path');
-  check(/let activeIdentityProvider = LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
-    'AFI-1: LocalIdentityProvider is still the default active provider (mode stays LOCAL, owner decision D1)');
+  // AFI-2 authorized revision: the foundation is now reached ONLY by the SESSION-mode boot
+  // (core/auth-boot.js) and, for the provider name alone, by identity.js's mode resolution.
+  // Was: no module outside the two AFI-1 files.
+  const users = offenders(/\b(SessionIdentityProvider|CsrfHolder|mapSessionProjection)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/identity.js']);
+  check(users.length === 0 && !/\b(CsrfHolder|mapSessionProjection)\b/.test(prodCode['core/identity.js']),
+    'AFI-1/AFI-2: SessionIdentityProvider / CsrfHolder are referenced only by auth-boot.js (and the provider name by identity.js)' + (users.length ? ' >> VIOLATION: ' + users.join(', ') : ''));
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js']);
+  check(apiUsers.length === 0, 'AFI-1/AFI-2: only session-identity.js and auth-boot.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+    && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'",
+    'AFI-1/AFI-2: /api/ paths are named only by the session modules; auth-boot.js names only /api/auth/login and /api/auth/logout');
+  check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
+    'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
   check(/u\.employeeId !== null/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1: the identity contract accepts a server CEO employee binding (absent / null / non-empty string)');
 }
