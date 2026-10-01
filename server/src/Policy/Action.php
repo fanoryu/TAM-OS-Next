@@ -4,9 +4,9 @@ declare(strict_types=1);
 namespace TamOs\Policy;
 
 /**
- * The server ACTION vocabulary: exactly the 20 values of js/core/authz.js ACTIONS (SDR-0002 §7),
- * with each action's rule (authz.js POLICY) and the entity its record belongs to (authz.js
- * ACTION_RESOURCE_ENTITY; null = the action takes no record).
+ * The server ACTION vocabulary: exactly the 21 values of js/core/authz.js ACTIONS (SDR-0002 §7;
+ * SDR-0004 added account.manage), with each action's rule (authz.js POLICY) and the entity its
+ * record belongs to (authz.js ACTION_RESOURCE_ENTITY; null = the action takes no record).
  *
  * A string that is not one of these values has no Action (Action::tryFrom → null), and Policy
  * accepts only an Action, so an unknown action can never be authorized. Both matches list every
@@ -37,6 +37,7 @@ enum Action: string
     case ImportUndo = 'import.undo';
     case DataRestore = 'data.restore';
     case DataReset = 'data.reset';
+    case AccountManage = 'account.manage';
 
     public function rule(): Rule
     {
@@ -61,6 +62,7 @@ enum Action: string
             self::ImportUndo => Rule::CeoOnly,
             self::DataRestore => Rule::CeoOnly,
             self::DataReset => Rule::CeoOnly,
+            self::AccountManage => Rule::CeoOnly,
         };
     }
 
@@ -87,6 +89,7 @@ enum Action: string
             self::ImportUndo => null,
             self::DataRestore => null,
             self::DataReset => null,
+            self::AccountManage => 'employee',
         };
     }
 }

@@ -413,7 +413,7 @@ function mkTxn(over){
   /* ---------- cross-journey invariants ---------- */
   console.log('-- cross-journey : platform invariants unchanged --');
   { const rt = loadRuntime();
-    check(Object.keys(rt.ACTIONS).length === 20, 'ACTIONS remains exactly 20 (no journey added a capability)');
+    check(Object.keys(rt.ACTIONS).length === 21, 'ACTIONS remains exactly 21 (no journey added a capability; BF-4a2 added account.manage, SDR-0004)');
     check(/const SCHEMA_VERSION = 6;/.test(fs.readFileSync(path.join(ROOT,'js','core','constants.js'),'utf8')),
       'SCHEMA_VERSION remains 6 (no journey required a migration)');
     // Readiness-2 pinned this at 2.9.0 because the release decision was explicitly deferred to

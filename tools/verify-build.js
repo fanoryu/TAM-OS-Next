@@ -225,7 +225,7 @@ check(pkgMan.format === pkgTool.MANIFEST_FORMAT && pkgMan.entry === 'index.html'
   'manifest format is ' + pkgTool.MANIFEST_FORMAT + ' with entry point index.html');
 check(pkgMan.appVersion === meta.version && pkgMan.appReleaseName === meta.releaseName,
   'manifest identity is derived from constants.js (APP_VERSION ' + meta.version + ', ' + meta.releaseName + ')');
-check(pkgMan.schemaVersion === 6 && pkgMan.actions === 20, 'manifest records SCHEMA_VERSION 6 and ACTIONS 20');
+check(pkgMan.schemaVersion === 6 && pkgMan.actions === 21, 'manifest records SCHEMA_VERSION 6 and ACTIONS 21 (BF-4a2 account.manage, SDR-0004)');
 check(pkgMan.zip.name === 'tam-os-v' + meta.version + '-package.zip' && pkgMan.zip.sha256 === crypto.createHash('sha256').update(pkgA.zip).digest('hex'),
   'package ZIP name is derived from APP_VERSION and its digest is recorded in the manifest');
 const pkgPaths = pkgMan.files.map((f) => f.path);
@@ -4588,8 +4588,8 @@ check(persistenceLayerIsUnauthorized(read(path.join(root, 'js', 'core', 'hr-pers
   && !/\bcan\(/.test(read(path.join(root, 'js', 'core', 'storage-adapter.js'))),
   'UX-006C2A: authorization is NOT wired into any persistence primitive or StorageAdapter');
 // Authz core after UX-006C2C-2: exactly 17 ACTIONS (13 + the self-Draft trio + finance.manage).
-check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20,
-  'UX-006C2C-3: ACTIONS vocabulary is exactly 20 (17 + import.undo + data.restore + data.reset)');
+check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+  'UX-006C2C-3: ACTIONS vocabulary is exactly 21 (17 + import.undo + data.restore + data.reset; BF-4a2 account.manage, SDR-0004)');
 // New SE-0 harness present; identity/D1 untouched; private CodeQL compat intact.
 check(fs.existsSync(path.join(root, 'tools', 'verify-mutation-enforcement-hr-runtime.js')),
   'UX-006C2A: SE-0 runtime harness present — tools/verify-mutation-enforcement-hr-runtime.js');
@@ -4901,8 +4901,8 @@ const c2c4Leg = read(path.join(root, 'js', 'people', 'legacy-mapping.js'));
 const c2c4Set = read(path.join(root, 'js', 'ui', 'settings-about.js'));
 const c2c4Onb = read(path.join(root, 'js', 'core', 'onboarding-reset.js'));
 // ACTIONS unchanged by C2C-4 — reuse only.
-check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20,
-  'UX-006C2C-4: ACTIONS remains exactly 20 (C2C-4 adds no action)');
+check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+  'UX-006C2C-4: ACTIONS remains exactly 21 (C2C-4 adds no action; BF-4a2 added account.manage)');
 ['recurring.manage','bank.manage','employee.merge'].forEach(function(rej){
   check(read(path.join(root, 'js', 'core', 'authz.js')).indexOf("'" + rej + "'") === -1,
     'UX-006C2C-4: rejected action ' + rej + ' still absent');
@@ -5100,8 +5100,8 @@ check(C3M.MUTATION_CONTROLS.every(function(c){ return typeof c.action === 'strin
 check(!/style="display:none|hidden/.test(read(path.join(root, 'js', 'import', 'smart-import-ui.js')).match(/id="irUndo"[^>]*>/)[0]),
   'UX-006C3: a denied control is disabled, never hidden');
 // --- C3 changes no authorization semantics ---
-check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20,
-  'UX-006C3: ACTIONS remains exactly 20 (C3 adds no action)');
+check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+  'UX-006C3: ACTIONS remains exactly 21 (C3 adds no action; BF-4a2 added account.manage)');
 check(fs.existsSync(path.join(root, 'tools', 'verify-authz-integration-runtime.js')),
   'UX-006C3: integration runtime harness present — tools/verify-authz-integration-runtime.js');
 check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
@@ -5175,8 +5175,8 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
       'UX-006D2: the shell/navigation module still applies no availability policy'); }
 
   // --- D2 changes no authorization vocabulary, schema or version ---
-  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20,
-    'UX-006D2: ACTIONS remains exactly 20 (D2 adds no capability)');
+  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+    'UX-006D2: ACTIONS remains exactly 21 (D2 adds no capability; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D2: SCHEMA_VERSION remains 6 (no D2 migration/storage change)');
   check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
@@ -5220,8 +5220,8 @@ console.log('== UX-006D3 — CROSS-SURFACE PRESENTATION CONSISTENCY ==');
     'UX-006D3: the empty-state path persists nothing');
 
   // --- the frozen surfaces are untouched by D3 ---
-  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20,
-    'UX-006D3: ACTIONS remains exactly 20 (D3 adds no capability)');
+  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+    'UX-006D3: ACTIONS remains exactly 21 (D3 adds no capability; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D3: SCHEMA_VERSION remains 6 (no D3 migration/storage change)');
   check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
@@ -5319,8 +5319,8 @@ console.log('== READINESS-1 — EMPLOYEE READ SCOPE ==');
       'Readiness-1: the import parser is deliberately NOT scoped (it must see the whole ledger)'); }
 
   // --- Readiness-1 changed no authorization, schema or version ---
-  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20,
-    'Readiness-1: ACTIONS remains exactly 20 (read scope needed no new action)');
+  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+    'Readiness-1: ACTIONS remains exactly 21 (read scope needed no new action; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'Readiness-1: SCHEMA_VERSION remains 6 (no migration)');
   check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
@@ -5356,7 +5356,7 @@ console.log('== READINESS-2 — END-TO-END USER JOURNEY ACCEPTANCE ==');
     'Readiness-2: journeys assert the PERSISTED payload, not just in-memory State');
   check(/Global Search indexes no B document/.test(r2src) && /roster contains no B identity/.test(r2src),
     'Readiness-2: the Employee journey carries privacy assertions (Readiness-1 stays closed)');
-  check(/ACTIONS remains exactly 20/.test(r2src) && /SCHEMA_VERSION remains 6/.test(r2src),
+  check(/ACTIONS remains exactly 21/.test(r2src) && /SCHEMA_VERSION remains 6/.test(r2src),
     'Readiness-2: the harness re-asserts the platform invariants it must not move');
 }
 

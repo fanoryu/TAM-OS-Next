@@ -147,13 +147,13 @@ async function assertSE0(rt, S, label, invoke, opts){
   /* 1. Registry */
   console.log('-- 1. ACTIONS registry (17 -> 20) --');
   { const rt = loadRuntime();
-    check(rt.ACTION_SET.length === 20, 'ACTIONS: exactly 20 after the C2C-3 amendment');
+    check(rt.ACTION_SET.length === 21, 'ACTIONS: exactly 21 (20 after the C2C-3 amendment, + BF-4a2 account.manage)');
     NEW_ACTIONS.forEach(function(a){ check(rt.ACTION_SET.indexOf(a) !== -1, 'ACTIONS: ' + a + ' exists'); });
     check(rt.ACTIONS.IMPORT_UNDO === 'import.undo' && rt.ACTIONS.DATA_RESTORE === 'data.restore'
       && rt.ACTIONS.DATA_RESET === 'data.reset', 'ACTIONS: the three keys map to their frozen values');
     ['recurring.manage','bank.manage','employee.merge'].forEach(function(r){
       check(rt.ACTION_SET.indexOf(r) === -1, 'ACTIONS: rejected action ' + r + ' is absent'); });
-    check(new Set(rt.ACTION_SET).size === 20, 'ACTIONS: no duplicate values');
+    check(new Set(rt.ACTION_SET).size === 21, 'ACTIONS: no duplicate values');
     check(rt.ACTION_SET.indexOf('finance.execute') !== -1 && rt.ACTION_SET.indexOf('import.commit') !== -1,
       'ACTIONS: pre-existing vocabulary preserved'); }
 

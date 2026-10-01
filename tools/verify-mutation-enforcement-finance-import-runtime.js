@@ -145,7 +145,7 @@ const TXN_BOUNDARIES = [
   { const rt = loadRuntime();
     // UX-006C2C-3 raised the vocabulary to 20; this C2C-2 harness asserts the count it
     // shares with the registry, plus the C2C-2 actions it actually owns.
-    check(rt.ACTION_SET.length === 20, 'ACTIONS: exactly 20 actions (C2C-2 finance.manage + C2C-3 trio)');
+    check(rt.ACTION_SET.length === 21, 'ACTIONS: exactly 21 actions (C2C-2 finance.manage + C2C-3 trio + BF-4a2 account.manage)');
     check(rt.ACTION_SET.indexOf('finance.manage') !== -1, 'ACTIONS: finance.manage exists');
     check(rt.ACTIONS.FINANCE_MANAGE === 'finance.manage', 'ACTIONS.FINANCE_MANAGE maps to finance.manage');
     check(rt.ACTIONS.FINANCE_EXECUTE === 'finance.execute', 'ACTIONS.FINANCE_EXECUTE preserved');

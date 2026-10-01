@@ -29,16 +29,18 @@ $expected = [
     'import.undo' => [Rule::CeoOnly, null],
     'data.restore' => [Rule::CeoOnly, null],
     'data.reset' => [Rule::CeoOnly, null],
+    // BF-4a2 (SDR-0004, owner decision C1 = A): shared with authz.js, CEO-only, on the Employee record.
+    'account.manage' => [Rule::CeoOnly, 'employee'],
 ];
 
 return [
-    'the vocabulary is exactly the 20 frontend ACTIONS, without duplicates' => static function () use ($expected): void {
+    'the vocabulary is exactly the 21 frontend ACTIONS, without duplicates' => static function () use ($expected): void {
         $values = array_map(static fn (Action $a): string => $a->value, Action::cases());
-        assertSame(20, count($values), 'count');
-        assertSame(20, count(array_unique($values)), 'no duplicates');
+        assertSame(21, count($values), 'count');
+        assertSame(21, count(array_unique($values)), 'no duplicates');
         assertSame(array_keys($expected), $values, 'values and order');
     },
-    'every action has its frontend rule and entity (16 CeoOnly, 4 CeoOrOwnDraft)' => static function () use ($expected): void {
+    'every action has its frontend rule and entity (17 CeoOnly, 4 CeoOrOwnDraft)' => static function () use ($expected): void {
         foreach (Action::cases() as $a) {
             assertSame($expected[$a->value], [$a->rule(), $a->entity()], $a->value);
         }
@@ -49,7 +51,7 @@ return [
     },
     'an unknown or near-miss action string has no Action' => static function (): void {
         foreach (['', 'employee.read', 'Employee.create', 'employee.create ', 'overtime.submitself', 'admin', 'employee.merge',
-            'recurring.manage', 'bank.manage', '*', 'EmployeeCreate'] as $bad) {
+            'recurring.manage', 'bank.manage', '*', 'EmployeeCreate', 'account.read', 'Account.manage', 'account.manageSelf', 'AccountManage'] as $bad) {
             assertSame(null, Action::tryFrom($bad), $bad);
         }
         assertTrue(!array_filter(Action::cases(), static fn (Action $a): bool => str_ends_with($a->value, '.read')), 'no read actions');
