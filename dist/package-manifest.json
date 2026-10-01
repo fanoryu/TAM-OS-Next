@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "ecd48a74ec79d50cf1a6c767b582e5dd561f1de97f5f7b4d6046df7bb2cb9057",
+  "packageDigest": "086e78add75d2128f8f887330c32243e24c0a1336c3d9c3f8e0c4e84bd43524e",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2660347,
-    "sha256": "fb9ed56953235ed1a7f6413dad5d2db71d08611ec8f9f8e5ee2cd751b8611c11"
+    "bytes": 2690362,
+    "sha256": "3ec99bd1bb821b1b3c40ea5f2d15aca8ff0a643c9eae19f320e80c07ac15dc87"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9460,
-      "sha256": "fdefcf68110f897321127568866bb0eb3585adb38956d8991fe916e8d087c522"
+      "bytes": 9616,
+      "sha256": "e6d3f2aae685b6c2931c30134842ce95c6e83a5c39bfdc0a21274c0fa6c36642"
     },
     {
       "path": "js/analytics/compare.js",
@@ -109,8 +109,8 @@
     },
     {
       "path": "js/core/auth-boot.js",
-      "bytes": 8733,
-      "sha256": "440311284fe77aaaf7227ca228b98426d3ed1522ad8b58193775467a2064c204"
+      "bytes": 9564,
+      "sha256": "4577ae5f43d4ef613a3eb9622041a2e5cbb9f5e753d1e07465b266b2dc6cd243"
     },
     {
       "path": "js/core/auth-flow.js",
@@ -138,6 +138,11 @@
       "sha256": "f4fb392382c5c88515fb65dfc89ea14e0055fa52eabefb16f472432a368d7e33"
     },
     {
+      "path": "js/core/employee-api.js",
+      "bytes": 7589,
+      "sha256": "eab6256708baa2e49a928623fe67d389085efdd20a71f17026e67a16409c8ede"
+    },
+    {
       "path": "js/core/global-search.js",
       "bytes": 4341,
       "sha256": "6a1cd9d35cd02cf294d1af15795cf6d360b4948957fbd2b0d263f127850e6c74"
@@ -156,6 +161,11 @@
       "path": "js/core/onboarding-reset.js",
       "bytes": 20819,
       "sha256": "b043998298e9300640ce99532ff88e00cf1937de8866bccb6b16a553be3e99f1"
+    },
+    {
+      "path": "js/core/session-employee.js",
+      "bytes": 9693,
+      "sha256": "38f78e8f90dd0b618a1255f783cd5cbc9057411205bf6a11d616310d33654b0a"
     },
     {
       "path": "js/core/session-identity.js",
@@ -414,8 +424,8 @@
     },
     {
       "path": "js/transport/api-client.js",
-      "bytes": 10679,
-      "sha256": "c6ddaa22d184c5a9d03008adf76bf435c724a3c0a6d49455c5ed0386a758fe65"
+      "bytes": 12188,
+      "sha256": "ac3f9dfb8f49fec5706defe864502668bc022d7ff4e84a06d07909138e8db88c"
     },
     {
       "path": "js/transport/transport-adapter.js",
@@ -429,8 +439,8 @@
     },
     {
       "path": "js/ui/auth-view.js",
-      "bytes": 15727,
-      "sha256": "adedac7b2ce1518291922f4c83656c62a05ad59473177ff9bac46abe714fac4f"
+      "bytes": 15487,
+      "sha256": "1ac800dc45145e058e3afa8305f5e1715f5beb937cfb527a87a5ac282119e2ed"
     },
     {
       "path": "js/ui/charts.js",
@@ -446,6 +456,11 @@
       "path": "js/ui/identity-selector.js",
       "bytes": 11883,
       "sha256": "028d690d49b7bd9fa3db8a0fd6d9b432d30e54932d2e0794a9fb2e8ba86b72bd"
+    },
+    {
+      "path": "js/ui/session-workspace-view.js",
+      "bytes": 10087,
+      "sha256": "1d358c8dab0a9c18a79190dc4f5c048199e63684b149d815dc1d59ac0d850d47"
     },
     {
       "path": "js/ui/settings-about.js",

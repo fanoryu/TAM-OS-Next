@@ -8,7 +8,9 @@
 
      CHECKING_SESSION  "Checking your session…"
      SIGNED_OUT        sign-in form (email + password), with a fixed message
-     AUTHENTICATED     holding view: role label + Sign out (owner decision D-A)
+     AUTHENTICATED     AFI-4a1: the read-only SESSION Employee workspace —
+                       renderSessionWorkspace() (js/ui/session-workspace-view.js),
+                       called only from here — with the role label and Sign out
      UNAVAILABLE       explanation + Retry
 
    Every message is a fixed string chosen by key; no server text is shown. Every
@@ -37,7 +39,8 @@ const AUTH_VIEW_MESSAGES = Object.freeze({
   unavailable: 'TAM OS could not be reached. Try again in a moment.',
   failed: 'Sign-in did not complete. Try again.',
   signed_out: 'You have signed out.',
-  signout_unconfirmed: 'Signed out on this device. TAM OS could not confirm the sign-out with the server; that session ends on its own after a period of inactivity.'
+  signout_unconfirmed: 'Signed out on this device. TAM OS could not confirm the sign-out with the server; that session ends on its own after a period of inactivity.',
+  session_ended: 'Your session has ended. Sign in again to continue.'
 });
 
 // The email of the last attempt, so a failed sign-in keeps it. Memory only; never the password.
@@ -74,12 +77,6 @@ function authViewHTML(s){
       + '<div class="auth-actions"><button class="btn" id="authForgotBtn" type="button"' + dis + '>Forgot password?</button>'
       + '<button class="btn btn-accent" id="authSignInBtn" type="submit"' + dis + '>' + (s.busy ? 'Signing in…' : 'Sign in') + '</button></div>'
       + '</form>';
-  } else if(s.state === AUTH_STATES.AUTHENTICATED){
-    const who = (s.principal && s.principal.displayName) ? s.principal.displayName : '';
-    body = head('Signed in')
-      + '<p class="auth-lead">Signed in as <strong>' + escapeHtml(who) + '</strong>.</p>'
-      + '<p class="auth-notice">Your TAM OS workspace is not available in this sign-in mode yet.</p>'
-      + '<div class="auth-actions"><button class="btn" id="authSignOutBtn" type="button"' + (s.busy ? ' disabled aria-busy="true"' : '') + '>' + (s.busy ? 'Signing out…' : 'Sign out') + '</button></div>';
   } else if(s.state === AUTH_STATES.UNAVAILABLE){
     body = head('TAM OS is unavailable')
       + '<p class="auth-lead">Your session could not be confirmed. Check your connection, then try again.</p>'
@@ -250,6 +247,7 @@ function renderAuthView(){
   if(modal) modal.innerHTML = '';
   if(typeof AuthFlow !== 'undefined' && AuthFlow.active()) return renderAuthFlowView(app);
   const s = AuthBoot.snapshot();
+  if(s.state === AUTH_STATES.AUTHENTICATED) return renderSessionWorkspace(app, s);   // AFI-4a1
   app.innerHTML = authViewHTML(s);
   bindAuthView(app);
   // Focus: the first empty sign-in field when the form is usable, else the heading.
