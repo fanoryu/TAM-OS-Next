@@ -27,6 +27,20 @@
  *   /__stub/scenario/logout-unavailable  logout 503
  * Fabricated test login (stub only): ceo@example.invalid / stub-only-password
  * (employee@example.invalid signs in as Employee); anything else is 401.
+ *
+ * AFI-3 credential flows (POST /api/auth/activate, /forgot-password, /reset-password).
+ * Fabricated one-time links (stub only; each token works once per scenario switch):
+ *   /#activation=stub-activation-token-aaaaaaaaaaaaaaaaaaaaa
+ *   /#recovery=stub-recovery-token-rrrrrrrrrrrrrrrrrrrrrrr
+ * Any other well-formed token answers 400 fields:[token], as the backend does for every
+ * invalid, expired, used or revoked token. A new password under 12 characters answers
+ * 400 fields:[password]. forgot-password answers the one generic 200 for every address.
+ *   /__stub/scenario/link-invalid         activate / reset: 400 token for every token
+ *   /__stub/scenario/password-policy      activate / reset: 400 password
+ *   /__stub/scenario/forgot-rate-limited  forgot-password 429 with Retry-After: 900
+ *   /__stub/scenario/reset-rate-limited   activate / reset 429 with Retry-After: 300
+ *   /__stub/scenario/recovery-unavailable activate / forgot / reset 503
+ *   /__stub/scenario/recovery-malformed   activate / forgot / reset 200 with a malformed body
  */
 'use strict';
 const http = require('http');
@@ -44,24 +58,29 @@ const USERS = {
   'ceo@example.invalid': { userId: 'u_stub_ceo', membershipId: 'm_stub_ceo', role: 'ceo', employeeId: null },
   'employee@example.invalid': { userId: 'u_stub_emp', membershipId: 'm_stub_emp', role: 'employee', employeeId: 'emp_stub_1' }
 };
-const SCENARIOS = ['signed-out', 'ceo', 'employee', 'me-unavailable', 'me-malformed', 'login-rate-limited', 'logout-stale-csrf', 'logout-unavailable'];
+const SCENARIOS = ['signed-out', 'ceo', 'employee', 'me-unavailable', 'me-malformed', 'login-rate-limited', 'logout-stale-csrf', 'logout-unavailable',
+  'link-invalid', 'password-policy', 'forgot-rate-limited', 'reset-rate-limited', 'recovery-unavailable', 'recovery-malformed'];
+// AFI-3 fabricated one-time tokens (43 base64url characters, the server shape).
+const STUB_TOKENS = { activation: 'stub-activation-token-' + 'a'.repeat(21), recovery: 'stub-recovery-token-' + 'r'.repeat(23) };
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '': 'text/plain; charset=utf-8' };
 
 let scenario = 'signed-out';
 let session = null;            // { user, csrf, staleOnce }
+let usedTokens = [];           // AFI-3: tokens consumed since the last scenario switch
 
 const token = () => crypto.randomBytes(32).toString('base64url');        // 43 characters, the server shape
 const rid = () => crypto.randomBytes(16).toString('hex');
 function reset(name){
   scenario = name;
+  usedTokens = [];
   session = (name === 'ceo' || name === 'me-malformed') ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
-function api(res, status, payload, extra){
+function api(res, status, payload, extra, fields){
   const id = rid();
   const body = status < 300 ? { ok: true, data: payload, requestId: id }
-    : { ok: false, error: { code: payload, message: 'stub' }, requestId: id };
+    : { ok: false, error: Object.assign({ code: payload, message: 'stub' }, fields ? { fields: fields } : {}), requestId: id };
   res.writeHead(status, { ...API_HEADERS, 'Content-Type': 'application/json; charset=utf-8', 'X-Request-Id': id, ...(extra || {}) });
   res.end(JSON.stringify(body));
 }
@@ -104,6 +123,28 @@ async function handleApi(req, res, p){
     }
     session = null;
     return api(res, 200, { loggedOut: true });
+  }
+  // AFI-3 credential flows: RouteAuth::None on the server — no session, no CSRF.
+  if(p === '/api/auth/forgot-password' && req.method === 'POST'){
+    const b = await readJson(req);
+    if(!b || Object.keys(b).join() !== 'email' || typeof b.email !== 'string') return api(res, 400, 'validation_failed', null, ['email']);
+    if(scenario === 'forgot-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '900' });
+    if(scenario === 'recovery-unavailable') return api(res, 503, 'service_unavailable');
+    if(scenario === 'recovery-malformed') return api(res, 200, { requested: 'yes' });
+    return api(res, 200, { requested: true });                                            // every address alike
+  }
+  const purpose = p === '/api/auth/activate' ? 'activation' : p === '/api/auth/reset-password' ? 'recovery' : null;
+  if(purpose && req.method === 'POST'){
+    const b = await readJson(req);
+    if(!b || Object.keys(b).sort().join() !== 'password,token' || typeof b.token !== 'string' || typeof b.password !== 'string') return api(res, 400, 'validation_failed', null, ['token', 'password']);
+    if(scenario === 'recovery-unavailable') return api(res, 503, 'service_unavailable');
+    if(scenario === 'recovery-malformed') return api(res, 200, { done: true });
+    if(scenario === 'password-policy' || Array.from(b.password).length < 12) return api(res, 400, 'validation_failed', null, ['password']);
+    if(scenario === 'reset-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '300' });
+    if(scenario === 'link-invalid' || b.token !== STUB_TOKENS[purpose] || usedTokens.indexOf(b.token) !== -1) return api(res, 400, 'validation_failed', null, ['token']);
+    usedTokens.push(b.token);
+    session = null;                                    // every session of the user ends; none is created
+    return api(res, 200, purpose === 'activation' ? { activated: true } : { reset: true });
   }
   return api(res, 404, 'not_found');
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **AFI-3 credential flows (SESSION mode only; not shipped).** Account activation from
+  `<origin>/#activation=<token>`, password reset from `<origin>/#recovery=<token>`, and a "Forgot password?"
+  request with one generic confirmation, in `js/core/auth-flow.js` and `js/ui/auth-view.js`. The link token is
+  read once, stripped from the address bar at once and kept in memory only; a new password is entered twice and
+  only one copy is sent. The shipped `AUTH_MODE` stays **LOCAL**, so users see no change. No backend, schema
+  (`SCHEMA_VERSION` **6**), storage-key, ACTIONS (**20**) or CSS change; no deployment.
+
 ## 2.11.0 — Identity Refresh
 
 **Type:** Presentation / product-identity release carrying the merged **BRAND-1** identity modernization.

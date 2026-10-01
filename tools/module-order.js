@@ -142,7 +142,10 @@ module.exports = [
   'transport/transport-adapter.js',
   // --- AFI-2 authenticated boot: the SESSION-mode state machine and its views. Both
   //     define functions/frozen objects only; app-bootstrap.js starts AuthBoot only when
-  //     AUTH_MODE is SESSION (LOCAL — the shipped default — never touches them). ---
+  //     AUTH_MODE is SESSION (LOCAL — the shipped default — never touches them).
+  //     AFI-3: the subordinate credential flows (activation, recovery) load first;
+  //     AuthBoot.start() gives them the first look at a credential link. ---
+  'core/auth-flow.js',
   'core/auth-boot.js',
   'ui/auth-view.js',
   // --- bootstrap (19) ---

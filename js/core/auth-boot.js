@@ -23,6 +23,10 @@
    orchestration. Nothing is persisted and nothing is logged; the password is a
    parameter of signIn() only. No timer, no automatic retry.
 
+   AFI-3: the credential flows (activation, recovery request, reset) are a
+   subordinate machine, AuthFlow (js/core/auth-flow.js). It never touches identity;
+   start() only gives it the first look at a credential link.
+
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
 
@@ -113,8 +117,13 @@ const AuthBoot = (function(){
   });
 
   return Object.freeze({
-    // Boot entry (SESSION mode only; called by app-bootstrap.js).
-    start(){ return check(); },
+    // Boot entry (SESSION mode only; called by app-bootstrap.js). AFI-3: a credential
+    // link (#recovery= / #activation=) opens its flow first, without checking the
+    // session; the flow calls start() again when it ends, and /me decides from there.
+    start(){
+      if(AUTH_MODE === AUTH_MODES.SESSION && typeof AuthFlow !== 'undefined' && AuthFlow.beginFromLink()) return Promise.resolve();
+      return check();
+    },
 
     // UNAVAILABLE -> CHECKING_SESSION. Manual only; never scheduled.
     retry(){
