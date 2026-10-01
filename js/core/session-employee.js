@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION EMPLOYEE DATA (AFI-4a1) — js/core/session-employee.js
+   SESSION EMPLOYEE DATA (AFI-4a1, AFI-4a2) — js/core/session-employee.js
    ------------------------------------------------------------
    The SESSION-mode Employee data, held in memory only and owned here — never in
    the LOCAL `State`, never in storage, never through the legacy repository. The
@@ -10,58 +10,94 @@
      principalKey  the principal the data belongs to (user, role, binding)
      generation    bumped by clear(): logout, session loss, a different principal
      list, listArchived, listSeq, listStatus     CEO list (active / archived)
+     listStale     AFI-4a2: a write succeeded (or may have); refetch when shown
      detail, detailId, detailSeq, detailStatus   CEO detail
      self, selfSeq, selfStatus                   Employee's own profile
-     error         { scope, kind, retryAfter?, requestId? } of the last failure
+     error         { scope, kind, retryAfter?, requestId? } of the last failed read
+     mutation      AFI-4a2: { kind, status, error, fields } of the CEO's write —
+                   kind create | update | archive; status idle | pending | error |
+                   ambiguous; error { kind, retryAfter?, requestId? }; fields the
+                   field names a validation failure named
+     mutationSeq   AFI-4a2: the sequence of the write in flight
+     form          AFI-4a2: the create / edit draft { mode, id, base, values } —
+                   strings, memory only; never persisted, destroyed with the identity
+     confirm       AFI-4a2: the archive confirmation { id }
+     notice        AFI-4a2: a fixed message key for the view
 
-   A request takes a token { gen, kind, seq } from begin(); its answer is applied
-   only while token.gen is the current generation AND token.seq is still the latest
-   for its kind. The generation drops everything an earlier identity asked for; the
-   sequence drops a superseded request (the active list answering after the user
-   switched to archived, an earlier detail). Reads have no side effect, so a
-   superseded request is simply ignored rather than aborted.
+   A request takes a token { gen, kind, seq } from begin() / beginMutation(); its
+   answer is applied only while token.gen is the current generation AND token.seq is
+   still the latest for its kind. The generation drops everything an earlier identity
+   asked for; the sequence drops a superseded request (the active list answering after
+   the user switched to archived, an earlier detail). Reads have no side effect, so a
+   superseded request is simply ignored rather than aborted. A write that was sent
+   cannot be unsent: it is never aborted, and its late answer is dropped the same way.
 
-   SessionWorkspace — the read-only controller the view calls:
-     ensureLoaded(principal)  CEO: the active list; Employee: their own profile.
-                              Idempotent: nothing is sent while one is pending.
+   SessionWorkspace — the controller the view calls:
+     ensureLoaded(principal)  CEO: the active list (again when stale); Employee: their
+                              own profile. Idempotent: nothing is sent while pending.
      showArchived(bool)       CEO: the list with or without archived records
      openDetail(id) / back()  CEO detail
-     retry()                  repeat the request that failed
-   A 401 on a current request ends the session (AuthBoot.sessionLost()); any other
-   failure stays a workspace error while the identity stays authenticated. AFI-4a2
-   adds its writes here, invalidating and refetching — authority never moves.
+     retry()                  repeat the read that failed
+   AFI-4a2, CEO only — for any other principal each one returns without a request:
+     openCreate() / openEdit() / setDraft(name, value) / cancelForm() / submitForm()
+     openArchive() / cancelArchive() / confirmArchive() / reloadRecord()
+   A write is sent once (a second submit while it is pending sends nothing). Only the
+   strictly decoded server answer changes the data — nothing is optimistic. A 401
+   (or a recovery that found the session gone) ends the session
+   (AuthBoot.sessionLost()); a recovery that could not confirm it fails closed
+   (AuthBoot.sessionUncertain()); a different principal destroys the data. An outcome
+   that cannot be known (503, network, timeout, malformed success) is AMBIGUOUS: it is
+   never resent — the list or record is read again so the server state is shown.
+   Any other failure stays a workspace error while the identity stays authenticated.
 
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
 
 const SESSION_EMPLOYEE_STATUS = Object.freeze({ IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' });
+const SESSION_MUTATION_STATUS = Object.freeze({ IDLE: 'idle', PENDING: 'pending', ERROR: 'error', AMBIGUOUS: 'ambiguous' });
+const SESSION_MUTATION_KINDS = Object.freeze(['create', 'update', 'archive']);
+const SESSION_MUTATION_IDLE = Object.freeze({ kind: null, status: SESSION_MUTATION_STATUS.IDLE, error: null, fields: null });
 
 const SessionEmployeeStore = (function(){
   let principalKey = null;
   let generation = 0;
-  let list = null, listArchived = false, listSeq = 0, listStatus = SESSION_EMPLOYEE_STATUS.IDLE;
+  let list = null, listArchived = false, listSeq = 0, listStatus = SESSION_EMPLOYEE_STATUS.IDLE, listStale = false;
   let detail = null, detailId = null, detailSeq = 0, detailStatus = SESSION_EMPLOYEE_STATUS.IDLE;
   let self = null, selfSeq = 0, selfStatus = SESSION_EMPLOYEE_STATUS.IDLE;
   let error = null;
+  let mutation = SESSION_MUTATION_IDLE, mutationSeq = 0;
+  let form = null, confirm = null, notice = null, focus = null;
 
   function keyOf(p){
     return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null;
   }
   function seqOf(kind){
-    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'self' ? selfSeq : -1;
+    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'self' ? selfSeq : kind === 'mutation' ? mutationSeq : -1;
   }
+  function isLive(token){ return !!token && token.gen === generation; }
   function isCurrent(token){
-    return !!token && token.gen === generation && token.seq === seqOf(token.kind);
+    return isLive(token) && token.seq === seqOf(token.kind);
   }
   function clear(){
-    list = null; listArchived = false; listStatus = SESSION_EMPLOYEE_STATUS.IDLE;
+    list = null; listArchived = false; listStatus = SESSION_EMPLOYEE_STATUS.IDLE; listStale = false;
     detail = null; detailId = null; detailStatus = SESSION_EMPLOYEE_STATUS.IDLE;
     self = null; selfStatus = SESSION_EMPLOYEE_STATUS.IDLE;
     error = null;
+    mutation = SESSION_MUTATION_IDLE; mutationSeq++;
+    form = null; confirm = null; notice = null; focus = null;
     principalKey = null;
     generation++;
   }
   function clearError(scope){ if(error && error.scope === scope) error = null; }
+  function failure(f){
+    const e = { kind: f.kind };
+    if(f.retryAfter !== undefined) e.retryAfter = f.retryAfter;
+    if(f.requestId) e.requestId = f.requestId;
+    return Object.freeze(e);
+  }
+  function formView(){
+    return form ? Object.freeze({ mode: form.mode, id: form.id, base: form.base, values: Object.freeze(Object.assign({}, form.values)) }) : null;
+  }
 
   return Object.freeze({
     clear: clear,
@@ -76,7 +112,7 @@ const SessionEmployeeStore = (function(){
     // A request token; the new request supersedes any earlier one of its kind.
     begin(kind, arg){
       if(kind === 'list'){
-        listSeq++; listArchived = arg === true; list = null; listStatus = SESSION_EMPLOYEE_STATUS.LOADING; clearError('list');
+        listSeq++; listArchived = arg === true; list = null; listStatus = SESSION_EMPLOYEE_STATUS.LOADING; listStale = false; clearError('list');
         return Object.freeze({ gen: generation, kind: kind, seq: listSeq });
       }
       if(kind === 'detail'){
@@ -89,6 +125,7 @@ const SessionEmployeeStore = (function(){
       }
       throw new Error('unknown session employee request kind');
     },
+    isLive: isLive,
     isCurrent: isCurrent,
     applyList(token, items){
       if(!isCurrent(token) || token.kind !== 'list') return false;
@@ -105,27 +142,85 @@ const SessionEmployeeStore = (function(){
       self = item; selfStatus = SESSION_EMPLOYEE_STATUS.READY;
       return true;
     },
-    applyError(token, failure){
+    applyError(token, failed){
       if(!isCurrent(token)) return false;
       if(token.kind === 'list'){ list = null; listStatus = SESSION_EMPLOYEE_STATUS.ERROR; }
       else if(token.kind === 'detail'){ detail = null; detailStatus = SESSION_EMPLOYEE_STATUS.ERROR; }
       else { self = null; selfStatus = SESSION_EMPLOYEE_STATUS.ERROR; }
-      const e = { scope: token.kind, kind: failure.kind };
-      if(failure.retryAfter !== undefined) e.retryAfter = failure.retryAfter;
-      if(failure.requestId) e.requestId = failure.requestId;
-      error = Object.freeze(e);
+      error = Object.freeze(Object.assign({ scope: token.kind }, failure(failed)));
       return true;
     },
-    // Leaves the detail: a pending detail answer is dropped (its sequence is superseded).
+    // Leaves the detail: a pending detail answer is dropped (its sequence is superseded),
+    // and the edit draft and archive confirmation of that record go with it.
     closeDetail(){
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_EMPLOYEE_STATUS.IDLE; clearError('detail');
+      if(form && form.mode === 'edit') form = null;
+      confirm = null;
     },
+
+    /* ---------- AFI-4a2: the CEO's writes ---------- */
+    // A draft starting from `base` (strings). A new form supersedes any earlier write state.
+    openForm(mode, id, base){
+      mutationSeq++; mutation = SESSION_MUTATION_IDLE; notice = null; confirm = null;
+      form = { mode: mode, id: id, base: Object.freeze(Object.assign({}, base)), values: Object.assign({}, base) };
+    },
+    setDraft(name, value){
+      if(!form || EMPLOYEE_WRITABLE_FIELDS.indexOf(name) === -1 || typeof value !== 'string') return false;
+      form.values[name] = value;
+      return true;
+    },
+    closeForm(){ mutationSeq++; mutation = SESSION_MUTATION_IDLE; form = null; },
+    openConfirm(id){ mutationSeq++; mutation = SESSION_MUTATION_IDLE; notice = null; confirm = Object.freeze({ id: id }); },
+    closeConfirm(){ mutationSeq++; mutation = SESSION_MUTATION_IDLE; confirm = null; },
+    resetMutation(){ mutation = SESSION_MUTATION_IDLE; notice = null; },
+    beginMutation(kind){
+      if(SESSION_MUTATION_KINDS.indexOf(kind) === -1) throw new Error('unknown session employee mutation kind');
+      mutationSeq++;
+      mutation = Object.freeze({ kind: kind, status: SESSION_MUTATION_STATUS.PENDING, error: null, fields: null });
+      notice = null;
+      return Object.freeze({ gen: generation, kind: 'mutation', seq: mutationSeq });
+    },
+    // A write that failed definitely (ERROR) or whose outcome is unknown (AMBIGUOUS).
+    failMutation(token, status, failed){
+      if(!isCurrent(token) || token.kind !== 'mutation') return false;
+      const kind = mutation.kind;
+      mutation = Object.freeze({ kind: kind, status: status, error: failure(failed), fields: failed.fields ? Object.freeze(failed.fields.slice()) : null });
+      if(status === SESSION_MUTATION_STATUS.AMBIGUOUS && kind === 'archive') confirm = null;
+      return true;
+    },
+    // A request refused before transport: nothing was sent.
+    refuseMutation(kind, fields){
+      mutationSeq++;
+      mutation = Object.freeze({ kind: kind, status: SESSION_MUTATION_STATUS.ERROR, error: Object.freeze({ kind: 'VALIDATION' }), fields: Object.freeze(fields.slice()) });
+      notice = null;
+    },
+    // A decoded server record from create / update: it becomes the detail; the list is stale.
+    applySaved(token, item, noticeKey){
+      if(!isCurrent(token) || token.kind !== 'mutation') return false;
+      detailSeq++; detail = item; detailId = item.id; detailStatus = SESSION_EMPLOYEE_STATUS.READY; clearError('detail');
+      form = null; confirm = null; mutation = SESSION_MUTATION_IDLE; listStale = true; notice = noticeKey;
+      return true;
+    },
+    // A decoded archived record: the detail and its form close; the list is stale.
+    applyArchived(token){
+      if(!isCurrent(token) || token.kind !== 'mutation') return false;
+      detailSeq++; detail = null; detailId = null; detailStatus = SESSION_EMPLOYEE_STATUS.IDLE; clearError('detail');
+      form = null; confirm = null; mutation = SESSION_MUTATION_IDLE; listStale = true; notice = 'archived';
+      return true;
+    },
+    markListStale(){ listStale = true; },
+    setNotice(key){ notice = key; },
+    // A focus hint for the next render, taken once by the view.
+    setFocus(hint){ focus = hint; },
+    takeFocus(){ const f = focus; focus = null; return f; },
+
     snapshot(){
       return Object.freeze({
         principalKey: principalKey, generation: generation,
-        list: list, listArchived: listArchived, listStatus: listStatus,
+        list: list, listArchived: listArchived, listStatus: listStatus, listStale: listStale,
         detail: detail, detailId: detailId, detailStatus: detailStatus,
-        self: self, selfStatus: selfStatus, error: error
+        self: self, selfStatus: selfStatus, error: error,
+        mutation: mutation, form: formView(), confirm: confirm, notice: notice
       });
     }
   });
@@ -162,48 +257,219 @@ const SessionWorkspace = (function(){
   function loadSelf(p){ return run('self', null, () => EmployeeApi.getSelf(p)); }
   function loadDetail(id){ return run('detail', id, () => EmployeeApi.get(id)); }
 
+  /* ---------- AFI-4a2: writes (CEO only) ---------- */
+  // Outcomes that cannot be known: the write may or may not have been applied.
+  const AMBIGUOUS = Object.freeze([API_RESULT_KINDS.UNAVAILABLE, EMPLOYEE_API_INVALID]);
+
+  function pending(){ return SessionEmployeeStore.snapshot().mutation.status === SESSION_MUTATION_STATUS.PENDING; }
+  // A CEO, authenticated, with no write in flight. Anything else acts on nothing.
+  function canAct(){ return ceoPrincipal(principalNow()) && !pending(); }
+
+  // A draft's starting values: the decoded server record as strings ('' for null).
+  function formValues(d){
+    const out = {};
+    EMPLOYEE_WRITABLE_FIELDS.forEach(function(k){ out[k] = (d && d[k] !== null && d[k] !== undefined) ? String(d[k]) : ''; });
+    if(!d) out.employmentStatus = 'Active';
+    return out;
+  }
+  function focusFirst(fields){
+    const first = EMPLOYEE_WRITABLE_FIELDS.filter((k) => (fields || []).indexOf(k) !== -1)[0];
+    SessionEmployeeStore.setFocus(first ? 'field:' + first : 'message');
+  }
+  function refuse(kind, fields){
+    SessionEmployeeStore.refuseMutation(kind, fields);
+    focusFirst(fields);
+    paint();
+  }
+
+  // Applies a write's outcome. Late (another identity) and superseded answers are dropped.
+  function settle(token, out){
+    if(out.recovery === 'unavailable'){ AuthBoot.sessionUncertain(); return; }   // identity already cleared: fail closed
+    if(!SessionEmployeeStore.isLive(token)) return;
+    if(out.recovery === 'principal_changed'){ SessionEmployeeStore.clear(); paint(); return; }
+    if(out.recovery === 'signed_out' || (!out.ok && out.kind === API_RESULT_KINDS.UNAUTHENTICATED)){ AuthBoot.sessionLost(); return; }
+    if(!SessionEmployeeStore.isCurrent(token)) return;
+    const s = SessionEmployeeStore.snapshot();
+    const kind = s.mutation.kind;
+    if(out.ok){
+      if(kind === 'archive'){
+        SessionEmployeeStore.applyArchived(token);
+        loadList(s.listArchived);
+      } else {
+        SessionEmployeeStore.applySaved(token, out.data, kind === 'create' ? 'created' : 'saved');
+      }
+      paint();
+      return;
+    }
+    if(AMBIGUOUS.indexOf(out.kind) !== -1){
+      // Never resent: read the server state again instead.
+      SessionEmployeeStore.failMutation(token, SESSION_MUTATION_STATUS.AMBIGUOUS, out);
+      SessionEmployeeStore.markListStale();
+      SessionEmployeeStore.setFocus('message');
+      if(kind === 'create') loadList(s.listArchived);
+      else if(s.detailId) loadDetail(s.detailId);
+      paint();
+      return;
+    }
+    SessionEmployeeStore.failMutation(token, SESSION_MUTATION_STATUS.ERROR, out);
+    if(out.kind === API_RESULT_KINDS.NOT_FOUND && kind !== 'create'){
+      SessionEmployeeStore.closeDetail();
+      SessionEmployeeStore.setFocus('message');
+      loadList(s.listArchived);
+    } else if(out.kind === API_RESULT_KINDS.VALIDATION){
+      focusFirst(out.fields);
+    } else {
+      SessionEmployeeStore.setFocus('message');
+    }
+    paint();
+  }
+
   return Object.freeze({
-    // Called while rendering the authenticated view: starts the first read once.
+    // Called while rendering the authenticated view: starts the first read once, and
+    // reads the list again when it is shown after a write.
     ensureLoaded(principal){
       if(!principal) return;
       SessionEmployeeStore.bindPrincipal(principal);
       const s = SessionEmployeeStore.snapshot();
-      if(ceoPrincipal(principal) && s.listStatus === SESSION_EMPLOYEE_STATUS.IDLE) loadList(false);
+      if(ceoPrincipal(principal)){
+        if(s.listStatus === SESSION_EMPLOYEE_STATUS.IDLE || (s.listStale && !s.detailId && s.listStatus !== SESSION_EMPLOYEE_STATUS.LOADING)) loadList(s.listArchived);
+      }
       else if(employeePrincipal(principal) && s.selfStatus === SESSION_EMPLOYEE_STATUS.IDLE) loadSelf(principal);
     },
     showArchived(archived){
       const p = principalNow();
-      if(!ceoPrincipal(p)) return;
+      if(!ceoPrincipal(p) || pending()) return;
       const s = SessionEmployeeStore.snapshot();
-      if(s.listArchived === (archived === true) && s.listStatus !== SESSION_EMPLOYEE_STATUS.ERROR) return;
+      if(s.listArchived === (archived === true) && s.listStatus !== SESSION_EMPLOYEE_STATUS.ERROR && !s.listStale) return;
       SessionEmployeeStore.closeDetail();
-      const pending = loadList(archived === true);
+      const loading = loadList(archived === true);
       paint();
-      return pending;
+      return loading;
     },
     openDetail(id){
       const p = principalNow();
-      if(!ceoPrincipal(p) || typeof id !== 'string') return;
+      if(!ceoPrincipal(p) || typeof id !== 'string' || pending()) return;
       const s = SessionEmployeeStore.snapshot();
       if(s.detailId === id && s.detailStatus === SESSION_EMPLOYEE_STATUS.LOADING) return;
-      const pending = loadDetail(id);
+      if(s.form) SessionEmployeeStore.closeForm();         // leaving the list leaves its create draft
+      SessionEmployeeStore.resetMutation();
+      const loading = loadDetail(id);
       paint();
-      return pending;
+      return loading;
     },
     back(){
+      if(pending()) return;
       SessionEmployeeStore.closeDetail();
+      SessionEmployeeStore.resetMutation();
       paint();
     },
     retry(){
       const p = principalNow();
       const s = SessionEmployeeStore.snapshot();
-      if(!s.error || !p) return;
-      let pending;
-      if(s.error.scope === 'list' && ceoPrincipal(p)) pending = loadList(s.listArchived);
-      else if(s.error.scope === 'detail' && ceoPrincipal(p) && s.detailId) pending = loadDetail(s.detailId);
-      else if(s.error.scope === 'self' && employeePrincipal(p)) pending = loadSelf(p);
+      if(!s.error || !p || pending()) return;
+      let loading;
+      if(s.error.scope === 'list' && ceoPrincipal(p)) loading = loadList(s.listArchived);
+      else if(s.error.scope === 'detail' && ceoPrincipal(p) && s.detailId) loading = loadDetail(s.detailId);
+      else if(s.error.scope === 'self' && employeePrincipal(p)) loading = loadSelf(p);
       paint();
-      return pending;
+      return loading;
+    },
+
+    /* ---------- AFI-4a2 ---------- */
+    openCreate(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      if(s.detailId || s.form) return;
+      SessionEmployeeStore.openForm('create', null, formValues(null));
+      SessionEmployeeStore.setFocus('form');
+      paint();
+    },
+    openEdit(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      const d = s.detail;
+      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.archived || s.form || s.confirm) return;
+      SessionEmployeeStore.openForm('edit', d.id, formValues(d));
+      SessionEmployeeStore.setFocus('form');
+      paint();
+    },
+    // Keeps the draft in memory as it is typed; no render, so focus and caret stay put.
+    setDraft(name, value){
+      if(!ceoPrincipal(principalNow()) || pending()) return;
+      SessionEmployeeStore.setDraft(name, value);
+    },
+    cancelForm(){
+      if(!canAct() || !SessionEmployeeStore.snapshot().form) return;
+      SessionEmployeeStore.closeForm();
+      paint();
+    },
+    // Create: every profile field. Edit: only the fields changed from the record the form
+    // started from, against the version of the record now held — nothing changed sends nothing.
+    async submitForm(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      const f = s.form;
+      if(!f) return;
+      if(f.mode === 'create'){
+        const fields = Object.assign({}, f.values);
+        const prepared = EmployeeRequests.create(fields);
+        if(!prepared.ok) return refuse('create', prepared.fields);
+        const token = SessionEmployeeStore.beginMutation('create');
+        paint();
+        return settle(token, await EmployeeApi.create(fields));
+      }
+      const d = s.detail;
+      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.id !== f.id || d.archived) return;
+      const changed = {};
+      EMPLOYEE_WRITABLE_FIELDS.forEach(function(k){ if(f.values[k] !== f.base[k]) changed[k] = f.values[k]; });
+      if(!Object.keys(changed).length){
+        SessionEmployeeStore.resetMutation();
+        SessionEmployeeStore.setNotice('unchanged');
+        SessionEmployeeStore.setFocus('message');
+        paint();
+        return;
+      }
+      const prepared = EmployeeRequests.update(d.id, d.version, changed);
+      if(!prepared.ok) return refuse('update', prepared.fields);
+      const token = SessionEmployeeStore.beginMutation('update');
+      paint();
+      return settle(token, await EmployeeApi.update(d.id, d.version, changed));
+    },
+    // After a conflict (or to check an unconfirmed write): the record again, from the server.
+    // An open draft is kept; a later Save uses the version read now.
+    reloadRecord(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      if(!s.detailId) return;
+      SessionEmployeeStore.resetMutation();
+      if(s.form) SessionEmployeeStore.setNotice('reloaded');
+      const loading = loadDetail(s.detailId);
+      paint();
+      return loading;
+    },
+    // Archive asks first: this only opens the confirmation; nothing is sent.
+    openArchive(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      const d = s.detail;
+      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.archived || s.form) return;
+      SessionEmployeeStore.openConfirm(d.id);
+      SessionEmployeeStore.setFocus('confirm');
+      paint();
+    },
+    cancelArchive(){
+      if(!canAct() || !SessionEmployeeStore.snapshot().confirm) return;
+      SessionEmployeeStore.closeConfirm();
+      paint();
+    },
+    async confirmArchive(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      const d = s.detail;
+      if(!s.confirm || s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.id !== s.confirm.id || d.archived) return;
+      const token = SessionEmployeeStore.beginMutation('archive');
+      paint();
+      return settle(token, await EmployeeApi.archive(d.id, d.version));
     }
   });
 })();

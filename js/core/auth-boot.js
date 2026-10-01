@@ -20,7 +20,8 @@
    identity. allowsWorkspace() is false in every state. AFI-4a1: leaving
    AUTHENTICATED also destroys the in-memory SESSION Employee data
    (SessionEmployeeStore), and sessionLost() is how a business read's 401 ends the
-   session.
+   session. AFI-4a2: sessionUncertain() is how a business write whose bounded CSRF
+   recovery could not confirm the session ('unavailable') fails closed to UNAVAILABLE.
 
    AUTHORITY: identity comes only from SessionIdentityProvider.refresh() (GET
    /api/auth/me). The login response is never trusted as identity; a successful
@@ -175,6 +176,15 @@ const AuthBoot = (function(){
     sessionLost(){
       if(state !== AUTH_STATES.AUTHENTICATED) return;
       go(AUTH_STATES.SIGNED_OUT, 'session_ended');
+    },
+
+    // AFI-4a2: a business write's authSessionMutation ended with recovery 'unavailable' —
+    // its /me check failed, so whether this session still exists is unknown. Fail closed:
+    // AUTHENTICATED -> UNAVAILABLE (Retry re-checks /me); identity, CSRF token and Employee
+    // data cleared. No request is made. Only that recovery outcome calls this.
+    sessionUncertain(){
+      if(state !== AUTH_STATES.AUTHENTICATED) return;
+      go(AUTH_STATES.UNAVAILABLE, 'unavailable');
     },
 
     // AFI-2 grants no business workspace in any state (D-A).
