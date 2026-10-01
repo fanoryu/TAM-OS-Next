@@ -5511,6 +5511,25 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1: the identity contract accepts a server CEO employee binding (absent / null / non-empty string)');
 }
 
+// ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
+// ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
+// steps. The rest of the runtime suite (including the date-sensitive contract-timeline
+// Q10) is NOT wired: adding one is a deliberate change to this allowlist.
+console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
+{
+  const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
+    'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js'];
+  const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
+  const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
+    .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
+  check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
+    'CI-HARDEN-1: ci.yml runs exactly the five allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+  check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
+    'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
+  check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');
+  check(!/continue-on-error|\|\|\s*true|\|\|\s*:|set\s+\+e|allow-failure/.test(ciWf), 'CI-HARDEN-1: no failure bypass in ci.yml (continue-on-error, || true, set +e)');
+}
+
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }
 console.log('VERIFICATION FAILED -- ' + passes + ' passed, ' + fails.length + ' failed:');

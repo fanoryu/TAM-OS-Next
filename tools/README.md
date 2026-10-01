@@ -188,9 +188,13 @@ PowerShell:
 Get-ChildItem tools/verify-*-runtime.js | ForEach-Object { node $_.FullName *> $null; if ($LASTEXITCODE -eq 0) { "PASS $($_.Name)" } else { "FAIL $($_.Name)" } }
 ```
 
-> **Note.** These harnesses are **not** wired into CI — `ci.yml` runs the build and `verify-build.js`
-> only. Run the suite locally before proposing a change that touches behaviour. Wiring them into CI is
-> a known, separately-scoped follow-up.
+> **Note.** `ci.yml` runs five of these harnesses as blocking steps after `verify-build.js` —
+> `verify-identity-foundation-runtime.js`, `verify-session-identity-runtime.js`,
+> `verify-identity-selection-runtime.js`, `verify-workspace-selfscope-runtime.js` and
+> `verify-authz-runtime.js` — a fixed allowlist of deterministic identity/authorization harnesses that
+> `verify-build.js` pins (no glob, no failure bypass). The rest of the suite is **not** wired into CI
+> (the contract-timeline harness is date-sensitive); run it locally before proposing a change that
+> touches behaviour.
 
 ### Authorization & identity
 
