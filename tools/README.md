@@ -52,7 +52,7 @@ php server/bin/migrate.php apply    # create and verify history, then run pendin
 
 Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
 is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`; BF-3B:
-`0007`–`0008`; BF-3C: `0009`–`0010`; BF-3D: `0011`–`0013`); the boundary tool refuses any migration that inserts, updates or
+`0007`–`0008`; BF-3C: `0009`–`0010`; BF-3D: `0011`–`0013`; BF-4a1: `0014`–`0015`); the boundary tool refuses any migration that inserts, updates or
 deletes rows, any cascading foreign key, and any new table that is not an auth/system table or a
 registered company table carrying the tenant key.
 
