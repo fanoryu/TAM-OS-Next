@@ -1047,7 +1047,7 @@ seeded rows. `0010_add_memberships_employee_fk` — `memberships (company_id, em
 (company_id, id)`, `ON DELETE RESTRICT ON UPDATE RESTRICT`: a binding must name an employee of the same
 company; a bound employee cannot be deleted, renamed or moved; a NULL (CEO) binding stays valid and an
 Employee still needs one (CHECK from `0003`). BF-3C left the backend migration head at `0010` (BF-3D
-moves it to `0013`, BF-4a1 to `0015`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
+moves it to `0013`, BF-4a1 to `0017`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
 
 **Routes.** `Route` may declare its `Action`; one that does must be a mutation with `RouteAuth::Required`.
 `Routes::validate()` fails the production table at bootstrap unless every mutation declares an `Action` or
@@ -1161,20 +1161,26 @@ backend only: the frontend does not call it, `AUTH_MODE` stays LOCAL, ACTIONS st
 is unchanged. Employee account provisioning, activation reissue, account disable/enable and the
 activation mail are **BF-4a2** (pending); AFI-4 stays blocked until BF-4a is complete.
 
-**Schema.** `0014_extend_employees_profile` (one `ALTER TABLE`, no row written) adds `employee_code`
-(`VARCHAR(32)`, `UNIQUE (company_id, employee_code)`, case-insensitive), `full_name` (`VARCHAR(160)`,
-non-empty), `job_title`, `department`, `employment_status` (exactly Active / Inactive / On Leave / Resigned /
+**Schema.** The final profile adds `employee_code` (`VARCHAR(32)`, `UNIQUE (company_id, employee_code)`,
+case-insensitive), `full_name` (`VARCHAR(160)`, non-empty), `job_title`, `department`, `employment_status` (exactly Active / Inactive / On Leave / Resigned /
 Terminated, default Active), `join_date` (`DATE`), `contact_email` (ascii, separate from the login
 `users.email`), `phone`, `notes` (`TEXT`), `monthly_base_salary` (`DECIMAL(15,2)`, ≥ 0, payroll-sensitive),
 `archived_at`, `version` (unsigned, starts at 1) and `updated_at`. `id`, `company_id`, `created_at`, the
-tenant key and the membership binding FK are unchanged. No bank fields, no contract type, no history. A row
-that predates `0014` has no code or name, so its CHECKs refuse it and the migration fails closed instead of
-inventing data — no production path ever created such a row. `0015_create_audit_events` is the
+tenant key and the membership binding FK are unchanged. No bank fields, no contract type, no history. It is
+staged so that a valid schema-`0013` database whose anchors have no profile migrates forward with no manual
+step (*owner decision D-BF4a1-MIGRATION-1 = A*): `0014_extend_employees_profile` adds the columns with
+`employee_code`, `full_name` and `updated_at` nullable; `0015_backfill_legacy_employees` gives **only** rows
+with neither code nor name the placeholder code `LEGACY-NNNNNN` (six digits, numbered per company in
+`(created_at, id)` order, never derived from the id, skipping any number whose code — compared
+case-insensitively — the company already holds), the name `[Legacy record — profile pending]` (synthetic
+migration metadata, not HR data) and `updated_at = created_at`; `0016_enforce_employees_profile` makes the
+three columns NOT NULL and adds the unique code and every CHECK. 0015 is the only migration that writes rows;
+the boundary tool admits it at its pinned digest only. `0017_create_audit_events` is the
 **append-only business audit trail**: `company_id` (tenant key and FK), `occurred_at` (database clock),
 `actor_user_id` and `actor_membership_id` (FKs; always the session principal), `action` (CHECK: the three
 employee ACTIONS), `entity` (`employee`), `entity_id`, `target_user_id` (always NULL until BF-4a2),
 `request_id` and `fields` — the changed **field names** only, never a value. The backend migration head is
-`0015`; the frontend `SCHEMA_VERSION` is unrelated and stays 6.
+`0017`; the frontend `SCHEMA_VERSION` is unrelated and stays 6.
 
 **Routes** (`Controller/EmployeeController`, `Employee/EmployeeService`, all `RouteAuth::Required`).
 

@@ -3,10 +3,12 @@
 ## Unreleased
 
 ### Added
-- **BF-4a1 server Employee record (backend source only; not deployed).** Migrations `0014`–`0015` extend the
+- **BF-4a1 server Employee record (backend source only; not deployed).** Migrations `0014`–`0017` extend the
   employee anchor with a profile (code, name, title, department, employment status, join date, contact, notes,
   monthly base salary), soft archive and an optimistic version, and add an append-only business audit trail.
-  New routes: `GET /api/employees` (CEO only), `GET /api/employee?id=` (CEO company scope, Employee self scope),
+  The profile is staged so a database whose anchors predate it migrates forward: those rows get a
+  `LEGACY-NNNNNN` placeholder code and the name `[Legacy record — profile pending]` before the final
+  constraints apply. New routes: `GET /api/employees` (CEO only), `GET /api/employee?id=` (CEO company scope, Employee self scope),
   and create / update / archive under the existing employee ACTIONS. The frontend does not call them; ACTIONS
   stay **20**, `AUTH_MODE` stays **LOCAL**, and there is no deployment.
 - **AFI-3 credential flows (SESSION mode only; not shipped).** Account activation from

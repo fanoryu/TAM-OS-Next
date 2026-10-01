@@ -10,7 +10,7 @@ use TamOs\Policy\Authorization;
 use TamOs\Policy\Scope;
 
 /**
- * The append-only business audit trail (SDR-0002 §9.2, migration 0015). One row per business
+ * The append-only business audit trail (SDR-0002 §9.2, migration 0017). One row per business
  * mutation, written by the same transaction as the mutation. This class is the only writer of
  * audit_events and it only inserts: no statement here, or anywhere, updates or deletes an audit
  * row (tools/verify-backend-boundary.js).
@@ -23,7 +23,7 @@ use TamOs\Policy\Scope;
  */
 final class AuditLog
 {
-    /** The Actions BF-4a1 audits. A new audited Action extends this list and migration 0015's CHECK. */
+    /** The Actions BF-4a1 audits. A new audited Action extends this list and migration 0017's CHECK. */
     public const ACTIONS = [Action::EmployeeCreate, Action::EmployeeUpdate, Action::EmployeeDelete];
     public const ENTITIES = ['employee'];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';

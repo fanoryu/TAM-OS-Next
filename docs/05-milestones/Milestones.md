@@ -354,7 +354,7 @@ production business endpoint; **BF-3D** (password recovery and governed mail —
 `0011`–`0013`, forgot/reset endpoints, the provider-neutral mail boundary with the Resend HTTPS adapter,
 the database outbox and cron worker; *owner decisions D-D1 and D-D3, 2026-10-01, recorded in SDR-0003,
 which resolves SDR-0002 O5*) is implemented as source only on the same terms, backend only, with no
-provider account or real mail; **BF-4a1** (the server Employee record — migrations `0014`–`0015` for the employee
+provider account or real mail; **BF-4a1** (the server Employee record — migrations `0014`–`0017` for the employee
 profile and the append-only business audit trail, CEO list, scoped read, versioned create/update and soft archive
 under the existing employee ACTIONS; *owner decisions D-AFI4-1 = B, D-AFI4-2 = A, D-BF4a-1/2/3 = B, 2026-10-01*)
 is implemented as source only on the same terms, backend only. Cross-account administration (Employee account

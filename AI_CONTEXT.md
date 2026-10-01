@@ -87,8 +87,9 @@ AFI-3 guards in `verify-build.js` (2631 checks). AFI-4 Phase 0 found the authent
 server business contracts; owner decisions **D-AFI4-1 = B** (server-authoritative only — the earlier D2 interim of
 a device-local CEO workspace behind SESSION is superseded) and **D-AFI4-2 = A** (Employee domain first, then
 overtime, payroll, finance). **BF-4a1** then adds the first server-authoritative business record, backend only:
-migrations `0014`–`0015` (the employee profile with soft archive and an optimistic `version`, and the append-only
-`audit_events` trail), `GET /api/employees` (CEO only), `GET /api/employee?id=` (company scope for the CEO, self
+migrations `0014`–`0017` (the employee profile with soft archive and an optimistic `version` — added transitionally,
+legacy anchors given a `LEGACY-NNNNNN` placeholder, then the final constraints; *D-BF4a1-MIGRATION-1 = A* — and the
+append-only `audit_events` trail), `GET /api/employees` (CEO only), `GET /api/employee?id=` (company scope for the CEO, self
 scope for an Employee), and create / update / archive under the existing `employee.create` / `employee.update` /
 `employee.delete` ACTIONS (archive is a soft archive; ACTIONS stay 20). BF-4a2 — Employee account provisioning under
 the owner-locked `account.manage` ACTION with activation by the governed mail outbox — is pending, and AFI-4 waits

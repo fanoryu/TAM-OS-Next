@@ -10,7 +10,7 @@ use TamOs\Policy\Authorization;
 use TamOs\Policy\Scope;
 
 /**
- * The server Employee record (BF-3C anchor, BF-4a1 profile, migrations 0009 and 0014): the first
+ * The server Employee record (BF-3C anchor, BF-4a1 profile, migrations 0009 and 0014–0016): the first
  * company-owned, self-scoped business store, and the pattern later domain stores follow. Every
  * statement names :company_id and the *_SELF_SQL variants add :self_employee_id;
  * ScopedDatabase injects both from the Scope and refuses the wrong variant for the scope.

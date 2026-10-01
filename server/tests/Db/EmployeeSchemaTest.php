@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /*
- * BF-3C / BF-4a1 schema: the employees table (0009 anchor, 0014 profile) and the binding-integrity
+ * BF-3C / BF-4a1 schema: the employees table (0009 anchor, 0014–0016 profile) and the binding-integrity
  * foreign key (0010) against the real, guarded MariaDB. A membership's employee binding must
  * reference an employee of the SAME company; a bound employee cannot be deleted or moved; the
  * profile columns hold no bank field, contract type or history; nothing is seeded.

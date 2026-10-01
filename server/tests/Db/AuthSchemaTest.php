@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /*
  * The production schema (server/migrations 0001–0006 BF-3A, 0007–0008 BF-3B, 0009–0010 BF-3C,
- * 0011–0013 BF-3D, 0014–0015 BF-4a1)
+ * 0011–0013 BF-3D, 0014–0017 BF-4a1)
  * against the real, guarded CI MariaDB: it applies, seeds nothing, is ready, and its constraints
  * are actually enforced. The employee anchor and binding FK are proven in EmployeeSchemaTest.
  */
@@ -43,13 +43,13 @@ $insertUser = 'INSERT INTO users (id, email, password_hash, status, created_at, 
 $insertMembership = 'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))';
 
 return [
-    'production migrations 0001–0015 apply in order, create exactly the auth tables, the employees, the mail outbox and the audit trail, and seed nothing' => static function () use ($tables, $authTables): void {
+    'production migrations 0001–0017 apply in order, create exactly the auth tables, the employees, the mail outbox and the audit trail, and seed nothing' => static function () use ($tables, $authTables): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events',
             '0007_create_account_tokens', '0008_replace_auth_events_event_check', '0009_create_employees', '0010_add_memberships_employee_fk',
             '0011_replace_account_tokens_purpose_check', '0012_replace_auth_events_event_check', '0013_create_mail_outbox',
-            '0014_extend_employees_profile', '0015_create_audit_events'],
+            '0014_extend_employees_profile', '0015_backfill_legacy_employees', '0016_enforce_employees_profile', '0017_create_audit_events'],
             array_map(static fn ($m): string => $m->label(), $applied));
         assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM employees')[0]['n'], 'no employee');
@@ -77,7 +77,7 @@ return [
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
             $files[basename($path)] = (string) file_get_contents($path);
         }
-        assertSame(15, count($files));
+        assertSame(17, count($files));
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());

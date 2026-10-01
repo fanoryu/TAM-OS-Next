@@ -22,7 +22,8 @@
  *     anywhere; Principal::fromAccount() is called outside the resolver and the Authenticator,
  *     or a Principal / AuthSession is constructed outside server/src/Identity/; a CSRF token is
  *     compared with anything but hash_equals(); SQL rewrites or removes auth_events rows; or a
- *     migration seeds rows (INSERT / UPDATE / DELETE / REPLACE / LOAD DATA);
+ *     migration seeds rows (INSERT / UPDATE / DELETE / REPLACE / LOAD DATA) — the one exception is
+ *     the BF-4a1 legacy employee backfill, admitted only at its pinned digest;
  *   - (BF-3B) a file other than migrate.php and account.php appears under server/bin/, or a CLI
  *     entry point lacks its SAPI guard; SQL writing companies, users or memberships appears
  *     outside server/src/Data/Auth/AccountStore.php, or SQL writing account_tokens outside
@@ -60,6 +61,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const crypto = require('crypto');
 
 const root = path.resolve(__dirname, '..');
 const SERVER = 'server';
@@ -252,8 +254,17 @@ function checkKernelCsrf(src) {
 }
 // A migration changes structure only: seed rows (a default CEO, credentials, business data)
 // never ship in server/migrations/.
-const MIGRATION_SEED = /\b(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|DELETE\s+FROM|LOAD\s+DATA|UPDATE\s+[`\w.]+\s+SET)\b/i;
-function checkMigrationSql(src) {
+const MIGRATION_SEED = /\b(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|DELETE\s+FROM|LOAD\s+DATA|(?<!\bON\s+)UPDATE\s+(?:(?:LOW_PRIORITY|IGNORE)\s+)*[`\w.]+(?:\s+(?:AS\s+)?(?!SET\b)`?\w+`?)?\s*(?:SET|JOIN|INNER|LEFT|RIGHT|CROSS|STRAIGHT_JOIN|,\s*`?\w+))\b/i;
+// BF-4a1 (owner decision D-BF4a1-MIGRATION-1 = A): the single exception. 0015 gives employee anchors
+// that predate 0014 a LEGACY-NNNNNN placeholder code and name so 0016 can enforce the final schema.
+// It is admitted only at exactly these bytes: any edit fails here before review, and MigrationSet's
+// checksum makes an applied copy immutable. No other file may write rows.
+const LEGACY_BACKFILL_FILE = 'server/migrations/0015_backfill_legacy_employees.sql';
+const LEGACY_BACKFILL_SHA256 = '791505de8fe5b345c9c140e8aeb1cc6002229e646b3eb1bcb5b4f62e3f8d08b2';
+function checkMigrationSql(src, file) {
+  if (file === LEGACY_BACKFILL_FILE) {
+    return crypto.createHash('sha256').update(src, 'utf8').digest('hex') === LEGACY_BACKFILL_SHA256 ? [] : ['the legacy employee backfill is admitted only at its pinned digest'];
+  }
   return MIGRATION_SEED.test(src) ? ['a migration must not insert, update or delete rows (no seed data)'] : [];
 }
 // BF-3C tenant-key convention. The auth/system tables are not company-owned business data; every
@@ -699,7 +710,7 @@ function run() {
   for (const f of files.filter((x) => x.endsWith('.sql'))) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
     for (const re of SECRET_RULES) if (re.test(src)) failures.push(f + ': secret-shaped value: ' + re);
-    for (const v of checkMigrationSql(src)) failures.push(f + ': ' + v);
+    for (const v of checkMigrationSql(src, f)) failures.push(f + ': ' + v);
     for (const v of checkMigrationTenantKey(src)) failures.push(f + ': ' + v);
     for (const v of checkMigrationNoCascade(src)) failures.push(f + ': ' + v);
   }
@@ -847,7 +858,8 @@ function selftest() {
   }
   cases.push({ name: 'a CREATE TABLE migration passes the seed rule', run: () => checkMigrationSql('CREATE TABLE users (\n  id CHAR(32) NOT NULL,\n  CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id) ON DELETE RESTRICT ON UPDATE CASCADE\n) ENGINE=InnoDB;\n'), expect: 0 });
   for (const sql of ["INSERT INTO users (id) VALUES ('ceo')", 'insert ignore into companies VALUES (1)', "REPLACE INTO users VALUES ('x')", 'DELETE FROM users',
-    "UPDATE users SET status = 'active'", "LOAD DATA INFILE 'x' INTO TABLE users"]) {
+    "UPDATE users SET status = 'active'", "LOAD DATA INFILE 'x' INTO TABLE users", 'UPDATE employees e JOIN users u ON u.id = e.id SET e.id = 1',
+    'update employees AS e, users u set e.id = 1', 'UPDATE IGNORE `employees` SET id = 1']) {
     cases.push({ name: 'a seeding migration is caught: ' + sql.slice(0, 24), run: () => checkMigrationSql('CREATE TABLE t (a INT);\n' + sql + ';\n'), expect: 'no seed data' });
   }
   for (const dir of ['Auth', 'Identity', 'Controller', 'Http']) {
@@ -1029,9 +1041,14 @@ function selftest() {
     "            $this->data->employees()->create($auth, $id, $profile);\n        }));\n        $this->writing(fn () => $this->data->atomically(function (): void {\n        }));\n        $this->data->audit()->append("), 'inside the transaction');
   dirty('an audit append with no transaction is caught', 'server/src/Overtime/OvertimeService.php', S + "$this->data->audit()->append($auth, $actor, 'employee', $id, [], $rid);\n", 'inside the transaction');
   clean('an audit append inside atomically passes', 'server/src/Overtime/OvertimeService.php', S + "$this->data->atomically(function () use ($auth): void { $x = '())('; $this->data->audit()->append($auth, $a, 'employee', $i, [], $r); });\n");
-  const realAuditMigration = fs.readFileSync(path.join(root, 'server/migrations/0015_create_audit_events.sql'), 'utf8');
+  const realAuditMigration = fs.readFileSync(path.join(root, 'server/migrations/0017_create_audit_events.sql'), 'utf8');
   tenant('the real audit migration passes (a registered company table)', realAuditMigration, 0);
   tenant('an audit table without its tenant UNIQUE is caught', realAuditMigration.replace('  UNIQUE KEY audit_events_company_id (company_id, id),\n', ''), 'UNIQUE KEY');
+  const realBackfill = fs.readFileSync(path.join(root, LEGACY_BACKFILL_FILE), 'utf8');
+  cases.push({ name: 'the real legacy employee backfill passes at its pinned digest', run: () => checkMigrationSql(realBackfill, LEGACY_BACKFILL_FILE), expect: 0 });
+  cases.push({ name: 'an edited legacy employee backfill is caught', run: () => checkMigrationSql(realBackfill.replace("'LEGACY-'", "'LEGACY_'"), LEGACY_BACKFILL_FILE), expect: 'pinned digest' });
+  cases.push({ name: 'a backfill with an appended DELETE is caught', run: () => checkMigrationSql(realBackfill + 'DELETE FROM employees;\n', LEGACY_BACKFILL_FILE), expect: 'pinned digest' });
+  cases.push({ name: 'the backfill bytes under another migration name are caught', run: () => checkMigrationSql(realBackfill, 'server/migrations/0018_backfill_legacy_employees.sql'), expect: 'no seed data' });
   cases.push({ name: 'contiguous migrations pass', run: () => checkMigrationContinuity(['server/migrations/0001_a.sql', 'server/migrations/0002_b.sql']), expect: 0 });
   cases.push({ name: 'a migration gap is caught', run: () => checkMigrationContinuity(['server/migrations/0001_a.sql', 'server/migrations/0003_c.sql']), expect: 'without a gap' });
   cases.push({ name: 'a duplicate migration version is caught', run: () => checkMigrationContinuity(['server/migrations/0001_a.sql', 'server/migrations/0001_b.sql']), expect: 'without a gap' });
