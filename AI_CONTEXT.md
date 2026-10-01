@@ -91,11 +91,14 @@ migrations `0014`–`0017` (the employee profile with soft archive and an optimi
 legacy anchors given a `LEGACY-NNNNNN` placeholder, then the final constraints; *D-BF4a1-MIGRATION-1 = A* — and the
 append-only `audit_events` trail), `GET /api/employees` (CEO only), `GET /api/employee?id=` (company scope for the CEO, self
 scope for an Employee), and create / update / archive under the existing `employee.create` / `employee.update` /
-`employee.delete` ACTIONS (archive is a soft archive; ACTIONS stay 20). BF-4a2 — Employee account provisioning under
-the owner-locked `account.manage` ACTION with activation by the governed mail outbox — is pending, and AFI-4 waits
-for BF-4a to finish. Its security decision is recorded in
-[SDR-0004](docs/security/SDR-0004-employee-account-administration.md) (owner decision C1 = A: `account.manage` is
-mirrored in `js/core/authz.js`, so BF-4a2 moves ACTIONS 20 → 21 on both sides; until then ACTIONS stay 20). v2.10.0 remains
+`employee.delete` ACTIONS (archive is a soft archive). **BF-4a2** (implemented as source on a feature branch; not
+deployed, no UI) adds Employee account administration under the CEO-only `account.manage` ACTION, as decided in
+[SDR-0004](docs/security/SDR-0004-employee-account-administration.md): provision, reissue activation, disable and
+enable (`/api/employees/provision-account` etc.), activation delivered by the governed mail outbox (the worker
+issues the token at send time; no route returns one), membership-only disable/enable, a derived `accountState` in
+the CEO reads, and migrations `0018`–`0019`. Owner decision C1 = A mirrors `account.manage` in `js/core/authz.js`
+as vocabulary only, so **ACTIONS are 21** on both sides and the package digest changes; `AUTH_MODE` stays LOCAL,
+"Acting as" is unchanged, and AFI-4a (the authenticated Employee workspace) is still pending. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

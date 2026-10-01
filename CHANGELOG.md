@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **BF-4a2 Employee account administration (backend source only; not deployed, no UI).** The CEO-only
+  `account.manage` ACTION (SDR-0004) provisions a login for an existing Employee record, reissues its
+  activation, and disables or re-enables it — `POST /api/employees/provision-account`, `reissue-activation`,
+  `disable-account`, `enable-account`. Activation mail goes through the governed outbox (`#activation=` link,
+  token issued by the worker at send time, never returned); disable acts on the membership and revokes
+  sessions and open tokens; the CEO reads gain a derived `accountState`. Migrations `0018`–`0019`. ACTIONS
+  move 20 → 21 in `server/src/Policy/Action.php` and `js/core/authz.js` (vocabulary only), so the package
+  digest changes; `AUTH_MODE` stays **LOCAL** and there is no deployment.
 - **BF-4a1 server Employee record (backend source only; not deployed).** Migrations `0014`–`0017` extend the
   employee anchor with a profile (code, name, title, department, employment status, join date, contact, notes,
   monthly base salary), soft archive and an optimistic version, and add an append-only business audit trail.
