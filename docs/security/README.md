@@ -23,6 +23,7 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
 |---|---|---|---|---|
 | [SDR-0001](SDR-0001-codeql-baseline-disposition.md) | CodeQL Baseline Disposition | Accepted | 2026-08-01 | 2027-08-01 |
 | [SDR-0002](SDR-0002-php-mariadb-security-architecture.md) | PHP + MariaDB Multi-User Security Architecture | Accepted | 2026-09-29 | Before first real company data |
+| [SDR-0003](SDR-0003-governed-mail-transport.md) | Governed Mail Transport | Accepted | 2026-10-01 | Before the first real recovery mail |
 
 ## Timeline
 
@@ -30,5 +31,9 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
 - **2026-09-29** — SDR-0002 Accepted (security architecture for the ADR-0004 same-origin PHP + MariaDB
   backend: sessions, CSRF, rate limiting, recovery, central data-access scope, audit, secrets,
   pre-deployment evidence gate). Authorizes no implementation.
+- **2026-10-01** — SDR-0003 Accepted (owner decisions D-D1 and D-D3: recovery mail through a
+  transactional HTTPS API — Resend — behind the provider-neutral `MailTransport` boundary, delivered
+  from a database outbox by a cron worker; no SMTP, no mailer library, no Composer dependency; resolves
+  SDR-0002 owner item O5 without amending SDR-0002).
 
 *Architecture decisions live in [`../adr/`](../03b-repository-adr/README.md) as ADRs.*

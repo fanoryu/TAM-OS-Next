@@ -95,14 +95,14 @@ return [
             $tokens = new AccountTokenStore($tx);
             $accounts = new AccountStore($tx);
             // B reads first: its snapshot says live and pending.
-            assertSame(['userId' => $ceo['userId'], 'live' => true], $tokens->peek($hash));
+            assertSame(['userId' => $ceo['userId'], 'live' => true], $tokens->peek($hash, AccountTokenStore::ACTIVATION));
             assertSame(false, $accounts->findById($ceo['userId'])['user']['has_password']);
             // A redeems and commits in between.
             assertSame(200, $k->handle(activateRequest($ceo['token'], $password), requestId())->status);
             // B's snapshot still says pending — but its writes are compare-and-swap on current rows.
             assertSame(false, $accounts->findById($ceo['userId'])['user']['has_password'], 'B still sees its stale snapshot');
             assertSame(false, $accounts->setInitialPasswordHash($ceo['userId'], Passwords::hash('attacker chosen value')), 'no second first-password');
-            assertSame(0, $tokens->consume($hash), 'no second consumption');
+            assertSame(0, $tokens->consume($hash, AccountTokenStore::ACTIVATION), 'no second consumption');
         });
         assertTrue(Passwords::verify($password, $hashOf($db, $ceo['userId'])), 'the winner\'s password stands');
         assertSame(1, (int) $db->select('SELECT COUNT(*) AS n FROM account_tokens WHERE used_at IS NOT NULL')[0]['n']);

@@ -39,6 +39,27 @@ final class LoginKeys
         return hash('sha256', 'activate-ip:' . self::ipKey($remoteAddr));
     }
 
+    /**
+     * BF-3D: password-recovery requests per address candidate. Computed for every candidate —
+     * unknown and invalid addresses included — so the limiter behaves the same for all.
+     */
+    public static function recoveryAccountBucket(string $emailCandidate): string
+    {
+        return hash('sha256', 'recover-acct:' . $emailCandidate);
+    }
+
+    /** BF-3D: password-recovery requests per client IP. */
+    public static function recoveryIpBucket(?string $remoteAddr): string
+    {
+        return hash('sha256', 'recover-ip:' . self::ipKey($remoteAddr));
+    }
+
+    /** BF-3D: failed password-reset redemptions per client IP (the token itself names no account). */
+    public static function resetIpBucket(?string $remoteAddr): string
+    {
+        return hash('sha256', 'reset-ip:' . self::ipKey($remoteAddr));
+    }
+
     /** BF-3B: wrong current passwords per authenticated user on password change. */
     public static function passwordChangeBucket(string $userId): string
     {

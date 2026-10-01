@@ -141,14 +141,16 @@ return [
         $status = runMigrateCli(['status'], $file);
         assertSame([1, "migrations: history_missing\n"], [$status['exit'], $status['stderr']]);
         // The real server/migrations set: 0001–0006 (BF-3A auth schema), 0007–0008 (BF-3B lifecycle),
-        // 0009–0010 (BF-3C employee anchor and binding FK).
+        // 0009–0010 (BF-3C employee anchor and binding FK), 0011–0013 (BF-3D token purpose, events, mail outbox).
         $apply = runMigrateCli(['apply'], $file);
         assertSame([0, "applied: 0001_create_companies\napplied: 0002_create_users\napplied: 0003_create_memberships\n"
             . "applied: 0004_create_sessions\napplied: 0005_create_auth_rate_limits\napplied: 0006_create_auth_events\n"
             . "applied: 0007_create_account_tokens\napplied: 0008_replace_auth_events_event_check\n"
-            . "applied: 0009_create_employees\napplied: 0010_add_memberships_employee_fk\nmigrations: current\n"],
+            . "applied: 0009_create_employees\napplied: 0010_add_memberships_employee_fk\n"
+            . "applied: 0011_replace_account_tokens_purpose_check\napplied: 0012_replace_auth_events_event_check\n"
+            . "applied: 0013_create_mail_outbox\nmigrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
-        assertSame(['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(['account_tokens', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));
         $again = runMigrateCli(['status'], $file);
         assertSame([0, "migrations: current\n"], [$again['exit'], $again['stdout']]);
         $noop = runMigrateCli(['apply'], $file);

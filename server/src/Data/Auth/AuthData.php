@@ -23,6 +23,7 @@ final class AuthData
     private ?RateLimiter $rateLimits = null;
     private ?AuthEvents $events = null;
     private ?AccountTokenStore $tokens = null;
+    private ?MailOutboxStore $outbox = null;
 
     /** @param \Closure(): Database $connect */
     private function __construct(private readonly \Closure $connect)
@@ -63,6 +64,37 @@ final class AuthData
     public function tokens(): AccountTokenStore
     {
         return $this->tokens ??= new AccountTokenStore($this->db());
+    }
+
+    public function outbox(): MailOutboxStore
+    {
+        return $this->outbox ??= new MailOutboxStore($this->db());
+    }
+
+    /**
+     * BF-3D: the server-wide advisory lock 'tamos_mail', taken without waiting, so one outbox
+     * worker runs at a time (a cron run that overlaps the previous one exits). Same semantics as
+     * acquireAccountLock().
+     *
+     * @throws DatabaseError on a lock error (NULL) or a database failure
+     */
+    public function acquireMailLock(): bool
+    {
+        $result = $this->db()->select("SELECT GET_LOCK('tamos_mail', 0) AS acquired")[0]['acquired'] ?? null;
+        if ($result === null) {
+            throw new DatabaseError(DatabaseError::FAILURE, 'lock');
+        }
+        return (int) $result === 1;
+    }
+
+    /** Best effort: the lock dies with the (non-persistent) connection anyway. */
+    public function releaseMailLock(): void
+    {
+        try {
+            $this->db()->select("SELECT RELEASE_LOCK('tamos_mail') AS released");
+        } catch (DatabaseError) {
+            // Released when the connection closes.
+        }
     }
 
     /**

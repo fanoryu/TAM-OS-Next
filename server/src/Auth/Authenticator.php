@@ -34,8 +34,8 @@ use TamOs\Identity\Principal;
  *   membership → exactly one password_verify of the current password → failure: count +
  *   password_fail → success: compare-and-swap on the verified hash (the users row is locked
  *   only from here to commit; a concurrent change means conflict and nothing is written) →
- *   revoke every session of the user → one new session for the caller → reset the bucket →
- *   password_change
+ *   revoke every session of the user and every open account token (BF-3D) → one new session
+ *   for the caller → reset the bucket → password_change
  *
  * logoutAll revokes every session of the user, the caller's included, and records logout_all.
  */
@@ -174,6 +174,8 @@ final class Authenticator
             }
             $sessions = $this->data->sessions();
             $sessions->revokeAllForUser($userId);
+            // BF-3D: no recovery (or other account) link issued before the change survives it.
+            $this->data->tokens()->revokeAllOpenForUser($userId);
             $sessions->create(SessionToken::hash($token), $userId, $csrf);
             $limits->reset($bucket);
             $this->data->events()->append('password_change', $userId, $principal->membershipId, null, $remoteAddr, $requestId);

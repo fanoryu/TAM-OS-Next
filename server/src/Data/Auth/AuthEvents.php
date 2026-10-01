@@ -13,11 +13,13 @@ use TamOs\Data\Database;
  */
 final class AuthEvents
 {
-    // Must equal the CHECK auth_events_event_v2 vocabulary (migration 0008); a unit test compares them.
+    // Must equal the CHECK auth_events_event_v3 vocabulary (migration 0012); a unit test compares them.
     public const EVENTS = [
         'login_success', 'login_failure', 'login_locked', 'logout',
         // BF-3B account lifecycle
         'ceo_bootstrap', 'credential_reset', 'activation_ok', 'activation_fail', 'password_change', 'password_fail', 'logout_all',
+        // BF-3D password recovery and governed mail
+        'recovery_req', 'recovery_ok', 'recovery_fail', 'mail_fail',
     ];
 
     public function __construct(private readonly Database $db)

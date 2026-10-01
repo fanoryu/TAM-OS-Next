@@ -23,6 +23,34 @@ final class AssertionFailed extends \RuntimeException
 {
 }
 
+/**
+ * The deterministic test MailTransport (BF-3D): records every message in memory and never
+ * touches a network — no real email is ever sent by a test. `$fail` queues outcomes: a
+ * MailError kind to throw for the next send, or null to accept it. `$during` runs inside
+ * send(), so a test can observe the database while "delivery" is in flight.
+ */
+final class RecordingMailTransport implements \TamOs\Mail\MailTransport
+{
+    /** @var list<\TamOs\Mail\MailMessage> */
+    public array $sent = [];
+    /** @var list<?string> */
+    public array $fail = [];
+    /** @var (\Closure(\TamOs\Mail\MailMessage): void)|null */
+    public ?\Closure $during = null;
+
+    public function send(\TamOs\Mail\MailMessage $message): void
+    {
+        if ($this->during !== null) {
+            ($this->during)($message);
+        }
+        $kind = array_shift($this->fail);
+        if ($kind !== null) {
+            throw new \TamOs\Mail\MailError($kind);
+        }
+        $this->sent[] = $message;
+    }
+}
+
 function fail(string $message): never
 {
     throw new AssertionFailed($message);
@@ -99,7 +127,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
     $auth ??= \TamOs\Data\Auth\AuthData::fromConfig($config);
     return Routes::production(
         new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'),
-        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth)),
+        new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth), new \TamOs\Auth\AccountRecovery($auth)),
     );
 }
 
@@ -264,6 +292,9 @@ function writeConfigFile(Config $config): string
     $values = ['env' => $config->env, 'origin' => $config->origin, 'log_path' => $config->logPath];
     if ($config->db !== null) {
         $values['db'] = $config->db;
+    }
+    if ($config->mail !== null) {
+        $values['mail'] = $config->mail;
     }
     file_put_contents($file, "<?php\ndeclare(strict_types=1);\nreturn " . var_export($values, true) . ";\n");
     return $file;

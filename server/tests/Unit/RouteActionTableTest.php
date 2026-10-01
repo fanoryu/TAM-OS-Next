@@ -24,13 +24,15 @@ $selfService = static fn (): array => array_map(static function (string $key) us
 }, Routes::ACCOUNT_SELF_SERVICE);
 
 return [
-    'the self-service allow-list is exactly the five BF-3A/BF-3B account routes' => static function (): void {
+    'the self-service allow-list is exactly the seven BF-3A/BF-3B/BF-3D account routes' => static function (): void {
         assertSame([
             'POST /api/auth/login',
             'POST /api/auth/logout',
             'POST /api/auth/activate',
             'POST /api/auth/change-password',
             'POST /api/auth/logout-all',
+            'POST /api/auth/forgot-password',
+            'POST /api/auth/reset-password',
         ], Routes::ACCOUNT_SELF_SERVICE);
     },
     'the production table validates: its only mutations are self-service, none claims an Action' => static function (): void {
@@ -59,7 +61,7 @@ return [
         $table = [...$selfService(),
             new Route('POST', '/api/employees', $h(...), [], RouteAuth::Required, Action::EmployeeCreate),
             new Route('GET', '/api/employees', $h(...), ['id'], RouteAuth::Required)];
-        assertSame(7, count(Routes::validate($table)));
+        assertSame(count(Routes::ACCOUNT_SELF_SERVICE) + 2, count(Routes::validate($table)));
     },
     'a self-service route may not claim a business Action, and none may go missing' => static function () use ($h, $selfService): void {
         $routes = $selfService();

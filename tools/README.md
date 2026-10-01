@@ -51,7 +51,7 @@ php server/bin/migrate.php apply    # create and verify history, then run pendin
 
 Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
 is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`; BF-3B:
-`0007`–`0008`; BF-3C: `0009`–`0010`); the boundary tool refuses any migration that inserts, updates or
+`0007`–`0008`; BF-3C: `0009`–`0010`; BF-3D: `0011`–`0013`); the boundary tool refuses any migration that inserts, updates or
 deletes rows, any cascading foreign key, and any new table that is not an auth/system table or a
 registered company table carrying the tenant key.
 
@@ -62,6 +62,17 @@ data. Neither command takes a password; each prints a one-time activation token 
 php server/bin/account.php create-ceo --email=<address>          # once: first company + pending CEO
 php server/bin/account.php reset-credentials --email=<address>   # break-glass, CEO only; also reissues an expired token
 ```
+
+Recovery mail (BF-3D, SDR-0003) is sent only by the cron worker, never by an HTTP request. It needs
+the `mail` configuration section and prints counts only:
+
+```bash
+php server/bin/mail.php run   # deliver up to 20 due outbox rows under the tamos_mail lock, then exit
+```
+
+Mail tests use the in-memory `RecordingMailTransport` (`server/tests/lib.php`) and the Resend adapter
+with an injected poster: no test reaches a network or sends mail, and the CLI tests run the worker
+only over an empty outbox.
 
 Authentication tests create their accounts per run inside the guarded test database
 (`server/tests/lib.php` → `authFixture`, and `pendingCeo` through the real lifecycle); no credential is

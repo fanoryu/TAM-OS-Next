@@ -38,6 +38,13 @@
  *     :company_id, with a positional ?, or a *_SELF_SQL without :self_employee_id; or a company
  *     table (employees) is named in SQL outside a business store. Heuristic shape checks only —
  *     tenant isolation is proven by construction, the MariaDB and hostile-principal tests;
+ *   - (BF-3D) network or mail I/O (curl_*, mail, fsockopen, stream sockets, stream contexts)
+ *     appears outside server/src/Mail/ResendTransport.php, the adapter is named outside
+ *     server/src/Mail/, or the provider endpoint appears outside the adapter; mail_outbox is
+ *     written outside server/src/Data/Auth/MailOutboxStore.php; a token or link variable is
+ *     printed, written or logged anywhere but the operator account CLI; a Resend-shaped key
+ *     appears anywhere; the `#recovery=` link is built outside server/src/Mail/RecoveryMail.php;
+ *     the Host or a forwarding header is read anywhere (server/bin/mail.php joins the CLI files);
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -61,9 +68,9 @@ const DATA_DIR = 'server/src/Data/';
 // only in that slice. server/src/Data was un-gated by BF-2A; server/migrations and server/bin by
 // BF-2B, each narrowly (see checkTree); server/src/Policy by BF-3C.
 const NOT_YET_AUTHORIZED = [];
-// The only files allowed under server/bin/ (BF-2B migrate, BF-3B account), and the only
-// shape a migration file may have.
-const CLI_FILES = new Set(['server/bin/migrate.php', 'server/bin/account.php']);
+// The only files allowed under server/bin/ (BF-2B migrate, BF-3B account, BF-3D mail), and the
+// only shape a migration file may have.
+const CLI_FILES = new Set(['server/bin/migrate.php', 'server/bin/account.php', 'server/bin/mail.php']);
 const MIGRATION_FILE = /^server\/migrations\/\d{4}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 const SUPERGLOBAL_READERS = new Set(['server/src/Http/Request.php', 'server/dev/router.php']);
 const HEADER_EMITTERS = new Set(['server/src/Http/Response.php', 'server/src/bootstrap.php']);
@@ -91,6 +98,15 @@ const SCOPED_DATABASE = 'server/src/Data/Scope/ScopedDatabase.php';
 // BF-3C: the server ACTION vocabulary and the frontend one it must equal.
 const ACTION_FILE = 'server/src/Policy/Action.php';
 const FRONTEND_AUTHZ = 'js/core/authz.js';
+// BF-3D governed mail (SDR-0003): the outbox has one writer; network and mail primitives exist
+// only in the one provider adapter, and only the Mail boundary may name that adapter, so no
+// application or authentication code can depend on the provider or send mail directly.
+const OUTBOX_STORE = 'server/src/Data/Auth/MailOutboxStore.php';
+const MAIL_DIR = 'server/src/Mail/';
+const MAIL_ADAPTER = 'server/src/Mail/ResendTransport.php';
+const RECOVERY_MAIL = 'server/src/Mail/RecoveryMail.php';
+// The only production place a raw one-time token is printed: the operator CLI, once, by design.
+const TOKEN_PRINTERS = new Set(['server/bin/account.php']);
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -169,6 +185,9 @@ const CODE_RULES = [
   { id: 'identity-construction', re: /\bnew\s+\\?(?:TamOs\\Identity\\)?(Principal|AuthSession)\s*\(/, msg: 'a Principal or AuthSession is constructed only inside ' + IDENTITY_DIR, allow: (f) => f.startsWith(IDENTITY_DIR) },
   { id: 'authorization-construction', re: /\bnew\s+\\?(?:TamOs\\Policy\\)?Authorization\s*\(/, msg: 'an Authorization is constructed only by ' + POLICY_FILE, allow: (f) => f === POLICY_FILE },
   { id: 'scoped-record-construction', re: /\bnew\s+\\?(?:TamOs\\Data\\Scope\\)?ScopedRecord\s*\(/, msg: 'a ScopedRecord is constructed only by ' + SCOPED_DATABASE, allow: (f) => f === SCOPED_DATABASE },
+  { id: 'network-io', re: /(?<![\w$>:])(curl_[a-z_]+|mail|mb_send_mail|fsockopen|pfsockopen|stream_socket_client|socket_create|socket_connect|stream_context_create)\s*\(/i, msg: 'network and mail I/O is performed only by the governed mail adapter ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
+  { id: 'mail-adapter-name', re: /\bResendTransport\b/, msg: 'only the Mail boundary (' + MAIL_DIR + ') may name the provider adapter; everything else uses MailTransport', allow: (f) => f.startsWith(MAIL_DIR) },
+  { id: 'token-output', re: /\b(echo|print|printf|fwrite|fputs|error_log|file_put_contents|var_export)\b[^;]*\$\w*(token|link)\b/i, msg: 'a raw token or recovery link is never printed, written or logged (only the operator CLI prints its activation token)', allow: (f) => TOKEN_PRINTERS.has(f) },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
 ];
 // Banned in every production file, the data layer included.
@@ -199,6 +218,10 @@ const STRING_RULES = [
   { id: 'auth-events-rewrite', re: /\bauth_events\b[\s\S]*\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b|\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b[\s\S]*\bauth_events\b/i, msg: 'auth_events is append-only: no UPDATE, DELETE, REPLACE, TRUNCATE, ALTER or DROP' },
   { id: 'account-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?(companies|users|memberships)\b/i, msg: 'companies, users and memberships are written only by ' + ACCOUNT_STORE, allow: (f) => f === ACCOUNT_STORE },
   { id: 'token-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?account_tokens\b/i, msg: 'account_tokens is written only by ' + TOKEN_STORE, allow: (f) => f === TOKEN_STORE },
+  { id: 'outbox-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?mail_outbox\b/i, msg: 'mail_outbox is written only by ' + OUTBOX_STORE, allow: (f) => f === OUTBOX_STORE },
+  { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
+  { id: 'recovery-link', re: /#recovery=/, msg: 'the recovery link is built only by ' + RECOVERY_MAIL + ' (from the configured origin)', allow: (f) => f === RECOVERY_MAIL },
+  { id: 'host-header', re: /^(HTTP_HOST|SERVER_NAME|HTTP_X_FORWARDED_HOST|HTTP_X_FORWARDED_PROTO|HTTP_FORWARDED)$/, msg: 'the Host and forwarding headers are never read: URLs come only from the configured origin' },
 ];
 // A CSRF token is compared only with hash_equals(): an ordinary comparison (or strcmp) against
 // anything but null is a timing leak. The kernel's comparison must be the hash_equals() one.
@@ -227,7 +250,7 @@ function checkMigrationSql(src) {
 // other table a migration creates must be registered in COMPANY_TABLES and carry the tenant key:
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
-const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations']);
+const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
 const COMPANY_TABLES = new Set(['employees']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
@@ -253,6 +276,8 @@ const SECRET_RULES = [
   /\bgithub_pat_[A-Za-z0-9_]{30,}\b/,
   /\bsk-[A-Za-z0-9]{20,}\b/,
   /\bxox[abpr]-[A-Za-z0-9-]{10,}\b/,
+  // BF-3D: a Resend API key (re_ followed by a long unbroken key body).
+  /\bre_[A-Za-z0-9]{20,}\b/,
 ];
 
 function isProductionPhp(file) {
@@ -405,7 +430,7 @@ function checkTree(files, dirs = []) {
     const isMigration = MIGRATION_FILE.test(f) && base.length - '0000_'.length - '.sql'.length <= 64;
     if (f.startsWith('server/migrations/') && !isMigration) out.push(f + ': server/migrations/ holds only NNNN_name.sql migration files');
     if (/\.sql$/i.test(f) && !f.startsWith('server/migrations/')) out.push(f + ': .sql files belong only in server/migrations/');
-    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php and account.php');
+    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php, account.php and mail.php');
     if (/^\.env/.test(base) || /\.(phar|pem|key)$/i.test(base)) out.push(f + ': forbidden file type');
     if (!/\.php$/.test(f) && f !== 'server/public/api/.htaccess' && !isMigration && !f.startsWith('server/migrations/')) out.push(f + ': unexpected file type under server/');
   }
@@ -866,6 +891,41 @@ function selftest() {
   dirty('a controller building a ScopedRecord is caught', 'server/src/Controller/X.php', S + "$r = new ScopedRecord($s, 'overtime', $id, $mine, 'Draft');\n", 'ScopedRecord is constructed only');
   dirty('Policy building a ScopedRecord is caught', POLICY_FILE, S + "$r = new \\TamOs\\Data\\Scope\\ScopedRecord($s, 'x', 'y', null, null);\n", 'ScopedRecord is constructed only');
   clean('a method named newAuthorization() is not construction', 'server/src/Controller/X.php', S + '$a = $this->newAuthorization(); $r = ScopedRecord::class;\n');
+
+  // BF-3D: governed mail — network I/O and the provider stay in the adapter; the outbox has one
+  // writer; no raw token or link is printed; the mail worker is an allowed, guarded CLI.
+  const realAdapter = fs.readFileSync(path.join(root, MAIL_ADAPTER), 'utf8');
+  clean('the real Resend adapter passes', MAIL_ADAPTER, realAdapter);
+  for (const fn of ['curl_init', 'curl_exec', 'mail', 'mb_send_mail', 'fsockopen', 'stream_socket_client', 'stream_context_create', 'socket_create']) {
+    dirty(fn + ' outside the mail adapter is caught', 'server/src/Auth/AccountRecovery.php', S + '$x = ' + fn + "('a', 'b');\n", 'network and mail I/O');
+  }
+  dirty('\\mail() in a controller is caught', 'server/src/Controller/AuthController.php', S + "\\mail($to, 'S', $b);\n", 'network and mail I/O');
+  dirty('curl in another Mail file is caught', 'server/src/Mail/OutboxWorker.php', S + '$c = curl_init();\n', 'network and mail I/O');
+  clean('a method named sendMail() is not mail()', 'server/src/Mail/OutboxWorker.php', S + '$this->transport->send($m); $x->mail($y); $e->curl_version;\n');
+  clean('the Mail boundary may name the adapter', 'server/src/Mail/MailConfig.php', S + "return new ResendTransport($k, $f);\n");
+  dirty('auth code naming the adapter is caught', 'server/src/Auth/AccountRecovery.php', S + 'function f(ResendTransport $t): void {}\n', 'only the Mail boundary');
+  dirty('a controller constructing the adapter is caught', 'server/src/Controller/AuthController.php', S + "$t = new \\TamOs\\Mail\\ResendTransport($k, $f);\n", 'only the Mail boundary');
+  dirty('the provider endpoint outside the adapter is caught', 'server/src/Mail/MailConfig.php', S + "const URL = 'https://api.resend.com/emails';\n", 'provider endpoint');
+  clean('the outbox store writes the outbox', OUTBOX_STORE, S + "$this->db->execute(\"UPDATE mail_outbox SET status = 'sent' WHERE id = ?\", [$i]);\n");
+  dirty('an outbox write elsewhere is caught', 'server/src/Data/Auth/AccountTokenStore.php', S + "$this->db->execute(\"INSERT INTO mail_outbox (user_id) VALUES (?)\", [$u]);\n", 'written only by ' + OUTBOX_STORE);
+  dirty('an outbox delete elsewhere is caught', 'server/src/Data/Auth/SessionStore.php', S + "$this->db->execute('DELETE FROM mail_outbox WHERE id = ?', [$i]);\n", 'written only by ' + OUTBOX_STORE);
+  for (const [name, src] of [['echo', 'echo $token;'], ['error_log', "error_log('reset ' . $rawToken);"], ['fwrite', 'fwrite(STDERR, $link);'], ['printf', "printf('%s', $recoveryLink);"], ['var_export', 'var_export($token);']]) {
+    dirty('printing a token or link with ' + name + ' is caught', 'server/bin/mail.php', S + "if (PHP_SAPI !== 'cli') { exit(1); }\n" + src + '\n', 'never printed');
+  }
+  clean('the operator CLI prints its activation token once', 'server/bin/account.php', S + "if (PHP_SAPI !== 'cli') { exit(1); }\necho 'activation_token: ' . $issued->token . \"\\n\";\n");
+  clean('mail.php with its CLI guard passes', 'server/bin/mail.php', S + "if (PHP_SAPI !== 'cli') { exit(1); }\necho 'sent: ' . $counts['sent'] . \"\\n\";\n");
+  dirty('mail.php without the CLI guard is caught', 'server/bin/mail.php', S + "echo 'x';\n", 'non-CLI SAPI');
+  cases.push({ name: 'server/bin/mail.php is authorized since BF-3D', run: () => checkTree(['server/bin/migrate.php', 'server/bin/account.php', 'server/bin/mail.php'], ['server/bin']), expect: 0 });
+  treeCase('a fourth file under server/bin is still caught', ['server/bin/mail.php', 'server/bin/worker.php'], 'server/bin/ holds only');
+  tenant('the real mail outbox migration passes (a system table)', fs.readFileSync(path.join(root, 'server/migrations/0013_create_mail_outbox.sql'), 'utf8'), 0);
+  dirty('a Resend-shaped API key is caught (tests too)', 'server/tests/Unit/T.php', S + "$k = 're_" + 'Ab3'.repeat(9) + "';\n", 'secret');
+  clean('a test key with separators is not key-shaped', 'server/tests/Unit/T.php', S + "$k = 're_test_not_a_real_key';\n");
+  clean('RecoveryMail builds the recovery link', RECOVERY_MAIL, S + "const FRAGMENT = '/#recovery=';\n");
+  dirty('a recovery link built elsewhere is caught', 'server/src/Auth/AccountRecovery.php', S + "$l = $origin . '/#recovery=' . $t;\n", 'recovery link is built only');
+  for (const h of ['HTTP_HOST', 'SERVER_NAME', 'HTTP_X_FORWARDED_HOST', 'HTTP_FORWARDED']) {
+    dirty('reading ' + h + ' is caught', REQUEST_FILE, S + "$h = $header('" + h + "');\n", 'Host and forwarding headers');
+  }
+  clean('a comment naming HTTP_HOST passes', REQUEST_FILE, S + "// HTTP_HOST is never read\n");
 
   // BF-3C: business stores use ScopedDatabase and name the scope; company tables stay inside them.
   const STORE = 'server/src/Data/Employee/EmployeeStore.php';

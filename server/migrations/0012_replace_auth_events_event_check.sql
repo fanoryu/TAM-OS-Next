@@ -1,0 +1,1 @@
+ALTER TABLE auth_events DROP CONSTRAINT auth_events_event_v2, ADD CONSTRAINT auth_events_event_v3 CHECK (event IN ('login_success', 'login_failure', 'login_locked', 'logout', 'ceo_bootstrap', 'credential_reset', 'activation_ok', 'activation_fail', 'password_change', 'password_fail', 'logout_all', 'recovery_req', 'recovery_ok', 'recovery_fail', 'mail_fail'));

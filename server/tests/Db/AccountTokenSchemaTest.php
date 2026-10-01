@@ -2,9 +2,10 @@
 declare(strict_types=1);
 
 /*
- * The BF-3B schema (migrations 0007 account_tokens, 0008 event vocabulary) against the real,
- * guarded CI MariaDB: every CHECK and the foreign key are enforced by the database itself, and
- * the replaced event CHECK accepts exactly the BF-3A + BF-3B vocabulary.
+ * The account-token and event schema (BF-3B 0007–0008, BF-3D 0011–0012) against the real,
+ * guarded CI MariaDB: every CHECK and the foreign key are enforced by the database itself, the
+ * purposes are exactly activation and recovery, and the replaced event CHECK accepts exactly the
+ * BF-3A + BF-3B + BF-3D vocabulary.
  */
 
 use TamOs\Data\Auth\AuthEvents;
@@ -21,16 +22,20 @@ $hash = static fn (): string => hash('sha256', random_bytes(32));
 $refused = static fn (Database $db, string $sql, array $params, string $label): DatabaseError => assertThrows(DatabaseError::class, static fn () => $db->execute($sql, $params), $label);
 
 return [
-    'account_tokens: a live activation token for an existing user is accepted' => static function () use ($insert, $hash): void {
+    'account_tokens: live activation and recovery tokens for an existing user are accepted' => static function () use ($insert, $hash): void {
         $db = authDatabase();
         $a = authFixture($db, ['password' => null]);
         assertSame(1, $db->execute($insert, [$hash(), $a['userId'], 'activation', null, null]));
+        assertSame(1, $db->execute($insert, [$hash(), $a['userId'], 'recovery', null, null]));
+        $names = array_column($db->select("SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'account_tokens' ORDER BY CONSTRAINT_NAME"), 'n');
+        assertSame(['account_tokens_expiry', 'account_tokens_final', 'account_tokens_purpose_v2', 'account_tokens_used_in_time'], $names, 'the purpose CHECK was replaced, not stacked');
     },
     'account_tokens: every CHECK is enforced by MariaDB' => static function () use ($insert, $hash, $refused): void {
         $db = authDatabase();
         $a = authFixture($db, ['password' => null]);
         $cases = [
-            'unknown purpose' => [$insert, [$hash(), $a['userId'], 'recovery', null, null]],
+            'unknown purpose' => [$insert, [$hash(), $a['userId'], 'reset', null, null]],
+            'empty purpose' => [$insert, [$hash(), $a['userId'], '', null, null]],
             'used and revoked' => [$insert, [$hash(), $a['userId'], 'activation', '2026-01-01 00:00:00.000000', '2026-01-01 00:00:00.000000']],
             'expires not after created' => ['INSERT INTO account_tokens (token_hash, user_id, purpose, created_at, expires_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))', [$hash(), $a['userId'], 'activation']],
             'used at expiry' => ['INSERT INTO account_tokens (token_hash, user_id, purpose, created_at, expires_at, used_at) VALUES (?, ?, ?, UTC_TIMESTAMP(6) - INTERVAL 1 HOUR, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))', [$hash(), $a['userId'], 'activation']],
@@ -56,17 +61,17 @@ return [
         assertSame(1062, $refused($db, $insert, [$h, $a['userId'], 'activation', null, null], 'duplicate hash')->driverCode);
         assertSame(1451, $refused($db, 'DELETE FROM users WHERE id = ?', [$a['userId']], 'user referenced by a token')->driverCode);
     },
-    'auth_events: the replaced CHECK accepts exactly the BF-3A and BF-3B vocabulary' => static function () use ($refused): void {
+    'auth_events: the replaced CHECK accepts exactly the BF-3A, BF-3B and BF-3D vocabulary' => static function () use ($refused): void {
         $db = authDatabase();
         $sql = 'INSERT INTO auth_events (occurred_at, event, request_id) VALUES (UTC_TIMESTAMP(6), ?, ?)';
         foreach (AuthEvents::EVENTS as $event) {
             assertSame(1, $db->execute($sql, [$event, requestId()]), $event);
         }
-        foreach (['activation_issue', 'activation_lock', 'password_locked', 'sessions_revoked', 'password_changed', 'account_created', ''] as $event) {
+        foreach (['activation_issue', 'activation_lock', 'password_locked', 'sessions_revoked', 'password_changed', 'account_created', 'recovery_mail', 'recovery_sent', ''] as $event) {
             $e = $refused($db, $sql, [$event, requestId()], 'refused: ' . $event);
             assertSame(4025, $e->driverCode, $event);
         }
         $names = array_column($db->select("SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'auth_events'"), 'n');
-        assertSame(['auth_events_event_v2'], $names, 'the BF-3A constraint was replaced, not stacked');
+        assertSame(['auth_events_event_v3'], $names, 'the earlier constraints were replaced, not stacked');
     },
 ];
