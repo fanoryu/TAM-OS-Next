@@ -5607,6 +5607,82 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
   check(/\.auth-screen\{/.test(read(path.join(root, 'css', 'components.css'))), 'AFI-2: auth-view styles live in css/components.css (authorized golden revision)');
 }
 
+// ===== AFI-3 — CREDENTIAL FLOWS (activation, recovery request, reset) =====
+// STRUCTURE only; behaviour is proven by tools/verify-auth-flow-runtime.js (local-only, not
+// in CI). Pins: a subordinate machine reached only from AuthBoot.start() in SESSION mode;
+// a strict fragment parser that strips the link at once; exactly three CSRF-free endpoints
+// with exact bodies; the token memory-only and never in the view; the business firewall.
+console.log('== AFI-3 — CREDENTIAL FLOWS ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? read(p) : ''; };
+  const afCode = code(rd('core/auth-flow.js'));
+  const abCode = code(rd('core/auth-boot.js'));
+  const avCode = code(rd('ui/auth-view.js'));
+  const allCode = jsFiles.concat(['boot/theme-boot.js']).map((f) => ({ f: f, c: code(rd(f)) }));
+  check(!!afCode, 'AFI-3: js/core/auth-flow.js exists');
+  check(jsFiles.indexOf('core/auth-flow.js') === jsFiles.indexOf('core/auth-boot.js') - 1
+    && indexHtml.includes('<script src="js/core/auth-flow.js"></script>\n<script src="js/core/auth-boot.js"></script>'),
+    'AFI-3: auth-flow.js loads immediately before auth-boot.js (manifest and index.html)');
+  const pkgManifestPath = path.join(root, 'dist', 'package-manifest.json');
+  const pkgPaths = fs.existsSync(pkgManifestPath) ? (JSON.parse(read(pkgManifestPath)).files || []).map((e) => e.path) : [];
+  check(pkgPaths.indexOf('js/core/auth-flow.js') !== -1 && !pkgPaths.some((p) => /^tools\/|serve-auth-stub|verify-auth-flow-runtime/.test(p)),
+    'AFI-3: the package carries js/core/auth-flow.js and no stub or harness');
+  // The link: one strict grammar, stripped from the current entry, no other URL access.
+  check(/const AUTH_LINK_PATTERN = \/\^#\(recovery\|activation\)=\(\[A-Za-z0-9_-\]\{43\}\)\$\/;/.test(afCode),
+    'AFI-3: the fragment parser is exactly ^#(recovery|activation)=<43 base64url characters>$');
+  check(/history\.replaceState\(null, '', location\.pathname \+ location\.search\);/.test(afCode) && !/pushState/.test(afCode),
+    'AFI-3: a credential fragment is stripped with history.replaceState (no new history entry)');
+  check(!/\blocation\b/.test(afCode.replace(/typeof location !== 'undefined' && location && typeof location\.hash === 'string'\) \? location\.hash|location\.pathname \+ location\.search/g, ''))
+    && !/\b(document\.URL|URLSearchParams|hostname|navigator\s*\.\s*onLine)\b/.test(afCode),
+    'AFI-3: auth-flow.js reads only location.hash (and pathname/search to strip it); nothing else from the URL');
+  check(['core/app-bootstrap.js', 'core/auth-boot.js', 'ui/auth-view.js', 'core/constants.js'].every((f) => !/\blocation\b|\bhistory\s*\.|hashchange/.test(code(rd(f))))
+    && allCode.filter((x) => /hashchange|history\s*\.\s*replaceState/.test(x.c)).map((x) => x.f).join() === 'core/auth-flow.js',
+    'AFI-3: only auth-flow.js handles the fragment, hashchange and replaceState');
+  // Mode: SESSION only, reached only from AuthBoot.start(); AUTH_MODE never derived here.
+  check(/function sessionMode\(\)\{ return AUTH_MODE === AUTH_MODES\.SESSION; \}/.test(afCode)
+    && /beginFromLink\(\)\{\s*if\(!sessionMode\(\)\) return false;/.test(afCode)
+    && /function onHashChange\(\)\{\s*if\(!sessionMode\(\)\) return;/.test(afCode) && !/\bAUTH_MODE\s*=[^=]/.test(afCode),
+    'AFI-3: AuthFlow acts only in SESSION mode and never assigns AUTH_MODE');
+  check(/start\(\)\{\s*if\(AUTH_MODE === AUTH_MODES\.SESSION && typeof AuthFlow !== 'undefined' && AuthFlow\.beginFromLink\(\)\) return Promise\.resolve\(\);\s*return check\(\);\s*\}/.test(abCode)
+    && allCode.filter((x) => /beginFromLink\(/.test(x.c)).map((x) => x.f).sort().join() === 'core/auth-boot.js,core/auth-flow.js',
+    'AFI-3: AuthFlow.beginFromLink() is entered only from AuthBoot.start(), in SESSION mode; otherwise start() is unchanged');
+  check(allCode.filter((x) => /\bAuthFlow\b/.test(x.c)).map((x) => x.f).sort().join() === 'core/auth-boot.js,core/auth-flow.js,ui/auth-view.js',
+    'AFI-3: AuthFlow is referenced only by auth-boot.js and auth-view.js');
+  // Network: exactly three CSRF-free endpoints with exact bodies.
+  check((afCode.match(/ApiClient\.request\(/g) || []).length === 2
+    && /ApiClient\.request\('\/api\/auth\/forgot-password', \{ method: 'POST', body: \{ email: email \} \}\)/.test(afCode)
+    && /ApiClient\.request\(activation \? '\/api\/auth\/activate' : '\/api\/auth\/reset-password', \{ method: 'POST', body: \{ token: token, password: password \} \}\)/.test(afCode)
+    && !/csrf/i.test(afCode),
+    'AFI-3: forgot-password sends exactly { email }; activate / reset-password send exactly { token, password }; no CSRF');
+  check(!/\bconfirmation\b[^;]*ApiClient|body: \{[^}]*confirm/.test(afCode), 'AFI-3: the password confirmation is compared locally and never sent');
+  // Firewall, authority and hygiene.
+  check(!/\b(loadState|maybeShowFirstRunChoice|meaningfulDataCounts|renderShell|renderIdentitySelectorHTML|LocalIdentityProvider|SessionIdentityProvider|CsrfHolder|selectPrincipal|FIXTURE_PRINCIPALS|setIdentityProviderForTesting|getCurrentUser|allowsWorkspace|openGlobalSearch)\b/.test(afCode),
+    'AFI-3: auth-flow.js never loads local state, the shell, "Acting as", the local or session identity, or a workspace');
+  check(!/\bfetch\s*\(|XMLHttpRequest|localStorage|sessionStorage|StorageAdapter|indexedDB|document\s*\.\s*cookie|\bState\b|\bconsole\s*\.|innerHTML/.test(afCode),
+    'AFI-3: auth-flow.js does not fetch directly, touch storage, cookies or State, log, or write the DOM');
+  check(!/setTimeout|setInterval|requestAnimationFrame|while\s*\(|for\s*\(/.test(afCode), 'AFI-3: AuthFlow schedules nothing and has no loop (no polling, no automatic retry)');
+  check(/snapshot\(\)\{\s*return Object\.freeze\(\{ state: state, purpose: purpose, busy: busy, message: message, retryAfter: retryAfter, requestId: requestId \}\);/.test(afCode),
+    'AFI-3: the AuthFlow view model never carries the token');
+  check(!/\btoken\b/i.test(avCode), 'AFI-3: auth-view.js never references the link token');
+  check(/allowsWorkspace\(\)\{ return false; \}/.test(abCode), 'AFI-3: AuthBoot still grants no workspace in any state');
+  // The views.
+  check((avCode.match(/type="password" autocomplete="new-password"/g) || []).length === 2
+    && !/type="password"[^>]*maxlength/.test(avCode)
+    && /newEl\.value = '';/.test(avCode) && /confirmEl\.value = '';/.test(avCode)
+    && /id="authForgotForm" method="post" novalidate/.test(avCode) && /id="authNewPasswordForm" method="post" novalidate/.test(avCode)
+    && (avCode.match(/e\.preventDefault\(\);/g) || []).length === 3,
+    'AFI-3: new-password fields (autocomplete="new-password", no byte-unsafe maxlength) are cleared on submit; forms intercepted');
+  check(/'<p class="auth-lead" role="status">If an account can be recovered, a link was sent\. Use the most recent message\. If none arrives, contact your administrator\.<\/p>'/.test(avCode),
+    'AFI-3: the recovery-request confirmation is one fixed generic text (no echo of the address)');
+  check(/'Continue to sign in'|>Continue to sign in</.test(avCode) && /AuthFlow\.leave\(\)/.test(avCode), 'AFI-3: success screens end with an explicit "Continue to sign in" (no timed redirect)');
+  // No mail provider or secret in the frontend.
+  const secretHits = allCode.filter((x) => /resend|\bre_[A-Za-z0-9_]{8,}|api_key|apiKey|smtp/i.test(x.c)).map((x) => x.f);
+  check(secretHits.length === 0 && !/resend|api_key|smtp/i.test(indexHtml),
+    'AFI-3: no mail provider, API key or SMTP reference in the frontend' + (secretHits.length ? ' >> VIOLATION: ' + secretHits.join(', ') : ''));
+  check(fs.existsSync(path.join(root, 'tools', 'verify-auth-flow-runtime.js')), 'AFI-3: runtime harness present — tools/verify-auth-flow-runtime.js');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
