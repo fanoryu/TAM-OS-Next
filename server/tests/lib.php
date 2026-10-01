@@ -128,7 +128,10 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
     return Routes::production(
         new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'),
         new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth), new \TamOs\Auth\AccountRecovery($auth)),
-        new \TamOs\Controller\EmployeeController(new \TamOs\Employee\EmployeeService(\TamOs\Data\BusinessData::fromConnector($auth->connector()))),
+        new \TamOs\Controller\EmployeeController(
+            new \TamOs\Employee\EmployeeService($business = \TamOs\Data\BusinessData::fromConnector($auth->connector())),
+            new \TamOs\Employee\AccountService($business, $auth),
+        ),
     );
 }
 
