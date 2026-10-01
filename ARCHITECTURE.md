@@ -1047,7 +1047,7 @@ seeded rows. `0010_add_memberships_employee_fk` — `memberships (company_id, em
 (company_id, id)`, `ON DELETE RESTRICT ON UPDATE RESTRICT`: a binding must name an employee of the same
 company; a bound employee cannot be deleted, renamed or moved; a NULL (CEO) binding stays valid and an
 Employee still needs one (CHECK from `0003`). BF-3C left the backend migration head at `0010` (BF-3D
-moves it to `0013`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
+moves it to `0013`, BF-4a1 to `0017`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
 
 **Routes.** `Route` may declare its `Action`; one that does must be a mutation with `RouteAuth::Required`.
 `Routes::validate()` fails the production table at bootstrap unless every mutation declares an `Action` or
@@ -1152,6 +1152,85 @@ anywhere; `server/bin/mail.php` allowed and SAPI-guarded.
 **Not production-ready.** Before real recovery mail: SDR-0003 §7 evidence (egress, sender-domain
 verification with SPF/DKIM/DMARC, a delivery test, cron, the key's placement and scope), the frontend
 recovery page, and everything BF-3A–BF-3C already list.
+
+### Employee domain — BF-4a1 (source only; not deployed, not production-ready)
+
+BF-4a1 makes the employee anchor the first **server-authoritative business record** (owner decisions
+D-AFI4-1 = B server-authoritative only, D-AFI4-2 = A Employee domain first, D-BF4a-3 = B field set). It is
+backend only: the frontend does not call it, `AUTH_MODE` stays LOCAL, ACTIONS stay **20**, and "Acting as"
+is unchanged. Employee account provisioning, activation reissue, account disable/enable and the
+activation mail are **BF-4a2** (pending); AFI-4 stays blocked until BF-4a is complete.
+
+**Schema.** The final profile adds `employee_code` (`VARCHAR(32)`, `UNIQUE (company_id, employee_code)`,
+case-insensitive), `full_name` (`VARCHAR(160)`, non-empty), `job_title`, `department`, `employment_status` (exactly Active / Inactive / On Leave / Resigned /
+Terminated, default Active), `join_date` (`DATE`), `contact_email` (ascii, separate from the login
+`users.email`), `phone`, `notes` (`TEXT`), `monthly_base_salary` (`DECIMAL(15,2)`, ≥ 0, payroll-sensitive),
+`archived_at`, `version` (unsigned, starts at 1) and `updated_at`. `id`, `company_id`, `created_at`, the
+tenant key and the membership binding FK are unchanged. No bank fields, no contract type, no history. It is
+staged so that a valid schema-`0013` database whose anchors have no profile migrates forward with no manual
+step (*owner decision D-BF4a1-MIGRATION-1 = A*): `0014_extend_employees_profile` adds the columns with
+`employee_code`, `full_name` and `updated_at` nullable; `0015_backfill_legacy_employees` gives **only** rows
+with neither code nor name the placeholder code `LEGACY-NNNNNN` (six digits, numbered per company in
+`(created_at, id)` order, never derived from the id, skipping any number whose code — compared
+case-insensitively — the company already holds), the name `[Legacy record — profile pending]` (synthetic
+migration metadata, not HR data) and `updated_at = created_at`; `0016_enforce_employees_profile` makes the
+three columns NOT NULL and adds the unique code and every CHECK. 0015 is the only migration that writes rows;
+the boundary tool admits it at its pinned digest only. `0017_create_audit_events` is the
+**append-only business audit trail**: `company_id` (tenant key and FK), `occurred_at` (database clock),
+`actor_user_id` and `actor_membership_id` (FKs; always the session principal), `action` (CHECK: the three
+employee ACTIONS), `entity` (`employee`), `entity_id`, `target_user_id` (always NULL until BF-4a2),
+`request_id` and `fields` — the changed **field names** only, never a value. The backend migration head is
+`0017`; the frontend `SCHEMA_VERSION` is unrelated and stays 6.
+
+**Routes** (`Controller/EmployeeController`, `Employee/EmployeeService`, all `RouteAuth::Required`).
+
+| Route | Decision | Answer |
+|---|---|---|
+| `GET /api/employees[?archived=1]` | CEO only (an Employee is 403: there is no enumeration surface); company scope; non-archived unless `archived=1` | `{employees: [list item…]}` in `(employee_code, id)` order; above 2000 entitled rows a 500 (`employee_list_cap`), never a truncated list |
+| `GET /api/employee?id=` | company scope for the CEO, self scope for an Employee; absent and out of scope are byte-identical 404s | `{employee: detail}` (CEO) or `{employee: self}` (Employee) |
+| `POST /api/employees/create` | `employee.create` (record-free, decided by the kernel) | server-generated opaque id, the session's company, version 1 |
+| `POST /api/employees/update` | `employee.update` (record-bearing: scoped load → 404, then Policy → 403) | `{id, expectedVersion, …fields}`; stale version or archived record 409 |
+| `POST /api/employees/archive` | `employee.delete` (record-bearing) | **soft archive**: `archived_at` set, version + 1; refused (409) while an active login is bound to the record |
+
+Reads add no ACTION — the session's role and `Scope` decide them (SDR-0002 §8). Every write runs in one
+transaction with its audit row (`AuditLog`, the only writer of `audit_events`, insert-only), under a row
+lock and a version compare-and-swap (SDR-0002 §10); a duplicate employee code is 409. An update that
+changes nothing writes nothing and is not audited. `employee.delete` never deletes: archived records stay
+readable, appear in `?archived=1`, and cannot be updated or archived again. Employment status never
+changes a user or membership.
+
+**Projections** (`Employee/EmployeeView`). CEO list: `id, employeeCode, fullName, jobTitle, department,
+employmentStatus, archived` — no salary, notes or contact. CEO detail: the list fields plus `joinDate,
+contactEmail, phone, notes, monthlyBaseSalary, version`. Employee self: `id, employeeCode, fullName,
+jobTitle, department, employmentStatus, joinDate, contactEmail, phone, monthlyBaseSalary` — no notes,
+version, archive flag or account data. None carries `company_id`, a scope column, an account, a token or a
+hash. Money travels as an exact decimal string (`"7500000.00"`); a request may send an integer or a decimal
+string, never a float.
+
+**Input** (`Employee/EmployeeInput`). Exact per-route allowlists: any other key — `company_id`, `version`,
+`archived_at`, an id on create, an actor — is a 400 naming the key, so nothing is mass-assigned and no scope
+value is accepted. Strings are trimmed, an optional field sent as `""` becomes null, the contact e-mail is
+normalized like the login e-mail, and anything malformed is a 400 naming the field.
+
+**Connection.** `Data/BusinessData` holds the business stores over `ScopedDatabase` and shares the request's
+lazy connection with `AuthData` (`AuthData::connector()`), so a request resolves its session and runs its
+business statements on one connection.
+
+**Proof.** Non-DB unit tests for the input allowlists and validation, the projections, the pinned SQL
+(scope predicates, version compare-and-swap, archive-only, list cap, insert-only audit) and the audit
+refusals; HTTP tests of the production routes with a session double and no database (401, CSRF and origin
+403, Employee list 403, CEO-only create 403, forged-scope and unknown-key 400s, query 400s); MariaDB tests
+(`tests/Db/EmployeeCrudTest.php`) for create, list, read, versioned update, archive, the bound-login refusal,
+the list cap and rollback when the audit row cannot be written; and the hostile-principal suite extended to
+the production routes. **Enforcement added to `tools/verify-backend-boundary.js`:** `employees` is written
+only by `EmployeeStore` and never hard-deleted or truncated; `audit_events` is a registered company table,
+inserted only by `AuditLog` and never updated, deleted, replaced or truncated; every `->audit()->append(`
+sits inside an `->atomically(` transaction; migration versions are contiguous; and every mutation route in
+`Routes.php` is account self-service or declares its `Action::`.
+
+**Deferred.** BF-4a2 (account provisioning under the owner-locked `account.manage` ACTION, activation by the
+governed mail outbox, reissue, disable/enable and their audit events), bank fields, bulk import, the
+LOCAL → server migration, the frontend workspace (AFI-4) and production SESSION (AFI-5).
 
 ### Session identity foundation — AFI-1 (frontend; headless and inert, not wired)
 

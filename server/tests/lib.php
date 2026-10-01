@@ -128,6 +128,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
     return Routes::production(
         new \TamOs\Data\Readiness($config, $migrationsDir ?? tempDir() . DIRECTORY_SEPARATOR . 'no-migrations'),
         new \TamOs\Controller\AuthController(new \TamOs\Auth\Authenticator($auth), new \TamOs\Auth\AccountLifecycle($auth), new \TamOs\Auth\AccountRecovery($auth)),
+        new \TamOs\Controller\EmployeeController(new \TamOs\Employee\EmployeeService(\TamOs\Data\BusinessData::fromConnector($auth->connector()))),
     );
 }
 
@@ -413,13 +414,17 @@ function authFixture(\TamOs\Data\Database $db, array $o = []): array
 }
 
 /**
- * The employee anchor row (BF-3C, migration 0009) that an employee binding must reference —
- * created once per company. Test-only SQL; fabricated identifiers only.
+ * The employee row (BF-3C anchor, BF-4a1 profile: migrations 0009, 0014–0016) that an employee
+ * binding must reference — created once per company, with a fabricated code (the id) and name.
+ * Test-only SQL; fabricated identifiers only.
  */
 function employeeAnchor(\TamOs\Data\Database $db, string $companyId, string $employeeId): void
 {
     if ($db->select('SELECT id FROM employees WHERE company_id = ? AND id = ?', [$companyId, $employeeId]) === []) {
-        $db->execute('INSERT INTO employees (id, company_id, created_at) VALUES (?, ?, UTC_TIMESTAMP(6))', [$employeeId, $companyId]);
+        $db->execute(
+            'INSERT INTO employees (id, company_id, employee_code, full_name, created_at, updated_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+            [$employeeId, $companyId, substr($employeeId, 0, 32), 'Fixture ' . $employeeId],
+        );
     }
 }
 

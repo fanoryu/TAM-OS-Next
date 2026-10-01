@@ -17,7 +17,7 @@ $router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly ten routes; activate, forgot-password and reset-password never resolve a session, change-password and logout-all require one' => static function () use ($production): void {
+    'production has exactly fifteen routes; activate, forgot-password and reset-password never resolve a session; change-password, logout-all and the Employee routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -31,6 +31,11 @@ return [
             ['POST', '/api/auth/logout-all', [], RouteAuth::Required],
             ['POST', '/api/auth/forgot-password', [], RouteAuth::None],
             ['POST', '/api/auth/reset-password', [], RouteAuth::None],
+            ['GET', '/api/employees', ['archived'], RouteAuth::Required],
+            ['GET', '/api/employee', ['id'], RouteAuth::Required],
+            ['POST', '/api/employees/create', [], RouteAuth::Required],
+            ['POST', '/api/employees/update', [], RouteAuth::Required],
+            ['POST', '/api/employees/archive', [], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

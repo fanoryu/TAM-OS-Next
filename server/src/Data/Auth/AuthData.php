@@ -72,6 +72,18 @@ final class AuthData
     }
 
     /**
+     * BF-4a1: this request's lazy connection, for the business data access point
+     * (TamOs\Data\BusinessData), so a request resolves its session and runs its business
+     * statements on ONE connection. Calling the closure connects; obtaining it does not.
+     *
+     * @return \Closure(): Database
+     */
+    public function connector(): \Closure
+    {
+        return fn (): Database => $this->db();
+    }
+
+    /**
      * BF-3D: the server-wide advisory lock 'tamos_mail', taken without waiting, so one outbox
      * worker runs at a time (a cron run that overlaps the previous one exits). Same semantics as
      * acquireAccountLock().

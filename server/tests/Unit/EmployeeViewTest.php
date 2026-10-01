@@ -1,0 +1,58 @@
+<?php
+declare(strict_types=1);
+
+/*
+ * BF-4a1: least-privilege Employee projections (SDR-0002 §9.1). The company list carries no
+ * salary, notes or contact; the self view no notes, version or account data; no projection
+ * carries company_id, the scope columns or anything beyond the profile.
+ */
+
+use TamOs\Employee\EmployeeView;
+use function TamOs\Tests\assertSame;
+use function TamOs\Tests\assertTrue;
+
+$row = [
+    'id' => 'emp_1', 'company_id' => str_repeat('c', 32), 'owner_employee_id' => 'emp_1',
+    'employee_code' => 'EMP-1', 'full_name' => 'Fabricated Person', 'job_title' => 'Engineer', 'department' => null,
+    'employment_status' => 'Active', 'join_date' => '2026-01-05', 'contact_email' => 'person@example.test', 'phone' => '0812',
+    'notes' => 'private note', 'monthly_base_salary' => '7500000.00', 'archived_at' => null, 'version' => 3,
+];
+$sensitive = ['monthlyBaseSalary', 'notes', 'contactEmail', 'phone', 'joinDate', 'version'];
+
+return [
+    'the CEO list item is exactly the list fields — no salary, notes, contact or version' => static function () use ($row, $sensitive): void {
+        $item = EmployeeView::listItem($row);
+        assertSame(['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived'], array_keys($item));
+        assertSame(['emp_1', 'EMP-1', 'Fabricated Person', 'Engineer', null, 'Active', false], array_values($item));
+        foreach ($sensitive as $f) {
+            assertTrue(!array_key_exists($f, $item), 'list leaks ' . $f);
+        }
+    },
+    'the CEO detail adds the profile and version, nothing else' => static function () use ($row): void {
+        $d = EmployeeView::detail($row + ['archived_at' => null]);
+        assertSame(EmployeeView::DETAIL_FIELDS, array_keys($d));
+        assertSame(['2026-01-05', 'person@example.test', '0812', 'private note', '7500000.00', 3], [$d['joinDate'], $d['contactEmail'], $d['phone'], $d['notes'], $d['monthlyBaseSalary'], $d['version']]);
+        assertSame(true, EmployeeView::detail(array_merge($row, ['archived_at' => '2026-03-01 10:00:00.000000']))['archived'], 'archived flag');
+    },
+    'the self view is the Employee\'s own profile without notes, version, archive or account data' => static function () use ($row): void {
+        $s = EmployeeView::self($row);
+        assertSame(['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'monthlyBaseSalary'], array_keys($s));
+        foreach (['notes', 'version', 'archived'] as $f) {
+            assertTrue(!array_key_exists($f, $s), 'self leaks ' . $f);
+        }
+    },
+    'no projection carries company_id, the scope columns, a bank field, a contract type or history' => static function () use ($row): void {
+        $poisoned = $row + ['bank_account_number' => '123', 'contract_type' => 'PKWT', 'history' => 'h', 'password_hash' => 'x', 'csrf' => 'y'];
+        foreach ([EmployeeView::listItem($poisoned), EmployeeView::detail($poisoned), EmployeeView::self($poisoned)] as $i => $view) {
+            $json = json_encode($view, JSON_THROW_ON_ERROR);
+            foreach ([str_repeat('c', 32), 'company', 'owner', 'bank', '123', 'PKWT', 'history', 'password', 'csrf'] as $needle) {
+                assertTrue(stripos($json, $needle) === false, 'projection ' . $i . ' carries ' . $needle);
+            }
+        }
+    },
+    'profile() returns the ten profile columns as strings for write-back comparison' => static function () use ($row): void {
+        $p = EmployeeView::profile($row);
+        assertSame(['employee_code', 'full_name', 'job_title', 'department', 'employment_status', 'join_date', 'contact_email', 'phone', 'notes', 'monthly_base_salary'], array_keys($p));
+        assertSame([null, '7500000.00'], [$p['department'], $p['monthly_base_salary']]);
+    },
+];

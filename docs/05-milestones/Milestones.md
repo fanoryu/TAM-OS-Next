@@ -354,8 +354,11 @@ production business endpoint; **BF-3D** (password recovery and governed mail —
 `0011`–`0013`, forgot/reset endpoints, the provider-neutral mail boundary with the Resend HTTPS adapter,
 the database outbox and cron worker; *owner decisions D-D1 and D-D3, 2026-10-01, recorded in SDR-0003,
 which resolves SDR-0002 O5*) is implemented as source only on the same terms, backend only, with no
-provider account or real mail. Cross-account administration (additional and Employee
-accounts, disable/enable) comes after BF-3C. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+provider account or real mail; **BF-4a1** (the server Employee record — migrations `0014`–`0017` for the employee
+profile and the append-only business audit trail, CEO list, scoped read, versioned create/update and soft archive
+under the existing employee ACTIONS; *owner decisions D-AFI4-1 = B, D-AFI4-2 = A, D-BF4a-1/2/3 = B, 2026-10-01*)
+is implemented as source only on the same terms, backend only. Cross-account administration (Employee account
+provisioning, disable/enable) is BF-4a2, pending. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.
