@@ -20,11 +20,12 @@ use TamOs\Policy\Action;
  * BF-4a1: the Employee reads need a session and add no Action — the role and the Scope decide
  * them (SDR-0002 §8). The Employee writes declare employee.create (record-free, decided by the
  * kernel) and employee.update / employee.delete (record-bearing, decided by the handler after
- * its scoped load: 404 before 403).
+ * its scoped load: 404 before 403). BF-4a2 (SDR-0004): the four Employee account routes declare
+ * account.manage, record-bearing the same way.
  *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
- * governed by SDR-0002 §2–§5, not by the 20 ACTIONS. validate() refuses anything else, so the
+ * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
  * table fails closed at bootstrap if a business mutation is added without an Action.
  */
 final class Routes
@@ -64,6 +65,10 @@ final class Routes
             new Route('POST', '/api/employees/create', $employees->create(...), [], RouteAuth::Required, Action::EmployeeCreate),
             new Route('POST', '/api/employees/update', $employees->update(...), [], RouteAuth::Required, Action::EmployeeUpdate),
             new Route('POST', '/api/employees/archive', $employees->archive(...), [], RouteAuth::Required, Action::EmployeeDelete),
+            new Route('POST', '/api/employees/provision-account', $employees->provisionAccount(...), [], RouteAuth::Required, Action::AccountManage),
+            new Route('POST', '/api/employees/reissue-activation', $employees->reissueActivation(...), [], RouteAuth::Required, Action::AccountManage),
+            new Route('POST', '/api/employees/disable-account', $employees->disableAccount(...), [], RouteAuth::Required, Action::AccountManage),
+            new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),
         ]);
     }
 

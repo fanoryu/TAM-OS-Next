@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace TamOs\Mail;
 
+use TamOs\Auth\AccountLifecycle;
 use TamOs\Auth\AccountRecovery;
 use TamOs\Auth\SessionToken;
 use TamOs\Data\Auth\AccountTokenStore;
@@ -12,10 +13,13 @@ use TamOs\Data\Auth\MailOutboxStore;
 /**
  * The outbox worker (D-D3), run by cron through server/bin/mail.php. One mail per row:
  *
- *   transaction 1: claim the oldest due row (locked) → lock the account → still recoverable?
- *                  no → cancelled. yes → revoke every open token of the user, issue a fresh
- *                  recovery token (30 minutes from NOW, not from the request), row → sending
- *   no transaction: build the mail through RecoveryMail and hand it to the MailTransport
+ *   transaction 1: claim the oldest due row (locked) → lock the account → still eligible for
+ *                  the row's kind (recovery: AccountRecovery::isRecoverable; activation, BF-4a2:
+ *                  AccountLifecycle::isActivatable)? no → cancelled. yes → revoke every open
+ *                  token of the user, issue a fresh token of that purpose (recovery 30 minutes,
+ *                  activation 72 hours, from NOW, not from the request), row → sending
+ *   no transaction: build the mail through RecoveryMail or ActivationMail and hand it to the
+ *                  MailTransport
  *   transaction 2: accepted → sent. refused or unreachable → revoke that attempt's token;
  *                  attempts < MAX → pending with backoff, else failed + mail_fail
  *
@@ -69,7 +73,8 @@ final class OutboxWorker
                 return null;
             }
             $account = $this->data->accounts()->lockById($row['userId']);
-            if ($row['kind'] !== MailOutboxStore::RECOVERY || $account === null || !AccountRecovery::isRecoverable($account)) {
+            $purpose = self::purpose($row['kind'], $account);
+            if ($purpose === null) {
                 $outbox->cancel($row['id']);
                 return ['outcome' => self::CANCELLED];
             }
@@ -81,9 +86,9 @@ final class OutboxWorker
                 $this->data->events()->append('mail_fail', $row['userId'], null, null, null, $requestId);
                 return ['outcome' => self::FAILED];
             }
-            $tokens->issue($hash, $row['userId'], AccountTokenStore::RECOVERY);
+            $tokens->issue($hash, $row['userId'], $purpose);
             $outbox->markSending($row['id']);
-            return ['id' => $row['id'], 'userId' => $row['userId'], 'attempt' => $row['attempts'] + 1, 'to' => $account['email']];
+            return ['id' => $row['id'], 'userId' => $row['userId'], 'attempt' => $row['attempts'] + 1, 'to' => $account['email'], 'purpose' => $purpose];
         });
         if ($claim === null) {
             return null;
@@ -94,13 +99,10 @@ final class OutboxWorker
 
         $accepted = false;
         try {
-            $this->transport->send(RecoveryMail::build(
-                $this->origin,
-                $claim['to'],
-                $token,
-                AccountTokenStore::RECOVERY_MINUTES,
-                'outbox-' . $claim['id'] . '-' . $claim['attempt'],
-            ));
+            $reference = 'outbox-' . $claim['id'] . '-' . $claim['attempt'];
+            $this->transport->send($claim['purpose'] === AccountTokenStore::ACTIVATION
+                ? ActivationMail::build($this->origin, $claim['to'], $token, AccountTokenStore::ACTIVATION_HOURS, $reference)
+                : RecoveryMail::build($this->origin, $claim['to'], $token, AccountTokenStore::RECOVERY_MINUTES, $reference));
             $accepted = true;
         } catch (MailError | \LogicException) {
             // A refused, unreachable or unbuildable message: this attempt's token must not live on.
@@ -121,5 +123,24 @@ final class OutboxWorker
             $outbox->scheduleRetry($claim['id'], $claim['attempt']);
             return self::RETRIED;
         });
+    }
+
+    /**
+     * The token purpose a claimed row may be delivered with, or null when its account no longer
+     * qualifies for that kind of mail (the row is then cancelled): a recovery mail only to an
+     * account that could log in today, an activation mail only to one still awaiting activation.
+     *
+     * @param array{user: array{user_status: string, has_password: bool}, memberships: list<array{membership_status: string, role: string}>}|null $account
+     */
+    private static function purpose(string $kind, ?array $account): ?string
+    {
+        if ($account === null) {
+            return null;
+        }
+        return match ($kind) {
+            MailOutboxStore::RECOVERY => AccountRecovery::isRecoverable($account) ? AccountTokenStore::RECOVERY : null,
+            MailOutboxStore::ACTIVATION => AccountLifecycle::isActivatable($account) ? AccountTokenStore::ACTIVATION : null,
+            default => null,
+        };
     }
 }

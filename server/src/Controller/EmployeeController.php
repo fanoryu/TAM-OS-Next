@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace TamOs\Controller;
 
+use TamOs\Employee\AccountService;
 use TamOs\Employee\EmployeeService;
 use TamOs\Employee\EmployeeView;
 use TamOs\Http\ApiError;
@@ -24,10 +25,18 @@ use TamOs\Identity\Role;
  *   POST /api/employees/create        { employee: detail }
  *   POST /api/employees/update        { employee: detail }
  *   POST /api/employees/archive       { employee: detail }
+ *
+ * BF-4a2 (SDR-0004): Employee account administration, all under account.manage (CEO-only,
+ * record-bearing: 404 before 403) and answered with the CEO detail and its accountState:
+ *
+ *   POST /api/employees/provision-account   {id, email}
+ *   POST /api/employees/reissue-activation  {id}
+ *   POST /api/employees/disable-account     {id}
+ *   POST /api/employees/enable-account      {id}
  */
 final class EmployeeController
 {
-    public function __construct(private readonly EmployeeService $service)
+    public function __construct(private readonly EmployeeService $service, private readonly AccountService $accounts)
     {
     }
 
@@ -83,6 +92,45 @@ final class EmployeeController
     public function archive(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
         return ['employee' => EmployeeView::detail($this->service->archive(self::principal($session), $json, $requestId))];
+    }
+
+    /**
+     * BF-4a2 account administration (account.manage). The response is the CEO detail with the
+     * derived accountState — never a token, link, email or account id.
+     *
+     * @param array<string, mixed> $json
+     * @return array{employee: array<string, mixed>}
+     */
+    public function provisionAccount(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['employee' => EmployeeView::detail($this->accounts->provision(self::principal($session), $json, $requestId))];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{employee: array<string, mixed>}
+     */
+    public function reissueActivation(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['employee' => EmployeeView::detail($this->accounts->reissue(self::principal($session), $json, $requestId))];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{employee: array<string, mixed>}
+     */
+    public function disableAccount(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['employee' => EmployeeView::detail($this->accounts->disable(self::principal($session), $json, $requestId))];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{employee: array<string, mixed>}
+     */
+    public function enableAccount(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['employee' => EmployeeView::detail($this->accounts->enable(self::principal($session), $json, $requestId))];
     }
 
     private static function principal(?AuthSession $session): Principal

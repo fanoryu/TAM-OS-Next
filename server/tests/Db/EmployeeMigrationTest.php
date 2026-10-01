@@ -73,9 +73,10 @@ return [
         $db->execute("INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, 'employee', 'emp_b', 'active', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))", [$membership, $user, $a]);
 
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0014_extend_employees_profile', '0015_backfill_legacy_employees', '0016_enforce_employees_profile', '0017_create_audit_events'],
-            array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order');
-        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 17)), $history($db), 'every marker complete — none stranded');
+        assertSame(['0014_extend_employees_profile', '0015_backfill_legacy_employees', '0016_enforce_employees_profile', '0017_create_audit_events',
+            '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation'],
+            array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2');
+        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 19)), $history($db), 'every marker complete — none stranded');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'status: current');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->apply(), 'a second apply is a no-op');
 

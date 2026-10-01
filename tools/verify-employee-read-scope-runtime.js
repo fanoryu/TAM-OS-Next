@@ -275,9 +275,9 @@ function mentionsBravo(blob){ return JSON.stringify(blob === undefined ? null : 
   /* 9. mutation authorization untouched */
   console.log('-- 9. Readiness-1 changed no mutation authorization --');
   { const rt = loadRuntime();
-    check(Object.keys(rt.ACTIONS).length === 20, 'ACTIONS remains exactly 20 (no new action)');
+    check(Object.keys(rt.ACTIONS).length === 21, 'ACTIONS remains exactly 21 (no new read action; BF-4a2 added account.manage)');
     const az = fs.readFileSync(path.join(ROOT,'js','core','authz.js'),'utf8');
-    check((az.match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 20, 'the frozen 20-action registry is unchanged');
+    check((az.match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21, 'the 21-action registry is unchanged');
     const rtA = loadRuntime(); seed(rtA, A_P);
     check(rtA.can('data.reset') === false, 'A: a denied mutation is still denied');
     const rtC = loadRuntime(); seed(rtC, CEO_P);

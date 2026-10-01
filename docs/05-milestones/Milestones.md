@@ -357,8 +357,10 @@ which resolves SDR-0002 O5*) is implemented as source only on the same terms, ba
 provider account or real mail; **BF-4a1** (the server Employee record — migrations `0014`–`0017` for the employee
 profile and the append-only business audit trail, CEO list, scoped read, versioned create/update and soft archive
 under the existing employee ACTIONS; *owner decisions D-AFI4-1 = B, D-AFI4-2 = A, D-BF4a-1/2/3 = B, 2026-10-01*)
-is implemented as source only on the same terms, backend only. Cross-account administration (Employee account
-provisioning, disable/enable) is BF-4a2, pending. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+is implemented as source only on the same terms, backend only. **BF-4a2** (Employee account administration under
+the CEO-only `account.manage` ACTION — provision, reissue activation, disable, enable — with activation through the
+governed outbox; *SDR-0004, owner decision C1 = A, 2026-10-01*) is implemented as source on the same terms; ACTIONS
+become 21 and the authenticated Employee workspace (AFI-4a) is still pending. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

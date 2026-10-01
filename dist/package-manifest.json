@@ -3,13 +3,13 @@
   "appVersion": "2.11.0",
   "appReleaseName": "Identity Refresh",
   "schemaVersion": 6,
-  "actions": 20,
+  "actions": 21,
   "entry": "index.html",
-  "packageDigest": "00c9a234aa661c3488b18b200fd2f5239676654417c155ebb73c81ace9c0e431",
+  "packageDigest": "ecd48a74ec79d50cf1a6c767b582e5dd561f1de97f5f7b4d6046df7bb2cb9057",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2659761,
-    "sha256": "c4e81995b29a52f25619a4e5c264f8db867d588579fd6043b4a8012f4459f7c5"
+    "bytes": 2660347,
+    "sha256": "fb9ed56953235ed1a7f6413dad5d2db71d08611ec8f9f8e5ee2cd751b8611c11"
   },
   "files": [
     {
@@ -119,8 +119,8 @@
     },
     {
       "path": "js/core/authz.js",
-      "bytes": 12262,
-      "sha256": "cd3ba3f8369dd8303b49575d19452351cbdba74feb252743985aec659348d542"
+      "bytes": 12848,
+      "sha256": "fa449d17a34fc4863fb67155cce14f4db54fb116b80225bb3138c4324ba1ec05"
     },
     {
       "path": "js/core/constants.js",

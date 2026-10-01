@@ -20,6 +20,7 @@ use TamOs\Controller\EmployeeController;
 use TamOs\Data\Auth\AuthData;
 use TamOs\Data\BusinessData;
 use TamOs\Data\Readiness;
+use TamOs\Employee\AccountService;
 use TamOs\Employee\EmployeeService;
 use TamOs\Http\ErrorCode;
 use TamOs\Http\Kernel;
@@ -109,7 +110,7 @@ function run(): void
     $routes = Routes::production(
         $readiness,
         new AuthController(new Authenticator($auth), new AccountLifecycle($auth), new AccountRecovery($auth)),
-        new EmployeeController(new EmployeeService($business)),
+        new EmployeeController(new EmployeeService($business), new AccountService($business, $auth)),
     );
     $kernel = new Kernel($routes, new SessionPrincipalResolver($auth), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');

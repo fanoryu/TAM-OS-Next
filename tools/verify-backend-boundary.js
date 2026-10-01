@@ -30,7 +30,7 @@
  *     server/src/Data/Auth/AccountTokenStore.php;
  *   - (BF-3C) an Authorization is constructed outside server/src/Policy/Policy.php or a
  *     ScopedRecord outside server/src/Data/Scope/ScopedDatabase.php; or server/src/Policy/Action.php
- *     differs from js/core/authz.js in its 20 action values, a rule class or a resource entity
+ *     differs from js/core/authz.js in its 21 action values, a rule class or a resource entity
  *     (parity fails closed when either side cannot be read); a migration creates a table that is
  *     neither an auth/system table nor a registered company table with the tenant key
  *     (company_id NOT NULL, FK to companies, UNIQUE (company_id, id)), or any migration foreign
@@ -46,6 +46,11 @@
  *     printed, written or logged anywhere but the operator account CLI; a Resend-shaped key
  *     appears anywhere; the `#recovery=` link is built outside server/src/Mail/RecoveryMail.php;
  *     the Host or a forwarding header is read anywhere (server/bin/mail.php joins the CLI files);
+ *   - (BF-4a2, SDR-0004) the `#activation=` link is built outside server/src/Mail/ActivationMail.php;
+ *     the Employee account-administration code (server/src/Employee/, the Employee controller)
+ *     names a token primitive or a mail builder — it only queues delivery intent; an account
+ *     route does not declare account.manage, or account.manage is declared by any other route;
+ *     an audit append or an outbox enqueue sits outside ->atomically(...);
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -107,6 +112,11 @@ const OUTBOX_STORE = 'server/src/Data/Auth/MailOutboxStore.php';
 const MAIL_DIR = 'server/src/Mail/';
 const MAIL_ADAPTER = 'server/src/Mail/ResendTransport.php';
 const RECOVERY_MAIL = 'server/src/Mail/RecoveryMail.php';
+// BF-4a2: the activation link has one builder; account administration never touches a token.
+const ACTIVATION_MAIL = 'server/src/Mail/ActivationMail.php';
+const EMPLOYEE_DIR = 'server/src/Employee/';
+const EMPLOYEE_CONTROLLER = 'server/src/Controller/EmployeeController.php';
+const ACCOUNT_ROUTES = ['/api/employees/provision-account', '/api/employees/reissue-activation', '/api/employees/disable-account', '/api/employees/enable-account'];
 // The only production place a raw one-time token is printed: the operator CLI, once, by design.
 const TOKEN_PRINTERS = new Set(['server/bin/account.php']);
 // BF-4a1: the Employee record and the append-only business audit trail.
@@ -194,6 +204,7 @@ const CODE_RULES = [
   { id: 'network-io', re: /(?<![\w$>:])(curl_[a-z_]+|mail|mb_send_mail|fsockopen|pfsockopen|stream_socket_client|socket_create|socket_connect|stream_context_create)\s*\(/i, msg: 'network and mail I/O is performed only by the governed mail adapter ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
   { id: 'mail-adapter-name', re: /\bResendTransport\b/, msg: 'only the Mail boundary (' + MAIL_DIR + ') may name the provider adapter; everything else uses MailTransport', allow: (f) => f.startsWith(MAIL_DIR) },
   { id: 'token-output', re: /\b(echo|print|printf|fwrite|fputs|error_log|file_put_contents|var_export)\b[^;]*\$\w*(token|link)\b/i, msg: 'a raw token or recovery link is never printed, written or logged (only the operator CLI prints its activation token)', allow: (f) => TOKEN_PRINTERS.has(f) },
+  { id: 'account-admin-token', re: /\b(SessionToken|AccountTokenStore|ActivationMail|RecoveryMail|MailTransport)\b|->\s*issue\s*\(/, msg: 'Employee account administration never issues a token or builds a mail: it only queues delivery intent; the outbox worker issues the token at send time (SDR-0004 §4)', allow: (f) => !(f.startsWith(EMPLOYEE_DIR) || f === EMPLOYEE_CONTROLLER) },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
 ];
 // Banned in every production file, the data layer included.
@@ -233,6 +244,7 @@ const STRING_RULES = [
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
   { id: 'recovery-link', re: /#recovery=/, msg: 'the recovery link is built only by ' + RECOVERY_MAIL + ' (from the configured origin)', allow: (f) => f === RECOVERY_MAIL },
+  { id: 'activation-link', re: /#activation=/, msg: 'the activation link is built only by ' + ACTIVATION_MAIL + ' (from the configured origin)', allow: (f) => f === ACTIVATION_MAIL },
   { id: 'host-header', re: /^(HTTP_HOST|SERVER_NAME|HTTP_X_FORWARDED_HOST|HTTP_X_FORWARDED_PROTO|HTTP_FORWARDED)$/, msg: 'the Host and forwarding headers are never read: URLs come only from the configured origin' },
 ];
 // A CSRF token is compared only with hash_equals(): an ordinary comparison (or strcmp) against
@@ -313,7 +325,12 @@ function checkRouteActions(src) {
     const declares = /\bAction::[A-Z]\w*/.test(m[3]);
     if (selfService.has(key) && declares) out.push('Routes.php: self-service route ' + key + ' must not declare an Action');
     if (!selfService.has(key) && !declares) out.push('Routes.php: business mutation ' + key + ' must declare its Action::');
+    // BF-4a2: exactly the four Employee account routes are account.manage.
+    const accountManage = /\bAction::AccountManage\b/.test(m[3]);
+    if (ACCOUNT_ROUTES.includes(m[2]) && !accountManage) out.push('Routes.php: account route ' + key + ' must declare Action::AccountManage');
+    if (!ACCOUNT_ROUTES.includes(m[2]) && accountManage) out.push('Routes.php: ' + key + ' is not an Employee account route and must not declare Action::AccountManage');
   }
+  for (const path of ACCOUNT_ROUTES) if (!src.includes("new Route('POST', '" + path + "'")) out.push('Routes.php: account route POST ' + path + ' is missing');
   return out;
 }
 
@@ -335,10 +352,16 @@ function checkAuditInTransaction(lex) {
     ranges.push([m.index, i]);
   }
   const out = [];
-  const append = /->\s*audit\s*\(\s*\)\s*->\s*append\s*\(/g;
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account)?\s*\(/g;
   while ((m = append.exec(code))) {
     const at = m.index;
     if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
+  }
+  // BF-4a2: delivery intent commits with the account change it belongs to.
+  const enqueue = /->\s*outbox\s*\(\s*\)\s*->\s*enqueueOnce\s*\(/g;
+  while ((m = enqueue.exec(code))) {
+    const at = m.index;
+    if (!ranges.some(([a, b]) => at > a && at < b)) out.push('mail delivery intent is queued only inside the transaction it belongs to (->atomically(...))');
   }
   return out;
 }
@@ -645,8 +668,9 @@ function checkActionParity(phpSrc, jsSrc) {
   const server = readServerActions(phpSrc);
   const out = [...front.errors, ...server.errors];
   if (!front.actions || !server.actions) return out.length ? out : ['ACTION parity could not be established'];
-  if (front.actions.size !== 20) out.push('frontend ACTIONS has ' + front.actions.size + ' actions, not 20');
-  if (server.actions.size !== 20) out.push('server Action has ' + server.actions.size + ' actions, not 20');
+  // SDR-0004 (BF-4a2, owner decision C1 = A): account.manage joined the shared vocabulary, 20 → 21.
+  if (front.actions.size !== 21) out.push('frontend ACTIONS has ' + front.actions.size + ' actions, not 21');
+  if (server.actions.size !== 21) out.push('server Action has ' + server.actions.size + ' actions, not 21');
   for (const [value, f] of front.actions) {
     const s = server.actions.get(value);
     if (!s) { out.push('server Action is missing ' + value); continue; }
@@ -732,7 +756,7 @@ function run() {
     for (const v of dedup) console.error('  - ' + v);
     process.exit(1);
   }
-  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (20 actions, rules, entities).');
+  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (21 actions, rules, entities).');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1000,6 +1024,19 @@ function selftest() {
   clean('a test key with separators is not key-shaped', 'server/tests/Unit/T.php', S + "$k = 're_test_not_a_real_key';\n");
   clean('RecoveryMail builds the recovery link', RECOVERY_MAIL, S + "const FRAGMENT = '/#recovery=';\n");
   dirty('a recovery link built elsewhere is caught', 'server/src/Auth/AccountRecovery.php', S + "$l = $origin . '/#recovery=' . $t;\n", 'recovery link is built only');
+  // BF-4a2 (SDR-0004).
+  clean('ActivationMail builds the activation link', ACTIVATION_MAIL, S + "const FRAGMENT = '/#activation=';\n");
+  dirty('an activation link built elsewhere is caught', 'server/src/Employee/AccountService.php', S + "$l = $origin . '/#activation=' . $t;\n", 'activation link is built only');
+  dirty('an activation link built in the worker is caught', 'server/src/Mail/OutboxWorker.php', S + "$l = $o . '/#activation=' . $t;\n", 'activation link is built only');
+  for (const [name, src] of [['SessionToken::generate', '$t = SessionToken::generate();'], ['a token issue', '$this->auth->tokens()->issue($h, $u, \'activation\');'],
+    ['ActivationMail', '$m = ActivationMail::build($o, $to, $t, 72, $r);'], ['the transport', 'function f(MailTransport $t): void {}']]) {
+    dirty('account administration naming ' + name + ' is caught', 'server/src/Employee/AccountService.php', S + src + '\n', 'never issues a token');
+    dirty('the Employee controller naming ' + name + ' is caught', EMPLOYEE_CONTROLLER, S + src + '\n', 'never issues a token');
+  }
+  clean('the worker may issue and build', 'server/src/Mail/OutboxWorker.php', S + "$t = SessionToken::generate();\n$m = ActivationMail::build($o, $to, $t, 72, $r);\n");
+  dirty('an outbox enqueue outside a transaction is caught', 'server/src/Employee/AccountService.php', S + "$this->auth->outbox()->enqueueOnce($u, 'activation', $r);\n", 'queued only inside the transaction');
+  clean('an outbox enqueue inside atomically passes', 'server/src/Employee/AccountService.php', S + "$this->data->atomically(function () use ($u): void { $this->auth->outbox()->enqueueOnce($u, 'activation', $r); });\n");
+  dirty('an account audit outside a transaction is caught', 'server/src/Employee/AccountService.php', S + "$this->data->audit()->appendAccount($auth, $actor, 'disable', $u, $r);\n", 'inside the transaction');
   for (const h of ['HTTP_HOST', 'SERVER_NAME', 'HTTP_X_FORWARDED_HOST', 'HTTP_FORWARDED']) {
     dirty('reading ' + h + ' is caught', REQUEST_FILE, S + "$h = $header('" + h + "');\n", 'Host and forwarding headers');
   }
@@ -1055,6 +1092,9 @@ function selftest() {
   const realRoutes = fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8');
   cases.push({ name: 'the real Routes.php declares every Action', run: () => checkRouteActions(realRoutes), expect: 0 });
   cases.push({ name: 'a business mutation without an Action is caught', run: () => checkRouteActions(realRoutes.replace(', [], RouteAuth::Required, Action::EmployeeDelete)', ', [], RouteAuth::Required)')), expect: 'must declare its Action' });
+  cases.push({ name: 'an account route without account.manage is caught', run: () => checkRouteActions(realRoutes.replace("$employees->disableAccount(...), [], RouteAuth::Required, Action::AccountManage)", "$employees->disableAccount(...), [], RouteAuth::Required, Action::EmployeeUpdate)")), expect: 'must declare Action::AccountManage' });
+  cases.push({ name: 'account.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$employees->archive(...), [], RouteAuth::Required, Action::EmployeeDelete)", "$employees->archive(...), [], RouteAuth::Required, Action::AccountManage)")), expect: 'must not declare Action::AccountManage' });
+  cases.push({ name: 'a missing account route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),\n", '')), expect: 'is missing' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 
   // BF-3C: ACTION parity against the real js/core/authz.js and the real Action.php, then each drift.
@@ -1076,7 +1116,12 @@ function selftest() {
   parity('grouped match arms are caught (unparseable)', swap(swap(realAction, '            self::EmployeeUpdate => Rule::CeoOnly,\n', ''), 'self::EmployeeCreate => Rule::CeoOnly,', 'self::EmployeeCreate, self::EmployeeUpdate => Rule::CeoOnly,'), realAuthz, 'parseable');
   parity('a duplicated case is caught (unparseable)', swap(realAction, "    case DataReset = 'data.reset';\n", "    case DataReset = 'data.reset';\n    case DataReset = 'data.reset';\n"), realAuthz, 'parseable');
   parity('an unparseable Action.php is caught', S + "enum Action: string { case A = 'a'; }\n", realAuthz, 'parseable');
-  parity('a frontend action the server lacks is caught', realAction, swap(realAuthz, "  DATA_RESET:         'data.reset'\n", "  DATA_RESET:         'data.reset',\n  EMPLOYEE_MERGE:     'employee.merge'\n"), 'employee.merge');
+  parity('a frontend action the server lacks is caught', realAction, swap(realAuthz, "  ACCOUNT_MANAGE:     'account.manage'\n", "  ACCOUNT_MANAGE:     'account.manage',\n  EMPLOYEE_MERGE:     'employee.merge'\n"), 'employee.merge');
+  // BF-4a2: account.manage is shared, CEO-only and record-bearing on the Employee record.
+  parity('account.manage missing on the server is caught', swap(swap(swap(realAction, "    case AccountManage = 'account.manage';\n", ''), '            self::AccountManage => Rule::CeoOnly,\n', ''), "            self::AccountManage => 'employee',\n", ''), realAuthz, 'missing account.manage');
+  parity('account.manage missing on the frontend is caught', realAction, swap(swap(swap(swap(realAuthz, "  DATA_RESET:         'data.reset',\n", "  DATA_RESET:         'data.reset'\n"), "  ACCOUNT_MANAGE:     'account.manage'\n", ''), "  'account.manage':      'employee'     // administers the login bound to an Employee record\n", ''), "  'account.manage':      ceoOnly,\n", ''), 'frontend lacks: account.manage');
+  parity('a broadened server account.manage rule is caught', swap(realAction, 'self::AccountManage => Rule::CeoOnly,', 'self::AccountManage => Rule::CeoOrOwnDraft,'), realAuthz, 'rule drift for account.manage');
+  parity('a record-free server account.manage is caught', swap(realAction, "self::AccountManage => 'employee',", 'self::AccountManage => null,'), realAuthz, 'entity drift for account.manage');
   parity('a broadened frontend Employee rule is caught', realAction, swap(realAuthz, "  'employee.create':     ceoOnly,", "  'employee.create':     selfDraftOnly,"), 'rule drift for employee.create');
   parity('an allow-all frontend rule is caught', realAction, swap(realAuthz, "  'data.reset':          ceoOnly,", "  'data.reset':          function(){ return true; },"), 'neither CeoOnly nor CeoOrOwnDraft');
   parity('a changed frontend entity is caught', realAction, swap(realAuthz, "  'overtime.manage':     'overtime',", "  'overtime.manage':     'payrollPlan',"), 'entity drift for overtime.manage');

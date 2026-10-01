@@ -9,8 +9,10 @@ use TamOs\Data\Database;
  * Account reads and writes: login lookup and hash upgrade (BF-3A), and the BF-3B account
  * lifecycle — first-company bootstrap, activation, password change and operator reset.
  * This class is the only writer of companies, users and memberships
- * (tools/verify-backend-boundary.js). There is no generic account CRUD: BF-3B creates exactly
- * one kind of account, the pending bootstrap CEO.
+ * (tools/verify-backend-boundary.js). There is no generic account CRUD: BF-3B creates the
+ * pending bootstrap CEO, and BF-4a2 (SDR-0004) the pending Employee account bound to an
+ * Employee record and the status of that Employee membership. The company and the employee
+ * binding always come from the caller's authorized scope, never from a browser.
  */
 final class AccountStore
 {
@@ -135,6 +137,35 @@ final class AccountStore
         $this->db->execute(
             'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
             [$membershipId, $userId, $companyId, 'ceo', 'active'],
+        );
+    }
+
+    /**
+     * BF-4a2: an Employee login — role employee, active, bound to the Employee record. The
+     * company and the employee id come from the authorized scope (TamOs\Employee\AccountService);
+     * UNIQUE (user_id) and UNIQUE (company_id, employee_id) refuse a second membership.
+     */
+    public function createEmployeeMembership(string $membershipId, string $userId, string $companyId, string $employeeId): void
+    {
+        $this->db->execute(
+            'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+            [$membershipId, $userId, $companyId, 'employee', $employeeId, 'active'],
+        );
+    }
+
+    /**
+     * BF-4a2: disables or re-enables an Employee membership — compare-and-swap on its current
+     * status, and only for role employee in the given company, so a CEO membership is never
+     * changed here. Returns the affected row count (1, or 0 when nothing matched).
+     */
+    public function setEmployeeMembershipStatus(string $membershipId, string $companyId, string $from, string $to): int
+    {
+        if (!in_array($from, ['active', 'disabled'], true) || !in_array($to, ['active', 'disabled'], true) || $from === $to) {
+            throw new \LogicException('a membership status change goes between active and disabled');
+        }
+        return $this->db->execute(
+            "UPDATE memberships SET status = ?, updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND company_id = ? AND role = 'employee' AND status = ?",
+            [$to, $membershipId, $companyId, $from],
         );
     }
 

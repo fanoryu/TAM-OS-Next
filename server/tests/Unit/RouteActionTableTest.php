@@ -35,7 +35,7 @@ return [
             'POST /api/auth/reset-password',
         ], Routes::ACCOUNT_SELF_SERVICE);
     },
-    'the production table validates: its mutations are the self-service routes (no Action) and the three Employee writes (BF-4a1)' => static function (): void {
+    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1) and the four account routes under account.manage (BF-4a2)' => static function (): void {
         $routes = productionRoutes(testConfig());
         $selfService = [];
         $business = [];
@@ -59,6 +59,10 @@ return [
             'POST /api/employees/create' => Action::EmployeeCreate,
             'POST /api/employees/update' => Action::EmployeeUpdate,
             'POST /api/employees/archive' => Action::EmployeeDelete,
+            'POST /api/employees/provision-account' => Action::AccountManage,
+            'POST /api/employees/reissue-activation' => Action::AccountManage,
+            'POST /api/employees/disable-account' => Action::AccountManage,
+            'POST /api/employees/enable-account' => Action::AccountManage,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

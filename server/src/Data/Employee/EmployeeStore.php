@@ -23,6 +23,12 @@ use TamOs\Policy\Scope;
  * (SDR-0002 §10), never on an archived record. employee.delete is a SOFT archive: there is no
  * DELETE statement here, and history is kept (SDR-0002 §6, §12). Bank fields, contract type and
  * history are not stored.
+ *
+ * Accounts (BF-4a2, SDR-0004): the CEO reads carry `account_state`, DERIVED from the login bound
+ * to the record (membership ⟕ user, at most one row: UNIQUE (company_id, employee_id)) — none,
+ * pending (no password yet), active, or disabled (membership or user disabled) — never stored and
+ * never a hash. Under account.manage the same binding is read, and locked, for AccountService;
+ * the self reads do not join it.
  */
 final class EmployeeStore
 {
@@ -41,16 +47,23 @@ final class EmployeeStore
     public const LIST_SQL = 'SELECT id, company_id, id AS owner_employee_id FROM employees WHERE company_id = :company_id ORDER BY id';
     public const LIST_SELF_SQL = 'SELECT id, company_id, id AS owner_employee_id FROM employees WHERE company_id = :company_id AND id = :self_employee_id ORDER BY id';
 
-    // Profile reads (BF-4a1). The company list is CEO-only and has no self variant.
-    public const LIST_PROFILES_SQL = 'SELECT id, company_id, id AS owner_employee_id, employee_code, full_name, job_title, department, employment_status, join_date, contact_email, phone, notes, monthly_base_salary, archived_at, version FROM employees WHERE company_id = :company_id AND archived_at IS NULL ORDER BY employee_code, id LIMIT 2001';
-    public const LIST_ALL_PROFILES_SQL = 'SELECT id, company_id, id AS owner_employee_id, employee_code, full_name, job_title, department, employment_status, join_date, contact_email, phone, notes, monthly_base_salary, archived_at, version FROM employees WHERE company_id = :company_id ORDER BY employee_code, id LIMIT 2001';
-    public const FIND_PROFILE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employee_code, full_name, job_title, department, employment_status, join_date, contact_email, phone, notes, monthly_base_salary, archived_at, version FROM employees WHERE id = :id AND company_id = :company_id';
+    // Profile reads (BF-4a1). The company list is CEO-only and has no self variant. The CEO reads
+    // carry the derived account_state (BF-4a2); the self read does not.
+    public const LIST_PROFILES_SQL = "SELECT e.id, e.company_id, e.id AS owner_employee_id, e.employee_code, e.full_name, e.job_title, e.department, e.employment_status, e.join_date, e.contact_email, e.phone, e.notes, e.monthly_base_salary, e.archived_at, e.version, CASE WHEN m.id IS NULL THEN 'none' WHEN m.status <> 'active' OR u.status <> 'active' THEN 'disabled' WHEN u.password_hash IS NULL THEN 'pending' ELSE 'active' END AS account_state FROM employees e LEFT JOIN memberships m ON m.company_id = e.company_id AND m.employee_id = e.id LEFT JOIN users u ON u.id = m.user_id WHERE e.company_id = :company_id AND e.archived_at IS NULL ORDER BY e.employee_code, e.id LIMIT 2001";
+    public const LIST_ALL_PROFILES_SQL = "SELECT e.id, e.company_id, e.id AS owner_employee_id, e.employee_code, e.full_name, e.job_title, e.department, e.employment_status, e.join_date, e.contact_email, e.phone, e.notes, e.monthly_base_salary, e.archived_at, e.version, CASE WHEN m.id IS NULL THEN 'none' WHEN m.status <> 'active' OR u.status <> 'active' THEN 'disabled' WHEN u.password_hash IS NULL THEN 'pending' ELSE 'active' END AS account_state FROM employees e LEFT JOIN memberships m ON m.company_id = e.company_id AND m.employee_id = e.id LEFT JOIN users u ON u.id = m.user_id WHERE e.company_id = :company_id ORDER BY e.employee_code, e.id LIMIT 2001";
+    public const FIND_PROFILE_SQL = "SELECT e.id, e.company_id, e.id AS owner_employee_id, e.employee_code, e.full_name, e.job_title, e.department, e.employment_status, e.join_date, e.contact_email, e.phone, e.notes, e.monthly_base_salary, e.archived_at, e.version, CASE WHEN m.id IS NULL THEN 'none' WHEN m.status <> 'active' OR u.status <> 'active' THEN 'disabled' WHEN u.password_hash IS NULL THEN 'pending' ELSE 'active' END AS account_state FROM employees e LEFT JOIN memberships m ON m.company_id = e.company_id AND m.employee_id = e.id LEFT JOIN users u ON u.id = m.user_id WHERE e.id = :id AND e.company_id = :company_id";
     public const FIND_PROFILE_SELF_SQL = 'SELECT id, company_id, id AS owner_employee_id, employee_code, full_name, job_title, department, employment_status, join_date, contact_email, phone, notes, monthly_base_salary, archived_at, version FROM employees WHERE id = :id AND company_id = :company_id AND id = :self_employee_id';
     public const LOCK_PROFILE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employee_code, full_name, job_title, department, employment_status, join_date, contact_email, phone, notes, monthly_base_salary, archived_at, version FROM employees WHERE id = :id AND company_id = :company_id FOR UPDATE';
 
     // An active login bound to the record (memberships, 0010). Read after LOCK_PROFILE_SQL inside the
     // archive transaction; binding a membership (BF-4a2) locks the same employee row first.
     public const ACTIVE_BINDING_SQL = "SELECT id, company_id, employee_id AS owner_employee_id FROM memberships WHERE company_id = :company_id AND employee_id = :employee_id AND status = 'active' LIMIT 1";
+
+    // BF-4a2: the login bound to the record (membership + user), for account.manage only. LOCK_ takes
+    // the membership and user rows after the caller locked the employee row (lock order: employee →
+    // membership/user → tokens). The password hash itself is never read — only whether one is set.
+    public const ACCOUNT_SQL = "SELECT m.id AS membership_id, m.company_id, m.employee_id AS owner_employee_id, m.user_id, m.role, m.status AS membership_status, u.status AS user_status, (u.password_hash IS NOT NULL) AS has_password FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.company_id = :company_id AND m.employee_id = :employee_id";
+    public const LOCK_ACCOUNT_SQL = "SELECT m.id AS membership_id, m.company_id, m.employee_id AS owner_employee_id, m.user_id, m.role, m.status AS membership_status, u.status AS user_status, (u.password_hash IS NOT NULL) AS has_password FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.company_id = :company_id AND m.employee_id = :employee_id FOR UPDATE";
 
     // Writes. Version compare-and-swap; archived records are never written.
     public const CREATE_SQL = 'INSERT INTO employees (id, company_id, employee_code, full_name, job_title, department, employment_status, join_date, contact_email, phone, notes, monthly_base_salary, archived_at, version, created_at, updated_at) VALUES (:id, :company_id, :employee_code, :full_name, :job_title, :department, :employment_status, :join_date, :contact_email, :phone, :notes, :monthly_base_salary, NULL, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))';
@@ -112,6 +125,33 @@ final class EmployeeStore
     {
         $record = $auth->record ?? throw new \LogicException('a binding check needs the authorized record');
         return $this->db->select($auth->scope, self::ACTIVE_BINDING_SQL, ['employee_id' => $record->id]) !== [];
+    }
+
+    /**
+     * BF-4a2: the login bound to the authorized record, or null when it has none. With $lock the
+     * membership and user rows stay locked until the transaction ends (the employee row must
+     * already be locked by lockProfile()).
+     *
+     * @return array{membershipId: string, userId: string, role: string, membershipStatus: string, userStatus: string, hasPassword: bool}|null
+     */
+    public function account(Authorization $auth, bool $lock): ?array
+    {
+        if ($auth->action !== Action::AccountManage || $auth->record === null) {
+            throw new \LogicException('an employee account is read only under account.manage, against its record');
+        }
+        $rows = $this->db->select($auth->scope, $lock ? self::LOCK_ACCOUNT_SQL : self::ACCOUNT_SQL, ['employee_id' => $auth->record->id]);
+        if ($rows === []) {
+            return null;
+        }
+        $r = $rows[0];
+        return [
+            'membershipId' => (string) $r['membership_id'],
+            'userId' => (string) $r['user_id'],
+            'role' => (string) $r['role'],
+            'membershipStatus' => (string) $r['membership_status'],
+            'userStatus' => (string) $r['user_status'],
+            'hasPassword' => (int) $r['has_password'] === 1,
+        ];
     }
 
     /**

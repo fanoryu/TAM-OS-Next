@@ -54,7 +54,8 @@ import/ analytics/ domain/ platform/ transport/ repository/ cli/`) + 5 CSS files
 portable `dist/tam-os-v${APP_VERSION}.html`. **72 of the 73 are browser-loaded** — the
 load-order manifest and `index.html` agree on all 72 — and `js/cli/cli.js` is the CLI-only ingress,
 deliberately outside the browser load order. Still one shared global scope — no ES modules,
-no bundler. `SCHEMA_VERSION` is 6 and `ACTIONS` is 20.
+no bundler. `SCHEMA_VERSION` is 6 and `ACTIONS` is 21 (20 in the v2.11.0 release; BF-4a2 added `account.manage`,
+SDR-0004, as vocabulary only — no frontend feature consumes it).
 **Verification:** `tools/verify-build.js` — **2443** checks; **thirty-four** Node runtime harnesses —
 **2921** checks (largest: contract timeline 349, authz C2C-4 164, integrity warning rules 146, integrity
 payroll rules 144, Contract Core 129, authz C2C-3 129, UX-006D2 presentation 127, employee read scope 119,
@@ -1022,8 +1023,8 @@ backend store and routes of its own. Data still held only in the browser is exac
 
 | Class | Role |
 |---|---|
-| `Action` | enum of exactly the 20 `js/core/authz.js` ACTIONS, each with its `rule()` and resource `entity()` (both exhaustive `match`es, no default). An unknown string has no `Action`, and `Policy` accepts only an `Action` |
-| `Rule` | `CeoOnly` (16 actions) or `CeoOrOwnDraft` (the four overtime self actions: CEO always; an Employee only on their own Draft) — nothing broader exists |
+| `Action` | enum of exactly the 21 `js/core/authz.js` ACTIONS (20 + BF-4a2 `account.manage`), each with its `rule()` and resource `entity()` (both exhaustive `match`es, no default). An unknown string has no `Action`, and `Policy` accepts only an `Action` |
+| `Rule` | `CeoOnly` (17 actions) or `CeoOrOwnDraft` (the four overtime self actions: CEO always; an Employee only on their own Draft) — nothing broader exists |
 | `Scope` | built only by `Scope::of(Principal)`: `companyId` always; `selfEmployeeId` only for the Employee role. A CEO is company-wide even with an employee binding |
 | `Policy` | `authorize(Principal, Action, ?ScopedRecord)` → `Authorization`, else 403 `forbidden` (`action_denied`). A record-bearing action needs a record of its entity read under the principal's own scope (server AZ-1); a record-free action takes none. No fallback to CEO |
 | `Authorization` | the capability every scoped write requires; minted only by `Policy` |
@@ -1047,7 +1048,7 @@ seeded rows. `0010_add_memberships_employee_fk` — `memberships (company_id, em
 (company_id, id)`, `ON DELETE RESTRICT ON UPDATE RESTRICT`: a binding must name an employee of the same
 company; a bound employee cannot be deleted, renamed or moved; a NULL (CEO) binding stays valid and an
 Employee still needs one (CHECK from `0003`). BF-3C left the backend migration head at `0010` (BF-3D
-moves it to `0013`, BF-4a1 to `0017`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
+moves it to `0013`, BF-4a1 to `0017`, BF-4a2 to `0019`); the frontend `SCHEMA_VERSION` is unrelated and stays 6.
 
 **Routes.** `Route` may declare its `Action`; one that does must be a mutation with `RouteAuth::Required`.
 `Routes::validate()` fails the production table at bootstrap unless every mutation declares an `Action` or
@@ -1228,9 +1229,69 @@ inserted only by `AuditLog` and never updated, deleted, replaced or truncated; e
 sits inside an `->atomically(` transaction; migration versions are contiguous; and every mutation route in
 `Routes.php` is account self-service or declares its `Action::`.
 
-**Deferred.** BF-4a2 (account provisioning under the owner-locked `account.manage` ACTION, activation by the
-governed mail outbox, reissue, disable/enable and their audit events), bank fields, bulk import, the
-LOCAL → server migration, the frontend workspace (AFI-4) and production SESSION (AFI-5).
+**Deferred.** BF-4a2 (Employee account administration — implemented as source in the next section), bank
+fields, bulk import, the LOCAL → server migration, the frontend workspace (AFI-4) and production SESSION
+(AFI-5).
+
+### Employee account administration — BF-4a2 (source only; not deployed, not production-ready)
+
+BF-4a2 lets the CEO create and administer the login of an existing Employee record, as decided in
+[SDR-0004](docs/security/SDR-0004-employee-account-administration.md) (owner decisions D-BF4a-1 = B,
+D-BF4a-2 = B, C1 = A). Backend only: no frontend feature calls it, `AUTH_MODE` stays LOCAL, "Acting as" is
+unchanged, and the authenticated Employee workspace that will use it is AFI-4a (pending).
+
+**ACTION.** `account.manage` — CEO-only and record-bearing on the Employee record (scoped load → 404, then
+Policy → 403) — joins the shared vocabulary: `server/src/Policy/Action.php` and `js/core/authz.js` both hold
+**21** ACTIONS (C1 = A: no server-only exception). The frontend entry is vocabulary and parity only; it
+changes the distribution package (the `authz.js` file and the manifest's `actions`) and nothing else.
+
+**Schema.** `0018_replace_mail_outbox_kind_check` — the outbox kinds are `recovery` and `activation`.
+`0019_add_audit_events_account_operation` — `audit_events` gains `operation` (`provision`, `reissue`,
+`disable`, `enable`), set exactly when `action = 'account.manage'`, and an `account.manage` row must name its
+`target_user_id`. Both are additive single-statement ALTERs; no row is written. Migration head `0019`.
+
+**Routes** (`Controller/EmployeeController` → `Employee/AccountService`; all POST, `RouteAuth::Required`,
+`account.manage`, CSRF and origin checked; the target is named only by Employee id; the answer is the CEO
+detail with `accountState` — never a token, link, email or account id).
+
+| Route | Body | Effect |
+|---|---|---|
+| `/api/employees/provision-account` | `{id, email}` | not archived, no login bound, email free → pending user (active, no password), active `employee` membership in the session company, activation intent queued |
+| `/api/employees/reissue-activation` | `{id}` | pending only; at most 3 per target user per hour (429) → every open token revoked, activation intent queued (an open row is reused) |
+| `/api/employees/disable-account` | `{id}` | membership active → membership disabled; every session and open token revoked |
+| `/api/employees/enable-account` | `{id}` | not archived, membership disabled → membership active; no mail |
+
+Each runs in one transaction on the shared connection: lock the Employee row, then the bound membership
+and user rows, then tokens. A target membership whose role is not `employee` is refused (409) — the CEO-target
+guard, so a CEO membership bound to an Employee record (the acting CEO's own included) is never administered
+— and `AccountStore` changes a membership status only where `role = 'employee'`. Disable never writes
+`users.status`, employment status or the outbox; enable never sends mail. 409 also answers an archived record,
+an existing login, an unavailable email (and a concurrent `UNIQUE` win), a missing login and a wrong state.
+
+**Activation delivery.** The request queues delivery INTENT only — it issues no token. The outbox worker
+(`Mail/OutboxWorker`) re-reads the account under lock at send time and delivers an `activation` row only to an
+account `AccountLifecycle::isActivatable()` still accepts (otherwise the row is cancelled): it revokes the
+user's open tokens, issues a fresh 72-hour activation token and sends `Mail/ActivationMail` —
+`<configured origin>/#activation=<token>`, the form AFI-3 reads. `POST /api/auth/activate` is unchanged.
+
+**Account state** (`Employee/AccountState`, and the same rule in `EmployeeStore`'s CEO reads): `none`,
+`pending`, `active` or `disabled`, derived from the bound membership and user — never stored. The CEO list and
+detail carry `accountState`; the self view does not.
+
+**Audit.** `AuditLog::appendAccount()` writes one `account.manage` row per operation with the session actor,
+the target user and the `operation` — never an email, password, token or hash — in the same transaction.
+
+**Proof.** Unit tests for the vocabulary, the strict bodies, the state derivation, the activation message and
+link, the pinned SQL and the audit refusals; HTTP tests with a session double (401, CSRF and origin 403,
+forged-field and malformed-body 400s); MariaDB tests (`tests/Db/AccountAdministrationTest.php`) for every
+operation, the worker, activation and login, rollback on an outbox or audit failure, the reissue quota, the
+CEO-target guard and hostile principals. **Boundary additions:** 21-action parity; exactly the four account
+routes declare `account.manage`; the `#activation=` link is built only by `ActivationMail`; the account code
+never names a token primitive or a mail builder; every audit append and outbox enqueue sits inside
+`->atomically(`.
+
+**Not production-ready.** Everything BF-3A–BF-4a1 list, SDR-0003 §7 for the activation mail, and SDR-0004 §8
+(A1 activation delivery, A2 disable evidence).
 
 ### Session identity foundation — AFI-1 (frontend; headless and inert, not wired)
 

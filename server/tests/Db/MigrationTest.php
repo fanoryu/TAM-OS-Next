@@ -143,7 +143,7 @@ return [
         // The real server/migrations set: 0001–0006 (BF-3A auth schema), 0007–0008 (BF-3B lifecycle),
         // 0009–0010 (BF-3C employee anchor and binding FK), 0011–0013 (BF-3D token purpose, events, mail outbox),
         // 0014–0017 (BF-4a1 employee profile — transitional columns, legacy backfill, final constraints —
-        // and business audit).
+        // and business audit), 0018–0019 (BF-4a2 activation mail kind, account audit operation).
         $apply = runMigrateCli(['apply'], $file);
         assertSame([0, "applied: 0001_create_companies\napplied: 0002_create_users\napplied: 0003_create_memberships\n"
             . "applied: 0004_create_sessions\napplied: 0005_create_auth_rate_limits\napplied: 0006_create_auth_events\n"
@@ -152,6 +152,7 @@ return [
             . "applied: 0011_replace_account_tokens_purpose_check\napplied: 0012_replace_auth_events_event_check\n"
             . "applied: 0013_create_mail_outbox\napplied: 0014_extend_employees_profile\n"
             . "applied: 0015_backfill_legacy_employees\napplied: 0016_enforce_employees_profile\napplied: 0017_create_audit_events\n"
+            . "applied: 0018_replace_mail_outbox_kind_check\napplied: 0019_add_audit_events_account_operation\n"
             . "migrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
         assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'schema_migrations', 'sessions', 'users'], $tables($db));

@@ -96,7 +96,7 @@ const COMPANY_ACTIONS = ['employee.create','employee.update','employee.delete','
   /* ---------- 1. ACTIONS vocabulary — mutation-only, no reads ---------- */
   const a = fresh();
   const actionValues = a.ACTION_SET;
-  check(actionValues.length === 20, 'ACTIONS: exactly the 20 mutation actions (13 + C2B self-Draft trio + C2C-2 finance.manage + C2C-3 import.undo/data.restore/data.reset)');
+  check(actionValues.length === 21, 'ACTIONS: exactly the 21 mutation actions (13 + C2B self-Draft trio + C2C-2 finance.manage + C2C-3 import.undo/data.restore/data.reset + BF-4a2 account.manage)');
   check(!actionValues.some(function(x){ return /\.read(\.|$)/.test(x); }), 'ACTIONS: contains NO *.read / *.read.self action');
   ['employee.create','employee.update','employee.delete','contract.create','contract.update','contract.delete',
    'payroll.manage','overtime.submitSelf','overtime.createSelfDraft','overtime.updateSelfDraft','overtime.deleteSelfDraft',

@@ -224,7 +224,7 @@ function seed(rt, principal){
   /* 6. D3-6 — presentation never becomes the authorization source of truth */
   console.log('-- 6. D3-6 : presentation is not authorization --');
   { const rt = loadRuntime();
-    check(Object.keys(rt.ACTIONS).length === 20, 'ACTIONS remains exactly 20 (D3 adds no capability)');
+    check(Object.keys(rt.ACTIONS).length === 21, 'ACTIONS remains exactly 21 (D3 adds no capability; BF-4a2 added account.manage)');
     const helper = (read('js/core/stabilization.js').match(/function authzDisabled[\s\S]*?\n\}/) || [''])[0];
     check(/return can\(action, resource\) \?/.test(helper),
       'the availability condition is still the frozen delegation to can()');

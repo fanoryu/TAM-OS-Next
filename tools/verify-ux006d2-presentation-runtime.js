@@ -317,7 +317,7 @@ const attrOf = (html, id, attr) => {
   /* 6. D2-6 — presentation changed no decision */
   console.log('-- 6. D2-6 : presentation changed no authorization decision --');
   { const rt = loadRuntime();
-    check(Object.keys(rt.ACTIONS).length === 20, 'ACTIONS remains exactly 20 (D2 adds no capability)');
+    check(Object.keys(rt.ACTIONS).length === 21, 'ACTIONS remains exactly 21 (D2 adds no capability; BF-4a2 added account.manage)');
     const stab = read('js/core/stabilization.js');
     const helper = (stab.match(/function authzDisabled[\s\S]*?\n\}/) || [''])[0];
     check(/return can\(action, resource\) \?/.test(helper),

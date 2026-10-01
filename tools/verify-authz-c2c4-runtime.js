@@ -148,7 +148,7 @@ const deniedOk = (r)=> !!r && r.ok === false;
   /* 1. Registry unchanged by C2C-4 */
   console.log('-- 1. registry unchanged : ACTIONS stays 20, no new action --');
   { const rt = loadRuntime();
-    check(rt.ACTION_SET.length === 20, 'ACTIONS: still exactly 20 (C2C-4 adds none)');
+    check(rt.ACTION_SET.length === 21, 'ACTIONS: exactly 21 (C2C-4 adds none; BF-4a2 added account.manage)');
     ['recurring.manage','bank.manage','employee.merge'].forEach(function(r){
       check(rt.ACTION_SET.indexOf(r) === -1, 'ACTIONS: rejected action ' + r + ' still absent'); });
     ['supplemental.manage','finance.manage','payroll.manage','settings.manage'].forEach(function(a){
