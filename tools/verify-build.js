@@ -5465,8 +5465,13 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   check(cookieOff.length === 0, 'AFI-1: no document.cookie access in production JS (the session cookie is HttpOnly)' + (cookieOff.length ? ' >> VIOLATION: ' + cookieOff.join(', ') : ''));
 
   // The API client: same-origin relative /api/ paths, fixed fetch options, bounded timeout.
-  check(/fetch\(path, init\)/.test(apiCode) && (apiCode.match(/\bfetch\s*\(/g) || []).length === 1,
-    'AFI-1: ApiClient makes exactly one fetch(path, init) call');
+  // AFI-4a1 authorized revision: a GET may carry a structured query, so the one fetch is
+  // fetch(target, init) where target is the validated path plus the serialized query (or
+  // the path alone). Was: fetch(path, init). The property is unchanged — one fetch call,
+  // and its URL is only ever the checked path (+ an allowlisted, encoded query).
+  check(/fetch\(target, init\)/.test(apiCode) && (apiCode.match(/\bfetch\s*\(/g) || []).length === 1
+    && /let target = path;/.test(apiCode) && /target = path \+ qs;/.test(apiCode) && (apiCode.match(/\btarget =/g) || []).length === 2,
+    'AFI-1/AFI-4a1: ApiClient makes exactly one fetch(target, init) call; target is the checked path, plus only a serialized structured query');
   check(/const API_PATH_PATTERN = \/\^\\\/api\\\/\[/.test(apiCode) && /path\.indexOf\('\/\/'\) === -1/.test(apiCode),
     'AFI-1: ApiClient accepts only relative /api/ paths (anchored pattern, no "//")');
   check(!/https?:|wss?:/i.test(apiCode), 'AFI-1: ApiClient carries no absolute URL or scheme');
@@ -5518,12 +5523,16 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   // ApiClient caller, and it names exactly its three RouteAuth::None endpoints. Was: only
   // session-identity.js and auth-boot.js, and no /api/ path outside the session modules.
   // The property is unchanged — every API caller and every API path is allowlisted.
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js']);
-  check(apiUsers.length === 0, 'AFI-1/AFI-2/AFI-3: only session-identity.js, auth-boot.js and auth-flow.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
-  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+  // AFI-4a1 authorized revision: core/employee-api.js (the Employee reads) is the one further
+  // ApiClient caller, and core/session-employee.js reads API_RESULT_KINDS to tell a 401 apart.
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js']);
+  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || ''),
+    'AFI-1/AFI-2/AFI-3/AFI-4a1: only session-identity.js, auth-boot.js, auth-flow.js and employee-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+    && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -5681,6 +5690,76 @@ console.log('== AFI-3 — CREDENTIAL FLOWS ==');
   check(secretHits.length === 0 && !/resend|api_key|smtp/i.test(indexHtml),
     'AFI-3: no mail provider, API key or SMTP reference in the frontend' + (secretHits.length ? ' >> VIOLATION: ' + secretHits.join(', ') : ''));
   check(fs.existsSync(path.join(root, 'tools', 'verify-auth-flow-runtime.js')), 'AFI-3: runtime harness present — tools/verify-auth-flow-runtime.js');
+}
+
+// ===== AFI-4a1 — READ-ONLY SESSION EMPLOYEE WORKSPACE =====
+// The SESSION workspace renders on the auth-view path, never the business shell
+// (allowsWorkspace() stays false); its data is server-only, strictly decoded and held
+// in memory; no SESSION module reaches State, storage, the legacy repository, the
+// shell, "Acting as", local data tools or another domain. Behaviour is proven by
+// tools/verify-session-employee-runtime.js.
+console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
+{
+  const NEW = ['core/employee-api.js', 'core/session-employee.js', 'ui/session-workspace-view.js'];
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  check(NEW.every((f) => fs.existsSync(path.join(root, 'js', f))), 'AFI-4a1: employee-api.js, session-employee.js and session-workspace-view.js present');
+  const iFlow = jsFiles.indexOf('core/auth-flow.js');
+  check(iFlow >= 3 && jsFiles.slice(iFlow - 3, iFlow).join() === NEW.join()
+    && indexHtml.includes('<script src="js/core/employee-api.js"></script>\n<script src="js/core/session-employee.js"></script>\n<script src="js/ui/session-workspace-view.js"></script>\n<script src="js/core/auth-flow.js"></script>'),
+    'AFI-4a1: the three modules load in order immediately before auth-flow.js (manifest and index.html)');
+  const apiC = code(rd('core/employee-api.js')), storeC = code(rd('core/session-employee.js')), viewC = code(rd('ui/session-workspace-view.js'));
+  const abC = code(rd('core/auth-boot.js')), avC = code(rd('ui/auth-view.js'));
+  // Firewall: no State, storage, legacy persistence, shell, "Acting as", local data tools or other domains.
+  const DENY = /\b(State|StorageAdapter|loadState|saveState|persist[A-Za-z]*|localStorage|sessionStorage|indexedDB|EmployeeRepository|TransportAdapter|ApplicationGateway|renderShell|renderView|renderViewContent|renderIdentitySelectorHTML|bindIdentitySelector|LocalIdentityProvider|setIdentityProviderForTesting|openGlobalSearch|startFresh|maybeShowFirstRunChoice|restoreCompleteBackup|exportCompleteBackup|resetAppData|renderSmartImport|commitSmartImport|openEmployeeModal|setEmployeeActive|deleteEmployee|renderEmployees|renderEmployeeDetail|empById|getScopedRecords|renderOvertime|renderOvertimeWorksheet|renderPayrollWorkspace|renderPayrollDetail|renderDashboard|renderExecutiveDashboard|renderTransactions|renderExecutionCenter|XMLHttpRequest)\b|document\s*\.\s*cookie|\bfetch\s*\(/;
+  [['core/employee-api.js', apiC], ['core/session-employee.js', storeC], ['ui/session-workspace-view.js', viewC]].forEach(([name, c]) => {
+    const hit = c.match(DENY);
+    check(!hit, 'AFI-4a1: ' + name + ' reaches no State, storage, legacy repository, shell, "Acting as", local data tool or other domain' + (hit ? ' >> ' + hit[0] : ''));
+    check(!/\bconsole\s*\.|setInterval|setTimeout|\bwindow\.[A-Za-z]+\s*=/.test(c), 'AFI-4a1: ' + name + ' does not log, schedule or publish on window');
+  });
+  // The read client: GET only, through ApiClient, structured queries, decoded strictly.
+  check((apiC.match(/ApiClient\.request\(/g) || []).length === 3 && (apiC.match(/method: 'GET'/g) || []).length === 4
+    && !/'POST'|'PUT'|'PATCH'|'DELETE'|csrf/.test(apiC) && !/body\s*:/.test(apiC),
+    'AFI-4a1: EmployeeApi makes exactly three GET reads through ApiClient — no mutation, no body, no CSRF');
+  check(!/'\/api\/[^']*[?#&=][^']*'/.test(apiC) && /query: \{ archived: '1' \}/.test(apiC) && (apiC.match(/query: \{ id: (id|own) \}/g) || []).length === 2,
+    'AFI-4a1: EmployeeApi never writes a raw query into a path; archived and id travel as structured queries');
+  check(/getSelf\(principal\)\{\s*const own = principal \? principal\.employeeId : undefined;/.test(apiC) && /out\.data\.id !== own/.test(apiC) && !/employeeCode/.test(apiC.replace(/'employeeCode'|employeeCode: \(v\)/g, '')),
+    'AFI-4a1: getSelf asks for the OPAQUE principal.employeeId and accepts only its own record (never the employee code)');
+  check(!/\bNumber\s*\(|parseFloat|parseInt|Math\./.test(apiC) && /\^\\d\{1,13\}\\\.\\d\{2\}\$/.test(apiC),
+    'AFI-4a1: monthlyBaseSalary is validated as an exact decimal string and never converted to a number');
+  check(/const EMPLOYEE_API_STATUSES = Object\.freeze\(\['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'\]\);/.test(apiC)
+    && /const EMPLOYEE_API_ACCOUNT_STATES = Object\.freeze\(\['none', 'pending', 'active', 'disabled'\]\);/.test(apiC)
+    && /const EMPLOYEE_API_ID_PATTERN = \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/;/.test(apiC),
+    'AFI-4a1: decoder enums and id pattern equal the server (EmployeeInput STATUSES / ID_PATTERN, AccountState::VALUES)');
+  check(/const EMPLOYEE_SELF_KEYS = Object\.freeze\(\['contactEmail', 'department', 'employeeCode', 'employmentStatus', 'fullName', 'id', 'jobTitle', 'joinDate', 'monthlyBaseSalary', 'phone'\]\);/.test(apiC),
+    'AFI-4a1: the self decoder accepts exactly EmployeeView::SELF_FIELDS (no notes, archive, version or account state)');
+  // ApiClient structured query: frozen key vocabulary, value shape, GET/HEAD only.
+  const apiClientC = code(read(path.join(root, 'js', 'transport', 'api-client.js')));
+  check(/const API_QUERY_KEYS = Object\.freeze\(\['archived', 'id'\]\);/.test(apiClientC) && /const API_QUERY_VALUE_PATTERN = \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/;/.test(apiClientC)
+    && /const qs = mutation \? null : queryString\(opts\.query\);/.test(apiClientC) && /encodeURIComponent\(keys\[i\]\) \+ '=' \+ encodeURIComponent\(value\)/.test(apiClientC),
+    'AFI-4a1: ApiClient queries are GET/HEAD only, allowlisted keys, identifier values, sorted and encoded');
+  // Integration: the auth-view path only; identity loss destroys the data.
+  const callers = jsFiles.filter((f) => f !== 'ui/session-workspace-view.js' && /\brenderSessionWorkspace\s*\(/.test(code(rd(f))));
+  check(callers.join() === 'ui/auth-view.js' && (avC.match(/renderSessionWorkspace\(/g) || []).length === 1
+    && /if\(s\.state === AUTH_STATES\.AUTHENTICATED\) return renderSessionWorkspace\(app, s\);/.test(avC),
+    'AFI-4a1: renderAuthView() is the only caller of renderSessionWorkspace(), for AUTHENTICATED only');
+  const users = jsFiles.filter((f) => NEW.indexOf(f) === -1 && /\b(SessionEmployeeStore|SessionWorkspace|EmployeeApi|EmployeeDecoders)\b/.test(code(rd(f))));
+  check(users.join() === 'core/auth-boot.js' && /\bSessionEmployeeStore\.clear\(\)/.test(abC) && !/\b(SessionWorkspace|EmployeeApi)\b/.test(abC),
+    'AFI-4a1: outside its modules the SESSION Employee data is reached only by AuthBoot, and only to clear it');
+  check(/if\(next !== AUTH_STATES\.AUTHENTICATED\)\{\s*SessionIdentityProvider\.clear\(\);\s*SessionEmployeeStore\.clear\(\);/.test(abC),
+    'AFI-4a1: leaving AUTHENTICATED clears the identity and the SESSION Employee data together');
+  check(/sessionLost\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.SIGNED_OUT, 'session_ended'\);\s*\}/.test(abC),
+    'AFI-4a1: sessionLost() only moves AUTHENTICATED to SIGNED_OUT (no request)');
+  check((storeC.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 1 && /out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED/.test(storeC)
+    && /if\(!SessionEmployeeStore\.isCurrent\(token\)\) return;/.test(storeC),
+    'AFI-4a1: only a current read answered 401 ends the session; stale answers are dropped first');
+  check(/allowsWorkspace\(\)\{ return false; \}/.test(abC), 'AFI-4a1: AuthBoot still grants no business shell (allowsWorkspace() is false)');
+  // The view: no controls beyond reading, nothing but escaped values.
+  check(!/>(Create|Add|New|Edit|Save|Archive|Delete|Provision|Reissue|Disable|Enable)\b[^<]*</.test(viewC) && !/<form|<input|<textarea|<select/.test(viewC),
+    'AFI-4a1: the SESSION workspace has no create, edit, archive or account control (read-only)');
+  check(/escapeHtml\(/.test(viewC) && !/data-sw-open="' \+ (e|row)\.id/.test(viewC) && !/\.id\b[^;]*innerHTML/.test(viewC),
+    'AFI-4a1: the view escapes server values and never writes the opaque record id into the page');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-session-employee-runtime.js')), 'AFI-4a1: runtime harness present — tools/verify-session-employee-runtime.js');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

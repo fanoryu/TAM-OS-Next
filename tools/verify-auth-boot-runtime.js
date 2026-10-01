@@ -181,12 +181,19 @@ function firewall(rt, label){
     await flush();
     check(rt.spy.indexOf('applyTheme') === -1 && rt.spy.indexOf('installGlobalUIHandlers') === -1,
       'B. SESSION boot runs none of the LOCAL boot steps');
-    check(calls(rt, '/api/auth/me') === 1 && rt.net.calls.length === 1, 'B. SESSION boot checks the session first: exactly one GET /api/auth/me');
+    // AFI-4a1 revision: once AUTHENTICATED, the CEO workspace makes its one Employee read
+    // (GET /api/employees). Was: no request after /me. The session is still checked first.
+    check(calls(rt, '/api/auth/me') === 1 && rt.net.calls.length === 2 && rt.net.calls[0].url === '/api/auth/me' && rt.net.calls[1].url === '/api/employees',
+      'B. SESSION boot checks the session first: exactly one GET /api/auth/me, then only the workspace read GET /api/employees');
     const s = rt.AuthBoot.snapshot();
     check(s.state === 'AUTHENTICATED' && s.principal && s.principal.principalType === 'ceo', 'D. /me 200 valid -> AUTHENTICATED (CEO)');
     check(/Signed in/.test(rt.appHTML()) && /Signed in as <strong>CEO<\/strong>/.test(rt.appHTML()) && /authSignOutBtn/.test(rt.appHTML()),
       'D. AUTHENTICATED renders the holding view with the role label and Sign out');
-    check(!/authSignInForm/.test(rt.appHTML()) && /not available in this sign-in mode/.test(rt.appHTML()), 'D. holding view only: no workspace');
+    // AFI-4a1 revision: AUTHENTICATED now renders the read-only SESSION Employee workspace on
+    // the auth-view path (not the business shell — the firewall below still holds). Was: the
+    // "not available in this sign-in mode" holding view.
+    check(!/authSignInForm/.test(rt.appHTML()) && /<h1 class="auth-title" id="authTitle" tabindex="-1">Employees<\/h1>/.test(rt.appHTML())
+      && rt.AuthBoot.allowsWorkspace() === false, 'D. AUTHENTICATED renders the SESSION Employee workspace, never the business shell');
     firewall(rt, 'D. AUTHENTICATED CEO');
     check(rt.AuthBoot.allowsWorkspace() === false, 'D. AuthBoot grants no workspace (D-A)');
     check((rt.getCurrentUser() || {}).id === 'u_ceo_1' && rt.CsrfHolder.get() === CSRF_A, 'D. identity from /me; CSRF in memory');
@@ -275,7 +282,9 @@ function firewall(rt, label){
     const login = rt.net.calls.find((c) => c.url === '/api/auth/login');
     check(!!login && login.init.method === 'POST' && login.init.body === JSON.stringify({ email: 'ceo@example.invalid', password: PASSWORD })
       && login.init.headers['X-CSRF-Token'] === undefined, 'N. login: POST /api/auth/login {email, password}, no CSRF header');
-    check(rt.net.calls[rt.net.calls.length - 1].url === '/api/auth/me', 'N. login 200 is followed by GET /api/auth/me');
+    // AFI-4a1 revision: the request right after the login is /me (the workspace read follows it).
+    const iLogin = rt.net.calls.findIndex((c) => c.url === '/api/auth/login');
+    check(iLogin !== -1 && (rt.net.calls[iLogin + 1] || {}).url === '/api/auth/me', 'N. login 200 is followed by GET /api/auth/me');
     const s = rt.AuthBoot.snapshot();
     check(s.state === 'AUTHENTICATED' && (s.principal || {}).principalType === 'ceo',
       'N. identity comes from /me, not from the login body (login said employee, /me said CEO)');
