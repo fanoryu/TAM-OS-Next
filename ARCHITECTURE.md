@@ -112,10 +112,10 @@ flowchart TD
   subgraph SRC["Modular source (edited by hand)"]
     IDX["index.html<br/>ordered CSS link + JS script tags, mount points"]
     CSS["css/ — tokens, base, shell, components, charts"]
-    subgraph JSMOD["js/ — 73 modules: 72 browser-loaded (one global scope) + 1 CLI-only"]
+    subgraph JSMOD["js/ — 75 modules: 74 browser-loaded (one global scope) + 1 CLI-only"]
       CORE["core/ — constants, state, storage-adapter,<br/>state-load-migrations, domain-services, bootstrap"]
       DOM["domain/ — aggregates, aggregate-helpers,<br/>commands, queries, domain-layer"]
-      PLAT["platform/ + transport/ — application-gateway,<br/>transport-adapter"]
+      PLAT["platform/ + transport/ — application-gateway,<br/>transport-adapter, api-client"]
       REPO["repository/ — employee-repository,<br/>contract-repository, payroll-repository"]
       UI["ui/ — shell-render, charts, settings-about, activity-log"]
       FIN["finance/ — dashboard, transactions, execution-center,<br/>cashflow, budget, add-upload"]
@@ -1152,6 +1152,51 @@ anywhere; `server/bin/mail.php` allowed and SAPI-guarded.
 **Not production-ready.** Before real recovery mail: SDR-0003 §7 evidence (egress, sender-domain
 verification with SPF/DKIM/DMARC, a delivery test, cron, the key's placement and scope), the frontend
 recovery page, and everything BF-3A–BF-3C already list.
+
+### Session identity foundation — AFI-1 (frontend; headless and inert, not wired)
+
+AFI-1 is the first slice of Authenticated Frontend Integration. It adds the frontend pieces that will
+let the authoritative backend session replace the fabricated "Acting as" identity, and wires none of
+them: **normal boot is unchanged.** `LocalIdentityProvider` stays the active provider, "Acting as" works
+as before, no login or other auth view exists, and the page makes **no** request while booting or
+running. Switching to the session provider is AFI-2 work behind one explicit source constant (owner
+decision D1) — never inferred from backend availability, a response, the hostname or a cookie — and
+there is no automatic fallback between the two providers in either direction.
+
+| Module (load order) | Role |
+|---|---|
+| `js/transport/api-client.js` (after `core/identity.js`) | `ApiClient.request(path, {method, body, csrf})` — the **only** `fetch()` caller. Relative `/api/...` paths only (absolute, protocol-relative, dot-segment, query and fragment forms refused locally); `credentials` and `mode` `'same-origin'`, `cache: 'no-store'`, `redirect: 'error'`; a 10 s `AbortController` timeout; JSON mutations; `X-CSRF-Token` only when the caller asks, from `CsrfHolder`; bodies may not carry `role` / `companyId` / `employeeId`. No retry, no logging, no persistence. Not the `TransportAdapter`, which stays the inbound, in-process boundary |
+| `js/core/session-identity.js` (after the API client) | `SessionIdentityProvider` — satisfies the canonical `getCurrentUser()` seam from `GET /api/auth/me`; `refresh()` is the only way its identity changes. `CsrfHolder` — the session's CSRF token in memory only (`get` / `replace` / `clear`, begins empty) |
+
+**Normalized results.** `{ok:true, data, requestId}` or `{ok:false, kind, fields?, retryAfter?, requestId?}`.
+400 `validation_failed` → `VALIDATION` (field names only); other 400s, 405, 413, 415 → `CLIENT_FAULT`;
+401 → `UNAUTHENTICATED`; 403 → `DENIED` (CSRF and policy alike, as the backend intends); 404 →
+`NOT_FOUND` (absent and out of scope alike); 409 → `CONFLICT`; 429 → `RATE_LIMITED` with integer
+`Retry-After`; 500 → `SERVER_ERROR`; 503, network failure, timeout and any non-canonical answer (non-JSON,
+a status/`ok` contradiction, a non-backend status such as 422) → `UNAVAILABLE`. The server message, the
+raw `Response` and internal detail never leave the client; the server `requestId` is carried, never
+invented.
+
+**`/me` projection.** Exactly `{userId, membershipId, role, employeeId, csrfToken}`; any other shape is
+refused and yields no principal. `userId` → `id`, `role` → `principalType` (`ceo` / `employee`, never
+coerced), `employeeId` → `employeeId` (an Employee requires one; a CEO keeps one only if the server
+sends it), `displayName` a fixed role label (`CEO` / `Employee`) — never a personal name. `membershipId`
+is validated and not retained. `csrfToken` is validated and goes to `CsrfHolder`, never into the
+principal. A 401 or an invalid projection clears the principal and the token; any other failure leaves
+both unchanged and reports its kind. Concurrent `refresh()` calls share one request.
+
+**CEO employee binding.** `isValidUser` (`js/core/identity.js`) now accepts a CEO whose `employeeId` is
+absent, `null` or a non-empty string, matching the backend `Principal` (SDR-0002 §6, User ≠ Employee);
+an Employee still requires a non-empty `employeeId`. A CEO's workspace stays Executive / ALL_COMPANY
+whatever the binding. A server `employeeId` is never bound to a local `State.employees` uid (owner
+decision D2): an authenticated Employee resolves to no workspace until its domains are server-backed.
+
+**Proof.** `tools/verify-session-identity-runtime.js` (129 checks) runs the real modules against a
+scripted `fetch` and a controllable timer — no network. `tools/verify-build.js` adds the AFI-1 structural
+guards (fetch only in the API client; no XHR, WebSocket or `document.cookie` anywhere; fixed fetch options
+and timeout; no storage, `State`, logging, DOM or `window` exposure in either module; no reference to the
+local adapter from the session provider; no other module calling either). `tools/verify-identity-foundation-runtime.js`
+covers the CEO binding cases (37 checks). No CSS, backend, schema, storage-key or ACTIONS change.
 
 ### Release engineering
 

@@ -49,7 +49,21 @@ and `POST /api/auth/reset-password` (single use, every session and open token re
 and `server/bin/mail.php`, which issues a fresh 30-minute token and sends outside any transaction. The
 recovery link is `<configured origin>/#recovery=<token>`; the page that reads it is future frontend
 work, and no provider account, key or DNS record exists yet. All of this is source only and **not
-production-ready**: the frontend does not call it, and "Acting as" is unchanged. v2.10.0 remains
+production-ready**: the frontend does not call it, and "Acting as" is unchanged. **AFI-1** (Authenticated
+Frontend Integration, slice 1) then adds the **headless, inert** frontend session-identity foundation:
+`js/transport/api-client.js` (the only `fetch()` caller — same-origin relative `/api/` paths, a 10 s timeout,
+normalized result kinds, CSRF only on request) and `js/core/session-identity.js` (`SessionIdentityProvider`
+over `GET /api/auth/me`, plus the memory-only `CsrfHolder`), and makes `isValidUser` accept a CEO carrying a
+server employee binding. Nothing installs the provider or makes a request: `LocalIdentityProvider` stays
+active and "Acting as" is unchanged. Owner decisions (2026-10-01): **D1** one explicit source constant
+selects local or session mode — never inferred — and it stays local until AFI-5; **D2** before business
+domains are server-backed an authenticated Employee gets no local business workspace and a CEO may use the
+device-local one only under a persistent "Local data on this device — not shared, not server-protected"
+warning (no deletion, namespacing, migration or automatic local binding); **D3** activation and recovery UI
+(AFI-3) precede the first visible authenticated release; **D4** AFI-2 may add a minimal auth-view CSS
+revision; **D5** a separate backend Employee track (architecture approved, not yet authorized) precedes the
+Employee path and "Acting as" retirement, which stays the last slice (AFI-5). Proven by `tools/verify-session-identity-runtime.js` (129 checks)
+and AFI-1 guards in `verify-build.js` (2579 checks). v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

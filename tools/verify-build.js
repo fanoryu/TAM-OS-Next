@@ -5417,6 +5417,100 @@ check(/class="brand-monogram"[^>]*aria-hidden="true"/.test(b1ShellJs),
 check(/const COMPANY_NAME_DEFAULT = 'PT Total Asset Manajemen';/.test(read(path.join(root,'js','core','constants.js'))),
   'BRAND-1: company name default is preserved (About/Settings/reports still identify the company)');
 
+// ===== AFI-1 — SESSION IDENTITY FOUNDATION (additive, structural) =====
+// STRUCTURE only; behaviour is proven by tools/verify-session-identity-runtime.js.
+// Pins the AFI-1 boundaries: ONE outbound HTTP boundary (js/transport/api-client.js,
+// the only fetch caller, same-origin /api/ paths only), a session identity provider
+// that never falls back to the local adapter, a memory-only CSRF holder, and an
+// INERT foundation — nothing at boot installs the provider or makes a request.
+console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
+{
+  // Block comments and whole-line / trailing " // " comments removed, so prose never trips a guard.
+  const afiCode = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const apiPath = path.join(root, 'js', 'transport', 'api-client.js');
+  const sesPath = path.join(root, 'js', 'core', 'session-identity.js');
+  check(fs.existsSync(apiPath) && fs.existsSync(sesPath), 'AFI-1: js/transport/api-client.js and js/core/session-identity.js present');
+  const apiSrc = fs.existsSync(apiPath) ? read(apiPath) : '';
+  const sesSrc = fs.existsSync(sesPath) ? read(sesPath) : '';
+  const apiCode = afiCode(apiSrc);
+  const sesCode = afiCode(sesSrc);
+  check(indexHtml.includes('<script src="js/transport/api-client.js"></script>') && indexHtml.includes('<script src="js/core/session-identity.js"></script>'),
+    'AFI-1: both modules mirrored in index.html');
+  const oId = jsFiles.indexOf('core/identity.js'), oApi = jsFiles.indexOf('transport/api-client.js');
+  const oSes = jsFiles.indexOf('core/session-identity.js'), oWs = jsFiles.indexOf('core/workspace.js');
+  check(oId !== -1 && oApi === oId + 1 && oSes === oApi + 1 && oWs === oSes + 1,
+    'AFI-1: load order identity.js -> transport/api-client.js -> core/session-identity.js -> workspace.js');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-session-identity-runtime.js')),
+    'AFI-1: runtime harness present — tools/verify-session-identity-runtime.js');
+
+  // Production JS = every manifest module + the pre-paint boot script.
+  const prodFiles = jsFiles.concat(['boot/theme-boot.js']);
+  const prodCode = {};
+  prodFiles.forEach((f) => { prodCode[f] = afiCode(read(path.join(root, 'js', f))); });
+  const offenders = (re, allowed) => prodFiles.filter((f) => (allowed || []).indexOf(f) === -1 && re.test(prodCode[f]));
+  const fetchOff = offenders(/\bfetch\s*\(/, ['transport/api-client.js']);
+  check(fetchOff.length === 0, 'AFI-1: fetch() is called only in js/transport/api-client.js' + (fetchOff.length ? ' >> VIOLATION: ' + fetchOff.join(', ') : ''));
+  const xhrOff = offenders(/XMLHttpRequest|WebSocket|EventSource|sendBeacon/);
+  check(xhrOff.length === 0, 'AFI-1: no XMLHttpRequest / WebSocket / EventSource / sendBeacon in production JS' + (xhrOff.length ? ' >> VIOLATION: ' + xhrOff.join(', ') : ''));
+  const cookieOff = offenders(/document\s*\.\s*cookie/);
+  check(cookieOff.length === 0, 'AFI-1: no document.cookie access in production JS (the session cookie is HttpOnly)' + (cookieOff.length ? ' >> VIOLATION: ' + cookieOff.join(', ') : ''));
+
+  // The API client: same-origin relative /api/ paths, fixed fetch options, bounded timeout.
+  check(/fetch\(path, init\)/.test(apiCode) && (apiCode.match(/\bfetch\s*\(/g) || []).length === 1,
+    'AFI-1: ApiClient makes exactly one fetch(path, init) call');
+  check(/const API_PATH_PATTERN = \/\^\\\/api\\\/\[/.test(apiCode) && /path\.indexOf\('\/\/'\) === -1/.test(apiCode),
+    'AFI-1: ApiClient accepts only relative /api/ paths (anchored pattern, no "//")');
+  check(!/https?:|wss?:/i.test(apiCode), 'AFI-1: ApiClient carries no absolute URL or scheme');
+  check(/credentials: 'same-origin'/.test(apiCode) && /mode: 'same-origin'/.test(apiCode)
+    && /cache: 'no-store'/.test(apiCode) && /redirect: 'error'/.test(apiCode),
+    "AFI-1: fetch options credentials/mode 'same-origin', cache 'no-store', redirect 'error'");
+  check(/const API_TIMEOUT_MS = 10000;/.test(apiCode) && /new AbortController\(\)/.test(apiCode)
+    && /setTimeout\(function\(\)\{ controller\.abort\(\); \}, API_TIMEOUT_MS\)/.test(apiCode) && /clearTimeout\(timer\)/.test(apiCode),
+    'AFI-1: bounded 10000 ms AbortController timeout, cleared when the request settles');
+  check(/'X-CSRF-Token'/.test(apiCode) && /opts\.csrf === true/.test(apiCode) && /CsrfHolder\.get\(\)/.test(apiCode),
+    'AFI-1: X-CSRF-Token injected only on request, from the in-memory CsrfHolder');
+  check(/const API_FORBIDDEN_BODY_KEYS = Object\.freeze\(\['role', 'companyId', 'company_id', 'employeeId', 'employee_id'\]\)/.test(apiCode),
+    'AFI-1: request bodies may not carry role / companyId / employeeId authority fields');
+  check(!/while\s*\(|setInterval|\.request\(/.test(apiCode), 'AFI-1: ApiClient has no retry loop (no while, no interval, no re-entry)');
+  check(!/Math\.random|crypto\.|Date\.now/.test(apiCode), 'AFI-1: ApiClient generates no request id (the server requestId is carried)');
+  check(/case 403: return API_RESULT_KINDS\.DENIED;/.test(apiCode), 'AFI-1: 403 normalizes to DENIED');
+
+  // Memory only, no logging, no DOM, in both modules.
+  [['api-client.js', apiCode], ['session-identity.js', sesCode]].forEach(([name, code]) => {
+    check(!/localStorage|sessionStorage|StorageAdapter|indexedDB|document\s*\.\s*cookie/.test(code),
+      'AFI-1: ' + name + ' never touches storage or cookies (nothing persisted)');
+    check(!/\bState\b/.test(code), 'AFI-1: ' + name + ' never reads or writes State (no client authority, nothing persisted there)');
+    check(!/\bconsole\s*\./.test(code), 'AFI-1: ' + name + ' does not log');
+    check(!/innerHTML|setAttribute|dataset|\blocation\b|\bhistory\b/.test(code), 'AFI-1: ' + name + ' writes nothing to the DOM or URL');
+    check(!/window\.(ApiClient|SessionIdentityProvider|CsrfHolder|API_RESULT_KINDS|mapSessionProjection)\s*=/.test(code),
+      'AFI-1: ' + name + ' exposes nothing on window');
+  });
+
+  // The session provider: /me only, through ApiClient, never the local adapter.
+  check(!/LocalIdentityProvider|selectPrincipal|getAvailablePrincipals|FIXTURE_PRINCIPALS|setIdentityProviderForTesting|activeIdentityProvider/.test(sesCode),
+    'AFI-1: SessionIdentityProvider never references the local adapter, its fixtures or the provider seam (no fallback)');
+  check(!/\bfetch\s*\(/.test(sesCode) && (sesCode.match(/ApiClient\.request\(/g) || []).length === 1
+    && /ApiClient\.request\('\/api\/auth\/me', \{ method: 'GET' \}\)/.test(sesCode),
+    'AFI-1: SessionIdentityProvider issues only GET /api/auth/me, through ApiClient');
+  check(!/\bbody\s*:/.test(sesCode), 'AFI-1: SessionIdentityProvider sends no request body (no client-supplied authority)');
+  check(/const CsrfHolder = \(function\(\)\{\s*let token = null;/.test(sesCode), 'AFI-1: CsrfHolder is a closure that begins empty');
+  check(/const principal = \{ id: data\.userId, displayName: SESSION_ROLE_LABELS\[role\], principalType: role \};/.test(sesCode)
+    && (sesCode.match(/principal\.\w+\s*=/g) || []).join() === 'principal.employeeId =',
+    'AFI-1: the principal is built from userId / role / employeeId only (the CSRF token is not part of it)');
+
+  // INERT: nothing outside the two modules uses them; boot and the canonical seam are unchanged.
+  const users = offenders(/\b(SessionIdentityProvider|CsrfHolder|mapSessionProjection)\b/, ['core/session-identity.js', 'transport/api-client.js']);
+  check(users.length === 0, 'AFI-1: no other module references SessionIdentityProvider / CsrfHolder (inert foundation)' + (users.length ? ' >> VIOLATION: ' + users.join(', ') : ''));
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js']);
+  check(apiUsers.length === 0, 'AFI-1: no other module calls ApiClient (no request during normal boot)' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  check(!/\/api\//.test(prodFiles.filter((f) => f !== 'transport/api-client.js' && f !== 'core/session-identity.js').map((f) => prodCode[f]).join('\n')),
+    'AFI-1: no other production module names an /api/ path');
+  check(/let activeIdentityProvider = LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
+    'AFI-1: LocalIdentityProvider is still the default active provider (mode stays LOCAL, owner decision D1)');
+  check(/u\.employeeId !== null/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
+    'AFI-1: the identity contract accepts a server CEO employee binding (absent / null / non-empty string)');
+}
+
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }
 console.log('VERIFICATION FAILED -- ' + passes + ' passed, ' + fails.length + ' failed:');

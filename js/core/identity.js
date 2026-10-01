@@ -50,8 +50,12 @@ function isValidUser(u){
     // Employee requires a non-empty opaque employeeId (a forward reference).
     if(typeof u.employeeId !== 'string' || u.employeeId.length === 0) return false;
   } else {
-    // CEO must not carry an employee linkage.
-    if('employeeId' in u && u.employeeId !== undefined) return false;
+    // AFI-1 — a CEO MAY carry an employee binding (User != Employee; the server's
+    // Principal permits it, SDR-0002 §6). Absent / undefined / null mean no binding;
+    // any other value must be a non-empty opaque id. The binding never changes the
+    // CEO workspace (Executive / ALL_COMPANY, js/core/workspace.js).
+    if('employeeId' in u && u.employeeId !== undefined && u.employeeId !== null
+       && (typeof u.employeeId !== 'string' || u.employeeId.length === 0)) return false;
   }
   return true;
 }
