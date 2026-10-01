@@ -197,6 +197,7 @@ Get-ChildItem tools/verify-*-runtime.js | ForEach-Object { node $_.FullName *> $
 | Harness | Proves |
 |---|---|
 | [`verify-identity-foundation-runtime.js`](verify-identity-foundation-runtime.js) | UX-006A identity seam, CEO + Employee principals, no persistence, fail-closed |
+| [`verify-session-identity-runtime.js`](verify-session-identity-runtime.js) | AFI-1 same-origin API client, normalized errors, in-memory CSRF holder, `/api/auth/me` projection, CEO binding, no local fallback (scripted fetch, no network) |
 | [`verify-identity-selection-runtime.js`](verify-identity-selection-runtime.js) | UX-006D1 reachable principal selection ("Acting as"), ephemeral, no boot default |
 | [`verify-workspace-selfscope-runtime.js`](verify-workspace-selfscope-runtime.js) | UX-006B derived Executive/Personal workspaces and the SELF-scope resolver |
 | [`verify-authz-runtime.js`](verify-authz-runtime.js) | The frozen `can(action, resource?)` policy table and capability matrix |

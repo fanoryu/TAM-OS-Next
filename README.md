@@ -207,7 +207,7 @@ Source and distribution:
 
 | Form | What it is | Where |
 |---|---|---|
-| **A. Modular development source** | `index.html` + `css/` (6 files) + `js/` (73 classic-script modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/ cli/` — 72 browser-loaded in one shared global scope, plus the CLI-only module) + the pre-paint `js/boot/theme-boot.js` + vendored SheetJS under `vendor/`; no ES modules | project root |
+| **A. Modular development source** | `index.html` + `css/` (6 files) + `js/` (75 classic-script modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/ cli/` — 74 browser-loaded in one shared global scope, plus the CLI-only module) + the pre-paint `js/boot/theme-boot.js` + vendored SheetJS under `vendor/`; no ES modules | project root |
 | **B. Deployment package** (canonical, Distribution-1) | the static document root: every runtime file copied byte-for-byte from the source, no inline script, no third-party request, strict CSP ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) Model B) | built into `dist/package/` + ZIP; recorded by `dist/package-manifest.json` |
 | **C. Historical single-file release** | the published v2.11.0 portable file — frozen, digest-pinned, never rebuilt | `dist/tam-os-v2.11.0.html` |
 
@@ -318,7 +318,7 @@ flowchart LR
   BUILD --> VERIFY
 ```
 
-The 72 browser-loaded modules are **classic scripts** sharing one global scope; their **load order** is the single
+The 74 browser-loaded modules are **classic scripts** sharing one global scope; their **load order** is the single
 critical invariant and lives once in `tools/module-order.js` (mirrored by `index.html`). The build
 inlines CSS + JS into one portable file; the verifier asserts the dist equals the concatenated
 source and that the version identity, schema, storage keys, and decomposition are all consistent.
@@ -337,7 +337,7 @@ index.html                         Modular entry: meta, external deps, pre-paint
                                    script, ordered CSS <link> + JS <script> tags, mounts
 css/                               Extracted styles (load order fixed)
   tokens.css base.css shell.css components.css charts.css
-js/                                73 classic-script modules (72 browser-loaded, one shared
+js/                                75 classic-script modules (74 browser-loaded, one shared
                                    global scope; cli/ is Node-only)
   core/       constants, utils, storage-adapter, state, state-load-migrations,
               domain-services, hr-persistence-portability, stabilization,
