@@ -65,9 +65,15 @@ return [
         // A correct statement passes every check and only then reaches the (unreachable) database.
         assertThrows(DatabaseError::class, static fn () => $db()->execute($auth, $sql, ['id' => 'ot_1', 'hours' => 1]), 'reaches the database');
     },
-    'the anchor store creates only under employee.create' => static function () use ($db, $principal, $refusedBeforeDb): void {
+    'the employee store creates only under employee.create, with exactly the profile columns' => static function () use ($db, $principal, $refusedBeforeDb): void {
         $store = new EmployeeStore($db());
-        $refusedBeforeDb(static fn () => $store->create(Policy::authorize($principal('ceo', null), Action::SettingsManage), 'emp_x'), 'wrong action');
-        assertThrows(DatabaseError::class, static fn () => $store->create(Policy::authorize($principal('ceo', null), Action::EmployeeCreate), 'emp_x'), 'right action reaches the database');
+        $profile = array_fill_keys(EmployeeStore::PROFILE, null);
+        $profile['employee_code'] = 'E-1';
+        $profile['full_name'] = 'Fixture One';
+        $profile['employment_status'] = 'Active';
+        $refusedBeforeDb(static fn () => $store->create(Policy::authorize($principal('ceo', null), Action::SettingsManage), 'emp_x', $profile), 'wrong action');
+        $refusedBeforeDb(static fn () => $store->create(Policy::authorize($principal('ceo', null), Action::EmployeeCreate), 'emp_x', $profile + ['company_id' => 'x']), 'an extra column');
+        $refusedBeforeDb(static fn () => $store->create(Policy::authorize($principal('ceo', null), Action::EmployeeCreate), 'emp_x', array_reverse($profile, true)), 'columns out of order');
+        assertThrows(DatabaseError::class, static fn () => $store->create(Policy::authorize($principal('ceo', null), Action::EmployeeCreate), 'emp_x', $profile), 'right action reaches the database');
     },
 ];

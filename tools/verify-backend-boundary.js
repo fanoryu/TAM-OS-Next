@@ -251,7 +251,7 @@ function checkMigrationSql(src) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];

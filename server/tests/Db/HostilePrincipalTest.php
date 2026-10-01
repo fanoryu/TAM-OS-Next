@@ -74,7 +74,9 @@ $routes = static function (EmployeeStore $store, ScopedDatabase $scoped): array 
         new Route('POST', '/api/test/employee-update', $recordAction(Action::EmployeeUpdate), [], RouteAuth::Required, Action::EmployeeUpdate),
         new Route('POST', '/api/test/employee-delete', $recordAction(Action::EmployeeDelete), [], RouteAuth::Required, Action::EmployeeDelete),
         new Route('POST', '/api/test/employees', static function (Request $r, ?AuthSession $s, array $json) use ($store, $idFrom): array {
-            $store->create(Policy::authorize(($s ?? throw new \LogicException('required'))->principal, Action::EmployeeCreate), $idFrom($json));
+            $id = $idFrom($json);
+            $profile = array_merge(array_fill_keys(EmployeeStore::PROFILE, null), ['employee_code' => substr($id, 0, 32), 'full_name' => 'Fixture ' . $id, 'employment_status' => 'Active']);
+            $store->create(Policy::authorize(($s ?? throw new \LogicException('required'))->principal, Action::EmployeeCreate), $id, $profile);
             return ['created' => true];
         }, [], RouteAuth::Required, Action::EmployeeCreate),
         new Route('POST', '/api/test/settings', static fn (): array => ['done' => true], [], RouteAuth::Required, Action::SettingsManage),

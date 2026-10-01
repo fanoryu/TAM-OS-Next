@@ -90,13 +90,14 @@ return [
     },
     'a create lands in the authorized principal\'s company; the company never comes from input' => static function () use ($world): void {
         $w = $world();
-        $w['store']->create(Policy::authorize($w['ceoB'], Action::EmployeeCreate), 'e_new_b');
+        $profile = array_merge(array_fill_keys(EmployeeStore::PROFILE, null), ['employee_code' => 'B-NEW', 'full_name' => 'Fixture B', 'employment_status' => 'Active']);
+        $w['store']->create(Policy::authorize($w['ceoB'], Action::EmployeeCreate), 'e_new_b', $profile);
         assertSame([$w['b']], array_map(static fn (array $r): string => (string) $r['company_id'],
             $w['db']->select('SELECT company_id FROM employees WHERE id = ?', ['e_new_b'])), 'company B');
         assertSame(null, $w['store']->find(Scope::of($w['ceoA']), 'e_new_b'), 'invisible to company A');
         assertThrows(\TamOs\Http\ApiError::class, static fn () => Policy::authorize($w['empA1'], Action::EmployeeCreate), 'an Employee cannot create');
         assertThrows(\LogicException::class, static fn () => $w['scoped']->execute(Policy::authorize($w['ceoA'], Action::EmployeeCreate),
-            EmployeeStore::CREATE_SQL, ['id' => 'e_forged', 'company_id' => $w['b']]), 'a forged company_id is refused');
+            EmployeeStore::CREATE_SQL, ['id' => 'e_forged', 'company_id' => $w['b']] + $profile), 'a forged company_id is refused');
         assertSame([], $w['db']->select('SELECT id FROM employees WHERE id = ?', ['e_forged']), 'nothing written');
     },
 ];
