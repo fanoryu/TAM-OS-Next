@@ -63,7 +63,16 @@ warning (no deletion, namespacing, migration or automatic local binding); **D3**
 (AFI-3) precede the first visible authenticated release; **D4** AFI-2 may add a minimal auth-view CSS
 revision; **D5** a separate backend Employee track (architecture approved, not yet authorized) precedes the
 Employee path and "Acting as" retirement, which stays the last slice (AFI-5). Proven by `tools/verify-session-identity-runtime.js` (129 checks)
-and AFI-1 guards in `verify-build.js` (2579 checks). v2.10.0 remains
+and AFI-1 guards in `verify-build.js` (2579 checks). **AFI-2** then builds the SESSION-mode boot on that
+foundation without shipping it: `AUTH_MODES` / `AUTH_MODE = AUTH_MODES.LOCAL` in `constants.js`; `identity.js`
+resolves its provider from the mode (SESSION never reaches the local adapter); `app-bootstrap.js` keeps the
+LOCAL sequence verbatim and otherwise only starts `AuthBoot` (`js/core/auth-boot.js`: checking / signed-out /
+authenticated holding view / unavailable, login then `/me`, logout with CSRF and a bounded 403 recovery);
+`js/ui/auth-view.js` renders the screens, and `render()` / Global Search show nothing else outside LOCAL. No
+local business state, first-run choice, shell or "Acting as" ever loads in SESSION mode, and no role gets a
+workspace (D-A). Proven by `tools/verify-auth-boot-runtime.js` (125 checks, ten mutations) and AFI-2 guards in
+`verify-build.js`; browser QA uses the test-only `tools/serve-auth-stub.js` (D-B). Local mode is unchanged
+(D-C), and switching production to SESSION remains AFI-5. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

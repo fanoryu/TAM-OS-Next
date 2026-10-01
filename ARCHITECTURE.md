@@ -112,7 +112,7 @@ flowchart TD
   subgraph SRC["Modular source (edited by hand)"]
     IDX["index.html<br/>ordered CSS link + JS script tags, mount points"]
     CSS["css/ — tokens, base, shell, components, charts"]
-    subgraph JSMOD["js/ — 75 modules: 74 browser-loaded (one global scope) + 1 CLI-only"]
+    subgraph JSMOD["js/ — 77 modules: 76 browser-loaded (one global scope) + 1 CLI-only"]
       CORE["core/ — constants, state, storage-adapter,<br/>state-load-migrations, domain-services, bootstrap"]
       DOM["domain/ — aggregates, aggregate-helpers,<br/>commands, queries, domain-layer"]
       PLAT["platform/ + transport/ — application-gateway,<br/>transport-adapter, api-client"]
@@ -1197,6 +1197,43 @@ guards (fetch only in the API client; no XHR, WebSocket or `document.cookie` any
 and timeout; no storage, `State`, logging, DOM or `window` exposure in either module; no reference to the
 local adapter from the session provider; no other module calling either). `tools/verify-identity-foundation-runtime.js`
 covers the CEO binding cases (37 checks). No CSS, backend, schema, storage-key or ACTIONS change.
+
+### Authenticated boot — AFI-2 (frontend; SESSION mode built, LOCAL still shipped)
+
+AFI-2 adds the SESSION-mode boot and the sign-in/sign-out flow on top of the AFI-1 foundation, and
+**ships nothing new to users: the explicit source constant `AUTH_MODE` stays `AUTH_MODES.LOCAL`**
+(`js/core/constants.js`, owner decision D1). It is never inferred from the hostname, URL, a cookie,
+storage, a query parameter or backend reachability, and there is no automatic fallback between the
+modes. Flipping it is AFI-5 work.
+
+| Piece | Behaviour |
+|---|---|
+| `js/core/constants.js` | `AUTH_MODES = { LOCAL, SESSION }`, `AUTH_MODE = AUTH_MODES.LOCAL` |
+| `js/core/identity.js` | The canonical seam resolves its provider from `AUTH_MODE` at call time: LOCAL → `LocalIdentityProvider`; SESSION → `SessionIdentityProvider`, never the local adapter; any other value → a provider that returns `null`. The test seam still wins while set |
+| `js/core/app-bootstrap.js` | LOCAL: the unchanged sequence (`loadState` → `applyTheme` → `installGlobalUIHandlers` → `render` → first-run choice). Otherwise: `AuthBoot.start()` only — no local state, migration, first-run choice or theme reconciliation |
+| `js/core/auth-boot.js` (before bootstrap) | `AuthBoot`: `CHECKING_SESSION` → `AUTHENTICATED` / `SIGNED_OUT` / `UNAVAILABLE` from `GET /api/auth/me` (200 valid → AUTHENTICATED; 401 → SIGNED_OUT; 403, 429, 5xx, network, timeout, malformed → UNAVAILABLE; an invalid mode → UNAVAILABLE without a request). Manual Retry only. `signIn` posts `/api/auth/login` (no CSRF) and then trusts only `/me`; `signOut` posts `/api/auth/logout` with the CSRF token and always ends signed out on this device, warning when the server did not confirm. `allowsWorkspace()` is always false (owner decision D-A) |
+| `js/ui/auth-view.js` (before bootstrap) | The four screens, rendered into `#app` by `render()`: checking; sign-in form (`autocomplete` username / current-password, `method="post"`, submit intercepted, password field cleared on submit); signed-in holding view (role label + Sign out); unavailable + Retry. Fixed messages only; one generic credential failure |
+| `js/ui/shell-render.js`, `js/ui/global-search-ui.js` | Outside LOCAL, `render()` shows only the auth views and Ctrl/Cmd+K opens nothing until a workspace is granted — so the shell, the business views and "Acting as" never mount in SESSION mode |
+
+**Bounded 403 recovery.** A session-bound mutation answered 403 triggers one `GET /api/auth/me`. It
+is replayed exactly once only when `/me` succeeds, the principal (id, type, employee binding) is the
+same and the CSRF token changed — the stale-token case of another tab. A 401 means signed out; any
+other `/me` failure clears identity; a changed principal or an unchanged token is a genuine denial.
+At most three requests; a replay answered 403 is final. In AFI-2 the only consumer is logout.
+
+**Not in AFI-2:** a business workspace for any role (AFI-4, with the D2 CEO warning), activation and
+recovery views (AFI-3), the authenticated shell, revalidation on focus, and the mode flip (AFI-5).
+
+**Proof.** `tools/verify-auth-boot-runtime.js` (125 checks) runs the real modules with the mode
+rewritten per scenario and a scripted `fetch`; ten mutations (LOCAL fallback, `loadState` in SESSION,
+"Acting as" in SESSION, 401 or malformed `/me` authenticating, wrong or repeated replays, the shipped
+default, Global Search) each turn it red with counted failures. `tools/verify-build.js` adds the AFI-2
+guards and revises the AFI-1/UX-006A guards from "nothing calls the foundation" to "only the SESSION
+boot does". `tools/serve-auth-stub.js` is a **test-only** loopback server that serves the package with
+`AUTH_MODE` rewritten to SESSION in memory and answers `/api/auth/*` from fabricated scenarios, for
+browser QA (owner decision D-B); it is not a backend, and real PHP + MariaDB authenticated E2E is still
+required before AFI-5. The CSS golden master was revised once (additive `.auth-*` rules in
+`css/components.css`; tokens unchanged). No backend, schema, storage-key or ACTIONS change.
 
 ### Release engineering
 
