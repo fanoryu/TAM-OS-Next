@@ -83,7 +83,16 @@ function fresh(){ return loadRuntime(); }
   check(c.isValidUser(EMP) === true, 'contract: valid Employee accepted (non-empty employeeId)');
   check(c.isValidUser({ id:'u', displayName:'X', principalType:'employee' }) === false, 'contract: Employee without employeeId rejected');
   check(c.isValidUser({ id:'u', displayName:'X', principalType:'employee', employeeId:'' }) === false, 'contract: Employee with empty employeeId rejected');
-  check(c.isValidUser({ id:'u', displayName:'X', principalType:'ceo', employeeId:'e' }) === false, 'contract: CEO with stray employeeId rejected');
+  // AFI-1 — this expectation was "CEO with stray employeeId rejected". The backend
+  // Principal (server/src/Identity/Principal.php) permits a CEO membership to carry an
+  // employee binding (SDR-0002 §6, User != Employee), so rejecting it here would turn a
+  // valid server identity into "no principal". A CEO binding is now accepted when it is
+  // absent, null or a non-empty string; an empty or non-string binding is still rejected.
+  check(c.isValidUser({ id:'u', displayName:'X', principalType:'ceo', employeeId:'e' }) === true, 'contract: CEO with a server employee binding (non-empty string) accepted');
+  check(c.isValidUser({ id:'u', displayName:'X', principalType:'ceo', employeeId:null }) === true, 'contract: CEO with a null employee binding accepted');
+  check(c.isValidUser({ id:'u', displayName:'X', principalType:'ceo', employeeId:'' }) === false, 'contract: CEO with an empty employee binding rejected');
+  check(c.isValidUser({ id:'u', displayName:'X', principalType:'ceo', employeeId:42 }) === false, 'contract: CEO with a non-string employee binding rejected');
+  check(c.isValidUser({ id:'u', displayName:'X', principalType:'employee', employeeId:null }) === false, 'contract: Employee with a null employeeId rejected');
   check(c.isValidUser({ id:'', displayName:'X', principalType:'ceo' }) === false, 'contract: empty id rejected');
   check(c.isValidUser({ id:'u', displayName:'', principalType:'ceo' }) === false, 'contract: empty displayName rejected');
   check(c.isValidUser({ id:'u', displayName:'X', principalType:'root' }) === false, 'contract: unknown principalType rejected');

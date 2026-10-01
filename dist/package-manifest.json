@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 20,
   "entry": "index.html",
-  "packageDigest": "415e1f26c2552865af78b3b95540e0689039ab4cd20d2b6332bc7bd86a3fde67",
+  "packageDigest": "e861a225d1e86c99e9c31817abbacfb3d954dc2aa218091154e4189f14d2b657",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2620312,
-    "sha256": "21c5c5aeac8d47cd30d944c119fd5060a26cc96c4070eea18a287870e3ebcd1a"
+    "bytes": 2620690,
+    "sha256": "13d86ea6e1ef62a2bd21ef308b75adaa204c4f4bdb453aa23f3e225c809dc3bd"
   },
   "files": [
     {
@@ -139,8 +139,8 @@
     },
     {
       "path": "js/core/identity.js",
-      "bytes": 8377,
-      "sha256": "62c37dc0b96db598b3e9e690f176af80397d1dff681a023ed5822b5bcccfbb53"
+      "bytes": 8755,
+      "sha256": "d966d7ab5edb3f104cd4b4f8e74b907b46525ae7694cb09a04c7e1d3c84f6645"
     },
     {
       "path": "js/core/onboarding-reset.js",
