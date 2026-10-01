@@ -5514,11 +5514,16 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   const users = offenders(/\b(SessionIdentityProvider|CsrfHolder|mapSessionProjection)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/identity.js']);
   check(users.length === 0 && !/\b(CsrfHolder|mapSessionProjection)\b/.test(prodCode['core/identity.js']),
     'AFI-1/AFI-2: SessionIdentityProvider / CsrfHolder are referenced only by auth-boot.js (and the provider name by identity.js)' + (users.length ? ' >> VIOLATION: ' + users.join(', ') : ''));
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js']);
-  check(apiUsers.length === 0, 'AFI-1/AFI-2: only session-identity.js and auth-boot.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
-  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
-    && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'",
-    'AFI-1/AFI-2: /api/ paths are named only by the session modules; auth-boot.js names only /api/auth/login and /api/auth/logout');
+  // AFI-3 authorized revision: core/auth-flow.js (the credential flows) is the one further
+  // ApiClient caller, and it names exactly its three RouteAuth::None endpoints. Was: only
+  // session-identity.js and auth-boot.js, and no /api/ path outside the session modules.
+  // The property is unchanged — every API caller and every API path is allowlisted.
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js']);
+  check(apiUsers.length === 0, 'AFI-1/AFI-2/AFI-3: only session-identity.js, auth-boot.js and auth-flow.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+    && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
+    && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
+    'AFI-1/AFI-2/AFI-3: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');

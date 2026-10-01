@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 20,
   "entry": "index.html",
-  "packageDigest": "38e5bb08e78d8d379fcf3053f17f895e8805036b6f241a76dea6d3a17f3dd5e5",
+  "packageDigest": "b73f3c4b9d795a7f5d587b004414bceb25858ae26e490edcdb7d919cf74b4fd4",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2639863,
-    "sha256": "b1e0e348ed48ba66f846a255114b6f36d358dca3d9fa22a8fb75f8f2f28f9469"
+    "bytes": 2651010,
+    "sha256": "920ac93e23002afdee05e27f4a4af2eb8d06890e8d1b2e59c0a46af42a934ca0"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9415,
-      "sha256": "ae8c3333305d6eabe1d118f36948391ab2a6a8f47f901172c6ede56973837552"
+      "bytes": 9460,
+      "sha256": "fdefcf68110f897321127568866bb0eb3585adb38956d8991fe916e8d087c522"
     },
     {
       "path": "js/analytics/compare.js",
@@ -109,8 +109,13 @@
     },
     {
       "path": "js/core/auth-boot.js",
-      "bytes": 8179,
-      "sha256": "2e7dfff7f8045ad9f8dc6fc7ab7b1ecf55103a04e42cfb3811dd93fb7b41f9c8"
+      "bytes": 8733,
+      "sha256": "440311284fe77aaaf7227ca228b98426d3ed1522ad8b58193775467a2064c204"
+    },
+    {
+      "path": "js/core/auth-flow.js",
+      "bytes": 10432,
+      "sha256": "9c0ca6970628357306b1684fde2a0c6d74e1862da432c82dfb48ebd9e0ad1e12"
     },
     {
       "path": "js/core/authz.js",
