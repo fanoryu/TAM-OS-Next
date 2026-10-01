@@ -5590,8 +5590,13 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
   check(/type="email" autocomplete="username"/.test(avCode) && /type="password" autocomplete="current-password"/.test(avCode)
     && /method="post" novalidate/.test(avCode) && /e\.preventDefault\(\);/.test(avCode) && /passEl\.value = ''/.test(avCode),
     'AFI-2: sign-in form: username/current-password autocomplete, method="post", submit intercepted, password field cleared');
-  check(/escapeHtml\(/.test(avCode) && !/password/.test(avCode.replace(/authPassword|type="password"|current-password|name="password"|const password = passEl \? passEl\.value : '';|AuthBoot\.signIn\(email, password\)|'Enter your email address and password\.'|Email or password|passEl/g, '')),
-    'AFI-2: auth-view.js escapes dynamic values and keeps the password only as a submit-time local');
+  // AFI-3 authorized revision: the credential views add fixed password vocabulary (field
+  // names, autocomplete, copy), removed by a second, literal-only list. Was: the AFI-2
+  // sign-in literals only. The property is unchanged — no other `password` remains, so
+  // the only password values are the submit-time locals.
+  check(/escapeHtml\(/.test(avCode) && !/password/.test(avCode.replace(/authPassword|type="password"|current-password|name="password"|const password = passEl \? passEl\.value : '';|AuthBoot\.signIn\(email, password\)|'Enter your email address and password\.'|Email or password|passEl/g, '')
+    .replace(/name="(confirm-)?new-password"|autocomplete="new-password"|Forgot password\?|missing_password|Enter the new password in both fields|The two passwords do not match|That password cannot be used|Very long passwords|a common password|Choose a new password|Set a new password|Set the password|Set password|Reset your password|Your password (was changed|is set)|with the new password|If you just set a new password|(Confirm new|New) password<\/label>/g, '')),
+    'AFI-2/AFI-3: auth-view.js escapes dynamic values and keeps passwords only as submit-time locals');
   // The test-only stub.
   const stubPath = path.join(root, 'tools', 'serve-auth-stub.js');
   const stubSrc = fs.existsSync(stubPath) ? read(stubPath) : '';
