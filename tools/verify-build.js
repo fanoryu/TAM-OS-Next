@@ -5526,6 +5526,77 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1: the identity contract accepts a server CEO employee binding (absent / null / non-empty string)');
 }
 
+// ===== AFI-2 — AUTHENTICATED BOOT (explicit mode, SESSION boot firewall) =====
+// STRUCTURE only; behaviour is proven by tools/verify-auth-boot-runtime.js. Pins: one
+// explicit source constant that ships LOCAL; LOCAL boot unchanged; SESSION boot checks the
+// session first and never loads local state, the shell or "Acting as"; login/logout only
+// through AuthBoot; no persistence, logging or environment inference in the auth modules;
+// the test-only auth stub stays out of the package.
+console.log('== AFI-2 — AUTHENTICATED BOOT ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? read(p) : ''; };
+  const constCode = code(rd('core/constants.js'));
+  const bootCode = code(rd('core/app-bootstrap.js'));
+  const abCode = code(rd('core/auth-boot.js'));
+  const avCode = code(rd('ui/auth-view.js'));
+  const shellCode = code(rd('ui/shell-render.js'));
+  const gsCode = code(rd('ui/global-search-ui.js'));
+  const iBoot = jsFiles.indexOf('core/app-bootstrap.js');
+  check(jsFiles.indexOf('core/auth-boot.js') === iBoot - 2 && jsFiles.indexOf('ui/auth-view.js') === iBoot - 1 && iBoot === jsFiles.length - 1
+    && indexHtml.includes('<script src="js/core/auth-boot.js"></script>\n<script src="js/ui/auth-view.js"></script>\n<script src="js/core/app-bootstrap.js"></script>'),
+    'AFI-2: auth-boot.js and auth-view.js load immediately before app-bootstrap.js (manifest and index.html)');
+  // D1 — one explicit source constant, shipped LOCAL.
+  check(/const AUTH_MODES = Object\.freeze\(\{ LOCAL: 'local', SESSION: 'session' \}\);/.test(constCode)
+    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(constCode),
+    'AFI-2: AUTH_MODES is exactly { LOCAL, SESSION } and the shipped AUTH_MODE is LOCAL');
+  const modeAssign = jsFiles.concat(['boot/theme-boot.js']).filter((f) => /\bAUTH_MODE\s*=[^=]/.test(code(rd(f))));
+  check(modeAssign.join() === 'core/constants.js', 'AFI-2: AUTH_MODE is assigned exactly once, in constants.js' + (modeAssign.join() === 'core/constants.js' ? '' : ' >> ' + modeAssign.join(', ')));
+  [['core/app-bootstrap.js', bootCode], ['core/auth-boot.js', abCode], ['ui/auth-view.js', avCode], ['core/constants.js', constCode]].forEach(([name, c]) => {
+    check(!/\blocation\b|hostname|document\s*\.\s*cookie|localStorage|sessionStorage|StorageAdapter|URLSearchParams|navigator\s*\.\s*onLine/.test(c),
+      'AFI-2: ' + name + ' infers nothing from the URL, hostname, cookies, storage or connectivity');
+  });
+  // LOCAL boot unchanged; SESSION boot starts AuthBoot and nothing else.
+  check(/if\(AUTH_MODE === AUTH_MODES\.LOCAL\)\{\s*await loadState\(\);\s*applyTheme\(\);\s*installGlobalUIHandlers\(\);\s*render\(\);\s*maybeShowFirstRunChoice\(\);\s*return;\s*\}\s*AuthBoot\.start\(\);\s*\}\)\(\);/.test(bootCode),
+    'AFI-2: app-bootstrap.js keeps the LOCAL boot sequence verbatim and only starts AuthBoot otherwise');
+  check(/function render\(\)\{\s*closeFloatingMenu\(\);\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\)\{\s*if\(typeof renderAuthView === 'function'\) renderAuthView\(\);\s*return;\s*\}/.test(shellCode),
+    'AFI-2: render() shows only the auth views outside LOCAL mode until a workspace is granted');
+  check(/function openGlobalSearch\(\)\{\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\) return;/.test(gsCode),
+    'AFI-2: Global Search (Ctrl/Cmd+K) is gated the same way');
+  check(/allowsWorkspace\(\)\{ return false; \}/.test(abCode), 'AFI-2: AuthBoot grants no workspace in any state (D-A)');
+  // Firewall + authority inside the auth modules.
+  [['core/auth-boot.js', abCode], ['ui/auth-view.js', avCode]].forEach(([name, c]) => {
+    check(!/\b(loadState|maybeShowFirstRunChoice|meaningfulDataCounts|renderShell|renderIdentitySelectorHTML|LocalIdentityProvider|selectPrincipal|FIXTURE_PRINCIPALS|setIdentityProviderForTesting)\b/.test(c),
+      'AFI-2: ' + name + ' never loads local state, the shell, "Acting as" or the local identity');
+    check(!/\bconsole\s*\.|\bfetch\s*\(|XMLHttpRequest|\bState\b|setInterval/.test(c), 'AFI-2: ' + name + ' does not log, fetch directly, touch State or poll');
+  });
+  check(!/setTimeout|while\s*\(/.test(abCode), 'AFI-2: AuthBoot schedules nothing and has no loop (no automatic retry)');
+  check((abCode.match(/ApiClient\.request\(/g) || []).length === 3
+    && /ApiClient\.request\('\/api\/auth\/login', \{ method: 'POST', body: \{ email: email, password: password \} \}\)/.test(abCode)
+    && (abCode.match(/ApiClient\.request\(path, \{ method: 'POST', body: body, csrf: true \}\)/g) || []).length === 2
+    && /authSessionMutation\('\/api\/auth\/logout', \{\}\)/.test(abCode),
+    'AFI-2: login is a CSRF-free POST; logout goes through the bounded recovery (one send, at most one replay), with CSRF');
+  check(/if\(!samePrincipal\(principal, SessionIdentityProvider\.getCurrentUser\(\)\)\) return/.test(abCode)
+    && /if\(CsrfHolder\.get\(\) === token\) return/.test(abCode) && /first\.kind !== API_RESULT_KINDS\.DENIED/.test(abCode),
+    'AFI-2: a 403 is replayed only for the same principal with a changed CSRF token');
+  check(/const me = await SessionIdentityProvider\.refresh\(\);/.test(abCode) && !/res\.data/.test(abCode),
+    'AFI-2: identity after login comes from /me; the login response body is never read');
+  // The views.
+  check(/type="email" autocomplete="username"/.test(avCode) && /type="password" autocomplete="current-password"/.test(avCode)
+    && /method="post" novalidate/.test(avCode) && /e\.preventDefault\(\);/.test(avCode) && /passEl\.value = ''/.test(avCode),
+    'AFI-2: sign-in form: username/current-password autocomplete, method="post", submit intercepted, password field cleared');
+  check(/escapeHtml\(/.test(avCode) && !/password/.test(avCode.replace(/authPassword|type="password"|current-password|name="password"|const password = passEl \? passEl\.value : '';|AuthBoot\.signIn\(email, password\)|'Enter your email address and password\.'|Email or password|passEl/g, '')),
+    'AFI-2: auth-view.js escapes dynamic values and keeps the password only as a submit-time local');
+  // The test-only stub.
+  const stubPath = path.join(root, 'tools', 'serve-auth-stub.js');
+  const stubSrc = fs.existsSync(stubPath) ? read(stubPath) : '';
+  check(!!stubSrc && /\.listen\(port, '127\.0\.0\.1'/.test(stubSrc) && !/writeFileSync|https?:\/\/(?!127\.0\.0\.1)/.test(stubSrc.replace(/\/\*[\s\S]*?\*\//, '')),
+    'AFI-2: tools/serve-auth-stub.js is loopback-only, writes nothing to disk and calls nothing external');
+  check(!jsFiles.some((f) => /stub/.test(f)) && !/serve-auth-stub/.test(indexHtml), 'AFI-2: the auth stub is not part of the application or the package');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-auth-boot-runtime.js')), 'AFI-2: runtime harness present — tools/verify-auth-boot-runtime.js');
+  check(/\.auth-screen\{/.test(read(path.join(root, 'css', 'components.css'))), 'AFI-2: auth-view styles live in css/components.css (authorized golden revision)');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
