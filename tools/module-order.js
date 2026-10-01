@@ -140,6 +140,13 @@ module.exports = [
   //     gateway it delegates to (and only to) and before bootstrap. Owns no
   //     business behavior. ---
   'transport/transport-adapter.js',
+  // --- AFI-4a1 read-only SESSION Employee workspace: the strict Employee read client
+  //     (over ApiClient), the in-memory SESSION Employee data and its controller, and
+  //     the view auth-view.js renders while AUTHENTICATED. Defined before the auth
+  //     modules that reach them at call time; never the business shell, never State. ---
+  'core/employee-api.js',
+  'core/session-employee.js',
+  'ui/session-workspace-view.js',
   // --- AFI-2 authenticated boot: the SESSION-mode state machine and its views. Both
   //     define functions/frozen objects only; app-bootstrap.js starts AuthBoot only when
   //     AUTH_MODE is SESSION (LOCAL — the shipped default — never touches them).

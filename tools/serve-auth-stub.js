@@ -41,6 +41,14 @@
  *   /__stub/scenario/reset-rate-limited   activate / reset 429 with Retry-After: 300
  *   /__stub/scenario/recovery-unavailable activate / forgot / reset 503
  *   /__stub/scenario/recovery-malformed   activate / forgot / reset 200 with a malformed body
+ *
+ * AFI-4a1 read-only Employee workspace (GET /api/employees[?archived=1], GET /api/employee?id=),
+ * scoped like the server: the CEO lists and reads the fabricated company records below; an
+ * Employee is 403 on the list and reads only their own record (any other id is 404). These
+ * records are fabricated and live only in this process.
+ *   /__stub/scenario/employees-unavailable  the Employee reads answer 503
+ *   /__stub/scenario/employee-self-missing  signed in as Employee; their own record answers 404
+ *   /__stub/scenario/employees-session-lost signed in as CEO; the Employee reads answer 401
  */
 'use strict';
 const http = require('http');
@@ -59,7 +67,21 @@ const USERS = {
   'employee@example.invalid': { userId: 'u_stub_emp', membershipId: 'm_stub_emp', role: 'employee', employeeId: 'emp_stub_1' }
 };
 const SCENARIOS = ['signed-out', 'ceo', 'employee', 'me-unavailable', 'me-malformed', 'login-rate-limited', 'logout-stale-csrf', 'logout-unavailable',
-  'link-invalid', 'password-policy', 'forgot-rate-limited', 'reset-rate-limited', 'recovery-unavailable', 'recovery-malformed'];
+  'link-invalid', 'password-policy', 'forgot-rate-limited', 'reset-rate-limited', 'recovery-unavailable', 'recovery-malformed',
+  'employees-unavailable', 'employee-self-missing', 'employees-session-lost'];
+// AFI-4a1 fabricated company records (the CEO detail DTO; the list and self views are projections).
+const STUB_EMPLOYEES = [
+  { id: 'emp_stub_1', employeeCode: 'EMP-001', fullName: 'Fabricated Employee One', jobTitle: 'Engineer', department: 'Operations', employmentStatus: 'Active',
+    archived: false, accountState: 'active', joinDate: '2026-01-05', contactEmail: 'one@example.invalid', phone: '0812 000 001',
+    notes: 'Fabricated note <script>not run</script>', monthlyBaseSalary: '7500000.00', version: 2 },
+  { id: 'emp_stub_2', employeeCode: 'EMP-002', fullName: 'Fabricated Employee Two', jobTitle: null, department: null, employmentStatus: 'On Leave',
+    archived: false, accountState: 'none', joinDate: null, contactEmail: null, phone: null, notes: null, monthlyBaseSalary: null, version: 1 },
+  { id: 'emp_stub_3', employeeCode: 'EMP-003', fullName: 'Fabricated Former Employee', jobTitle: 'Analyst', department: 'Operations', employmentStatus: 'Resigned',
+    archived: true, accountState: 'disabled', joinDate: '2025-03-01', contactEmail: null, phone: null, notes: null, monthlyBaseSalary: '6000000.00', version: 4 }
+];
+const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
+const LIST_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState'];
+const SELF_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'monthlyBaseSalary'];
 // AFI-3 fabricated one-time tokens (43 base64url characters, the server shape).
 const STUB_TOKENS = { activation: 'stub-activation-token-' + 'a'.repeat(21), recovery: 'stub-recovery-token-' + 'r'.repeat(23) };
 
@@ -74,8 +96,8 @@ const rid = () => crypto.randomBytes(16).toString('hex');
 function reset(name){
   scenario = name;
   usedTokens = [];
-  session = (name === 'ceo' || name === 'me-malformed') ? { user: USERS['ceo@example.invalid'], csrf: token() }
-    : (name === 'employee') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
+  session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable') ? { user: USERS['ceo@example.invalid'], csrf: token() }
+    : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
 function api(res, status, payload, extra, fields){
   const id = rid();
@@ -91,7 +113,7 @@ function readJson(req){
   });
 }
 
-async function handleApi(req, res, p){
+async function handleApi(req, res, p, query){
   const mutation = req.method !== 'GET' && req.method !== 'HEAD';
   if(mutation){
     if(req.headers.origin !== ORIGIN) return api(res, 403, 'forbidden');                 // same-origin only
@@ -123,6 +145,28 @@ async function handleApi(req, res, p){
     }
     session = null;
     return api(res, 200, { loggedOut: true });
+  }
+  // AFI-4a1 Employee reads: RouteAuth::Required, scoped by the session principal, exact query keys.
+  if((p === '/api/employees' || p === '/api/employee') && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    const keys = [...query.keys()];
+    const ceo = session.user.role === 'ceo';
+    if(p === '/api/employees'){
+      if(keys.some((k) => k !== 'archived') || (query.has('archived') && query.get('archived') !== '1')) return api(res, 400, 'invalid_query');
+      if(!ceo) return api(res, 403, 'forbidden');
+      const all = query.get('archived') === '1';
+      return api(res, 200, { employees: STUB_EMPLOYEES.filter((e) => all || !e.archived).map((e) => pick(e, LIST_KEYS)) });
+    }
+    if(keys.join() !== 'id' || !/^[A-Za-z0-9_-]{1,64}$/.test(query.get('id') || '')) return api(res, 400, 'validation_failed', null, ['id']);
+    const id = query.get('id');
+    if(ceo){
+      const e = STUB_EMPLOYEES.find((x) => x.id === id);
+      return e ? api(res, 200, { employee: e }) : api(res, 404, 'not_found');
+    }
+    if(scenario === 'employee-self-missing' || id !== session.user.employeeId) return api(res, 404, 'not_found');
+    return api(res, 200, { employee: pick(STUB_EMPLOYEES[0], SELF_KEYS) });
   }
   // AFI-3 credential flows: RouteAuth::None on the server — no session, no CSRF.
   if(p === '/api/auth/forgot-password' && req.method === 'POST'){
@@ -156,7 +200,8 @@ if(!fs.existsSync(path.join(pkgRoot, 'index.html'))){
 reset('signed-out');
 
 http.createServer((req, res) => {
-  const urlPath = decodeURIComponent(new URL(req.url, ORIGIN).pathname);
+  const url = new URL(req.url, ORIGIN);
+  const urlPath = decodeURIComponent(url.pathname);
   const sw = /^\/__stub\/scenario\/([a-z-]+)$/.exec(urlPath);
   if(sw && req.method === 'GET'){
     if(SCENARIOS.indexOf(sw[1]) === -1){ res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('unknown scenario'); }
@@ -164,7 +209,7 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('scenario: ' + scenario);
   }
-  if(urlPath === '/api' || urlPath.startsWith('/api/')) return handleApi(req, res, urlPath);
+  if(urlPath === '/api' || urlPath.startsWith('/api/')) return handleApi(req, res, urlPath, url.searchParams);
   if(req.method !== 'GET' && req.method !== 'HEAD'){ res.writeHead(405, { ...STATIC_HEADERS, 'Allow': 'GET, HEAD' }); return res.end(); }
   const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
   const file = path.resolve(pkgRoot, rel);

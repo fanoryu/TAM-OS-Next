@@ -1429,6 +1429,46 @@ guards and revises two AFI-1/AFI-2 allowlists (one more `ApiClient` caller with 
 credential views' fixed password vocabulary). `tools/serve-auth-stub.js` answers the three endpoints from
 fabricated one-time tokens and scenarios. No CSS, backend, schema, storage-key or ACTIONS change.
 
+### Read-only SESSION Employee workspace — AFI-4a1 (frontend; SESSION mode only, LOCAL still shipped)
+
+AFI-4a1 is the first slice of the authenticated Employee workspace (AFI-4a). In SESSION mode, AUTHENTICATED no
+longer shows a holding view: `renderAuthView()` (js/ui/auth-view.js) renders the read-only workspace —
+`renderSessionWorkspace()` in `js/ui/session-workspace-view.js`, which only it calls. It is **not** the business
+shell: `AuthBoot.allowsWorkspace()` is still `false`, so `render()` never mounts the shell, its navigation, Global
+Search or "Acting as", and no other domain (Overtime, Payroll, Finance) or local data tool (backup, restore, reset,
+import, first run) is reachable. Production `AUTH_MODE` stays LOCAL; LOCAL is unchanged.
+
+| Principal | Workspace | Reads (BF-4a1) |
+|---|---|---|
+| CEO | Employees: Active / Including archived tabs, the company list, a record's detail; `accountState` shown as text | `GET /api/employees[?archived=1]`, `GET /api/employee?id=` |
+| Employee | My profile: their own record, read-only, exactly the self fields | `GET /api/employee?id=<principal.employeeId>` — never the list |
+
+**Data** (`js/core/employee-api.js`, `js/core/session-employee.js`). `EmployeeApi` makes the three GET reads through
+`ApiClient` and decodes every answer strictly against `EmployeeView` — exact keys, the server's enums, id pattern and
+formats; money stays the exact decimal string; anything else is `INVALID_RESPONSE` and nothing of it is kept.
+`principal.employeeId` (from `/me`) is the **opaque Employee record id**, not the employee code; `getSelf()` asks for it
+and accepts only a record with that `id`. `SessionEmployeeStore` holds the answers **in memory only** — never `State`,
+storage or the legacy repository — and `SessionWorkspace` drives the reads. A request token carries the store's
+generation and a per-kind sequence: an answer is applied only while both are current, so nothing from a previous
+identity, or from a superseded list or detail request, is ever shown.
+
+**Identity loss.** `AuthBoot.go()` clears the store whenever it leaves AUTHENTICATED (logout, SIGNED_OUT,
+UNAVAILABLE); a 401 on a current business read calls the new `AuthBoot.sessionLost()` (AUTHENTICATED → SIGNED_OUT,
+"session ended", no request); a different principal clears the store first. A 403, 404, 409, 429, 5xx, network
+failure, timeout or malformed answer is a workspace state — denied, not found, unavailable with an explicit Retry —
+and the identity stays authenticated. Nothing retries on its own.
+
+**ApiClient.** A GET may now pass a structured `query` (`API_QUERY_KEYS` = `archived`, `id`; identifier values;
+keys sorted, parts encoded); a raw `?` or `#` in the path is still refused, and a mutation never carries a query.
+
+**CSS.** None: the workspace reuses existing classes (`card`, `page-head`, `tabs`, `table-wrap`, `pill`, `auth-*`).
+
+**Proof.** `tools/verify-session-employee-runtime.js` (query serialization and refusals, strict decoders, CEO and
+Employee flows, every error kind, malformed answers, logout / 401 / principal change / late answers, the archived and
+detail races) with instrumented storage — zero localStorage / sessionStorage access — and recording spies on the LOCAL
+boot, the shell, "Acting as", local data tools, Global Search, the legacy Employee handlers and the other domains;
+the AFI-4a1 checks in `tools/verify-build.js`; `tools/serve-auth-stub.js` gained Employee scenarios for browser QA.
+
 ### Release engineering
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the

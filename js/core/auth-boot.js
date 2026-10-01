@@ -8,14 +8,19 @@
    STATES
      CHECKING_SESSION  GET /api/auth/me is in flight. Neutral checking view.
      SIGNED_OUT        /me said 401 (or the user signed out). Sign-in form.
-     AUTHENTICATED     /me returned a valid projection. Holding view only
-                       (owner decision D-A): no business workspace in AFI-2.
+     AUTHENTICATED     /me returned a valid projection. AFI-4a1: the read-only
+                       SESSION Employee workspace (js/ui/session-workspace-view.js),
+                       rendered by auth-view — never the business shell (D-A holds:
+                       allowsWorkspace() stays false).
      UNAVAILABLE       /me could not be determined (403, 429, 5xx, network,
                        timeout, malformed answer) or the mode is invalid. Retry only.
 
    FIREWALL: no state ever loads local business state, runs a migration, opens the
    first-run choice, mounts the shell or "Acting as", or falls back to the local
-   identity. allowsWorkspace() is false in every AFI-2 state.
+   identity. allowsWorkspace() is false in every state. AFI-4a1: leaving
+   AUTHENTICATED also destroys the in-memory SESSION Employee data
+   (SessionEmployeeStore), and sessionLost() is how a business read's 401 ends the
+   session.
 
    AUTHORITY: identity comes only from SessionIdentityProvider.refresh() (GET
    /api/auth/me). The login response is never trusted as identity; a successful
@@ -88,7 +93,10 @@ const AuthBoot = (function(){
     message = msg || null;
     retryAfter = extra && extra.retryAfter;
     requestId = extra && extra.requestId;
-    if(next !== AUTH_STATES.AUTHENTICATED) SessionIdentityProvider.clear();
+    if(next !== AUTH_STATES.AUTHENTICATED){
+      SessionIdentityProvider.clear();
+      SessionEmployeeStore.clear();          // AFI-4a1: no server business data outlives the identity
+    }
     paint();
   }
 
@@ -159,6 +167,14 @@ const AuthBoot = (function(){
       busy = false;
       const confirmed = out.result.ok || out.recovery === 'signed_out';
       go(AUTH_STATES.SIGNED_OUT, confirmed ? 'signed_out' : 'signout_unconfirmed', { requestId: out.result.requestId });
+    },
+
+    // AFI-4a1: a business read answered 401 — the session is gone. AUTHENTICATED ->
+    // SIGNED_OUT ('session_ended'): identity, CSRF token and Employee data cleared.
+    // No request is made. Any other failure is the workspace's, not the session's.
+    sessionLost(){
+      if(state !== AUTH_STATES.AUTHENTICATED) return;
+      go(AUTH_STATES.SIGNED_OUT, 'session_ended');
     },
 
     // AFI-2 grants no business workspace in any state (D-A).

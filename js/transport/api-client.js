@@ -19,6 +19,9 @@
        path    a relative same-origin '/api/...' path. Absolute URLs,
                protocol-relative '//host' forms, '..' segments, query strings,
                fragments and anything outside /api/ are refused locally.
+       query   AFI-4a1: GET / HEAD only — a plain object of API_QUERY_KEYS whose
+               values are short identifier strings. It is serialized here, keys
+               sorted and every part encoded; the path itself never carries '?'.
        method  GET | HEAD | POST | PUT | PATCH | DELETE (default GET).
        body    mutations only: a plain JSON object (default {}). It may never
                carry an authority/scope field (role, company, employee) — those
@@ -63,6 +66,11 @@ const API_PATH_PATTERN = /^\/api\/[A-Za-z0-9._~\-\/]+$/;
 const API_METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 // Authority and scope are server-derived; a request body may never claim them.
 const API_FORBIDDEN_BODY_KEYS = Object.freeze(['role', 'companyId', 'company_id', 'employeeId', 'employee_id']);
+// AFI-4a1 structured query: the only query keys a read may send (GET /api/employees
+// ?archived=1, GET /api/employee?id=<opaque id>), and the only value shape — the server
+// Employee id pattern (server/src/Employee/EmployeeInput.php ID_PATTERN), which '1' also fits.
+const API_QUERY_KEYS = Object.freeze(['archived', 'id']);
+const API_QUERY_VALUE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // Server formats (server/src/Http/RequestId.php, server/src/Auth/SessionToken.php).
 const API_REQUEST_ID_PATTERN = /^[0-9a-f]{32}$/;
 const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -75,6 +83,19 @@ const ApiClient = (function(){
 
   function isPlainObject(v){
     return !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+  }
+
+  // '' for an empty query, '?k=v&…' (keys sorted, parts encoded), or null when refused.
+  function queryString(query){
+    if(!isPlainObject(query)) return null;
+    const keys = Object.keys(query).sort();
+    const parts = [];
+    for(let i = 0; i < keys.length; i++){
+      const value = query[keys[i]];
+      if(API_QUERY_KEYS.indexOf(keys[i]) === -1 || typeof value !== 'string' || !API_QUERY_VALUE_PATTERN.test(value)) return null;
+      parts.push(encodeURIComponent(keys[i]) + '=' + encodeURIComponent(value));
+    }
+    return parts.length ? '?' + parts.join('&') : '';
   }
 
   function failure(kind, extra){
@@ -182,12 +203,18 @@ const ApiClient = (function(){
       } else if(opts.body !== undefined || opts.csrf === true){
         return failure(API_RESULT_KINDS.CLIENT_FAULT);   // GET/HEAD carry no body and no CSRF token
       }
+      let target = path;
+      if(opts.query !== undefined){
+        const qs = mutation ? null : queryString(opts.query);
+        if(qs === null) return failure(API_RESULT_KINDS.CLIENT_FAULT);   // a mutation carries no query; a bad query is never sent
+        target = path + qs;
+      }
       if(typeof fetch !== 'function' || typeof AbortController !== 'function') return failure(API_RESULT_KINDS.UNAVAILABLE);
       const controller = new AbortController();
       init.signal = controller.signal;
       const timer = setTimeout(function(){ controller.abort(); }, API_TIMEOUT_MS);
       try {
-        const response = await fetch(path, init);
+        const response = await fetch(target, init);
         return await normalize(response, method);
       } catch(_e){
         return failure(API_RESULT_KINDS.UNAVAILABLE);   // network failure, timeout (abort), redirect refused
