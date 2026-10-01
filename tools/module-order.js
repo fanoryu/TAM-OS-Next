@@ -20,6 +20,11 @@ module.exports = [
   // caller). Defines functions/frozen objects only; no request at load or boot.
   // Reads CsrfHolder (core/session-identity.js) at CALL time. Not TransportAdapter.
   'transport/api-client.js',
+  // AFI-1 Session Identity Foundation — SessionIdentityProvider (GET /api/auth/me ->
+  // canonical User) + the in-memory CsrfHolder. Headless and INERT: nothing installs
+  // the provider or calls refresh(); LocalIdentityProvider stays active. Depends on
+  // identity (PRINCIPAL_TYPES, isValidUser) and the API client at call time.
+  'core/session-identity.js',
   // UX-006B Personal Workspace & SELF-scope — derived workspace + scope query
   // layer over unchanged raw resolvers. Depends on identity (getCurrentUser,
   // PRINCIPAL_TYPES) at call time; reads State/empById lazily post-load. No

@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 20,
   "entry": "index.html",
-  "packageDigest": "9ee3a8ae02fbbbf8ea02fd87f7aaca15d39b901488df1357eaa6338c30ccf7a7",
+  "packageDigest": "415e1f26c2552865af78b3b95540e0689039ab4cd20d2b6332bc7bd86a3fde67",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2613909,
-    "sha256": "9dc364b3855ef426203d2f73e3842e38e6de84099db6fa6fde45381f16419f9e"
+    "bytes": 2620312,
+    "sha256": "21c5c5aeac8d47cd30d944c119fd5060a26cc96c4070eea18a287870e3ebcd1a"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9275,
-      "sha256": "312e266d379eba85b4635709fba1ad0afc995b86b17f40b4421baf5bc3491bf4"
+      "bytes": 9327,
+      "sha256": "f8dc45edcee911448efdb7d8051beb97046d1f8dfca92e61dc5de850445a8be0"
     },
     {
       "path": "js/analytics/compare.js",
@@ -146,6 +146,11 @@
       "path": "js/core/onboarding-reset.js",
       "bytes": 20819,
       "sha256": "b043998298e9300640ce99532ff88e00cf1937de8866bccb6b16a553be3e99f1"
+    },
+    {
+      "path": "js/core/session-identity.js",
+      "bytes": 6221,
+      "sha256": "c9af2fa0bb9fb5dbe5c3032114029a29bbb482b232e00d39e9213797aca0a554"
     },
     {
       "path": "js/core/stabilization.js",
