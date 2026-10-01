@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 20,
   "entry": "index.html",
-  "packageDigest": "3917b6b12ddfbb3adf6f16fa7029af22e7f4dcc6c6ccba1cab9191323823846f",
+  "packageDigest": "9ee3a8ae02fbbbf8ea02fd87f7aaca15d39b901488df1357eaa6338c30ccf7a7",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2603051,
-    "sha256": "53cc0f22383da205c6c86d16908adfb46c85eebf61cbd226a388ab3057d4afae"
+    "bytes": 2613909,
+    "sha256": "9dc364b3855ef426203d2f73e3842e38e6de84099db6fa6fde45381f16419f9e"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9224,
-      "sha256": "d0c083310ec1f47cc0dbef77c35e37674079d7282eaad935ce4c2fa7749ed31a"
+      "bytes": 9275,
+      "sha256": "312e266d379eba85b4635709fba1ad0afc995b86b17f40b4421baf5bc3491bf4"
     },
     {
       "path": "js/analytics/compare.js",
@@ -396,6 +396,11 @@
       "path": "js/repository/payroll-repository.js",
       "bytes": 5209,
       "sha256": "3adf6c972b09e962f0ff15d3b98d88527e9092cee2082d3a94dc584fd60743ce"
+    },
+    {
+      "path": "js/transport/api-client.js",
+      "bytes": 10679,
+      "sha256": "c6ddaa22d184c5a9d03008adf76bf435c724a3c0a6d49455c5ed0386a758fe65"
     },
     {
       "path": "js/transport/transport-adapter.js",

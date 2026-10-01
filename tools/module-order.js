@@ -16,6 +16,10 @@ module.exports = [
   // canonical IdentityProvider seam + local dev/test adapter; no State, no
   // bootstrap, no persistence, no schema. Loaded early after the other leaves.
   'core/identity.js',
+  // AFI-1 Same-origin API client — the ONE outbound HTTP boundary (the only fetch()
+  // caller). Defines functions/frozen objects only; no request at load or boot.
+  // Reads CsrfHolder (core/session-identity.js) at CALL time. Not TransportAdapter.
+  'transport/api-client.js',
   // UX-006B Personal Workspace & SELF-scope — derived workspace + scope query
   // layer over unchanged raw resolvers. Depends on identity (getCurrentUser,
   // PRINCIPAL_TYPES) at call time; reads State/empById lazily post-load. No
