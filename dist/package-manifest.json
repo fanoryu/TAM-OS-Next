@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 20,
   "entry": "index.html",
-  "packageDigest": "2749cd37a2342e7bc4261a3b45565189d58cb68c74671d82ff8e9f292c80c92a",
+  "packageDigest": "38e5bb08e78d8d379fcf3053f17f895e8805036b6f241a76dea6d3a17f3dd5e5",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2631678,
-    "sha256": "b78e533f468337e6d811fd9cdc7d37b2652114577bbfc92326514f3b4a640350"
+    "bytes": 2639863,
+    "sha256": "b1e0e348ed48ba66f846a255114b6f36d358dca3d9fa22a8fb75f8f2f28f9469"
   },
   "files": [
     {
@@ -44,8 +44,8 @@
     },
     {
       "path": "css/components.css",
-      "bytes": 16873,
-      "sha256": "f89c8b9e90297d9f1a0beae950f775f12f869c810cc20ff6fc37bedaa65d5baa"
+      "bytes": 17927,
+      "sha256": "57dd89708ca6e40604f21d27ba82de020d605da38b9dfcaf2cd6e8104b729aac"
     },
     {
       "path": "css/fonts.css",
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9372,
-      "sha256": "bfc76778a6c50836a2408ff88318203a182d3de8d6135ccdac4b40a37e90b03b"
+      "bytes": 9415,
+      "sha256": "ae8c3333305d6eabe1d118f36948391ab2a6a8f47f901172c6ede56973837552"
     },
     {
       "path": "js/analytics/compare.js",
@@ -421,6 +421,11 @@
       "path": "js/ui/activity-log.js",
       "bytes": 13300,
       "sha256": "70cb745fb59972c17065d02c3fd1e9e77e9dce03178db6173a64ef949a7f56ad"
+    },
+    {
+      "path": "js/ui/auth-view.js",
+      "bytes": 6976,
+      "sha256": "fade144e8ab004b408c19ada522a4e53833d6bef5deb5cbd5889f442c841773f"
     },
     {
       "path": "js/ui/charts.js",

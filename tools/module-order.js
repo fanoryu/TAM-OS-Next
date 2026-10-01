@@ -144,6 +144,7 @@ module.exports = [
   //     define functions/frozen objects only; app-bootstrap.js starts AuthBoot only when
   //     AUTH_MODE is SESSION (LOCAL — the shipped default — never touches them). ---
   'core/auth-boot.js',
+  'ui/auth-view.js',
   // --- bootstrap (19) ---
   'core/app-bootstrap.js'
 ];

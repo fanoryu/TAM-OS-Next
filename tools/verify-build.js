@@ -153,12 +153,16 @@ const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
 //     deliberately UNCHANGED (palette strategy P1: identity/UI separation). No schema,
 //     storage-key, migration, type-scale or spacing change. Old CSS golden pin was
 //     6d9c2137…3b4b96; old tokens pin was 60dde600…1a7d1.
-//   BRAND-1 refinement (current) — AUTHORIZED golden revision, css/shell.css only. Owner
+//   BRAND-1 refinement — AUTHORIZED golden revision, css/shell.css only. Owner
 //     optical ruling: the expanded-sidebar monogram grows 30px→34px so it reads as a brand
 //     mark; the collapsed rail keeps it at 30px (size intentionally differs by state);
 //     hover-peek and the mobile drawer show the expanded 34px mark. Presentation only; no
 //     token change (tokens.css pin unchanged). Prior CSS golden pin was 742164ea…4e0a7d8a.
-const CSS_GOLDEN_SHA256 = '84c3434fe6b1f9c571462fa42bce0f62d550851f7b8605bcd9998f4b500f7bae';
+//   AFI-2 (current) — AUTHORIZED golden revision (owner decision D4), css/components.css
+//     only: additive .auth-* rules for the SESSION-mode auth views, appended at the end of
+//     the file; no existing rule changed, no token change (tokens.css pin unchanged).
+//     Prior CSS golden pin was 84c3434f…4b500f7bae.
+const CSS_GOLDEN_SHA256 = 'be5eea17f71a9af7e4c28243d950be14e4385bb4c362318efcd24f095e230067';
 // UX-005C — tokens.css anti-drift pin. The design tokens are the single source of truth
 // for spacing/type/radius/color; this pin fails loudly if any token VALUE is changed,
 // so a "consistency" edit can never silently move the scale it normalizes onto.
