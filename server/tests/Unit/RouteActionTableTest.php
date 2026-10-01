@@ -35,19 +35,31 @@ return [
             'POST /api/auth/reset-password',
         ], Routes::ACCOUNT_SELF_SERVICE);
     },
-    'the production table validates: its only mutations are self-service, none claims an Action' => static function (): void {
+    'the production table validates: its mutations are the self-service routes (no Action) and the three Employee writes (BF-4a1)' => static function (): void {
         $routes = productionRoutes(testConfig());
-        $mutations = [];
+        $selfService = [];
+        $business = [];
         foreach ($routes as $r) {
-            assertSame(null, $r->action, $r->method . ' ' . $r->path);
-            if (in_array($r->method, Request::MUTATION_METHODS, true)) {
-                $mutations[] = $r->method . ' ' . $r->path;
+            $key = $r->method . ' ' . $r->path;
+            if (!in_array($r->method, Request::MUTATION_METHODS, true)) {
+                assertSame(null, $r->action, 'a read declares no Action: ' . $key);
+                continue;
+            }
+            if ($r->action === null) {
+                $selfService[] = $key;
+            } else {
+                $business[$key] = $r->action;
             }
         }
-        sort($mutations);
+        sort($selfService);
         $expected = Routes::ACCOUNT_SELF_SERVICE;
         sort($expected);
-        assertSame($expected, $mutations);
+        assertSame($expected, $selfService);
+        assertSame([
+            'POST /api/employees/create' => Action::EmployeeCreate,
+            'POST /api/employees/update' => Action::EmployeeUpdate,
+            'POST /api/employees/archive' => Action::EmployeeDelete,
+        ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {
         foreach (['POST', 'PUT', 'PATCH', 'DELETE'] as $method) {

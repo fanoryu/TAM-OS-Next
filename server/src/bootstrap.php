@@ -16,8 +16,11 @@ use TamOs\Auth\Authenticator;
 use TamOs\Config\ConfigError;
 use TamOs\Config\ConfigLoader;
 use TamOs\Controller\AuthController;
+use TamOs\Controller\EmployeeController;
 use TamOs\Data\Auth\AuthData;
+use TamOs\Data\BusinessData;
 use TamOs\Data\Readiness;
+use TamOs\Employee\EmployeeService;
 use TamOs\Http\ErrorCode;
 use TamOs\Http\Kernel;
 use TamOs\Http\Request;
@@ -101,7 +104,13 @@ function run(): void
     // when an auth route needs it — never for /api/health or /api/ready (RouteAuth::None).
     $readiness = new Readiness($config, dirname(__DIR__) . '/migrations');
     $auth = AuthData::fromConfig($config);
-    $routes = Routes::production($readiness, new AuthController(new Authenticator($auth), new AccountLifecycle($auth), new AccountRecovery($auth)));
+    // BF-4a1: the business stores share the request's lazy connection with the auth stores.
+    $business = BusinessData::fromConnector($auth->connector());
+    $routes = Routes::production(
+        $readiness,
+        new AuthController(new Authenticator($auth), new AccountLifecycle($auth), new AccountRecovery($auth)),
+        new EmployeeController(new EmployeeService($business)),
+    );
     $kernel = new Kernel($routes, new SessionPrincipalResolver($auth), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');
 }

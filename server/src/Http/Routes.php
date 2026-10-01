@@ -4,16 +4,23 @@ declare(strict_types=1);
 namespace TamOs\Http;
 
 use TamOs\Controller\AuthController;
+use TamOs\Controller\EmployeeController;
 use TamOs\Controller\HealthController;
 use TamOs\Controller\ReadyController;
 use TamOs\Data\Readiness;
+use TamOs\Policy\Action;
 
 /**
  * The production route table: liveness (never touches the database), readiness (read-only
  * database and schema check), the BF-3A session endpoints, the BF-3B self-service account
- * lifecycle and BF-3D password recovery. Only logout, me, change-password and logout-all resolve
- * a session; health, ready, login, activate, forgot-password and reset-password are
- * RouteAuth::None whatever cookie is sent.
+ * lifecycle, BF-3D password recovery and the BF-4a1 Employee domain. Only logout, me,
+ * change-password, logout-all and the Employee routes resolve a session; health, ready, login,
+ * activate, forgot-password and reset-password are RouteAuth::None whatever cookie is sent.
+ *
+ * BF-4a1: the Employee reads need a session and add no Action — the role and the Scope decide
+ * them (SDR-0002 §8). The Employee writes declare employee.create (record-free, decided by the
+ * kernel) and employee.update / employee.delete (record-bearing, decided by the handler after
+ * its scoped load: 404 before 403).
  *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
@@ -34,7 +41,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -51,6 +58,12 @@ final class Routes
             // activate); neither route ever resolves a session or sets a cookie.
             new Route('POST', '/api/auth/forgot-password', $auth->forgotPassword(...)),
             new Route('POST', '/api/auth/reset-password', $auth->resetPassword(...)),
+            // BF-4a1: the Employee domain (company scope for the CEO, self scope for an Employee).
+            new Route('GET', '/api/employees', $employees->list(...), ['archived'], RouteAuth::Required),
+            new Route('GET', '/api/employee', $employees->find(...), ['id'], RouteAuth::Required),
+            new Route('POST', '/api/employees/create', $employees->create(...), [], RouteAuth::Required, Action::EmployeeCreate),
+            new Route('POST', '/api/employees/update', $employees->update(...), [], RouteAuth::Required, Action::EmployeeUpdate),
+            new Route('POST', '/api/employees/archive', $employees->archive(...), [], RouteAuth::Required, Action::EmployeeDelete),
         ]);
     }
 
