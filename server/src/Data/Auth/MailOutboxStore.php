@@ -7,14 +7,14 @@ use TamOs\Data\Database;
 
 /**
  * The mail outbox (BF-3D, migration 0013, D-D3): DELIVERY INTENT only — which user, which kind
- * of mail, how far delivery got. It never holds a recipient address, a token, a link or a
+ * of mail (recovery; BF-4a2 / SDR-0004 adds activation, migration 0018), how far delivery got. It never holds a recipient address, a token, a link or a
  * message body; the worker resolves the account and issues a fresh token at send time. This
  * class is the only writer of mail_outbox (tools/verify-backend-boundary.js).
  *
  *   pending ──claim──▶ sending ──sent──▶ sent
  *      ▲                  │ └─failure, attempts < MAX──▶ pending (next_attempt_at = backoff)
  *      │                  └──failure, attempts = MAX──▶ failed
- *      └── enqueue        any claimed row whose account is no longer recoverable ──▶ cancelled
+ *      └── enqueue        any claimed row whose account no longer qualifies for its kind ──▶ cancelled
  *
  * A row left in `sending` longer than STALE_MINUTES (a worker that died mid-send) is claimed
  * again. All times are the database clock.
@@ -22,6 +22,8 @@ use TamOs\Data\Database;
 final class MailOutboxStore
 {
     public const RECOVERY = 'recovery';
+    public const ACTIVATION = 'activation';
+    public const KINDS = [self::RECOVERY, self::ACTIVATION];
     public const MAX_ATTEMPTS = 5;
     public const STALE_MINUTES = 10;
 
@@ -109,7 +111,7 @@ final class MailOutboxStore
 
     private static function requireKind(string $kind): void
     {
-        if ($kind !== self::RECOVERY) {
+        if (!in_array($kind, self::KINDS, true)) {
             throw new \LogicException('unknown mail kind');
         }
     }

@@ -66,6 +66,12 @@ final class LoginKeys
         return hash('sha256', 'pwchange:' . $userId);
     }
 
+    /** BF-4a2 (SDR-0004): activation reissues per target user (the CEO cannot flood one mailbox). */
+    public static function activationReissueBucket(string $userId): string
+    {
+        return hash('sha256', 'reissue:' . $userId);
+    }
+
     /** "4:<address>", "6:<first 64 bits, hex>" or "none". */
     public static function ipKey(?string $remoteAddr): string
     {

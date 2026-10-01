@@ -90,6 +90,45 @@ final class EmployeeInput
     }
 
     /**
+     * BF-4a2 POST /api/employees/provision-account: exactly id and the login email. The email is
+     * normalized as TamOs\Auth\EmailAddress does for every account; a company, user, role,
+     * status, token or password is an unknown key (400).
+     *
+     * @param array<string, mixed> $json
+     * @return array{id: string, email: string}
+     */
+    public static function provision(array $json): array
+    {
+        self::onlyKeys($json, ['id', 'email']);
+        $bad = [];
+        if (!is_string($json['id'] ?? null) || preg_match(self::ID_PATTERN, $json['id']) !== 1) {
+            $bad[] = 'id';
+        }
+        $email = is_string($json['email'] ?? null) ? EmailAddress::candidate($json['email']) : '';
+        if (!EmailAddress::isValid($email)) {
+            $bad[] = 'email';
+        }
+        if ($bad !== []) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'invalid account request', fields: $bad);
+        }
+        return ['id' => $json['id'], 'email' => $email];
+    }
+
+    /**
+     * BF-4a2 reissue-activation / disable-account / enable-account: exactly the Employee id.
+     *
+     * @param array<string, mixed> $json
+     */
+    public static function accountTarget(array $json): string
+    {
+        self::onlyKeys($json, ['id']);
+        if (!is_string($json['id'] ?? null) || preg_match(self::ID_PATTERN, $json['id']) !== 1) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'invalid employee target', fields: ['id']);
+        }
+        return $json['id'];
+    }
+
+    /**
      * The profile after applying a validated patch (API fields) to a current profile (columns).
      *
      * @param array<string, int|string|null> $profile keyed by column

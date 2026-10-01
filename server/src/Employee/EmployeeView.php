@@ -8,11 +8,15 @@ namespace TamOs\Employee;
  * the fields its view needs: the company list carries no salary, notes or contact; the self
  * view carries the Employee's own profile but no notes, version or account data. No
  * projection ever carries company_id, the scope columns, an account, a token or a hash.
+ *
+ * BF-4a2 (SDR-0004): the CEO list and detail add `accountState` — none, pending, active or
+ * disabled, derived by EmployeeStore — and nothing else about the login: no email, user id,
+ * membership id, hash, token, session or mail detail. The self view gains nothing.
  */
 final class EmployeeView
 {
-    public const LIST_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived'];
-    public const DETAIL_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary', 'version'];
+    public const LIST_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState'];
+    public const DETAIL_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary', 'version', 'accountState'];
     public const SELF_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'monthlyBaseSalary'];
 
     /**
@@ -85,6 +89,7 @@ final class EmployeeView
             'notes' => $text('notes'),
             'monthlyBaseSalary' => $text('monthly_base_salary'),
             'version' => (int) $row['version'],
+            'accountState' => $row['account_state'] ?? null,
         ];
     }
 
@@ -98,6 +103,9 @@ final class EmployeeView
         $out = [];
         foreach ($fields as $f) {
             $out[$f] = $all[$f];
+        }
+        if (array_key_exists('accountState', $out) && !in_array($out['accountState'], AccountState::VALUES, true)) {
+            throw new \LogicException('a CEO projection needs the derived account state');
         }
         return $out;
     }
