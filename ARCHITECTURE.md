@@ -112,7 +112,7 @@ flowchart TD
   subgraph SRC["Modular source (edited by hand)"]
     IDX["index.html<br/>ordered CSS link + JS script tags, mount points"]
     CSS["css/ — tokens, base, shell, components, charts"]
-    subgraph JSMOD["js/ — 77 modules: 76 browser-loaded (one global scope) + 1 CLI-only"]
+    subgraph JSMOD["js/ — 78 modules: 77 browser-loaded (one global scope) + 1 CLI-only"]
       CORE["core/ — constants, state, storage-adapter,<br/>state-load-migrations, domain-services, bootstrap"]
       DOM["domain/ — aggregates, aggregate-helpers,<br/>commands, queries, domain-layer"]
       PLAT["platform/ + transport/ — application-gateway,<br/>transport-adapter, api-client"]
@@ -1094,7 +1094,7 @@ provisioning, E11 for every endpoint, authenticated workspace derivation and end
 
 BF-3D adds self-service password recovery (SDR-0002 §4, §5) and the governed mail foundation
 ([SDR-0003](docs/security/SDR-0003-governed-mail-transport.md), owner decisions D-D1 and D-D3). It is
-backend only: the page that reads a recovery link is future frontend work, no provider account, key or
+backend only: the page that reads a recovery link is frontend work (since added by AFI-3, below), no provider account, key or
 DNS record exists, and no real mail has been sent. "Acting as" is unchanged.
 
 **Schema.** `0011_replace_account_tokens_purpose_check` — token purposes `activation` and `recovery`.
@@ -1222,7 +1222,7 @@ other `/me` failure clears identity; a changed principal or an unchanged token i
 At most three requests; a replay answered 403 is final. In AFI-2 the only consumer is logout.
 
 **Not in AFI-2:** a business workspace for any role (AFI-4, with the D2 CEO warning), activation and
-recovery views (AFI-3), the authenticated shell, revalidation on focus, and the mode flip (AFI-5).
+recovery views (AFI-3, below), the authenticated shell, revalidation on focus, and the mode flip (AFI-5).
 
 **Proof.** `tools/verify-auth-boot-runtime.js` (125 checks) runs the real modules with the mode
 rewritten per scenario and a scripted `fetch`; ten mutations (LOCAL fallback, `loadState` in SESSION,
@@ -1234,6 +1234,60 @@ boot does". `tools/serve-auth-stub.js` is a **test-only** loopback server that s
 browser QA (owner decision D-B); it is not a backend, and real PHP + MariaDB authenticated E2E is still
 required before AFI-5. The CSS golden master was revised once (additive `.auth-*` rules in
 `css/components.css`; tokens unchanged). No backend, schema, storage-key or ACTIONS change.
+
+### Credential flows — AFI-3 (frontend; SESSION mode only, LOCAL still shipped)
+
+AFI-3 adds account activation, the password-recovery request and the password reset to the SESSION-mode
+auth screens. Production stays LOCAL, and LOCAL never reaches any of it.
+
+| Piece | Behaviour |
+|---|---|
+| `js/core/auth-flow.js` (before `auth-boot.js`) | `AuthFlow`, a state machine **subordinate** to `AuthBoot`: `IDLE`, `FORGOT_FORM` → `FORGOT_SENT`, `RESET_FORM` → `RESET_DONE`, `ACTIVATE_FORM` → `ACTIVATE_DONE`, `LINK_INVALID`. It never touches identity, the CSRF holder or a workspace; `AuthBoot` stays the only session authority. One request in flight; no timer, polling or automatic retry |
+| `js/core/auth-boot.js` | `start()` first asks `AuthFlow.beginFromLink()` (SESSION only). When a credential link was found the flow is shown and `/me` is not called first; otherwise `start()` is unchanged |
+| `js/ui/auth-view.js` | "Forgot password?" on the sign-in view; while `AuthFlow` is active its views replace the `AuthBoot` ones. Reset and activation forms have new password + confirmation (`autocomplete="new-password"`, no `maxlength` — the 72 limit is in bytes); both fields are cleared on submit. Success screens end with an explicit **Continue to sign in**; no timed redirect |
+
+**Links.** Recovery: `<origin>/#recovery=<token>` (built by `RecoveryMail`). Activation:
+`<origin>/#activation=<token>` (owner decision D-A) — `server/bin/account.php` still prints only the raw token,
+so the operator composes this link; printing it from the CLI is a separate, backend-authorized change. A
+fragment is accepted only as `^#(recovery|activation)=[A-Za-z0-9_-]{43}$` — extra parameters, two tokens,
+redirects or any other syntax are refused. In SESSION mode a credential fragment is read once (at start, or on
+`hashchange` in a loaded tab) and stripped at once with `history.replaceState(null, '', pathname + search)`,
+malformed or not; a malformed one shows the invalid-link screen without a request, and a link arriving while a
+request is in flight is stripped and ignored. The token is held only in the `AuthFlow` closure: never in the
+view model, the DOM, `State`, storage, a cookie, a URL or a log. A reload after the strip runs the normal boot.
+
+**Contract** (all `RouteAuth::None` on the server: no session, no CSRF token sent).
+
+| Call | Body | Outcome in the browser |
+|---|---|---|
+| `POST /api/auth/activate` | exactly `{ token, password }` | `{activated:true}` → `ACTIVATE_DONE` |
+| `POST /api/auth/reset-password` | exactly `{ token, password }` | `{reset:true}` → `RESET_DONE` |
+| `POST /api/auth/forgot-password` | exactly `{ email }` | `{requested:true}` → `FORGOT_SENT`, one fixed generic text for every address |
+
+For activate and reset: `400 fields:[token]` → `LINK_INVALID` and the token is dropped (invalid, expired,
+used and revoked are never told apart); `400 fields:[password]` → the fixed policy message, token kept; `429`
+→ the approximate wait from `Retry-After`, token kept, no countdown; `5xx`, network, timeout or any malformed
+answer — including a malformed 200 — → unavailable, token kept, manual retry only. The confirmation is
+compared locally (a mismatch sends nothing) and never sent; the server alone enforces the password policy.
+For the recovery request, a 429 names the network, and nothing shown depends on whether the account exists.
+
+**Sessions.** Activation and reset create no session and set no cookie; the backend ends every session of the
+user. **Continue to sign in** (or **Back to sign in**) returns `AuthFlow` to `IDLE` and calls
+`AuthBoot.start()`, so `/me` decides what follows. "Forgot password?" is offered only from `SIGNED_OUT`.
+
+**Firewall.** The flows never load local business state, run a migration or the first-run choice, mount the
+shell, "Acting as" or Global Search, reach the local identity, or fall back to LOCAL; `allowsWorkspace()` is
+still always false. The frontend knows nothing about the mail outbox, the worker or the provider.
+
+**Proof.** `tools/verify-auth-flow-runtime.js` (176 checks; **local-only**, not in the CI allowlist) runs the
+real modules with a fake `location` / `history` and a small `#app` DOM that drives the real form handlers;
+seventeen controlled mutations (local state, "Acting as", an echoed address, a stored token, a stored password,
+a local identity, a dead link treated as success or retried, no busy guard, LOCAL stripping the fragment, a
+URL-derived mode, CSRF on a recovery call, an extra body key, a provider string, `State` in the view model, no
+strip, the token in the DOM) each turn the harness or the verifier red. `tools/verify-build.js` adds the AFI-3
+guards and revises two AFI-1/AFI-2 allowlists (one more `ApiClient` caller with exactly its three paths; the
+credential views' fixed password vocabulary). `tools/serve-auth-stub.js` answers the three endpoints from
+fabricated one-time tokens and scenarios. No CSS, backend, schema, storage-key or ACTIONS change.
 
 ### Release engineering
 

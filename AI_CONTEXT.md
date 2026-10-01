@@ -47,8 +47,8 @@ token purpose, recovery and mail events, `mail_outbox` holding delivery intent o
 `POST /api/auth/forgot-password` (one generic answer for every address, per-address and per-IP quotas)
 and `POST /api/auth/reset-password` (single use, every session and open token revoked, no auto-login),
 and `server/bin/mail.php`, which issues a fresh 30-minute token and sends outside any transaction. The
-recovery link is `<configured origin>/#recovery=<token>`; the page that reads it is future frontend
-work, and no provider account, key or DNS record exists yet. All of this is source only and **not
+recovery link is `<configured origin>/#recovery=<token>`; the page that reads it is frontend work (AFI-3,
+below), and no provider account, key or DNS record exists yet. All of this is source only and **not
 production-ready**: the frontend does not call it, and "Acting as" is unchanged. **AFI-1** (Authenticated
 Frontend Integration, slice 1) then adds the **headless, inert** frontend session-identity foundation:
 `js/transport/api-client.js` (the only `fetch()` caller — same-origin relative `/api/` paths, a 10 s timeout,
@@ -72,7 +72,18 @@ authenticated holding view / unavailable, login then `/me`, logout with CSRF and
 local business state, first-run choice, shell or "Acting as" ever loads in SESSION mode, and no role gets a
 workspace (D-A). Proven by `tools/verify-auth-boot-runtime.js` (125 checks, ten mutations) and AFI-2 guards in
 `verify-build.js`; browser QA uses the test-only `tools/serve-auth-stub.js` (D-B). Local mode is unchanged
-(D-C), and switching production to SESSION remains AFI-5. v2.10.0 remains
+(D-C), and switching production to SESSION remains AFI-5. **AFI-3** adds the SESSION-mode credential flows
+as a subordinate machine, `AuthFlow` (`js/core/auth-flow.js`), entered only from `AuthBoot.start()`: account
+activation from `<origin>/#activation=<token>` (owner decision D-A — the operator composes this link from the
+raw token that `server/bin/account.php` still prints; the CLI is unchanged), password reset from
+`<origin>/#recovery=<token>`, and the "Forgot password?" request from the sign-in view. A credential fragment
+is parsed strictly (one 43-character token, nothing else), read once and stripped at once with
+`history.replaceState`; the token then lives only in the `AuthFlow` closure. The three endpoints are called
+without CSRF and with exact bodies; the confirmation field (D-B) is compared locally and never sent; the
+recovery request always ends on one generic confirmation; activation and reset create no session, and an
+explicit "Continue to sign in" returns to `AuthBoot`, where `/me` decides. LOCAL never parses the fragment.
+Proven by `tools/verify-auth-flow-runtime.js` (176 checks, seventeen mutations; local-only, not in CI) and
+AFI-3 guards in `verify-build.js` (2631 checks). v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
