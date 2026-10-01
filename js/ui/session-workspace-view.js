@@ -51,7 +51,7 @@ const SESSION_WORKSPACE_FIELDS = Object.freeze([
   { name: 'employmentStatus', label: 'Employment status', type: 'select', required: true, error: 'Choose an employment status.' },
   { name: 'jobTitle', label: 'Job title', type: 'text', error: 'Use at most 120 characters, on one line.' },
   { name: 'department', label: 'Department', type: 'text', error: 'Use at most 120 characters, on one line.' },
-  { name: 'joinDate', label: 'Join date', type: 'date', hint: 'YYYY-MM-DD.', error: 'Enter a valid date (YYYY-MM-DD) from 1900 onwards.' },
+  { name: 'joinDate', label: 'Join date', type: 'date', error: 'Enter a valid date, from 1900 onwards.' },
   { name: 'contactEmail', label: 'Contact email', type: 'email', error: 'Enter a valid email address.' },
   { name: 'phone', label: 'Phone', type: 'tel', error: 'Use digits, spaces and + ( ) - . only, at most 40 characters.' },
   { name: 'monthlyBaseSalary', label: 'Monthly base salary (Rp)', type: 'text', inputmode: 'decimal', hint: 'Digits only, up to 2 decimals — for example 7500000 or 7500000.50.', error: 'Enter an amount with digits only and at most 2 decimals, without separators.' },
@@ -315,7 +315,8 @@ function bindSessionWorkspace(app){
 }
 
 // After a render: the element the workspace asked for (an invalid field, the write
-// message, the confirmation, the form); else the form field that had focus; else the heading.
+// message, the confirmation, the form); else the element that had focus, when it is still
+// there (a background re-read must not move focus); else the heading.
 function sessionWorkspaceFocus(app, hint, kept){
   let el = null;
   if(hint && hint.indexOf('field:') === 0 && EMPLOYEE_WRITABLE_FIELDS.indexOf(hint.slice(6)) !== -1) el = app.querySelector('#swf-' + hint.slice(6));
@@ -338,7 +339,7 @@ function sessionWorkspaceFocus(app, hint, kept){
 function renderSessionWorkspace(app, auth){
   SessionWorkspace.ensureLoaded(auth.principal);
   const active = typeof document !== 'undefined' ? document.activeElement : null;
-  const kept = (active && typeof active.id === 'string' && /^swf-[A-Za-z]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
+  const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
   app.innerHTML = sessionWorkspaceHTML(auth, SessionEmployeeStore.snapshot());
   bindSessionWorkspace(app);
