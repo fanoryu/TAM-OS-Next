@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **AFI-4a1 read-only SESSION Employee workspace (frontend; SESSION mode only, not shipped).** When signed in
+  through the backend session, a CEO sees the server Employee list (with archived records on request) and a
+  record's detail with its account state, and an Employee sees their own profile — read-only, from the server only,
+  strictly validated, kept in memory and cleared on sign-out or session loss. No local business data is read or
+  written, and the business shell, "Acting as" and the other domains stay unavailable in this mode. No Employee
+  edits or account controls yet; the shipped `AUTH_MODE` stays **LOCAL**.
 - **BF-4a2 Employee account administration (backend source only; not deployed, no UI).** The CEO-only
   `account.manage` ACTION (SDR-0004) provisions a login for an existing Employee record, reissues its
   activation, and disables or re-enables it — `POST /api/employees/provision-account`, `reissue-activation`,

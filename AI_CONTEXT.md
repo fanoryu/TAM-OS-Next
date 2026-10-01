@@ -98,7 +98,14 @@ enable (`/api/employees/provision-account` etc.), activation delivered by the go
 issues the token at send time; no route returns one), membership-only disable/enable, a derived `accountState` in
 the CEO reads, and migrations `0018`–`0019`. Owner decision C1 = A mirrors `account.manage` in `js/core/authz.js`
 as vocabulary only, so **ACTIONS are 21** on both sides and the package digest changes; `AUTH_MODE` stays LOCAL,
-"Acting as" is unchanged, and AFI-4a (the authenticated Employee workspace) is still pending. v2.10.0 remains
+"Acting as" is unchanged. **AFI-4a1** (implemented as source on a feature branch; not deployed) is the first slice of
+the authenticated Employee workspace: in SESSION mode an AUTHENTICATED CEO gets the server Employee list (with an
+archived toggle) and a record's detail with its account state as text, and an Employee gets their own read-only
+profile — server-authoritative, strictly decoded, held in memory only (no business localStorage, no `State`), rendered
+on the auth-view path (the business shell, "Acting as", Global Search, local data tools and the other domains stay
+unreachable; `allowsWorkspace()` is still false), and destroyed on logout, a 401 or a principal change. There is no
+Employee create/update/archive (AFI-4a2) and no account control (AFI-4a3, after BF-4a3's `accountManageable`,
+D-AFI4a-D1 = A); production `AUTH_MODE` is still LOCAL and AFI-4a is not closed. v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
