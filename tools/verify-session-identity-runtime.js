@@ -113,6 +113,9 @@ function loadRuntime(){
   return rt;
 }
 const flush = () => new Promise(r => setImmediate(r));
+// Reads one field of a principal that may be null, so a wrongly refused identity is a
+// counted [FAIL] (and the run reaches its summary) instead of a TypeError that aborts it.
+const fieldOf = (o, k) => (o && typeof o === 'object') ? o[k] : undefined;
 
 const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employeeId: null, csrfToken: CSRF_A };
 
@@ -377,8 +380,8 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
     check(rt.CsrfHolder.get() === CSRF_A, 'session: /me csrfToken replaced the in-memory CSRF token');
     const ws = rt.getCurrentWorkspace();
     check(!!ws && ws.type === 'executive' && ws.scope === 'ALL_COMPANY', 'session: CEO -> Executive / ALL_COMPANY');
-    const mutated = rt.getCurrentUser(); mutated.principalType = 'employee';
-    check(rt.getCurrentUser().principalType === 'ceo', 'session: callers receive copies; the held principal cannot be mutated');
+    const mutated = rt.getCurrentUser(); if(mutated) mutated.principalType = 'employee';
+    check(!!mutated && fieldOf(rt.getCurrentUser(), 'principalType') === 'ceo', 'session: callers receive copies; the held principal cannot be mutated');
     rt.net.responder = () => resp(200, okEnv(Object.assign({}, ME_CEO, { employeeId: 'emp_srv_9', csrfToken: CSRF_B })));
     await rt.SessionIdentityProvider.refresh();
     const ub = rt.getCurrentUser(); const wsb = rt.getCurrentWorkspace();
@@ -388,7 +391,7 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
     // an outage changes nothing
     rt.net.responder = () => new TypeError('Failed to fetch');
     const off = await rt.SessionIdentityProvider.refresh();
-    check(off.ok === false && off.kind === K.UNAVAILABLE && rt.getCurrentUser().id === 'u_ceo_1' && rt.CsrfHolder.get() === CSRF_B,
+    check(off.ok === false && off.kind === K.UNAVAILABLE && fieldOf(rt.getCurrentUser(), 'id') === 'u_ceo_1' && rt.CsrfHolder.get() === CSRF_B,
       'session: UNAVAILABLE leaves identity and token unchanged (no fallback, no fabrication)');
     // 401 clears identity and token
     rt.net.responder = () => resp(401, errEnv('unauthenticated'));
