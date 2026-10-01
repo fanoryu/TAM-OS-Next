@@ -93,7 +93,9 @@ append-only `audit_events` trail), `GET /api/employees` (CEO only), `GET /api/em
 scope for an Employee), and create / update / archive under the existing `employee.create` / `employee.update` /
 `employee.delete` ACTIONS (archive is a soft archive; ACTIONS stay 20). BF-4a2 — Employee account provisioning under
 the owner-locked `account.manage` ACTION with activation by the governed mail outbox — is pending, and AFI-4 waits
-for BF-4a to finish. v2.10.0 remains
+for BF-4a to finish. Its security decision is recorded in
+[SDR-0004](docs/security/SDR-0004-employee-account-administration.md) (owner decision C1 = A: `account.manage` is
+mirrored in `js/core/authz.js`, so BF-4a2 moves ACTIONS 20 → 21 on both sides; until then ACTIONS stay 20). v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,
