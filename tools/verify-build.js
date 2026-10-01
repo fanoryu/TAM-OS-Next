@@ -5850,7 +5850,21 @@ console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
   // Static class names in class="…" plus the one class added by concatenation.
   const classes = (viewC.match(/class="([^"]+)"/g) || []).map((m) => m.slice(7, -1)).join(' ').split(/\s+/).filter((c) => /^[a-z][a-z0-9-]*$/.test(c)).concat(['auth-message-warn']);
   const cssAll = ['base.css', 'components.css', 'shell.css', 'tokens.css', 'charts.css', 'fonts.css'].map((f) => fs.existsSync(path.join(root, 'css', f)) ? read(path.join(root, 'css', f)) : '').join('\n');
-  const missing = classes.filter((c, i) => classes.indexOf(c) === i && !new RegExp('\\.' + c.replace(/-/g, '\\-') + '\\b').test(cssAll));
+  // Exact membership in the set of class selectors the CSS defines — no regular expression is
+  // ever built from a class name, so no name (backslash, quote, dot, bracket…) needs escaping.
+  const cssClassesOf = (css) => new Set((css.match(/\.-?[_A-Za-z][_A-Za-z0-9-]*/g) || []).map((s) => s.slice(1)));
+  const cssClassDefined = (defined, name) => typeof name === 'string' && defined.has(name);
+  const definedClasses = cssClassesOf(cssAll);
+  const missing = classes.filter((c, i) => classes.indexOf(c) === i && !cssClassDefined(definedClasses, c));
+  // Regression for the class lookup (code scanning js/incomplete-sanitization): hostile names are
+  // compared literally — never interpreted as a pattern, never thrown on, never a partial match.
+  const probeCss = '.auth-message{} .auth-message-warn{} .xzy{} .tabs{}';
+  const probe = cssClassesOf(probeCss);
+  const hostile = ['x.y', 'x\\', 'a\\b', "q'", 'q"', 'n\nl', 'c\rr', 't\tb', 'p(', 'x*', '[a]', 'tab', 'auth', '.auth-message', 'auth-message ', ''];
+  let hostileOk = true;
+  try { hostileOk = hostile.every((n) => cssClassDefined(probe, n) === false); } catch(_e){ hostileOk = false; }
+  check(hostileOk && cssClassDefined(probe, 'auth-message') && cssClassDefined(probe, 'auth-message-warn') && cssClassDefined(probe, 'tabs') && !cssClassDefined(probe, 'auth-message-w'),
+    'AFI-4a2: the CSS class lookup is exact — backslash, quotes, newline, CR, tab and pattern characters are never interpreted');
   check(missing.length === 0, 'AFI-4a2: the view uses only CSS classes that already exist (CSS unchanged)' + (missing.length ? ' >> missing: ' + missing.join(', ') : ''));
   check(!/localStorage|sessionStorage|indexedDB|document\s*\.\s*cookie|\bState\b|StorageAdapter/.test(storeC + viewC + apiC), 'AFI-4a2: drafts and write state live in memory only (no storage, no State)');
 }
