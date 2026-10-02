@@ -7,7 +7,7 @@ authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file
 there rather than duplicating it.
 
 **As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the merged BRAND-1
-identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 20. The published v2.11.0 portable artifact is
+identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 21 (20 until BF-4a2 added `account.manage`). The published v2.11.0 portable artifact is
 `dist/tam-os-v2.11.0.html` (1,676,709 bytes, SHA-256
 `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`), now frozen history. **v2.11.0 is
 published and marked Latest** in `fanoryu/TAM-OS-Next`, from annotated tag `v2.11.0` peeling to `04c1503d`.
@@ -82,7 +82,7 @@ is parsed strictly (one 43-character token, nothing else), read once and strippe
 without CSRF and with exact bodies; the confirmation field (D-B) is compared locally and never sent; the
 recovery request always ends on one generic confirmation; activation and reset create no session, and an
 explicit "Continue to sign in" returns to `AuthBoot`, where `/me` decides. LOCAL never parses the fragment.
-Proven by `tools/verify-auth-flow-runtime.js` (176 checks, seventeen mutations; local-only, not in CI) and
+Proven by `tools/verify-auth-flow-runtime.js` (176 checks, seventeen mutations; local-only until N1-B added it to CI with the AFI-2 and SESSION Employee harnesses) and
 AFI-3 guards in `verify-build.js` (2631 checks). AFI-4 Phase 0 found the authenticated workspace blocked on
 server business contracts; owner decisions **D-AFI4-1 = B** (server-authoritative only — the earlier D2 interim of
 a device-local CEO workspace behind SESSION is superseded) and **D-AFI4-2 = A** (Employee domain first, then
@@ -91,14 +91,14 @@ migrations `0014`–`0017` (the employee profile with soft archive and an optimi
 legacy anchors given a `LEGACY-NNNNNN` placeholder, then the final constraints; *D-BF4a1-MIGRATION-1 = A* — and the
 append-only `audit_events` trail), `GET /api/employees` (CEO only), `GET /api/employee?id=` (company scope for the CEO, self
 scope for an Employee), and create / update / archive under the existing `employee.create` / `employee.update` /
-`employee.delete` ACTIONS (archive is a soft archive). **BF-4a2** (implemented as source on a feature branch; not
+`employee.delete` ACTIONS (archive is a soft archive). **BF-4a2** (merged to `main` as source, PR #34; not
 deployed, no UI) adds Employee account administration under the CEO-only `account.manage` ACTION, as decided in
 [SDR-0004](docs/security/SDR-0004-employee-account-administration.md): provision, reissue activation, disable and
 enable (`/api/employees/provision-account` etc.), activation delivered by the governed mail outbox (the worker
 issues the token at send time; no route returns one), membership-only disable/enable, a derived `accountState` in
 the CEO reads, and migrations `0018`–`0019`. Owner decision C1 = A mirrors `account.manage` in `js/core/authz.js`
 as vocabulary only, so **ACTIONS are 21** on both sides and the package digest changes; `AUTH_MODE` stays LOCAL,
-"Acting as" is unchanged. **AFI-4a1** (merged to `main` as source; not deployed) is the first slice of
+"Acting as" is unchanged. **AFI-4a1** (merged to `main` as source, PR #35; not deployed) is the first slice of
 the authenticated Employee workspace: in SESSION mode an AUTHENTICATED CEO gets the server Employee list (with an
 archived toggle) and a record's detail with its account state as text, and an Employee gets their own read-only
 profile — server-authoritative, strictly decoded, held in memory only (no business localStorage, no `State`), rendered
@@ -117,7 +117,7 @@ active; false for a CEO-bound record, an archived record and an out-of-band disa
 self view carries neither it nor `accountState`; it is output only — never request input, never read by the account
 routes, which keep enforcing scope, Policy, the CEO-target guard and their own state rules. The frontend's strict
 CEO decoders were updated in the same slice so SESSION reads and AFI-4a2 writes keep decoding. `accountState` is
-unchanged. **AFI-4a3** (implemented as source on a feature branch; not pushed, not deployed; D-AFI4a3-1 = A) adds the
+unchanged. **AFI-4a3** (merged to `main` as source, PR #38; not deployed; D-AFI4a3-1 = A) adds the
 CEO's account-administration UI on the record detail, over the BF-4a2 routes: a "Login access" row offers exactly what
 the server projection allows — `accountManageable` false → nothing (the Login status text stays, unexplained); true +
 none → Create login; pending → Resend activation email, Disable login; active → Disable login; disabled → Enable login
@@ -127,7 +127,17 @@ produces. The login email starts empty (never the contact email) and lives in me
 link ever reaches the browser — the activation email is **queued** by the server. An unconfirmed write (503, network,
 timeout, malformed or non-confirming success) is never resent: the record is read again, and an unconfirmed resend
 is reported as such. An Employee still has no account control. No backend change, no migration; ACTIONS stay 21.
-Production `AUTH_MODE` is still LOCAL, "Acting as" remains LOCAL-only, and AFI-4a is not closed.
+Production `AUTH_MODE` is still LOCAL and "Acting as" remains LOCAL-only. **AFI-4a is CLOSED** (owner
+acceptance after the capability closure review, 2026-10-02; canonical merge `f545733b19466262530bc1d1bc53de687dc5d29a`,
+tree `ee354f3b795e3257d57b4437054d51e85112b8eb`): the server-backed Employee read/write capability, the SESSION
+Employee workspace, CEO Employee CRUD, backend account administration, the `accountState` / `accountManageable`
+projection and the CEO account-administration UI are one accepted capability, still not deployed. **Next domain:
+Overtime** (D-AFI4-2; owner decision D-BF4b-1 = A), split by D-BF4b-2 = A into **BF-4b1 → AFI-4b1** (the non-money
+overtime workflow) and **BF-4b2 → AFI-4b2** (server-authoritative valuation and approval). Locked for 4b1:
+D-BF4b-5 = A — a strict state machine (Draft → Submitted → Reviewed; Submitted or Reviewed → Rejected; Rejected is
+terminal; editing only while Draft; no approval in 4b1) — and D-BF4b-6 = A — a Draft is hard-deleted, Drafts only,
+with its audit row in the same transaction. **D-BF4b-3** (valuation inputs) and **D-BF4b-4** (exact-decimal
+implementation) are **deferred** to BF-4b2 Phase 0 and are not decided. Nothing of 4b is implemented.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

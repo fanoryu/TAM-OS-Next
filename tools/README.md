@@ -189,11 +189,12 @@ PowerShell:
 Get-ChildItem tools/verify-*-runtime.js | ForEach-Object { node $_.FullName *> $null; if ($LASTEXITCODE -eq 0) { "PASS $($_.Name)" } else { "FAIL $($_.Name)" } }
 ```
 
-> **Note.** `ci.yml` runs five of these harnesses as blocking steps after `verify-build.js` —
+> **Note.** `ci.yml` runs eight of these harnesses as blocking steps after `verify-build.js` —
 > `verify-identity-foundation-runtime.js`, `verify-session-identity-runtime.js`,
-> `verify-identity-selection-runtime.js`, `verify-workspace-selfscope-runtime.js` and
-> `verify-authz-runtime.js` — a fixed allowlist of deterministic identity/authorization harnesses that
-> `verify-build.js` pins (no glob, no failure bypass). The rest of the suite is **not** wired into CI
+> `verify-identity-selection-runtime.js`, `verify-workspace-selfscope-runtime.js`,
+> `verify-authz-runtime.js` and, since N1-B, `verify-auth-boot-runtime.js`, `verify-auth-flow-runtime.js` and
+> `verify-session-employee-runtime.js` — a fixed allowlist of deterministic identity/authorization/SESSION
+> harnesses that `verify-build.js` pins (no glob, no failure bypass). The rest of the suite is **not** wired into CI
 > (the contract-timeline harness is date-sensitive); run it locally before proposing a change that
 > touches behaviour.
 
@@ -203,9 +204,9 @@ Get-ChildItem tools/verify-*-runtime.js | ForEach-Object { node $_.FullName *> $
 |---|---|
 | [`verify-identity-foundation-runtime.js`](verify-identity-foundation-runtime.js) | UX-006A identity seam, CEO + Employee principals, no persistence, fail-closed |
 | [`verify-session-identity-runtime.js`](verify-session-identity-runtime.js) | AFI-1 same-origin API client, normalized errors, in-memory CSRF holder, `/api/auth/me` projection, CEO binding, no local fallback (scripted fetch, no network) |
-| [`verify-auth-boot-runtime.js`](verify-auth-boot-runtime.js) | AFI-2 SESSION-mode boot: explicit auth mode, `/me` classification, login then `/me`, logout, bounded 403 recovery, no local state / shell / "Acting as" in SESSION, LOCAL boot unchanged (local only — not in the CI allowlist) |
-| [`verify-session-employee-runtime.js`](verify-session-employee-runtime.js) | AFI-4a1 read-only SESSION Employee workspace, AFI-4a2 CEO create / update / archive , the BF-4a3 strict `accountManageable` decoder contract and the AFI-4a3 account-administration matrix, operations, unconfirmed-write reconciliation and email-draft lifecycle (request mirror, exact write bodies, CSRF recovery, ambiguous-write reconciliation without resend, conflicts, Employee containment, draft lifecycle, focus): structured API queries, strict DTO decoders, CEO list / archived / detail and Employee self flows, every error kind, malformed answers, logout / 401 / principal change / late and superseded answers, zero localStorage / sessionStorage access, and no LOCAL boot, shell, "Acting as", local data tool, Global Search or other domain (local only — not in the CI allowlist) |
-| [`verify-auth-flow-runtime.js`](verify-auth-flow-runtime.js) | AFI-3 credential flows: strict `#recovery=` / `#activation=` parsing and immediate stripping, activation, recovery request (enumeration-safe), reset, error mapping, token and password never stored, no local state / shell / "Acting as", LOCAL ignores the fragment (local only — not in the CI allowlist) |
+| [`verify-auth-boot-runtime.js`](verify-auth-boot-runtime.js) | AFI-2 SESSION-mode boot: explicit auth mode, `/me` classification, login then `/me`, logout, bounded 403 recovery, no local state / shell / "Acting as" in SESSION, LOCAL boot unchanged (in the CI allowlist) |
+| [`verify-session-employee-runtime.js`](verify-session-employee-runtime.js) | AFI-4a1 read-only SESSION Employee workspace, AFI-4a2 CEO create / update / archive , the BF-4a3 strict `accountManageable` decoder contract and the AFI-4a3 account-administration matrix, operations, unconfirmed-write reconciliation and email-draft lifecycle (request mirror, exact write bodies, CSRF recovery, ambiguous-write reconciliation without resend, conflicts, Employee containment, draft lifecycle, focus): structured API queries, strict DTO decoders, CEO list / archived / detail and Employee self flows, every error kind, malformed answers, logout / 401 / principal change / late and superseded answers, zero localStorage / sessionStorage access, and no LOCAL boot, shell, "Acting as", local data tool, Global Search or other domain (in the CI allowlist) |
+| [`verify-auth-flow-runtime.js`](verify-auth-flow-runtime.js) | AFI-3 credential flows: strict `#recovery=` / `#activation=` parsing and immediate stripping, activation, recovery request (enumeration-safe), reset, error mapping, token and password never stored, no local state / shell / "Acting as", LOCAL ignores the fragment (in the CI allowlist) |
 | [`verify-identity-selection-runtime.js`](verify-identity-selection-runtime.js) | UX-006D1 reachable principal selection ("Acting as"), ephemeral, no boot default |
 | [`verify-workspace-selfscope-runtime.js`](verify-workspace-selfscope-runtime.js) | UX-006B derived Executive/Personal workspaces and the SELF-scope resolver |
 | [`verify-authz-runtime.js`](verify-authz-runtime.js) | The frozen `can(action, resource?)` policy table and capability matrix |

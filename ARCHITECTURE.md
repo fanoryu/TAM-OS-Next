@@ -1160,7 +1160,7 @@ BF-4a1 makes the employee anchor the first **server-authoritative business recor
 D-AFI4-1 = B server-authoritative only, D-AFI4-2 = A Employee domain first, D-BF4a-3 = B field set). It is
 backend only: the frontend does not call it, `AUTH_MODE` stays LOCAL, ACTIONS stay **20**, and "Acting as"
 is unchanged. Employee account provisioning, activation reissue, account disable/enable and the
-activation mail are **BF-4a2** (pending); AFI-4 stays blocked until BF-4a is complete.
+activation mail are **BF-4a2** (next sections); the frontend workspace followed as AFI-4a, now closed.
 
 **Schema.** The final profile adds `employee_code` (`VARCHAR(32)`, `UNIQUE (company_id, employee_code)`,
 case-insensitive), `full_name` (`VARCHAR(160)`, non-empty), `job_title`, `department`, `employment_status` (exactly Active / Inactive / On Leave / Resigned /
@@ -1238,7 +1238,7 @@ fields, bulk import, the LOCAL → server migration, the frontend workspace (AFI
 BF-4a2 lets the CEO create and administer the login of an existing Employee record, as decided in
 [SDR-0004](docs/security/SDR-0004-employee-account-administration.md) (owner decisions D-BF4a-1 = B,
 D-BF4a-2 = B, C1 = A). Backend only: no frontend feature calls it, `AUTH_MODE` stays LOCAL, "Acting as" is
-unchanged, and the authenticated Employee workspace that will use it is AFI-4a (pending).
+unchanged; the authenticated Employee workspace that uses it is AFI-4a (since closed).
 
 **ACTION.** `account.manage` — CEO-only and record-bearing on the Employee record (scoped load → 404, then
 Policy → 403) — joins the shared vocabulary: `server/src/Policy/Action.php` and `js/core/authz.js` both hold
@@ -1419,7 +1419,7 @@ user. **Continue to sign in** (or **Back to sign in**) returns `AuthFlow` to `ID
 shell, "Acting as" or Global Search, reach the local identity, or fall back to LOCAL; `allowsWorkspace()` is
 still always false. The frontend knows nothing about the mail outbox, the worker or the provider.
 
-**Proof.** `tools/verify-auth-flow-runtime.js` (176 checks; **local-only**, not in the CI allowlist) runs the
+**Proof.** `tools/verify-auth-flow-runtime.js` (176 checks; local-only when AFI-3 landed, a CI harness since N1-B) runs the
 real modules with a fake `location` / `history` and a small `#app` DOM that drives the real form handlers;
 seventeen controlled mutations (local state, "Acting as", an echoed address, a stored token, a stored password,
 a local identity, a dead link treated as success or retried, no busy guard, LOCAL stripping the fragment, a
@@ -1610,6 +1610,11 @@ Edit, Archive, another record and another account action are refused; a second s
 **Proof.** Runtime harness section V (matrix, each operation's success and failure classes, unconfirmed outcomes and
 reconciliation, CSRF recovery, races, the email draft lifecycle, Employee containment); the AFI-4a3 checks in
 `tools/verify-build.js`; the four account routes in `tools/serve-auth-stub.js` (test only).
+
+**Status.** AFI-4a (AFI-4a1–AFI-4a3 with BF-4a1–BF-4a3) is **closed** as one Employee capability, owner-accepted on
+2026-10-02 at canonical merge `f545733b19466262530bc1d1bc53de687dc5d29a` (tree `ee354f3b…`); source only, not
+deployed. The next domain is Overtime, as BF-4b1 → AFI-4b1 (non-money workflow) then BF-4b2 → AFI-4b2 (valuation
+and approval); its valuation inputs and exact-decimal method are deferred to BF-4b2 Phase 0 (see `AI_CONTEXT.md`).
 
 ### Release engineering
 

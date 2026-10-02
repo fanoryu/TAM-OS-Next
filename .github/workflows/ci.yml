@@ -35,9 +35,10 @@ jobs:
       - name: Verify build
         run: node tools/verify-build.js
 
-      # Deterministic identity / authorization runtime harnesses (fixed allowlist; no
-      # network, no clock, no credentials). Each is a blocking step: a non-zero exit
-      # fails the job. The rest of the runtime suite is still run locally only.
+      # Deterministic identity / authorization / SESSION runtime harnesses (fixed allowlist;
+      # no network, no clock, no credentials — fetch is a stub and the API timeout is a
+      # virtual timer). Each is a blocking step: a non-zero exit fails the job. The rest of
+      # the runtime suite is still run locally only.
       - name: Runtime harness - identity foundation
         run: node tools/verify-identity-foundation-runtime.js
 
@@ -52,6 +53,15 @@ jobs:
 
       - name: Runtime harness - authorization
         run: node tools/verify-authz-runtime.js
+
+      - name: Runtime harness - SESSION auth boot (AFI-2)
+        run: node tools/verify-auth-boot-runtime.js
+
+      - name: Runtime harness - SESSION credential flows (AFI-3)
+        run: node tools/verify-auth-flow-runtime.js
+
+      - name: Runtime harness - SESSION Employee workspace (AFI-4a)
+        run: node tools/verify-session-employee-runtime.js
 
       - name: Build deployment package
         run: node tools/build-package.js
