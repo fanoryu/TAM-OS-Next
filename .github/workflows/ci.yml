@@ -63,6 +63,9 @@ jobs:
       - name: Runtime harness - SESSION Employee workspace (AFI-4a)
         run: node tools/verify-session-employee-runtime.js
 
+      - name: Runtime harness - SESSION Overtime workspace (AFI-4b1)
+        run: node tools/verify-session-overtime-runtime.js
+
       - name: Build deployment package
         run: node tools/build-package.js
 

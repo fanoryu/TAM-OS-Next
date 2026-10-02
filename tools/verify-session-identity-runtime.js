@@ -73,7 +73,7 @@ function loadRuntime(){
     + ' API_TIMEOUT_MS: API_TIMEOUT_MS, CsrfHolder: CsrfHolder, SessionIdentityProvider: SessionIdentityProvider,'
     + ' mapSessionProjection: mapSessionProjection, getCurrentUser: getCurrentUser, isValidUser: isValidUser,'
     + ' getCurrentWorkspace: getCurrentWorkspace, LocalIdentityProvider: LocalIdentityProvider,'
-    + ' setIdentityProviderForTesting: setIdentityProviderForTesting,'
+    + ' setIdentityProviderForTesting: setIdentityProviderForTesting, API_BODY_KEY_EXCEPTION: API_BODY_KEY_EXCEPTION,'
     // Builds a request body in the PAGE realm, as a real caller would (a plain object
     // from this Node realm has a different Object.prototype).
     + ' body: function(json){ return JSON.parse(json); } };';
@@ -205,8 +205,10 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
     }
     const arr = await rt.ApiClient.request('/api/auth/logout', { method: 'POST', body: [] });
     const str = await rt.ApiClient.request('/api/auth/logout', { method: 'POST', body: 'x' });
+    // D-AFI4b1-3 revision: identity-shaped mutation keys stay forbidden except for the ONE explicit
+    // Overtime-create employeeId target selector (proven in section 3b). Was: forbidden everywhere.
     check(allRefused && arr.kind === K.CLIENT_FAULT && str.kind === K.CLIENT_FAULT && rt.net.calls.length === n,
-      'mutation: role/companyId/employeeId authority fields and non-object bodies are refused before any request');
+      'mutation: role/companyId/company_id/employeeId/employee_id and non-object bodies are refused before any request (outside the one Overtime-create selector)');
     const noTok = await rt.ApiClient.request('/api/auth/logout', { method: 'POST', csrf: true });
     check(noTok.kind === K.CLIENT_FAULT && rt.net.calls.length === n, 'CSRF: requested with an empty holder -> refused locally, nothing sent');
     rt.CsrfHolder.replace(CSRF_A);
@@ -215,6 +217,60 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
     rt.CsrfHolder.replace(CSRF_B);
     await rt.ApiClient.request('/api/auth/logout', { method: 'POST', csrf: true });
     check(rt.net.calls[n + 1].init.headers['X-CSRF-Token'] === CSRF_B, 'CSRF: a replaced token is the one sent next');
+  }
+
+  /* ---------- 3b. D-AFI4b1-3: the one route-scoped employeeId target selector ---------- */
+  {
+    const rt = loadRuntime(); const K = rt.API_RESULT_KINDS;
+    const X = rt.API_BODY_KEY_EXCEPTION;
+    check(!!X && Object.isFrozen(X) && Object.keys(X).sort().join() === 'key,method,path'
+      && X.method === 'POST' && X.path === '/api/overtime-records/create' && X.key === 'employeeId'
+      && rt.w.API_BODY_KEY_EXCEPTION === undefined,
+      'selector: exactly one frozen exception { POST, /api/overtime-records/create, employeeId }, not on window');
+    try { X.path = '/api/employees/create'; X.key = 'employee_id'; X.method = 'PUT'; } catch(_e){ /* frozen */ }
+    check(X.path === '/api/overtime-records/create' && X.key === 'employeeId' && X.method === 'POST',
+      'selector: the exception cannot be rewritten at runtime');
+    rt.net.responder = () => resp(200, okEnv({ done: true }));
+    rt.CsrfHolder.replace(CSRF_A);
+    const OT_CREATE = '/api/overtime-records/create';
+    const okBody = '{"employeeId":"emp_srv_1","monthKey":"2026-10","hours":"7.50"}';
+    const r0 = await rt.ApiClient.request(OT_CREATE, { method: 'POST', body: rt.body(okBody), csrf: true });
+    const c0 = rt.net.calls[0];
+    check(r0.ok === true && rt.net.calls.length === 1 && c0.url === OT_CREATE && c0.init.method === 'POST'
+      && c0.init.body === okBody && c0.init.headers['X-CSRF-Token'] === CSRF_A,
+      'selector: POST /api/overtime-records/create with employeeId is sent, body byte-exact, CSRF header attached');
+    const r0b = await rt.ApiClient.request(OT_CREATE, { method: 'POST', body: rt.body('{"employeeId":"someone_else_9","monthKey":"2026-10","hours":"1.00"}') });
+    check(r0b.ok === true && rt.net.calls.length === 2 && JSON.parse(rt.net.calls[1].init.body).employeeId === 'someone_else_9',
+      'selector: any well-shaped value is passed through untouched — the client never treats it as authority; the server re-scopes it');
+    // Negative: employeeId on every other route stays CLIENT_FAULT, nothing sent.
+    const n = rt.net.calls.length;
+    const otherRoutes = ['/api/employees/create', '/api/employees/update', '/api/employees/archive',
+      '/api/overtime-records/update', '/api/overtime-records/delete', '/api/overtime-records/submit',
+      '/api/overtime-records/review', '/api/overtime-records/reject', '/api/auth/logout', '/api/auth/login',
+      '/api/overtime-records/create/', '/api/overtime-records', '/api/overtime-records/creat', '/api/overtime-records/create/x',
+      '/api/Overtime-records/create', '/api/employees/provision-account'];
+    for(const route of otherRoutes){
+      const r = await rt.ApiClient.request(route, { method: 'POST', body: rt.body('{"employeeId":"emp_srv_1","id":"x"}') });
+      check(r.kind === K.CLIENT_FAULT && rt.net.calls.length === n, 'selector: employeeId on POST ' + route + ' is CLIENT_FAULT, nothing sent');
+    }
+    const otherMethods = [];
+    for(const method of ['PUT', 'PATCH', 'DELETE']){
+      const r = await rt.ApiClient.request(OT_CREATE, { method: method, body: rt.body(okBody) });
+      if(r.kind !== K.CLIENT_FAULT) otherMethods.push(method);
+    }
+    const getQ = await rt.ApiClient.request('/api/overtime-records', { method: 'GET', query: rt.body('{"employeeId":"emp_srv_1"}') });
+    check(otherMethods.length === 0 && getQ.kind === K.CLIENT_FAULT && rt.net.calls.length === n,
+      'selector: PUT / PATCH / DELETE to the create path with employeeId, and employeeId as a GET query key, are refused locally');
+    // Negative on the authorized route itself: every other identity key stays forbidden.
+    for(const extra of ['employee_id', 'role', 'companyId', 'company_id']){
+      const alone = await rt.ApiClient.request(OT_CREATE, { method: 'POST', body: rt.body(JSON.stringify({ [extra]: 'x', monthKey: '2026-10', hours: '1.00' })) });
+      const withSel = await rt.ApiClient.request(OT_CREATE, { method: 'POST', body: rt.body(JSON.stringify({ employeeId: 'emp_srv_1', [extra]: 'x', monthKey: '2026-10', hours: '1.00' })) });
+      check(alone.kind === K.CLIENT_FAULT && withSel.kind === K.CLIENT_FAULT && rt.net.calls.length === n,
+        'selector: ' + extra + ' stays CLIENT_FAULT on POST /api/overtime-records/create — alone and beside employeeId');
+    }
+    const r404 = await (async () => { rt.net.responder = () => resp(404, errEnv('not_found')); return rt.ApiClient.request(OT_CREATE, { method: 'POST', body: rt.body(okBody) }); })();
+    check(r404.ok === false && r404.kind === K.NOT_FOUND && rt.net.calls.length === n + 1,
+      'selector: an out-of-scope target is the server answer (404 NOT_FOUND passed through), never decided by the client');
   }
 
   /* ---------- 4. CsrfHolder ---------- */

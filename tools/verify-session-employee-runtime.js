@@ -235,8 +235,16 @@ function firewall(rt, label){
     label + ': zero localStorage / sessionStorage access' + (rt.access.local.length + rt.access.session.length ? ' >> ' + rt.access.local.concat(rt.access.session).join(', ') : ''));
   check(rt.spy.length === 0, label + ': no LOCAL boot, shell, "Acting as", local data tool, Global Search, legacy Employee handler or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
   const html = rt.appHTML();
-  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Overtime|Payroll|Finance|Smart Import|Backup|Restore|Start fresh/i.test(html),
-    label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool');
+  // AFI-4b1 authorized revision: the authenticated workspace carries the SESSION section switch —
+  // exactly this nav of two buttons (Employees | Overtime, My profile | My overtime) — and the
+  // Overtime section is never open in this harness (its button is not pressed, no swo* control).
+  // Only that exact markup is removed before the deny test; any other Overtime / Payroll /
+  // Finance text, navigation or local data tool still fails. Was: no "Overtime" text at all.
+  const SECTIONS = /<nav aria-label="Workspace sections"><div class="tabs"><button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>(Employees|My profile)<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>(Overtime|My overtime)<\/button><\/div><\/nav>/g;
+  const sections = html.match(SECTIONS) || [];
+  check(sections.length <= 1 && !/id="swo|id="swSection/.test(html.replace(SECTIONS, ''))
+    && !/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Overtime|Payroll|Finance|Smart Import|Backup|Restore|Start fresh/i.test(html.replace(SECTIONS, '')),
+    label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool (beyond the exact SESSION section switch, Overtime not open)');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
     label + ': legacy State stays empty and the business shell is never granted');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');

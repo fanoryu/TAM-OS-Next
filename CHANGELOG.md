@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **AFI-4b1 SESSION Overtime (frontend; SESSION mode only, not shipped).** Signed in through the backend session,
+  the CEO has an Overtime section next to Employees, and an Employee a "My overtime" section next to their profile.
+  It shows one month at a time (starting at the current month; Previous / Next / a month field), the company's or
+  the Employee's own records with date, employee, hours and status. Both can add overtime as a Draft (the CEO for an
+  active employee); a Draft can be edited, deleted or submitted; the CEO can review or reject a submitted record and
+  reject a reviewed one. Every change asks first, uses the record version, and is shown only when TAM OS confirms
+  it; if a result cannot be confirmed, nothing is sent again — the month or record is read again and shown as it
+  really is. No pay, rate or approval yet. The request that creates a record names its employee as a target only;
+  TAM OS's server decides whether that is allowed. No backend change; the shipped `AUTH_MODE` stays **LOCAL**.
 - **BF-4b1 overtime workflow (backend source only; not deployed, no UI).** The server can now hold overtime
   records: an employee's hours for a month (with an optional date inside that month), from Draft to Submitted to
   Reviewed, or Rejected. The CEO works with the whole company; an Employee only with their own Drafts, and only the

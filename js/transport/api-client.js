@@ -25,7 +25,10 @@
        method  GET | HEAD | POST | PUT | PATCH | DELETE (default GET).
        body    mutations only: a plain JSON object (default {}). It may never
                carry an authority/scope field (role, company, employee) — those
-               are server-derived (SDR-0002 §23.8).
+               are server-derived (SDR-0002 §23.8). D-AFI4b1-3: the one pinned
+               target-selector exception, API_BODY_KEY_EXCEPTION, is employeeId on
+               exactly POST /api/overtime-records/create — it names the record's
+               owner; the server re-scopes and authorizes it. It is not authority.
        csrf    true only for a session-bound mutation. The token is read from
                the in-memory CsrfHolder and sent as X-CSRF-Token; never sent
                otherwise. An empty holder refuses the request locally.
@@ -66,10 +69,17 @@ const API_PATH_PATTERN = /^\/api\/[A-Za-z0-9._~\-\/]+$/;
 const API_METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 // Authority and scope are server-derived; a request body may never claim them.
 const API_FORBIDDEN_BODY_KEYS = Object.freeze(['role', 'companyId', 'company_id', 'employeeId', 'employee_id']);
+// D-AFI4b1-3: the ONE target-selector exception — this exact method, path and key, nothing else.
+// The Overtime create body names the owner of the new record (BF-4b1 OvertimeInput::create); the
+// server resolves it inside the session's scope (404 outside it) and Policy decides — the value
+// selects a target and is never authority. Every other forbidden key, route and method is refused.
+const API_BODY_KEY_EXCEPTION = Object.freeze({ method: 'POST', path: '/api/overtime-records/create', key: 'employeeId' });
 // AFI-4a1 structured query: the only query keys a read may send (GET /api/employees
 // ?archived=1, GET /api/employee?id=<opaque id>), and the only value shape — the server
 // Employee id pattern (server/src/Employee/EmployeeInput.php ID_PATTERN), which '1' also fits.
-const API_QUERY_KEYS = Object.freeze(['archived', 'id']);
+// AFI-4b1: plus month (GET /api/overtime-records?month=YYYY-MM, which the same shape fits; the
+// overtime record id fits it too).
+const API_QUERY_KEYS = Object.freeze(['archived', 'id', 'month']);
 const API_QUERY_VALUE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // Server formats (server/src/Http/RequestId.php, server/src/Auth/SessionToken.php).
 const API_REQUEST_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -191,7 +201,10 @@ const ApiClient = (function(){
         const body = (opts.body === undefined) ? {} : opts.body;
         if(!isPlainObject(body)) return failure(API_RESULT_KINDS.CLIENT_FAULT);
         for(let i = 0; i < API_FORBIDDEN_BODY_KEYS.length; i++){
-          if(Object.prototype.hasOwnProperty.call(body, API_FORBIDDEN_BODY_KEYS[i])) return failure(API_RESULT_KINDS.CLIENT_FAULT);
+          const key = API_FORBIDDEN_BODY_KEYS[i];
+          if(!Object.prototype.hasOwnProperty.call(body, key)) continue;
+          if(method === API_BODY_KEY_EXCEPTION.method && path === API_BODY_KEY_EXCEPTION.path && key === API_BODY_KEY_EXCEPTION.key) continue;
+          return failure(API_RESULT_KINDS.CLIENT_FAULT);
         }
         headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(body);
