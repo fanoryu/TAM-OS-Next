@@ -43,8 +43,9 @@ const EMPLOYEE_API_INVALID = 'INVALID_RESPONSE';
 const EMPLOYEE_API_STATUSES = Object.freeze(['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated']);
 const EMPLOYEE_API_ACCOUNT_STATES = Object.freeze(['none', 'pending', 'active', 'disabled']);
 const EMPLOYEE_API_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-// EmployeeView::LIST_FIELDS / DETAIL_FIELDS / SELF_FIELDS, sorted for the exact-key comparison.
-const EMPLOYEE_LIST_KEYS = Object.freeze(['accountState', 'archived', 'department', 'employeeCode', 'employmentStatus', 'fullName', 'id', 'jobTitle']);
+// EmployeeView::LIST_FIELDS / DETAIL_FIELDS / SELF_FIELDS, sorted for the exact-key comparison. BF-4a3: the
+// CEO list and detail carry accountManageable (a required boolean); the self view never does.
+const EMPLOYEE_LIST_KEYS = Object.freeze(['accountManageable', 'accountState', 'archived', 'department', 'employeeCode', 'employmentStatus', 'fullName', 'id', 'jobTitle']);
 const EMPLOYEE_DETAIL_KEYS = Object.freeze(EMPLOYEE_LIST_KEYS.concat(['contactEmail', 'joinDate', 'monthlyBaseSalary', 'notes', 'phone', 'version']).sort());
 const EMPLOYEE_SELF_KEYS = Object.freeze(['contactEmail', 'department', 'employeeCode', 'employmentStatus', 'fullName', 'id', 'jobTitle', 'joinDate', 'monthlyBaseSalary', 'phone']);
 
@@ -78,6 +79,7 @@ const EmployeeDecoders = (function(){
     employmentStatus: (v) => EMPLOYEE_API_STATUSES.indexOf(v) !== -1,
     archived: (v) => typeof v === 'boolean',
     accountState: (v) => EMPLOYEE_API_ACCOUNT_STATES.indexOf(v) !== -1,
+    accountManageable: (v) => v === true || v === false,
     joinDate: isDate,
     contactEmail: (v) => v === null || (text(v, 254) && v.indexOf('@') !== -1),
     phone: (v) => v === null || (typeof v === 'string' && /^[0-9+()\-. ]{1,40}$/.test(v)),
