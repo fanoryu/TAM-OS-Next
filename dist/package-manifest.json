@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "caed142e0aae97b7e6944b2b451c51dc3ea2c484afa0f0ad5eced2271f47d4da",
+  "packageDigest": "fd2983120738661a7722c33f231335a6ff13da28a9e6ad82d602e3fb279b1cc6",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2726239,
-    "sha256": "b0a6a483ac7e9e0e62e95eb9a08222d977f2dfe06cec0047a9d887816d021874"
+    "bytes": 2726424,
+    "sha256": "81ddfb143200e6c2eaf387171552fe41bd81d576d769b15e9ec08bfcf18e8731"
   },
   "files": [
     {
@@ -139,8 +139,8 @@
     },
     {
       "path": "js/core/employee-api.js",
-      "bytes": 15044,
-      "sha256": "340ea27b8dcbdce9e8d261390803e8da2fb8a0d4a70a0ca98887ee97e8845577"
+      "bytes": 15229,
+      "sha256": "7e19dc9ca7aa80b2bdb1c6d3121b2659371e18e77d8efc532e7fe1105b82717e"
     },
     {
       "path": "js/core/global-search.js",
