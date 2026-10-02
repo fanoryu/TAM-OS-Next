@@ -123,6 +123,8 @@ const TOKEN_PRINTERS = new Set(['server/bin/account.php']);
 const EMPLOYEE_STORE = 'server/src/Data/Employee/EmployeeStore.php';
 const AUDIT_LOG = 'server/src/Data/Audit/AuditLog.php';
 const ROUTES_FILE = 'server/src/Http/Routes.php';
+// BF-4b1: the overtime record has one writer, and its only hard delete removes a Draft.
+const OVERTIME_STORE = 'server/src/Data/Overtime/OvertimeStore.php';
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -240,6 +242,8 @@ const STRING_RULES = [
   // the audit trail is append-only — nothing updates, deletes, replaces or truncates it.
   { id: 'employee-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?employees\b/i, msg: 'employees is written only by ' + EMPLOYEE_STORE, allow: (f) => f === EMPLOYEE_STORE },
   { id: 'employee-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?employees\b/i, msg: 'an employee is never hard-deleted (employee.delete is a soft archive)' },
+  { id: 'overtime-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?overtime_records\b/i, msg: 'overtime_records is written only by ' + OVERTIME_STORE, allow: (f) => f === OVERTIME_STORE },
+  { id: 'overtime-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?overtime_records\b/i, msg: 'overtime_records is never truncated' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -284,7 +288,7 @@ function checkMigrationSql(src, file) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees', 'audit_events']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -330,8 +334,7 @@ function checkRouteActions(src) {
     if (ACCOUNT_ROUTES.includes(m[2]) && !accountManage) out.push('Routes.php: account route ' + key + ' must declare Action::AccountManage');
     if (!ACCOUNT_ROUTES.includes(m[2]) && accountManage) out.push('Routes.php: ' + key + ' is not an Employee account route and must not declare Action::AccountManage');
   }
-  for (const path of ACCOUNT_ROUTES) if (!src.includes("new Route('POST', '" + path + "'")) out.push('Routes.php: account route POST ' + path + ' is missing');
-  return out;
+  for (const path of ACCOUNT_ROUTES) if (!src.includes("new Route('POST', '" + path + "'")) out.push('Routes.php: account route POST ' + path + ' is missing');  return out;
 }
 
 // BF-4a1, SDR-0002 §9.2: a business mutation and its audit row commit in one transaction. Every
@@ -352,7 +355,7 @@ function checkAuditInTransaction(lex) {
     ranges.push([m.index, i]);
   }
   const out = [];
-  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account)?\s*\(/g;
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime)?\s*\(/g;
   while ((m = append.exec(code))) {
     const at = m.index;
     if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
@@ -452,6 +455,22 @@ function checkPhp(file, src) {
   for (const v of checkCsrfComparison(lex.code)) out.push(v);
   for (const v of checkScopedData(file, src, lex)) out.push(v);
   for (const v of checkAuditInTransaction(lex)) out.push(v);
+  for (const v of checkOvertimeDelete(lex)) out.push(v);
+  return out;
+}
+
+// BF-4b1, owner decision D-BF4b-6: the only hard delete of overtime removes a Draft. Every
+// DELETE FROM overtime_records statement names the company, the expected version and the Draft
+// status in its own predicate, so no caller can widen it to submitted or reviewed records.
+function checkOvertimeDelete(lex) {
+  const out = [];
+  for (const s of lex.strings) {
+    if (!/^\s*DELETE\s+FROM\s+`?overtime_records\b/i.test(s)) continue;
+    const where = s.split(/\bWHERE\b/i)[1] || '';
+    if (!/\bcompany_id = :company_id\b/.test(where) || !/\bversion = :expected_version\b/.test(where) || !/\bstatus = 'Draft'/.test(where) || /\bOR\b/i.test(where)) {
+      out.push("an overtime DELETE removes only a Draft: its WHERE names company_id = :company_id, version = :expected_version and status = 'Draft' (and no OR)");
+    }
+  }
   return out;
 }
 
@@ -478,9 +497,9 @@ function checkScopedData(file, src, lex) {
       if (!/:company_id\b/.test(s)) out.push('a business store statement must name :company_id: "' + s.slice(0, 40) + '"');
       if (s.includes('?')) out.push('a business store statement uses named parameters only: "' + s.slice(0, 40) + '"');
     }
-    const selfSql = /\bconst\s+(\w+_SELF_SQL)\s*=\s*'([^']*)'/g;
+    const selfSql = /\bconst\s+(\w+_SELF_SQL)\s*=\s*(?:'([^']*)'|"([^"]*)")/g;
     let m;
-    while ((m = selfSql.exec(src))) if (!/:self_employee_id\b/.test(m[2])) out.push(m[1] + ' must name :self_employee_id');
+    while ((m = selfSql.exec(src))) if (!/:self_employee_id\b/.test(m[2] ?? m[3])) out.push(m[1] + ' must name :self_employee_id');
   } else if (sql.some(companyTableSql)) {
     out.push('the company tables (' + [...COMPANY_TABLES].join(', ') + ') are read and written only by business stores under ScopedDatabase');
   }
@@ -1070,6 +1089,17 @@ function selftest() {
   dirty('an employees write outside EmployeeStore is caught', AUDIT_LOG, realAudit.replace('    public const ACTIONS', "    public const BAD_SQL = 'UPDATE employees SET notes = NULL WHERE company_id = :company_id';\n    public const ACTIONS"), 'written only by ' + EMPLOYEE_STORE);
   dirty('a hard DELETE of an employee in EmployeeStore is caught', STORE, inStore(realStore, "public const DELETE_SQL = 'DELETE FROM employees WHERE id = :id AND company_id = :company_id';"), 'never hard-deleted');
   dirty('an employee TRUNCATE is caught', STORE, inStore(realStore, "public const T_SQL = 'TRUNCATE TABLE employees';"), 'never hard-deleted');
+
+  // BF-4b1: overtime has one writer; its hard delete removes a Draft only; self SQL names the owner.
+  const realOvertime = fs.readFileSync(path.join(root, OVERTIME_STORE), 'utf8');
+  clean('the real OvertimeStore passes', OVERTIME_STORE, realOvertime);
+  dirty('an overtime DELETE without the Draft predicate is caught', OVERTIME_STORE, realOvertime.replace(" AND version = :expected_version AND status = 'Draft'\";\n    public const DELETE_DRAFT_SELF_SQL", " AND version = :expected_version\";\n    public const DELETE_DRAFT_SELF_SQL"), 'removes only a Draft');
+  dirty('an overtime DELETE without the version predicate is caught', OVERTIME_STORE, realOvertime.replace("employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'\";\n\n", "employee_id = :self_employee_id AND status = 'Draft'\";\n\n"), 'removes only a Draft');
+  dirty('an overtime DELETE widened with OR is caught', OVERTIME_STORE, realOvertime.replace("AND status = 'Draft'\";\n    public const DELETE_DRAFT_SELF_SQL", "AND (status = 'Draft' OR status = 'Submitted')\";\n    public const DELETE_DRAFT_SELF_SQL"), 'removes only a Draft');
+  dirty('an overtime write outside OvertimeStore is caught', STORE, inStore(realStore, "public const OT_SQL = 'UPDATE overtime_records SET status = :s WHERE company_id = :company_id';"), 'written only by ' + OVERTIME_STORE);
+  dirty('an overtime TRUNCATE is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const T_SQL = 'TRUNCATE TABLE overtime_records';\n    public const ENTITY"), 'never truncated');
+  dirty('a double-quoted *_SELF_SQL without :self_employee_id is caught', OVERTIME_STORE, realOvertime.replace("employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL", "version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL"), 'UPDATE_SELF_SQL must name :self_employee_id');
+  dirty('overtime SQL in an auth store is caught', 'server/src/Data/Auth/AccountStore.php', S + "$this->db->select('SELECT id FROM overtime_records WHERE id = ?', [$e]);\n", 'read and written only by business stores');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
   clean('the real EmployeeService appends audit rows inside its transactions', SERVICE, realService);

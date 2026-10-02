@@ -79,6 +79,23 @@ final class ScopedDatabase
     }
 
     /**
+     * BF-4b1: a create candidate — the record a record-bearing create is authorized against before
+     * it exists. Its scope and its owner come only from an employee record this layer already
+     * found under that scope, so a candidate can never name a company or an employee the
+     * principal cannot see; the caller supplies only the new server id and the initial status.
+     */
+    public function candidate(ScopedRecord $owner, string $entity, string $id, string $status): ScopedRecord
+    {
+        if ($owner->entity !== 'employee' || $owner->ownerEmployeeId !== $owner->id) {
+            throw new \LogicException('a create candidate is owned by an employee record read in scope');
+        }
+        if ($entity === 'employee' || preg_match('/^[0-9a-f]{32}$/', $id) !== 1 || $status === '') {
+            throw new \LogicException('a create candidate needs a new server id and its initial status');
+        }
+        return new ScopedRecord($owner->scope, $entity, $id, $owner->id, $status);
+    }
+
+    /**
      * @param array<string, int|string|bool|null> $params
      * @return int the affected row count (0 = nothing in scope matched → the caller's 404)
      */
