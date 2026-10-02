@@ -104,14 +104,21 @@ archived toggle) and a record's detail with its account state as text, and an Em
 profile — server-authoritative, strictly decoded, held in memory only (no business localStorage, no `State`), rendered
 on the auth-view path (the business shell, "Acting as", Global Search, local data tools and the other domains stay
 unreachable; `allowsWorkspace()` is still false), and destroyed on logout, a 401 or a principal change.
-**AFI-4a2** (implemented as source on a feature branch; not pushed, not deployed) lets a SESSION **CEO** create,
+**AFI-4a2** (merged to `main` as source, PR #36; not deployed) lets a SESSION **CEO** create,
 update and **soft-archive** Employee records (BF-4a1 `POST /api/employees/create|update|archive`, through the
 existing `authSessionMutation` CSRF path; changed fields + `expectedVersion` on update; no delete, no unarchive). The
 server stays authoritative: only its strictly decoded answer changes the in-memory data, an unknowable outcome (503,
 network, timeout, malformed success) is never resent but reconciled by re-reading, and a recovery that cannot confirm
-the session fails closed via the new `AuthBoot.sessionUncertain()`. An **Employee stays read-only**. There is still no
-account control and `accountManageable` is not implemented (AFI-4a3, after BF-4a3, D-AFI4a-D1 = A); `accountState`
-is display-only. Production `AUTH_MODE` is still LOCAL, "Acting as" remains LOCAL-only, and AFI-4a is not closed.
+the session fails closed via the new `AuthBoot.sessionUncertain()`. An **Employee stays read-only**.
+**BF-4a3** (implemented as source on a feature branch; not pushed, not deployed; D-AFI4a-D1 = A, D-BF4a3-1 = A,
+D-BF4a3-2 = A) adds the server-derived boolean `accountManageable` to the CEO Employee list and detail (and so to
+every Employee write answer): true only for a live record with no login or an `employee` membership whose user is
+active; false for a CEO-bound record, an archived record and an out-of-band disabled user (fail closed). The Employee
+self view carries neither it nor `accountState`; it is output only — never request input, never read by the account
+routes, which keep enforcing scope, Policy, the CEO-target guard and their own state rules. The frontend's strict
+CEO decoders were updated in the same slice so SESSION reads and AFI-4a2 writes keep decoding; no UI consumes the
+value and there is still no account control (AFI-4a3). `accountState` is unchanged and display-only. No migration;
+ACTIONS stay 21. Production `AUTH_MODE` is still LOCAL, "Acting as" remains LOCAL-only, and AFI-4a is not closed.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

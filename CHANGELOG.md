@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **BF-4a3 server-derived `accountManageable` (backend source + frontend contract; not deployed, no UI).** The
+  CEO's Employee list and record detail — and every Employee write answer — now say whether the record can be the
+  target of Employee account administration: yes for a live record with no login or an Employee login whose user is
+  active; no for a record bound to a CEO, an archived record, or a user disabled outside TAM OS. The Employee's own
+  profile does not carry it, browsers can never send it, and the account routes still check everything themselves.
+  The frontend's strict decoders accept it in the same change, so nothing breaks; no screen uses it yet. No
+  migration; ACTIONS stay **21**; `AUTH_MODE` stays **LOCAL**.
 - **AFI-4a2 SESSION Employee create, edit and archive (frontend; CEO only, SESSION mode only, not shipped).**
   A CEO signed in through the backend session can add an Employee record, edit it (only the changed fields are
   sent, with the record version) and archive it after an inline confirmation. Archive is a soft archive — the
