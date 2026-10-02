@@ -137,7 +137,14 @@ overtime workflow) and **BF-4b2 → AFI-4b2** (server-authoritative valuation an
 D-BF4b-5 = A — a strict state machine (Draft → Submitted → Reviewed; Submitted or Reviewed → Rejected; Rejected is
 terminal; editing only while Draft; no approval in 4b1) — and D-BF4b-6 = A — a Draft is hard-deleted, Drafts only,
 with its audit row in the same transaction. **D-BF4b-3** (valuation inputs) and **D-BF4b-4** (exact-decimal
-implementation) are **deferred** to BF-4b2 Phase 0 and are not decided. Nothing of 4b is implemented.
+implementation) are **deferred** to BF-4b2 Phase 0 and are not decided. **BF-4b1** (candidate on
+`feature/bf-4b1-overtime-workflow`; not merged, not deployed, no UI; D-BF4b1-1/2/3 = A) adds the backend-only
+overtime workflow: migrations `0020`–`0021` (`overtime_records` and the overtime audit vocabulary — migration head
+`0021`), a required-month list and a detail scoped like the Employee reads, and Draft create / update / hard delete
+plus submit / review / reject under the five existing overtime ACTIONS (**ACTIONS stay 21**). `monthKey` is a
+required `YYYY-MM` with an optional date inside it; hours are the exact string `"N.NN"`, > 0, ≤ 744, in quarter
+hours; every write is versioned, row-locked and audited in its transaction. No money, no approval, no payroll
+effect, and no frontend change: AFI-4b1 (the SESSION UI) and BF-4b2 (valuation and approval) are not started.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

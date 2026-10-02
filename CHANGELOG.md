@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **BF-4b1 overtime workflow (backend source only; not deployed, no UI).** The server can now hold overtime
+  records: an employee's hours for a month (with an optional date inside that month), from Draft to Submitted to
+  Reviewed, or Rejected. The CEO works with the whole company; an Employee only with their own Drafts, and only the
+  CEO reviews or rejects. A Draft can be edited or deleted; nothing else can. Every change is checked against the
+  version it was made from and recorded in the audit trail. Overtime pay, approval and payroll are not part of this
+  step, and the application does not use these routes yet; the shipped `AUTH_MODE` stays **LOCAL**.
 - **AFI-4a3 CEO login administration (frontend; SESSION mode only, not shipped).** On an Employee record the CEO
   can create a login (entering the login email; it is never taken from the contact email), resend the activation
   email, disable a login and enable it again — only the actions TAM OS's server allows for that record, each after

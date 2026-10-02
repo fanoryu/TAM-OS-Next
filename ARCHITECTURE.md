@@ -1293,6 +1293,56 @@ never names a token primitive or a mail builder; every audit append and outbox e
 **Not production-ready.** Everything BF-3A–BF-4a1 list, SDR-0003 §7 for the activation mail, and SDR-0004 §8
 (A1 activation delivery, A2 disable evidence).
 
+### Overtime workflow — BF-4b1 (candidate on a feature branch; source only, not deployed, no UI)
+
+BF-4b1 makes overtime the second server-authoritative business record — the **non-money** workflow only (owner
+decisions D-BF4b-1 = A, D-BF4b-2 = A). Backend only: no frontend module calls it (AFI-4b1), `AUTH_MODE` stays
+LOCAL, ACTIONS stay **21** and "Acting as" is unchanged. Valuation, approval and every payroll effect are BF-4b2;
+its inputs (D-BF4b-3) and exact-decimal method (D-BF4b-4) are not decided.
+
+**Schema.** Migration `0020` creates `overtime_records`: a server hex `id`, the tenant key, `employee_id` with a
+composite RESTRICT FK to `employees (company_id, id)`, `month_key` (`YYYY-MM`, required), `overtime_date` (optional
+`DATE`, CHECKed to fall inside the month — D-BF4b1-1), `hours` (`DECIMAL(5,2)`, > 0, ≤ 744, quarter-hour steps —
+D-BF4b1-2), `work_description`, `notes`, `status` (Draft / Submitted / Reviewed / Rejected) and `version`. No
+amount, rate, salary, schedule, contract or payroll column. Migration `0021` replaces the `audit_events` CHECKs: the
+five overtime actions and the `overtime` entity are admitted, an overtime transition must name its `operation`
+(`overtime.submitSelf` → submit; `overtime.manage` → review / reject), and every employee and account rule keeps
+its meaning. The runner applies one statement per migration file, hence two migrations.
+
+**Routes and authority.** `GET /api/overtime-records?month=YYYY-MM` (required month, no other filter — D-BF4b1-3;
+fails closed above 2000 rows) and `GET /api/overtime-record?id=` read in the session's scope: company-wide for the
+CEO, own rows for an Employee. Writes, each under its existing overtime Action: `create` (`createSelfDraft`),
+`update` (`updateSelfDraft`), `delete` (`deleteSelfDraft`), `submit` (`submitSelf`), `review` and `reject`
+(`manage`, CEO-only). The CEO passes the own-Draft rule; an Employee acts only on their own Draft; a colleague's
+or another company's record is 404.
+
+**State machine (D-BF4b-5).** Draft → Submitted → Reviewed; Submitted or Reviewed → Rejected; Rejected is
+terminal; editing only while Draft; no approval. Each transition is its own route with `{id, expectedVersion}`;
+there is no generic status update and no reject reason.
+
+**Writes.** Scoped load (404) → Policy (403) → one transaction: lock the row, re-check status and version (409),
+compare-and-swap (`version + 1`) and the audit row. Create builds a Draft candidate with
+`ScopedDatabase::candidate()` — whose scope and owner come only from an employee record already read in scope —
+then locks that employee and refuses it unless it is live and `employmentStatus` is Active (409); existing records
+keep their workflow after the employee is archived. Update rejects `employeeId` (immutable) and is no write and no
+audit when nothing changes. Delete (D-BF4b-6) hard-deletes a Draft only: the `DELETE` itself names the company,
+the expected version and `status = 'Draft'`, and its audit row survives the record. No business write is retried;
+a lost answer is reconciled by re-reading (the month list after a create, the detail after anything else).
+
+**Audit.** `AuditLog::appendOvertime()` names the Action, the record and the field names (create, update), the
+operation (submit, review, reject) or neither (delete). It is the first audit writer used under an Employee scope:
+there the insert is written only when the record's owner is the actor's own employee.
+
+**Proof.** Unit tests (allowlists, the month / date / hours rules, the state machine, the strict nine-field view,
+the statements, the audit vocabulary, the create candidate); HTTP tests with a session double (401, CSRF and
+origin 403, the required month, forged and money keys 400); MariaDB tests (`tests/Db/Overtime*Test.php`) for the
+schema and CHECKs, the workflow, eligibility, scoping, every legal and illegal transition, the Draft-only delete,
+atomic audit and its rollback, hostile principals, and lock, loser and worker-driven race proofs. **Boundary
+additions:** `overtime_records` is a company table with one writer; its DELETE is pinned to the Draft predicate;
+no TRUNCATE; each overtime route declares its Action; double-quoted `*_SELF_SQL` constants are checked too.
+
+**Not production-ready.** Everything BF-3A–BF-4a2 list; no SESSION UI exists yet (AFI-4b1).
+
 ### Session identity foundation — AFI-1 (frontend; headless and inert, not wired)
 
 AFI-1 is the first slice of Authenticated Frontend Integration. It adds the frontend pieces that will

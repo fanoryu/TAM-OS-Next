@@ -5988,6 +5988,26 @@ console.log('== AFI-4a3 — ACCOUNT ADMINISTRATION ==');
     'AFI-4a3: no activation token, link or copy UI exists in the SESSION workspace');
 }
 
+// ===== BF-4b1 — OVERTIME NON-MONEY WORKFLOW (backend only) =====
+// The server overtime record and workflow exist only as backend source: no production frontend
+// module calls them yet (that is AFI-4b1), and the record carries no money (valuation is BF-4b2).
+// Behaviour: server tests (OvertimeInputTest, OvertimeSqlTest, OvertimeRoutingTest, Db/Overtime*).
+console.log('== BF-4b1 — OVERTIME WORKFLOW (BACKEND ONLY) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  check(srv('migrations/0020_create_overtime_records.sql').startsWith('CREATE TABLE overtime_records (') && /^ALTER TABLE audit_events\b/.test(srv('migrations/0021_replace_audit_events_overtime_checks.sql')),
+    'BF-4b1: migrations 0020 (overtime_records) and 0021 (overtime audit vocabulary) exist');
+  const jsFiles = [];
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).forEach((e) => { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.js$/.test(e.name)) jsFiles.push(p); });
+  walk(path.join(root, 'js'));
+  check(jsFiles.length > 0 && jsFiles.every((f) => !/\/api\/overtime-record/.test(read(f))) && !/overtime-record/.test(read(path.join(root, 'index.html'))),
+    'BF-4b1: no production frontend module calls the overtime API (AFI-4b1 is not implemented)');
+  const view = srv('src/Overtime/OvertimeView.php');
+  check(/public const FIELDS = \['id', 'employeeId', 'monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes', 'status', 'version'\];/.test(view)
+    && !/amount|rate|salary|schedule|contract|payroll/i.test((view.match(/public const FIELDS = [^\n]*/) || [''])[0]) && !/amount|hourly|salary|payroll/i.test(srv('migrations/0020_create_overtime_records.sql')),
+    'BF-4b1: the overtime record and its DTO carry no money, rate, salary, schedule, contract or payroll field (BF-4b2 firewall)');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
