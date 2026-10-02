@@ -140,6 +140,14 @@ module.exports = [
   //     gateway it delegates to (and only to) and before bootstrap. Owns no
   //     business behavior. ---
   'transport/transport-adapter.js',
+  // --- AFI-4b1 SESSION Overtime (non-money, BF-4b1): the strict Overtime client (reads over
+  //     ApiClient, writes over authSessionMutation), the in-memory Overtime section data and
+  //     its controller, and its view (a section of the SESSION workspace). Defined before the
+  //     AFI-4a1 modules; everything they reach is resolved at call time. Never State, never the
+  //     LOCAL Overtime module. ---
+  'core/overtime-api.js',
+  'core/session-overtime.js',
+  'ui/session-overtime-view.js',
   // --- AFI-4a1 read-only SESSION Employee workspace: the strict Employee read client
   //     (over ApiClient), the in-memory SESSION Employee data and its controller, and
   //     the view auth-view.js renders while AUTHENTICATED. Defined before the auth

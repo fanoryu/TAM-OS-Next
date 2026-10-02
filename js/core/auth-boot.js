@@ -19,7 +19,8 @@
    first-run choice, mounts the shell or "Acting as", or falls back to the local
    identity. allowsWorkspace() is false in every state. AFI-4a1: leaving
    AUTHENTICATED also destroys the in-memory SESSION Employee data
-   (SessionEmployeeStore), and sessionLost() is how a business read's 401 ends the
+   (SessionEmployeeStore) — AFI-4b1: and the SESSION Overtime data
+   (SessionOvertimeStore) — and sessionLost() is how a business read's 401 ends the
    session. AFI-4a2: sessionUncertain() is how a business write whose bounded CSRF
    recovery could not confirm the session ('unavailable') fails closed to UNAVAILABLE.
 
@@ -97,6 +98,7 @@ const AuthBoot = (function(){
     if(next !== AUTH_STATES.AUTHENTICATED){
       SessionIdentityProvider.clear();
       SessionEmployeeStore.clear();          // AFI-4a1: no server business data outlives the identity
+      SessionOvertimeStore.clear();          // AFI-4b1: nor the SESSION Overtime data
     }
     paint();
   }

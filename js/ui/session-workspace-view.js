@@ -5,7 +5,13 @@
    (js/ui/auth-view.js) — its only caller — while AuthBoot is AUTHENTICATED. It is
    NOT the business shell: AuthBoot.allowsWorkspace() stays false, so render()
    never mounts the shell, its navigation, Global Search or "Acting as", and no
-   other domain (Overtime, Payroll, Finance) has an entry here.
+   other domain (Payroll, Finance) has an entry here.
+
+   AFI-4b1: two SESSION sections, switched by buttons under the heading — CEO
+   "Employees | Overtime", Employee "My profile | My overtime". The existing section
+   stays the default; the Overtime section is renderSessionOvertimeHTML()
+   (js/ui/session-overtime-view.js, SessionOvertime's memory-only data) — never the
+   LOCAL Overtime page. Sections do not switch while a write of either is in flight.
 
      CEO       Employees: Active / Archived tabs, the company list, a record's
                detail; the derived account state is status text only.
@@ -329,26 +335,50 @@ function sessionWorkspaceSelfHTML(w){
   ]);
 }
 
+// AFI-4b1: the two SESSION sections. A section button shows its section; neither switches while
+// a write of either section is in flight.
+function sessionWorkspaceSectionsHTML(ceo, overtime, busy){
+  const dis = busy ? ' disabled' : '';
+  const tab = function(id, label, current){
+    return '<button class="tab' + (current ? ' active' : '') + '" type="button" id="' + id + '" aria-pressed="' + current + '"' + dis + '>' + label + '</button>';
+  };
+  return '<nav aria-label="Workspace sections"><div class="tabs">'
+    + tab('swSectionMain', ceo ? 'Employees' : 'My profile', !overtime) + tab('swSectionOvertime', ceo ? 'Overtime' : 'My overtime', overtime)
+    + '</div></nav>';
+}
+
 function sessionWorkspaceHTML(auth, w){
   const principal = auth.principal;
   const who = (principal && principal.displayName) ? principal.displayName : '';
   const ceo = !!principal && principal.principalType === PRINCIPAL_TYPES.CEO;
   const employee = !!principal && principal.principalType === PRINCIPAL_TYPES.EMPLOYEE;
-  const title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
+  const ot = SessionOvertimeStore.snapshot();
+  const overtime = (ceo || employee) && ot.open;
+  const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING || ot.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING;
+  let title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
   let body;
-  if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
+  if(overtime){ title = renderSessionOvertimeTitle(principal, ot); body = renderSessionOvertimeHTML(principal, ot); }
+  else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
   else body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_WORKSPACE_ERRORS.UNAVAILABLE) + '</p>';
   return '<main class="auth-screen" id="main"><section class="card" aria-labelledby="authTitle">'
     + '<div class="page-head"><div><h1 class="auth-title" id="authTitle" tabindex="-1">' + escapeHtml(title) + '</h1>'
     + '<p class="auth-lead">Signed in as <strong>' + escapeHtml(who) + '</strong>.</p></div>'
     + '<div class="auth-actions"><button class="btn" id="authSignOutBtn" type="button"' + (auth.busy ? ' disabled aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>'
+    + (ceo || employee ? sessionWorkspaceSectionsHTML(ceo, overtime, busy) : '')
     + body + '</section></main>';
 }
 
 function bindSessionWorkspace(app){
   const on = function(id, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener('click', fn); };
   on('authSignOutBtn', function(){ AuthBoot.signOut(); });
+  // AFI-4b1: the section switch — never while an Employee write is in flight.
+  const sectionTo = function(overtime){
+    return function(){ if(SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING) SessionOvertime.show(overtime); };
+  };
+  on('swSectionMain', sectionTo(false));
+  on('swSectionOvertime', sectionTo(true));
+  if(SessionOvertimeStore.snapshot().open){ bindSessionOvertime(app); return; }
   on('swActiveTab', function(){ SessionWorkspace.showArchived(false); });
   on('swArchivedTab', function(){ SessionWorkspace.showArchived(true); });
   on('swBackBtn', function(){ SessionWorkspace.back(); });
@@ -428,10 +458,18 @@ function sessionWorkspaceFocus(app, hint, kept){
 // Renders the authenticated SESSION workspace. Called only by renderAuthView().
 function renderSessionWorkspace(app, auth){
   SessionWorkspace.ensureLoaded(auth.principal);
+  SessionOvertime.ensureLoaded(auth.principal);                // AFI-4b1: binds (or destroys) the Overtime data too
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
   app.innerHTML = sessionWorkspaceHTML(auth, SessionEmployeeStore.snapshot());
   bindSessionWorkspace(app);
-  sessionWorkspaceFocus(app, SessionEmployeeStore.takeFocus(), kept);
+  const hint = SessionEmployeeStore.takeFocus();
+  const otHint = SessionOvertimeStore.takeFocus();
+  if(SessionOvertimeStore.snapshot().open){
+    const el = sessionOvertimeFocusTarget(app, otHint);
+    if(el && typeof el.focus === 'function'){ el.focus(); return; }
+    return sessionWorkspaceFocus(app, otHint ? 'heading' : null, kept);
+  }
+  sessionWorkspaceFocus(app, hint, kept);
 }
