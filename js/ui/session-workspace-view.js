@@ -217,7 +217,7 @@ const SESSION_ACCOUNT_BUTTONS = Object.freeze({
 });
 const SESSION_ACCOUNT_PANELS = Object.freeze({
   provision: { title: 'Create a login', text: 'Enter the email address this person will sign in with. TAM OS queues an activation email to it; the login works once they set a password.', submit: 'Create login' },
-  reissue: { title: 'Resend the activation email?', text: 'A new activation email is queued. Activation links sent earlier stop working.', submit: 'Resend activation email' },
+  reissue: { title: 'Send a new activation email?', text: 'A new activation email is queued. Activation links sent earlier stop working.', submit: 'Resend activation email' },
   disable: { title: 'Disable this login?', text: 'Sign-in is blocked and every existing session of this person ends. Their employee record is not changed.', submit: 'Disable login' },
   enable: { title: 'Enable this login?', text: 'Sign-in is allowed again. No activation email is sent.', submit: 'Enable login' }
 });
