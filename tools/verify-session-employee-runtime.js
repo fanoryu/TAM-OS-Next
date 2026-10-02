@@ -236,9 +236,14 @@ function firewall(rt, label){
     label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
     label + ': legacy State stays empty and the business shell is never granted');
-  // AFI-4a2: no account administration, as a request or as a control.
-  check(!rt.net.calls.some((c) => /provision|reissue|disable-account|enable-account/i.test(c.url)) && !/Provision|Reissue|Disable login|Enable login|accountManageable/i.test(html),
-    label + ': no account administration (no account route requested, no account control rendered)');
+  // AFI-4a3 authorized revision: account administration exists only for the CEO, only on the
+  // record detail, and only as the exact BF-4a2 requests. Was: no account route or control at all.
+  const acct = rt.net.calls.filter((c) => /provision-account|reissue-activation|disable-account|enable-account/.test(c.url));
+  const acctOk = acct.every((c) => c.init && c.init.method === 'POST' && c.init.headers['X-CSRF-Token']
+    && Object.keys(JSON.parse(c.init.body)).sort().join() === (/provision-account$/.test(c.url) ? 'email,id' : 'id'));
+  const controls = /id="swAcct(Provision|Reissue|Disable|Enable|Cancel|Submit)"|id="swAccountTitle"/.test(html);
+  check(acctOk && (!controls || />Employee record<\/h1>/.test(html)) && !/Provision|Reissue|accountManageable|#activation=|[A-Za-z0-9_-]{43}/.test(html.replace(/id="swAcct[A-Za-z]+"/g, '')),
+    label + ': account administration only as exact CSRF POSTs and only on the CEO record detail; no internal wording, token or link');
 }
 
 /* ---------- AFI-4a2 helpers ---------- */
@@ -273,6 +278,29 @@ async function editWith(updateRoutes, extra){
   rt.SessionWorkspace.setDraft('fullName', 'Fabricated Alpha Prime');
   return rt;
 }
+/* ---------- AFI-4a3 helpers ---------- */
+const DA = (state, manageable, extra) => Object.assign({}, D1, { accountState: state, accountManageable: manageable }, extra || {});
+const ACCT_ROUTE = { provision: '/api/employees/provision-account', reissue: '/api/employees/reissue-activation', disable: '/api/employees/disable-account', enable: '/api/employees/enable-account' };
+const ACCT_FROM = { provision: 'none', reissue: 'pending', disable: 'active', enable: 'disabled' };
+const ACCT_TO = { provision: 'pending', reissue: 'pending', disable: 'disabled', enable: 'active' };
+const acctWrites = (rt) => rt.net.calls.filter((c) => /provision-account|reissue-activation|disable-account|enable-account/.test(c.url));
+const acctButtons = (html) => (html.match(/id="swAcct(Provision|Reissue|Disable|Enable)"/g) || []).map((m) => m.slice(10, -1)).join();
+// A CEO on the detail of e_1, whose record is `detail`.
+async function accountDetail(detail, routes){
+  const rt = await boot(ME_CEO, Object.assign({ '/api/employees': [ok(LIST_ACTIVE)], '/api/employee?id=e_1': [ok({ employee: detail })] }, routes || {}));
+  await rt.SessionWorkspace.openDetail('e_1'); await flush();
+  return rt;
+}
+// The same, in the state `kind` acts on, with its panel open (and a login email typed for provision).
+async function accountRun(kind, answers, extra){
+  const routes = Object.assign({}, extra || {});
+  routes[ACCT_ROUTE[kind]] = answers;
+  const rt = await accountDetail(DA(ACCT_FROM[kind], true), routes);
+  rt.SessionWorkspace.openAccountAction(kind); await flush();
+  if(kind === 'provision') rt.SessionWorkspace.setAccountEmail('login.person@example.test');
+  return rt;
+}
+
 async function archiveWith(archiveRoutes, extra){
   const rt = await ceoDetail(Object.assign({ '/api/employees/archive': archiveRoutes }, extra || {}));
   rt.SessionWorkspace.openArchive(); await flush();
@@ -1186,7 +1214,8 @@ async function archiveWith(archiveRoutes, extra){
     check(rt.store().mutation.status === 'idle' && (label === 'update' ? rt.store().detail.version === 4 : rt.store().detailId === null), 'U. AFI-4a2 ' + label + ' with the new contract stays a confirmed success');
   }
   {
-    // No UI depends on it yet: the same record renders identically with true and with false.
+    // AFI-4a3 authorized revision: accountManageable now gates exactly one thing — the Login
+    // access row. Was: true and false rendered byte-identically (no UI consumed it yet).
     const html = {};
     for(const v of [true, false]){
       const item = Object.assign({}, E1, { accountManageable: v });
@@ -1194,10 +1223,301 @@ async function archiveWith(archiveRoutes, extra){
       const list = rt.appHTML();
       await rt.SessionWorkspace.openDetail('e_1'); await flush();
       html[v] = list + '\n' + rt.appHTML();
-      check(!/Provision|Reissue|Disable login|Enable login|manageable/i.test(html[v]), 'U. no account control and no manageability text (accountManageable ' + v + ')');
+      check(!/Provision|Reissue|manageable/i.test(html[v]), 'U. no internal account wording or manageability text (accountManageable ' + v + ')');
       firewall(rt, 'U. accountManageable ' + v);
     }
-    check(html[true] === html[false], 'U. the list and detail render byte-identically for true and false — nothing is conditioned on it yet');
+    const row = '<div class="auth-actions" role="group" aria-label="Login access"><button class="btn" type="button" id="swAcctDisable">Disable login</button></div>';
+    check(html[true].split(row).length === 2 && html[false].indexOf('Login access') === -1 && html[true].replace(row, '') === html[false],
+      'U/V. true and false differ by exactly the Login access row (active → Disable login); nothing else is conditioned on it');
+  }
+
+  /* =================== AFI-4a3 — CEO ACCOUNT ADMINISTRATION =================== */
+
+  /* ---------- V1. the operation matrix: only the server projection decides ---------- */
+  for(const [label, detail, want] of [
+    ['manageable, no login', DA('none', true), 'Provision'],
+    ['manageable, pending', DA('pending', true), 'Reissue,Disable'],
+    ['manageable, active', DA('active', true), 'Disable'],
+    ['manageable, disabled', DA('disabled', true), 'Enable'],
+    ['unmanageable (e.g. CEO-bound), active', DA('active', false), ''],
+    ['unmanageable, no login', DA('none', false), ''],
+    ['unmanageable, pending', DA('pending', false), ''],
+    ['unmanageable, disabled (e.g. user disabled out of band)', DA('disabled', false), ''],
+    ['archived', DA('disabled', false, { archived: true }), '']
+  ]){
+    const rt = await accountDetail(detail);
+    const html = rt.appHTML();
+    check(acctButtons(html) === want, 'V1. ' + label + ' -> controls [' + want + ']' + (acctButtons(html) === want ? '' : ' >> got [' + acctButtons(html) + ']'));
+    const status = { none: 'No login', pending: 'Activation pending', active: 'Login active', disabled: 'Login disabled' }[detail.accountState];
+    check(new RegExp('<th scope="row">Login</th><td>' + status + '</td>').test(html) && !/CEO account|wrong role|system account|not manageable/i.test(html),
+      'V1. ' + label + ': the Login status text stays; no reason is explained');
+    for(const k of ['provision', 'reissue', 'disable', 'enable']){
+      rt.SessionWorkspace.openAccountAction(k);
+      const opened = rt.store().accountAction;
+      check(want.indexOf({ provision: 'Provision', reissue: 'Reissue', disable: 'Disable', enable: 'Enable' }[k]) === -1 ? opened === null : (opened && opened.kind === k),
+        'V1. ' + label + ': openAccountAction(' + k + ') opens only what the matrix offers');
+      if(opened) rt.SessionWorkspace.cancelAccountAction();
+    }
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(acctWrites(rt).length === 0, 'V1. ' + label + ': nothing is sent without a deliberate submission');
+    firewall(rt, 'V1. ' + label);
+  }
+  {
+    // Employee: no Login access, and even forged calls send nothing.
+    const rt = await boot(ME_EMP, { '/api/employee?id=emp_srv_1': [ok({ employee: SELF })], '/api/employees/disable-account': [ok({ employee: DA('disabled', true) })],
+      '/api/employees/provision-account': [ok({ employee: DA('pending', true) })] });
+    check(!/swAcct|swAccountTitle|Login access|Create login|Disable login|Enable login|Resend activation/.test(rt.appHTML()), 'V1. the Employee self view has no Login access control');
+    const ws = rt.SessionWorkspace;
+    ws.openAccountAction('disable'); ws.setAccountEmail('x@example.test'); await ws.submitAccountAction(); ws.cancelAccountAction();
+    rt.SessionEmployeeStore.openAccountAction('disable', 'emp_srv_1');
+    await ws.submitAccountAction();
+    rt.SessionEmployeeStore.openAccountAction('provision', 'emp_srv_1'); rt.SessionEmployeeStore.setAccountEmail('forged@example.test');
+    await ws.submitAccountAction(); ws.back(); await flush();
+    check(acctWrites(rt).length === 0 && !/swAcct|swAccountTitle|forged@/.test(rt.appHTML()), 'V1. forged Employee account actions render nothing and send zero requests');
+    firewall(rt, 'V1. Employee');
+  }
+
+  /* ---------- V2. Create login ---------- */
+  {
+    const rt = await accountDetail(DA('none', true), { '/api/employees/provision-account': [ok({ employee: DA('pending', true) })], '/api/employees': [ok(LIST_ACTIVE), ok(LIST_ACTIVE)] });
+    check(rt.app.fire('swAcctProvision', 'click') === 'fired', 'V2. Create login is offered for a manageable record without a login');
+    await flush();
+    let html = rt.appHTML();
+    check(/<h2 class="section-title" id="swAccountTitle" tabindex="-1">Create a login<\/h2>/.test(html) && lastFocus(rt) === 'swAccountTitle' && acctWrites(rt).length === 0,
+      'V2. opening it shows the inline panel and moves focus to its heading; nothing is sent');
+    check(/<label for="swa-email">Login email <span aria-hidden="true">\*<\/span><\/label><input class="input" type="email" id="swa-email" name="email" autocomplete="off" required aria-required="true" value="">/.test(html)
+      && !/alpha@example\.test/.test(html.split('id="swAccountTitle"')[1]),
+      'V2. D-AFI4a3-1: the login email starts EMPTY — the contact email is never pre-filled');
+    check(!/swEditBtn|swArchiveBtn|swAcctProvision/.test(html), 'V2. Edit, Archive and the other account buttons are withdrawn while the panel is open');
+    const el = rt.app.el('swa-email'); el.value = ' Login.Person@Example.test '; rt.app.fire('swa-email', 'input');
+    rt.app.fire('swAcctForm', 'submit'); await flush();
+    const w = acctWrites(rt);
+    check(w.length === 1 && w[0].url === '/api/employees/provision-account' && w[0].init.body === '{"id":"e_1","email":"Login.Person@Example.test"}' && w[0].init.headers['X-CSRF-Token'] === CSRF,
+      'V2. exactly one POST /api/employees/provision-account, body exactly { id, email } (trimmed), with CSRF');
+    const s = rt.store();
+    check(s.detail.accountState === 'pending' && s.accountAction === null && s.notice === 'provisioned' && s.listStale === true && s.mutation.status === 'idle',
+      'V2. the decoded record becomes the detail; the panel closes; the list is stale');
+    html = rt.appHTML();
+    check(/Login created\. An activation email has been queued/.test(html) && !/email sent|delivered/i.test(html) && acctButtons(html) === 'Reissue,Disable' && /Activation pending/.test(html),
+      'V2. it says the activation email is queued (not sent); the new state offers Resend / Disable');
+    check(!/Login\.Person|login\.person/i.test(html + JSON.stringify(rt.store())), 'V2. the login email is gone from memory and page after success');
+    firewall(rt, 'V2. create login');
+  }
+  {
+    const rt = await accountRun('provision', [ok({ employee: DA('pending', true) })]);
+    for(const bad of ['', '   ', 'nobody', 'a b@example.test']){
+      rt.SessionWorkspace.setAccountEmail(bad);
+      await rt.SessionWorkspace.submitAccountAction(); await flush();
+      const html = rt.appHTML();
+      check(acctWrites(rt).length === 0 && /id="swa-email"[^>]*aria-invalid="true" aria-describedby="swa-email-error"/.test(html) && /id="swa-email-error">Enter a valid email address/.test(html) && lastFocus(rt) === 'swa-email',
+        'V2. client validation "' + bad + '": zero requests; the field is marked and focused');
+    }
+  }
+  {
+    const rt = await accountRun('provision', [errF(['email'])]);
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(acctWrites(rt).length === 1 && /id="swa-email"[^>]*aria-invalid="true"/.test(rt.appHTML()) && lastFocus(rt) === 'swa-email' && rt.store().accountAction.email === 'login.person@example.test',
+      'V2. server 400 on email: field marked and focused; the typed email is kept');
+  }
+  {
+    const rt = await accountRun('provision', [err(409, 'conflict')], { '/api/employee?id=e_1': [ok({ employee: DA('none', true) }), ok({ employee: DA('pending', true) })] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush(20);
+    let html = rt.appHTML();
+    check(acctWrites(rt).length === 1 && /This login changed or the action is no longer available/.test(html) && /id="swReloadBtn"/.test(html) && rt.store().accountAction !== null,
+      'V2/V4. 409: generic conflict in the panel, Reload record offered; nothing resent');
+    rt.app.fire('swReloadBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(countOf(rt, '/api/employee?id=e_1') === 2 && rt.store().accountAction === null && acctButtons(html) === 'Reissue,Disable' && acctWrites(rt).length === 1,
+      'V2/V4. Reload record reads the record; the fresh projection decides the controls');
+  }
+
+  /* ---------- V3. Resend / Disable / Enable succeed with exact bodies ---------- */
+  for(const kind of ['reissue', 'disable', 'enable']){
+    const rt = await accountRun(kind, [ok({ employee: DA(ACCT_TO[kind], true) })], { '/api/employees': [ok(LIST_ACTIVE), ok(LIST_ACTIVE)] });
+    const html = rt.appHTML();
+    const panelText = { reissue: /Activation links sent earlier stop working\./, disable: /Sign-in is blocked and every existing session of this person ends\./, enable: /Sign-in is allowed again\. No activation email is sent\./ }[kind];
+    check(panelText.test(html) && /id="swAcctSubmit"/.test(html) && !/<input/.test(html.split('id="swAccountTitle"')[1]) && lastFocus(rt) === 'swAccountTitle',
+      'V3. ' + kind + ': an inline confirmation explains the consequence (no native confirm, no input)');
+    rt.app.fire('swAcctSubmit', 'click'); await flush();
+    const w = acctWrites(rt);
+    check(w.length === 1 && w[0].url === ACCT_ROUTE[kind] && w[0].init.body === '{"id":"e_1"}' && w[0].init.headers['X-CSRF-Token'] === CSRF,
+      'V3. ' + kind + ': exactly one POST ' + ACCT_ROUTE[kind] + ' with body exactly { id } — no expectedVersion, accountState or accountManageable');
+    const s = rt.store();
+    check(s.detail.accountState === ACCT_TO[kind] && s.accountAction === null && s.listStale === true && s.notice === { reissue: 'reissued', disable: 'disabled', enable: 'enabled' }[kind],
+      'V3. ' + kind + ': the decoded record becomes the detail; panel closed; list stale');
+    firewall(rt, 'V3. ' + kind);
+  }
+  {
+    const rt = await accountRun('enable', [ok({ employee: DA('pending', true) })]);
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(rt.store().detail.accountState === 'pending' && /Login enabled\. This person has not activated the login yet — the activation email may need to be resent\./.test(rt.appHTML())
+      && acctButtons(rt.appHTML()) === 'Reissue,Disable', 'V3. enable answered pending: shown as pending, with the hint that a resend may be needed (no guess)');
+  }
+  {
+    const rt = await accountRun('reissue', [err(429, 'rate_limited', { 'Retry-After': '45' })]);
+    await rt.SessionWorkspace.submitAccountAction(); await flush(20);
+    check(acctWrites(rt).length === 1 && /Too many requests\. Try again in 45 seconds\./.test(rt.appHTML()) && rt.store().accountAction !== null, 'V3. reissue 429: the wait is shown; nothing resent');
+  }
+
+  /* ---------- V4. definite failures, per operation ---------- */
+  for(const kind of ['provision', 'reissue', 'disable', 'enable']){
+    {
+      const rt = await accountRun(kind, [err(401, 'unauthenticated')]);
+      await rt.SessionWorkspace.submitAccountAction(); await flush();
+      check(rt.state() === 'SIGNED_OUT' && rt.store().accountAction === null && rt.store().detail === null && !/login\.person/.test(JSON.stringify(rt.store())), 'V4. ' + kind + ' 401: session ended; panel, email and data cleared');
+    }
+    {
+      const rt = await accountRun(kind, [err(403, 'forbidden')]);
+      await rt.SessionWorkspace.submitAccountAction(); await flush();
+      check(rt.state() === 'AUTHENTICATED' && rt.store().mutation.error.kind === 'DENIED' && /do not have permission/.test(rt.appHTML()) && acctWrites(rt).length === 1,
+        'V4. ' + kind + ' genuine 403: denied, still signed in, not replayed');
+    }
+    {
+      const rt = await accountRun(kind, [err(404, 'not_found')], { '/api/employees': [ok(LIST_ACTIVE), ok({ employees: [E2] })] });
+      await rt.SessionWorkspace.submitAccountAction(); await flush();
+      check(rt.store().detailId === null && rt.store().accountAction === null && rt.store().list.length === 1 && /no longer available/.test(rt.appHTML()), 'V4. ' + kind + ' 404: detail closed; the list is read again');
+    }
+    {
+      const rt = await accountRun(kind, [err(500, 'internal_error')]);
+      await rt.SessionWorkspace.submitAccountAction(); await flush(20);
+      check(acctWrites(rt).length === 1 && /change was not saved/.test(rt.appHTML()) && rt.store().mutation.status === 'error' && /id="swAcctSubmit"(?![^>]*disabled)/.test(rt.appHTML()),
+        'V4. ' + kind + ' 500: definite "not saved" (not "unconfirmed"); submit stays available; nothing resent');
+    }
+    {
+      const rt = await accountRun(kind, [err(409, 'conflict')]);
+      await rt.SessionWorkspace.submitAccountAction(); await flush(20);
+      check(acctWrites(rt).length === 1 && rt.store().mutation.error.kind === 'CONFLICT' && /id="swReloadBtn"/.test(rt.appHTML()), 'V4. ' + kind + ' 409: generic conflict + Reload record; never retried');
+    }
+  }
+
+  /* ---------- V5. unconfirmed outcomes: never resent; the record is read again ---------- */
+  const unconfirmed = [
+    ['network failure', () => [NETFAIL]],
+    ['503', () => [err(503, 'service_unavailable')]],
+    ['malformed success', (k) => [ok({ employee: Object.assign({}, DA(ACCT_TO[k], true), { token: 'x' }) })]],
+    ['success for another record', (k) => [ok({ employee: DA(ACCT_TO[k], true, { id: 'e_2' }) })]],
+    ['success in the unchanged state', (k) => [ok({ employee: DA(ACCT_FROM[k] === ACCT_TO[k] ? 'active' : ACCT_FROM[k], true) })]]
+  ];
+  for(const kind of ['provision', 'reissue', 'disable', 'enable']){
+    for(const [label, answers] of unconfirmed){
+      const rt = await accountRun(kind, answers(kind), { '/api/employee?id=e_1': [ok({ employee: DA(ACCT_FROM[kind], true) }), ok({ employee: DA(ACCT_TO[kind], true) })] });
+      await rt.SessionWorkspace.submitAccountAction(); await flush(20);
+      const s = rt.store();
+      const html = rt.appHTML();
+      check(acctWrites(rt).length === 1 && s.mutation.status === 'ambiguous' && s.mutation.kind === kind && s.accountAction === null && countOf(rt, '/api/employee?id=e_1') === 2 && s.listStale === true,
+        'V5. ' + kind + ' ' + label + ' -> UNCONFIRMED: not resent; the record is read again; list stale');
+      check(!/change was not saved|failed/i.test(html) && s.notice === null, 'V5. ' + kind + ' ' + label + ': never described as failed, never as confirmed');
+    }
+  }
+  {
+    const rt = await accountRun('provision', [NETFAIL], { '/api/employee?id=e_1': [ok({ employee: DA('none', true) }), ok({ employee: DA('pending', true) })] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(/its login status shows whether a login now exists/.test(rt.appHTML()) && /Activation pending/.test(rt.appHTML()) && acctButtons(rt.appHTML()) === 'Reissue,Disable',
+      'V5. provision reconciliation: the re-read pending state proves a login exists; no resend');
+  }
+  {
+    const rt = await accountRun('provision', [NETFAIL], { '/api/employee?id=e_1': [ok({ employee: DA('none', true) }), ok({ employee: DA('none', true) })] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(acctButtons(rt.appHTML()) === 'Provision' && acctWrites(rt).length === 1, 'V5. provision reconciliation: still no login — Create login offered again for a deliberate retry');
+  }
+  {
+    const rt = await accountRun('reissue', [err(503, 'service_unavailable')], { '/api/employee?id=e_1': [ok({ employee: DA('pending', true) }), ok({ employee: DA('pending', true) })] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    const html = rt.appHTML();
+    check(/could not confirm whether a new activation email was queued/.test(html) && !/A new activation email has been queued/.test(html) && rt.store().notice === null,
+      'V5. reissue reconciliation stays honestly unconfirmed — pending cannot prove a resend was queued');
+  }
+  {
+    const rt = await accountRun('disable', ['HANG'], { '/api/employee?id=e_1': [ok({ employee: DA('active', true) }), ok({ employee: DA('disabled', true) })] });
+    rt.SessionWorkspace.submitAccountAction(); await flush();
+    const html = rt.appHTML();
+    check(/id="swAcctSubmit" disabled aria-busy="true">Working…</.test(html) && /id="swAcctCancel" disabled/.test(html) && /aria-labelledby="swAccountTitle" aria-busy="true"/.test(html),
+      'V5. pending: submit shows Working… and is disabled with Cancel; the panel is aria-busy');
+    rt.net.timers[rt.net.timers.length - 1](); await flush(20);
+    check(acctWrites(rt).length === 1 && rt.store().mutation.status === 'ambiguous' && /Login disabled/.test(rt.appHTML()), 'V5. disable timeout -> unconfirmed; the re-read shows the authoritative state');
+  }
+  {
+    const rt = await accountRun('enable', [NETFAIL], { '/api/employee?id=e_1': [ok({ employee: DA('disabled', true) }), ok({ employee: DA('disabled', true) })] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(/Login disabled/.test(rt.appHTML()) && acctButtons(rt.appHTML()) === 'Enable' && rt.store().notice === null, 'V5. enable reconciliation: still disabled — not shown as changed');
+  }
+
+  /* ---------- V6. CSRF recovery ---------- */
+  {
+    const rt = await accountRun('disable', [err(403, 'forbidden'), ok({ employee: DA('disabled', true) })], { '/api/auth/me': [ok(ME_CEO), ok(Object.assign({}, ME_CEO, { csrfToken: CSRF2 }))] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    const w = acctWrites(rt);
+    check(w.length === 2 && w[1].init.headers['X-CSRF-Token'] === CSRF2 && w[0].init.body === w[1].init.body && rt.store().detail.accountState === 'disabled',
+      'V6. stale CSRF: one /me refresh, exactly one replay with the new token; its answer applies');
+  }
+  {
+    const rt = await accountRun('disable', [err(403, 'forbidden'), err(403, 'forbidden'), ok({ employee: DA('disabled', true) })], { '/api/auth/me': [ok(ME_CEO), ok(Object.assign({}, ME_CEO, { csrfToken: CSRF2 }))] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush(20);
+    check(acctWrites(rt).length === 2 && rt.store().mutation.error.kind === 'DENIED', 'V6. a 403 on the replay is final — never a third send');
+  }
+  {
+    const rt = await accountRun('provision', [err(403, 'forbidden'), ok({ employee: DA('pending', true) })], {
+      '/api/auth/me': [ok(ME_CEO), ok(Object.assign({}, ME_CEO, { userId: 'u_ceo_2', csrfToken: CSRF2 }))], '/api/employees': [ok(LIST_ACTIVE), ok({ employees: [E3] })] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(acctWrites(rt).length === 1 && rt.store().accountAction === null && rt.store().detail === null && rt.AuthBoot.snapshot().principal.id === 'u_ceo_2' && !/login\.person/.test(JSON.stringify(rt.store())),
+      'V6. principal changed: no replay under the old principal; its panel, email and data are cleared');
+  }
+  {
+    const rt = await accountRun('enable', [err(403, 'forbidden')], { '/api/auth/me': [ok(ME_CEO), err(503, 'service_unavailable')] });
+    await rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(rt.state() === 'UNAVAILABLE' && rt.store().accountAction === null && rt.CsrfHolder.get() === null && acctWrites(rt).length === 1, 'V6. recovery unavailable -> sessionUncertain: UNAVAILABLE, everything cleared');
+  }
+
+  /* ---------- V7. races and the email draft ---------- */
+  {
+    const late = deferred();
+    const rt = await accountRun('disable', [() => late.promise], { '/api/employee?id=e_2': [ok({ employee: DA('none', true, { id: 'e_2' }) })] });
+    rt.SessionWorkspace.submitAccountAction(); rt.SessionWorkspace.submitAccountAction(); await flush();
+    check(rt.app.fire('swAcctSubmit', 'click') === 'disabled', 'V7. the submit button is disabled while pending');
+    rt.app.fire('swAcctCancel', 'click'); rt.SessionWorkspace.cancelAccountAction();
+    rt.SessionWorkspace.back(); rt.SessionWorkspace.openDetail('e_2'); rt.SessionWorkspace.openEdit(); rt.SessionWorkspace.openArchive(); rt.SessionWorkspace.openAccountAction('enable');
+    await flush();
+    check(acctWrites(rt).length === 1 && rt.store().detailId === 'e_1' && rt.store().accountAction.kind === 'disable' && countOf(rt, '/api/employee?id=e_2') === 0 && rt.store().form === null,
+      'V7. double submit sends ONE write; Back, another record, Edit, Archive and another account action are blocked while pending');
+    late.resolve(ok({ employee: DA('disabled', true) })); await flush();
+    check(rt.store().detail.accountState === 'disabled', 'V7. the one write completes');
+  }
+  {
+    const late = deferred();
+    const rt = await accountRun('provision', [() => late.promise], { '/api/auth/logout': [ok(null)] });
+    rt.SessionWorkspace.submitAccountAction(); await flush();
+    await rt.AuthBoot.signOut(); await flush();
+    late.resolve(ok({ employee: DA('pending', true) })); await flush();
+    check(rt.state() === 'SIGNED_OUT' && rt.store().detail === null && rt.store().accountAction === null && !/login\.person/.test(JSON.stringify(rt.store()) + rt.appHTML()),
+      'V7. sign-out while pending: the late success is dropped; the email is gone');
+    firewall(rt, 'V7. sign-out while pending');
+  }
+  {
+    const rt = await accountDetail(DA('none', true), { '/api/auth/logout': [ok(null)] });
+    const ws = rt.SessionWorkspace;
+    const typed = () => { ws.openAccountAction('provision'); ws.setAccountEmail('draft.login@example.test'); };
+    typed(); ws.cancelAccountAction();
+    check(rt.store().accountAction === null && !/draft\.login/.test(JSON.stringify(rt.store())), 'V7. Cancel destroys the email draft');
+    typed(); await flush(); ws.openAccountAction('provision');
+    check(/value="draft\.login@example\.test"/.test(rt.appHTML()) || rt.store().accountAction.email === 'draft.login@example.test', 'V7. the draft survives an ordinary re-render');
+    ws.back(); await flush();
+    check(rt.store().accountAction === null && !/draft\.login/.test(JSON.stringify(rt.store())), 'V7. leaving the record destroys the email draft');
+    await ws.openDetail('e_1'); await flush(); typed();
+    rt.SessionWorkspace.ensureLoaded({ id: 'u_ceo_2', displayName: 'CEO', principalType: 'ceo' }); await flush();
+    check(rt.store().accountAction === null && !/draft\.login/.test(JSON.stringify(rt.store())), 'V7. a principal change destroys the email draft');
+    check(rt.access.local.length === 0 && rt.access.session.length === 0 && !rt.net.calls.some((c) => /draft\.login/.test(c.url)), 'V7. the email draft never reaches storage or a URL');
+  }
+  {
+    const rt = await accountDetail(DA('none', true));
+    rt.SessionWorkspace.openAccountAction('provision'); rt.SessionWorkspace.setAccountEmail('draft.login@example.test');
+    rt.AuthBoot.sessionUncertain(); await flush();
+    check(rt.state() === 'UNAVAILABLE' && rt.store().accountAction === null && !/draft\.login/.test(JSON.stringify(rt.store()) + rt.appHTML()), 'V7. sessionUncertain destroys the email draft');
+  }
+  {
+    const rt = await accountDetail(DA('none', true));
+    rt.SessionWorkspace.openAccountAction('provision'); rt.SessionWorkspace.setAccountEmail('draft.login@example.test');
+    rt.AuthBoot.sessionLost(); await flush();
+    check(rt.store().accountAction === null && !/draft\.login/.test(JSON.stringify(rt.store()) + rt.appHTML()), 'V7. a 401 / session loss destroys the email draft');
   }
 
   /* ---------- T. the draft: memory only, survives re-render, destroyed with the identity ---------- */

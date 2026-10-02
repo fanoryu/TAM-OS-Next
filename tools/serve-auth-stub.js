@@ -53,6 +53,16 @@
  * BF-4a3: the CEO list, detail and write answers carry the derived accountManageable; the self
  * answer never does.
  *
+ * AFI-4a3 account administration (POST /api/employees/provision-account { id, email },
+ * /reissue-activation, /disable-account, /enable-account { id }): the BF-4a2 guards — CEO only,
+ * CSRF, exact keys, live record for provision / reissue / enable, a CEO-bound record always 409,
+ * provision only without a login and with an unused email, reissue only when pending (at most 3
+ * per record, then 429), disable only with an active membership (pending or active), enable only
+ * when disabled (back to active if the login was ever activated, else pending). Answers are the
+ * CEO detail only — never a token, link or email. The write-* scenarios apply to these routes too.
+ * Fixtures for the matrix: EMP-001 active, EMP-002 no login, EMP-003 archived, EMP-004 bound to a
+ * CEO (not manageable), EMP-005 pending, EMP-006 disabled.
+ *
  * AFI-4a2 CEO writes (POST /api/employees/create, /update, /archive): RouteAuth::Required, same
  * origin, JSON, X-CSRF-Token equal to the session token (else 403), CEO only (an Employee is
  * 403), exact body keys, the EmployeeInput value rules, server ids, version compare-and-swap;
@@ -95,19 +105,27 @@ const SCENARIOS = ['signed-out', 'ceo', 'employee', 'me-unavailable', 'me-malfor
 // AFI-4a1 fabricated company records (the CEO detail DTO; the list and self views are projections).
 const STUB_EMPLOYEES = [
   { id: 'emp_stub_1', employeeCode: 'EMP-001', fullName: 'Fabricated Employee One', jobTitle: 'Engineer', department: 'Operations', employmentStatus: 'Active',
-    archived: false, accountState: 'active', joinDate: '2026-01-05', contactEmail: 'one@example.invalid', phone: '0812 000 001',
+    archived: false, accountState: 'active', activated: true, loginEmail: 'employee@example.invalid', joinDate: '2026-01-05', contactEmail: 'one@example.invalid', phone: '0812 000 001',
     notes: 'Fabricated note <script>not run</script>', monthlyBaseSalary: '7500000.00', version: 2 },
   { id: 'emp_stub_2', employeeCode: 'EMP-002', fullName: 'Fabricated Employee Two', jobTitle: null, department: null, employmentStatus: 'On Leave',
     archived: false, accountState: 'none', joinDate: null, contactEmail: null, phone: null, notes: null, monthlyBaseSalary: null, version: 1 },
   { id: 'emp_stub_3', employeeCode: 'EMP-003', fullName: 'Fabricated Former Employee', jobTitle: 'Analyst', department: 'Operations', employmentStatus: 'Resigned',
-    archived: true, accountState: 'disabled', joinDate: '2025-03-01', contactEmail: null, phone: null, notes: null, monthlyBaseSalary: '6000000.00', version: 4 }
+    archived: true, accountState: 'disabled', joinDate: '2025-03-01', contactEmail: null, phone: null, notes: null, monthlyBaseSalary: '6000000.00', version: 4 },
+  // AFI-4a3 fixtures. ceoBound / activated / loginEmail are the stub's own login model and never leave it.
+  { id: 'emp_stub_4', employeeCode: 'EMP-004', fullName: 'Fabricated Director Record', jobTitle: 'Director', department: 'Management', employmentStatus: 'Active',
+    archived: false, accountState: 'active', ceoBound: true, joinDate: null, contactEmail: null, phone: null, notes: null, monthlyBaseSalary: null, version: 1 },
+  { id: 'emp_stub_5', employeeCode: 'EMP-005', fullName: 'Fabricated Pending Person', jobTitle: null, department: 'Operations', employmentStatus: 'Active',
+    archived: false, accountState: 'pending', loginEmail: 'pending@example.invalid', joinDate: null, contactEmail: null, phone: null, notes: null, monthlyBaseSalary: null, version: 1 },
+  { id: 'emp_stub_6', employeeCode: 'EMP-006', fullName: 'Fabricated Disabled Person', jobTitle: null, department: 'Operations', employmentStatus: 'Inactive',
+    archived: false, accountState: 'disabled', activated: true, loginEmail: 'disabled@example.invalid', joinDate: null, contactEmail: null, phone: null, notes: null, monthlyBaseSalary: null, version: 1 }
 ];
 const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
 const LIST_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState', 'accountManageable'];
 const DETAIL_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary', 'version', 'accountState', 'accountManageable'];
-// BF-4a3: the server-derived accountManageable, as EmployeeStore derives it. Every stub login is an
-// Employee-role membership with an active user and none is CEO-bound, so it is: not archived.
-const ceoView = (e, keys) => pick({ ...e, accountManageable: !e.archived }, keys);
+// BF-4a3: the server-derived accountManageable, as EmployeeStore derives it: live AND (no login OR an
+// employee membership whose user is active). The stub's CEO-bound record is never manageable.
+const ceoView = (e, keys) => pick({ ...e, accountManageable: !e.archived && !e.ceoBound }, keys);
+const ACCOUNT_KINDS = ['provision', 'reissue', 'disable', 'enable'];
 // AFI-4a2: EmployeeInput::FIELDS and STATUSES (test-only mirror).
 const WRITABLE = ['employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary'];
 const STATUSES = ['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'];
@@ -201,7 +219,8 @@ async function handleApi(req, res, p, query){
     return api(res, 200, { employee: pick(employees[0], SELF_KEYS) });
   }
   // AFI-4a2 Employee writes (test-only model of BF-4a1; see the header).
-  const write = { '/api/employees/create': 'create', '/api/employees/update': 'update', '/api/employees/archive': 'archive' }[p];
+  const write = { '/api/employees/create': 'create', '/api/employees/update': 'update', '/api/employees/archive': 'archive',
+    '/api/employees/provision-account': 'provision', '/api/employees/reissue-activation': 'reissue', '/api/employees/disable-account': 'disable', '/api/employees/enable-account': 'enable' }[p];
   if(write && req.method === 'POST') return handleWrite(req, res, write);
   // AFI-3 credential flows: RouteAuth::None on the server — no session, no CSRF.
   if(p === '/api/auth/forgot-password' && req.method === 'POST'){
@@ -271,16 +290,18 @@ async function handleWrite(req, res, kind){
   if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
   if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
   if(!b) return api(res, 400, 'validation_failed');
-  const allowed = kind === 'create' ? WRITABLE : kind === 'update' ? ['id', 'expectedVersion'].concat(WRITABLE) : ['id', 'expectedVersion'];
+  const allowed = kind === 'create' ? WRITABLE : kind === 'update' ? ['id', 'expectedVersion'].concat(WRITABLE)
+    : kind === 'provision' ? ['id', 'email'] : ACCOUNT_KINDS.indexOf(kind) !== -1 ? ['id'] : ['id', 'expectedVersion'];
   const unknown = Object.keys(b).filter((k) => allowed.indexOf(k) === -1);
   if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
-  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, ['employeeCode']);
+  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [kind === 'provision' ? 'email' : ACCOUNT_KINDS.indexOf(kind) !== -1 ? 'id' : 'employeeCode']);
   if(scenario === 'write-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '45' });
   if(scenario === 'write-error') return api(res, 500, 'internal_error');
   if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
   if(scenario === 'write-conflict') return api(res, 409, 'conflict');
   if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
   const done = (e) => (scenario === 'write-malformed' ? api(res, 200, { employee: { ...ceoView(e, DETAIL_KEYS), internalNote: 'x' } }) : api(res, 200, { employee: ceoView(e, DETAIL_KEYS) }));
+  if(ACCOUNT_KINDS.indexOf(kind) !== -1) return accountWrite(res, kind, b, done);
   if(kind === 'create'){
     const missing = ['employeeCode', 'fullName'].filter((k) => !(k in b));
     const bad = missing.length ? missing : Object.keys(b).filter((k) => fieldValue(k, b[k]) === undefined);
@@ -313,6 +334,36 @@ async function handleWrite(req, res, kind){
   patch.forEach((k) => { next[k] = fieldValue(k, b[k]); });
   if(next.employeeCode !== e.employeeCode && employees.some((x) => x.employeeCode === next.employeeCode)) return api(res, 409, 'conflict');
   if(WRITABLE.some((k) => next[k] !== e[k])){ Object.assign(e, next); e.version++; }        // a no-op writes nothing
+  return done(e);
+}
+
+// AFI-4a3: the account operations (test-only model of AccountService's guards).
+function accountWrite(res, kind, b, done){
+  if(typeof b.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(b.id)) return api(res, 400, 'validation_failed', null, ['id']);
+  let email = '';
+  if(kind === 'provision'){
+    email = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
+    if(!email || email.length > 254 || !/^[\x21-\x7E]+$/.test(email) || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) return api(res, 400, 'validation_failed', null, ['email']);
+  }
+  const e = employees.find((x) => x.id === b.id);
+  if(!e) return api(res, 404, 'not_found');
+  if(e.ceoBound && e.accountState !== 'none') return api(res, 409, 'conflict');                   // never a CEO membership
+  const live = !e.archived;
+  if(kind === 'provision'){
+    if(!live || e.accountState !== 'none') return api(res, 409, 'conflict');
+    if(employees.some((x) => x.loginEmail === email) || USERS[email]) return api(res, 409, 'conflict');
+    Object.assign(e, { accountState: 'pending', loginEmail: email, activated: false });
+  } else if(kind === 'reissue'){
+    if(!live || e.accountState !== 'pending') return api(res, 409, 'conflict');
+    if((e.reissues || 0) >= 3) return api(res, 429, 'rate_limited', { 'Retry-After': '3600' });
+    e.reissues = (e.reissues || 0) + 1;
+  } else if(kind === 'disable'){
+    if(e.accountState !== 'pending' && e.accountState !== 'active') return api(res, 409, 'conflict');
+    e.accountState = 'disabled';
+  } else {
+    if(!live || e.accountState !== 'disabled') return api(res, 409, 'conflict');
+    e.accountState = e.activated ? 'active' : 'pending';
+  }
   return done(e);
 }
 
