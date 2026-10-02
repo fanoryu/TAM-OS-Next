@@ -1469,6 +1469,59 @@ detail races) with instrumented storage — zero localStorage / sessionStorage a
 boot, the shell, "Acting as", local data tools, Global Search, the legacy Employee handlers and the other domains;
 the AFI-4a1 checks in `tools/verify-build.js`; `tools/serve-auth-stub.js` gained Employee scenarios for browser QA.
 
+### SESSION Employee create / update / archive — AFI-4a2 (frontend; CEO only, SESSION mode only)
+
+AFI-4a2 gives the SESSION **CEO** the BF-4a1 Employee writes; the **Employee** principal stays read-only (no control,
+and every controller write method returns without a request for any non-CEO). No backend contract, migration,
+ACTION, schema, storage key or CSS changes.
+
+| Action | Route (BF-4a1, ACTION) | Body |
+|---|---|---|
+| Add employee | `POST /api/employees/create` (`employee.create`) | the ten writable profile fields |
+| Edit | `POST /api/employees/update` (`employee.update`) | `id`, `expectedVersion`, only the changed fields (none changed → no request) |
+| Archive | `POST /api/employees/archive` (`employee.delete`) | exactly `id`, `expectedVersion` — soft archive; no delete, no unarchive |
+
+**Requests** (`js/core/employee-api.js`). `EmployeeRequests` mirrors `EmployeeInput` for UX only: the writable
+allowlist (`EMPLOYEE_WRITABLE_FIELDS` = `EmployeeInput::FIELDS`), required code and name, lengths in code points,
+status enum, dates from 1900, e-mail, phone pattern, `^\d{1,13}(\.\d{1,2})?$` money kept a **string**; text is
+trimmed and a cleared optional field is sent as `null`. Any other key (company, user, role, account, version …) is
+refused before transport. Writes go only through `authSessionMutation` — the CSRF header and its bounded stale-token
+recovery (one `/me`, at most one replay) — and a success counts only when it decodes strictly as `{ employee: detail }`
+and confirms the write (create: version 1, not archived; update: same id; archive: same id, archived).
+
+**State** (`js/core/session-employee.js`). `SessionEmployeeStore` adds, in memory only, `mutation`
+`{ kind, status, error, fields }` (idle / pending / error / ambiguous), `mutationSeq`, the form draft, the archive
+confirmation and `listStale`. A write carries `{ gen, kind: 'mutation', seq }`; its answer applies only while both are
+current, so a late answer after logout, a 401 or a principal change is dropped. A second submit while pending sends
+nothing; a sent POST is never aborted.
+
+| Outcome | Behaviour |
+|---|---|
+| success | the decoded record becomes the detail (archive: detail closes); the list is stale and re-read when shown |
+| 400 | draft kept, named fields marked (`aria-invalid`, `aria-describedby`) and the first focused |
+| 401 / recovery `signed_out` | `AuthBoot.sessionLost()` — identity, CSRF, draft and data cleared |
+| recovery `unavailable` | `AuthBoot.sessionUncertain()` — AUTHENTICATED → UNAVAILABLE, all cleared, no request |
+| recovery `principal_changed` | the old data is cleared; the workspace renders for the new principal |
+| 403 (token unchanged) | denied; still signed in |
+| 404 | detail and draft cleared; list re-read |
+| 409 | generic conflict (cause not claimed), draft kept, **Reload record**; nothing resent or overwritten |
+| 429 / 500 | message (wait shown); a deliberate retry is the user's |
+| 503, network, timeout, malformed success | **ambiguous**: never resent; the list (create) or record (update / archive) is re-read |
+
+An edit sends only the fields changed from the record the form started from, against the version currently held, so
+a Reload after a conflict does not overwrite another user's change to an untouched field.
+
+**View** (`js/ui/session-workspace-view.js`). Inline form card (no modal) with labelled fields and required markers;
+Save / Cancel; pending disables controls and sets `aria-busy`; archive asks in an inline confirmation (focusable
+heading, record name and code, Cancel / Archive record — no browser `confirm()`). Every server and draft value is
+escaped; the version never enters the page. A re-render keeps focus on the element that had it. No account control:
+`accountState` remains status text. Existing CSS classes only.
+
+**Proof.** `tools/verify-session-employee-runtime.js` sections K–T (request mirror, create / update / archive, every
+error kind, ambiguity and reconciliation, CSRF recovery, identity loss, late answers, Employee containment, draft
+lifecycle, focus) over a recording `#app`; the AFI-4a2 checks in `tools/verify-build.js`; write routes and error
+scenarios in `tools/serve-auth-stub.js` (test only).
+
 ### Release engineering
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the

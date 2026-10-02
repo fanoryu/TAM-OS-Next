@@ -98,14 +98,21 @@ enable (`/api/employees/provision-account` etc.), activation delivered by the go
 issues the token at send time; no route returns one), membership-only disable/enable, a derived `accountState` in
 the CEO reads, and migrations `0018`–`0019`. Owner decision C1 = A mirrors `account.manage` in `js/core/authz.js`
 as vocabulary only, so **ACTIONS are 21** on both sides and the package digest changes; `AUTH_MODE` stays LOCAL,
-"Acting as" is unchanged. **AFI-4a1** (implemented as source on a feature branch; not deployed) is the first slice of
+"Acting as" is unchanged. **AFI-4a1** (merged to `main` as source; not deployed) is the first slice of
 the authenticated Employee workspace: in SESSION mode an AUTHENTICATED CEO gets the server Employee list (with an
 archived toggle) and a record's detail with its account state as text, and an Employee gets their own read-only
 profile — server-authoritative, strictly decoded, held in memory only (no business localStorage, no `State`), rendered
 on the auth-view path (the business shell, "Acting as", Global Search, local data tools and the other domains stay
-unreachable; `allowsWorkspace()` is still false), and destroyed on logout, a 401 or a principal change. There is no
-Employee create/update/archive (AFI-4a2) and no account control (AFI-4a3, after BF-4a3's `accountManageable`,
-D-AFI4a-D1 = A); production `AUTH_MODE` is still LOCAL and AFI-4a is not closed. v2.10.0 remains
+unreachable; `allowsWorkspace()` is still false), and destroyed on logout, a 401 or a principal change.
+**AFI-4a2** (implemented as source on a feature branch; not pushed, not deployed) lets a SESSION **CEO** create,
+update and **soft-archive** Employee records (BF-4a1 `POST /api/employees/create|update|archive`, through the
+existing `authSessionMutation` CSRF path; changed fields + `expectedVersion` on update; no delete, no unarchive). The
+server stays authoritative: only its strictly decoded answer changes the in-memory data, an unknowable outcome (503,
+network, timeout, malformed success) is never resent but reconciled by re-reading, and a recovery that cannot confirm
+the session fails closed via the new `AuthBoot.sessionUncertain()`. An **Employee stays read-only**. There is still no
+account control and `accountManageable` is not implemented (AFI-4a3, after BF-4a3, D-AFI4a-D1 = A); `accountState`
+is display-only. Production `AUTH_MODE` is still LOCAL, "Acting as" remains LOCAL-only, and AFI-4a is not closed.
+v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
 **Repository posture (current).** `fanoryu/TAM-OS-Next` is **PUBLIC** — the source is publicly viewable,

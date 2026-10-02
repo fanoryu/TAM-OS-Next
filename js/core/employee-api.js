@@ -1,13 +1,18 @@
 /* ============================================================
-   EMPLOYEE API (AFI-4a1) — js/core/employee-api.js
+   EMPLOYEE API (AFI-4a1, AFI-4a2) — js/core/employee-api.js
    ------------------------------------------------------------
-   The SESSION-mode read client for the server Employee record (BF-4a1): three
-   reads over ApiClient, each answer strictly decoded before anything else sees it.
+   The SESSION-mode client for the server Employee record (BF-4a1): three reads over
+   ApiClient and three writes over authSessionMutation (js/core/auth-boot.js), each
+   answer strictly decoded before anything else sees it.
 
      list({ archived })  GET /api/employees            CEO only (an Employee is 403)
                          GET /api/employees?archived=1 archived records included
      get(id)             GET /api/employee?id=<id>      CEO detail
      getSelf(principal)  GET /api/employee?id=<principal.employeeId>   Employee self
+
+     create(fields)                         POST /api/employees/create   employee.create
+     update(id, expectedVersion, changed)   POST /api/employees/update   employee.update
+     archive(id, expectedVersion)           POST /api/employees/archive  employee.delete (soft)
 
    IDENTIFIERS: principal.employeeId (from GET /api/auth/me) is the OPAQUE Employee
    record id — the same value as the `id` of every DTO here. It is NOT the human
@@ -19,9 +24,15 @@
    anything else is INVALID_RESPONSE and nothing of it is returned. Money stays the
    server's exact decimal STRING ("7500000.00") — never a JavaScript number.
 
-   READ-ONLY (AFI-4a1): no mutation route is named here. The server is the only
-   authority; nothing is persisted, cached or logged. Employee writes (AFI-4a2) will
-   be added beside these reads, through the same decoders.
+   WRITES (AFI-4a2): EmployeeRequests is the allowlisted mirror of the server's
+   EmployeeInput — UX only; the server stays the authority. It builds the exact body
+   (profile fields only; id + expectedVersion for update / archive), trims text, sends
+   a cleared optional field as null, keeps money a decimal STRING (or an integer) and
+   refuses any other key or value before transport. Every write goes through
+   authSessionMutation — the established CSRF path with its bounded stale-token
+   recovery — and its outcome carries that recovery. A success must decode as
+   { employee: detail } and confirm the write, or it is INVALID_RESPONSE — never a
+   success. Nothing is persisted, cached or logged, and nothing here resends a write.
 
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
@@ -107,11 +118,120 @@ const EmployeeDecoders = (function(){
   });
 })();
 
+// server/src/Employee/EmployeeInput.php FIELDS (the writable profile, in column order) and MAX_VERSION.
+const EMPLOYEE_WRITABLE_FIELDS = Object.freeze(['employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary']);
+const EMPLOYEE_API_MAX_VERSION = 4294967295;
+
+// The allowlisted request mirror of EmployeeInput: { ok: true, body } or { ok: false, fields }.
+const EmployeeRequests = (function(){
+  const REQUIRED = Object.freeze(['employeeCode', 'fullName']);
+  const SINGLE_LINE_CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+  const MULTI_LINE_CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
+  // EmailAddress::candidate / isValid: trimmed, lower-cased, printable ASCII, <= 254 bytes, an address.
+  const EMAIL_PATTERN = /^[a-z0-9!#$%&'*+\/=?^_`{|}~-]+(\.[a-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+  const INVALID = Object.freeze({});
+
+  function codePoints(s){ return Array.from(s).length; }
+  // A trimmed string, null for a cleared optional value, or INVALID.
+  function text(v, max, required, multiline){
+    if(v === null && !required) return null;
+    if(typeof v !== 'string') return INVALID;
+    const t = v.trim();
+    if(t === '') return required ? INVALID : null;
+    if((multiline ? MULTI_LINE_CONTROL : SINGLE_LINE_CONTROL).test(t) || codePoints(t) > max) return INVALID;
+    return t;
+  }
+  function optional(v, accept){
+    if(v === null) return null;
+    if(typeof v !== 'string') return INVALID;
+    const t = v.trim();
+    if(t === '') return null;
+    return accept(t) ? t : INVALID;
+  }
+  function isDate(t){
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+    if(!m) return false;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    const at = new Date(Date.UTC(y, mo - 1, d));
+    return y >= 1900 && at.getUTCFullYear() === y && at.getUTCMonth() === mo - 1 && at.getUTCDate() === d;
+  }
+  function isEmail(t){
+    const candidate = t.toLowerCase();
+    return candidate.length <= 254 && /^[\x21-\x7E]+$/.test(candidate) && EMAIL_PATTERN.test(candidate);
+  }
+  // An exact decimal: a string matching the server pattern (sent as that string) or a whole integer.
+  function money(v){
+    if(Number.isInteger(v)) return (v >= 0 && v <= 9999999999999) ? v : INVALID;
+    return optional(v, (t) => /^\d{1,13}(\.\d{1,2})?$/.test(t));
+  }
+  function value(field, v){
+    switch(field){
+      case 'employeeCode': return text(v, 32, true, false);
+      case 'fullName': return text(v, 160, true, false);
+      case 'jobTitle': case 'department': return text(v, 120, false, false);
+      case 'employmentStatus': return EMPLOYEE_API_STATUSES.indexOf(v) !== -1 ? v : INVALID;
+      case 'joinDate': return optional(v, isDate);
+      case 'contactEmail': return optional(v, isEmail);
+      case 'phone': return optional(v, (t) => /^[0-9+()\-. ]{1,40}$/.test(t));
+      case 'notes': return text(v, 2000, false, true);
+      case 'monthlyBaseSalary': return money(v);
+      default: return INVALID;
+    }
+  }
+  function isPlain(v){
+    return !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+  }
+  // Copies the valid profile fields into `body`; returns the names of the unknown or invalid ones.
+  function profile(fields, body){
+    const bad = [];
+    Object.keys(fields).forEach(function(k){
+      if(EMPLOYEE_WRITABLE_FIELDS.indexOf(k) === -1){ bad.push(k); return; }
+      const out = value(k, fields[k]);
+      if(out === INVALID) bad.push(k); else body[k] = out;
+    });
+    return bad;
+  }
+  function target(id, expectedVersion, bad){
+    if(typeof id !== 'string' || !EMPLOYEE_API_ID_PATTERN.test(id)) bad.push('id');
+    if(!Number.isInteger(expectedVersion) || expectedVersion < 1 || expectedVersion > EMPLOYEE_API_MAX_VERSION) bad.push('expectedVersion');
+  }
+  function result(bad, body){
+    return bad.length ? Object.freeze({ ok: false, fields: Object.freeze(bad) }) : Object.freeze({ ok: true, body: body });
+  }
+
+  return Object.freeze({
+    // POST /api/employees/create: profile fields only; employeeCode and fullName required.
+    create(fields){
+      if(!isPlain(fields)) return result(REQUIRED.slice(), null);
+      const body = {};
+      const bad = profile(fields, body);
+      REQUIRED.forEach(function(k){ if(!Object.prototype.hasOwnProperty.call(fields, k)) bad.push(k); });
+      return result(bad, body);
+    },
+    // POST /api/employees/update: id, expectedVersion and at least one changed profile field.
+    update(id, expectedVersion, changed){
+      const body = { id: id, expectedVersion: expectedVersion };
+      const bad = [];
+      target(id, expectedVersion, bad);
+      if(!isPlain(changed) || !Object.keys(changed).length) bad.push('fields');
+      else Array.prototype.push.apply(bad, profile(changed, body));
+      return result(bad, body);
+    },
+    // POST /api/employees/archive: exactly id and expectedVersion.
+    archive(id, expectedVersion){
+      const bad = [];
+      target(id, expectedVersion, bad);
+      return result(bad, { id: id, expectedVersion: expectedVersion });
+    }
+  });
+})();
+
 const EmployeeApi = (function(){
   // ApiResult -> { ok: true, data } | { ok: false, kind, retryAfter?, requestId? }.
   function outcome(res, decode){
     if(!res.ok){
       const failed = { ok: false, kind: res.kind };
+      if(res.fields) failed.fields = res.fields;
       if(res.retryAfter !== undefined) failed.retryAfter = res.retryAfter;
       if(res.requestId) failed.requestId = res.requestId;
       return Object.freeze(failed);
@@ -125,6 +245,17 @@ const EmployeeApi = (function(){
     return Object.freeze({ ok: true, data: data });
   }
   const refused = Object.freeze({ ok: false, kind: EMPLOYEE_API_INVALID });
+
+  // One write through the established CSRF path. A refused request is never sent; an answer
+  // carries authSessionMutation's recovery, and only a strictly decoded { employee: detail }
+  // that `confirms` the write is a success.
+  async function write(route, prepared, confirms){
+    if(!prepared.ok) return Object.freeze({ ok: false, kind: API_RESULT_KINDS.VALIDATION, fields: prepared.fields, local: true, recovery: 'none' });
+    const sent = await authSessionMutation(route, prepared.body);
+    let out = outcome(sent.result, EmployeeDecoders.detailResponse);
+    if(out.ok && !confirms(out.data)) out = refused;
+    return Object.freeze(Object.assign({}, out, { recovery: sent.recovery }));
+  }
 
   return Object.freeze({
     async list(options){
@@ -145,6 +276,17 @@ const EmployeeApi = (function(){
       const out = outcome(res, EmployeeDecoders.selfResponse);
       if(out.ok && out.data.id !== own) return refused;
       return out;
+    },
+    // A new record: a server id, version 1, not archived.
+    create(fields){
+      return write('/api/employees/create', EmployeeRequests.create(fields), (e) => e.version === 1 && e.archived === false);
+    },
+    update(id, expectedVersion, changed){
+      return write('/api/employees/update', EmployeeRequests.update(id, expectedVersion, changed), (e) => e.id === id && e.archived === false);
+    },
+    // Soft archive: the same record, now archived. There is no unarchive.
+    archive(id, expectedVersion){
+      return write('/api/employees/archive', EmployeeRequests.archive(id, expectedVersion), (e) => e.id === id && e.archived === true);
     }
   });
 })();

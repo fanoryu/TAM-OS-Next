@@ -5529,10 +5529,13 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || ''),
     'AFI-1/AFI-2/AFI-3/AFI-4a1: only session-identity.js, auth-boot.js, auth-flow.js and employee-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
   check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
-    && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees'"
+    // AFI-4a2 authorized revision: employee-api.js also names the three Employee write routes
+    // (create / update / archive). Was: the two Employee read paths only. The property is
+    // unchanged — every /api/ path is an exact, allowlisted literal; no account route.
+    && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/update'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads and the three Employee writes');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -5718,9 +5721,13 @@ console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
     check(!/\bconsole\s*\.|setInterval|setTimeout|\bwindow\.[A-Za-z]+\s*=/.test(c), 'AFI-4a1: ' + name + ' does not log, schedule or publish on window');
   });
   // The read client: GET only, through ApiClient, structured queries, decoded strictly.
-  check((apiC.match(/ApiClient\.request\(/g) || []).length === 3 && (apiC.match(/method: 'GET'/g) || []).length === 4
-    && !/'POST'|'PUT'|'PATCH'|'DELETE'|csrf/.test(apiC) && !/body\s*:/.test(apiC),
-    'AFI-4a1: EmployeeApi makes exactly three GET reads through ApiClient — no mutation, no body, no CSRF');
+  // AFI-4a2 authorized revision: the writes go through authSessionMutation (never ApiClient
+  // directly), so ApiClient still carries exactly the three GET reads — no method, body or
+  // CSRF option is named here. Was: no write at all. The writes are pinned in AFI-4a2 below.
+  const apiCalls = apiC.match(/ApiClient\.request\([^;]*;/g) || [];
+  check(apiCalls.length === 3 && (apiC.match(/method: 'GET'/g) || []).length === 4
+    && !/'POST'|'PUT'|'PATCH'|'DELETE'|csrf/.test(apiC) && !apiCalls.some((c) => /body\s*:/.test(c)),
+    'AFI-4a1/AFI-4a2: EmployeeApi calls ApiClient for exactly three GET reads — no method, body or CSRF option of its own');
   check(!/'\/api\/[^']*[?#&=][^']*'/.test(apiC) && /query: \{ archived: '1' \}/.test(apiC) && (apiC.match(/query: \{ id: (id|own) \}/g) || []).length === 2,
     'AFI-4a1: EmployeeApi never writes a raw query into a path; archived and id travel as structured queries');
   check(/getSelf\(principal\)\{\s*const own = principal \? principal\.employeeId : undefined;/.test(apiC) && /out\.data\.id !== own/.test(apiC) && !/employeeCode/.test(apiC.replace(/'employeeCode'|employeeCode: \(v\)/g, '')),
@@ -5750,16 +5757,116 @@ console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
     'AFI-4a1: leaving AUTHENTICATED clears the identity and the SESSION Employee data together');
   check(/sessionLost\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.SIGNED_OUT, 'session_ended'\);\s*\}/.test(abC),
     'AFI-4a1: sessionLost() only moves AUTHENTICATED to SIGNED_OUT (no request)');
-  check((storeC.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 1 && /out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED/.test(storeC)
-    && /if\(!SessionEmployeeStore\.isCurrent\(token\)\) return;/.test(storeC),
-    'AFI-4a1: only a current read answered 401 ends the session; stale answers are dropped first');
+  // AFI-4a2 authorized revision: a write's 401 (settle) is the one further sessionLost()
+  // caller, and it too drops an answer from an earlier identity first. Was: run() only.
+  const runFn = (storeC.match(/async function run\([\s\S]*?\n  \}/) || [''])[0];
+  const settleFn = (storeC.match(/function settle\([\s\S]*?\n  \}/) || [''])[0];
+  check((storeC.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 2 && (runFn.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 1 && (settleFn.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 1
+    && /if\(!SessionEmployeeStore\.isCurrent\(token\)\) return;\s*if\(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)/.test(runFn)
+    && settleFn.indexOf('if(!SessionEmployeeStore.isLive(token)) return;') !== -1 && settleFn.indexOf('if(!SessionEmployeeStore.isLive(token)) return;') < settleFn.indexOf('AuthBoot.sessionLost()'),
+    'AFI-4a1/AFI-4a2: only a current read, or a write of the current identity, answered 401 ends the session; stale answers are dropped first');
   check(/allowsWorkspace\(\)\{ return false; \}/.test(abC), 'AFI-4a1: AuthBoot still grants no business shell (allowsWorkspace() is false)');
   // The view: no controls beyond reading, nothing but escaped values.
-  check(!/>(Create|Add|New|Edit|Save|Archive|Delete|Provision|Reissue|Disable|Enable)\b[^<]*</.test(viewC) && !/<form|<input|<textarea|<select/.test(viewC),
-    'AFI-4a1: the SESSION workspace has no create, edit, archive or account control (read-only)');
+  // AFI-4a2 authorized revision: the CEO gains Employee CRUD controls (pinned role-scoped in
+  // AFI-4a2 below); the read-only property now holds for the Employee's self view, and no
+  // account control exists anywhere. Was: no write control in the whole view.
+  const selfFn = (viewC.match(/function sessionWorkspaceSelfHTML\([\s\S]*?\n\}/) || [''])[0];
+  check(!!selfFn && !/>(Create|Add|New|Edit|Save|Archive|Delete|Provision|Reissue|Disable|Enable)\b[^<]*</.test(selfFn) && !/<form|<input|<textarea|<select|swAddBtn|swEditBtn|swArchiveBtn|swForm|swConfirm|sessionWorkspaceFormHTML|sessionWorkspaceConfirmHTML/.test(selfFn)
+    && !/>(Provision|Reissue|Disable|Enable|Delete|Unarchive|Restore)\b[^<]*</.test(viewC),
+    'AFI-4a1/AFI-4a2: the Employee self view has no create, edit, archive or form control (read-only); no account, delete or unarchive control exists');
   check(/escapeHtml\(/.test(viewC) && !/data-sw-open="' \+ (e|row)\.id/.test(viewC) && !/\.id\b[^;]*innerHTML/.test(viewC),
     'AFI-4a1: the view escapes server values and never writes the opaque record id into the page');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-employee-runtime.js')), 'AFI-4a1: runtime harness present — tools/verify-session-employee-runtime.js');
+}
+
+// ===== AFI-4a2 — SESSION EMPLOYEE CREATE / UPDATE / ARCHIVE (CEO) =====
+// The CEO's Employee writes: exactly three routes, only through authSessionMutation (the
+// established CSRF path with its bounded recovery), an allowlisted request mirror of the
+// server's EmployeeInput, strictly decoded answers, no automatic resend, role-scoped
+// controls, no account administration. The AFI-4a1 firewall above still applies to all
+// three modules. Behaviour is proven by tools/verify-session-employee-runtime.js (K–T).
+console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  const apiC = code(rd('core/employee-api.js')), storeC = code(rd('core/session-employee.js')), viewC = code(rd('ui/session-workspace-view.js'));
+  const abC = code(rd('core/auth-boot.js'));
+  // Transport: three exact write routes, one authSessionMutation call, never ApiClient / fetch.
+  check((apiC.match(/authSessionMutation\(/g) || []).length === 1 && /const sent = await authSessionMutation\(route, prepared\.body\);/.test(apiC)
+    && (apiC.match(/write\('\/api\/employees\/(create|update|archive)', EmployeeRequests\.(create|update|archive)\(/g) || []).join() === "write('/api/employees/create', EmployeeRequests.create(,write('/api/employees/update', EmployeeRequests.update(,write('/api/employees/archive', EmployeeRequests.archive(",
+    'AFI-4a2: EmployeeApi writes exactly /api/employees/create, /update and /archive, each through authSessionMutation with the validated body');
+  check(!/\bfetch\s*\(|XMLHttpRequest/.test(apiC + storeC + viewC) && !/'\/api\/employees\/[^']*[?#&=][^']*'/.test(apiC)
+    && !/provision|reissue|disable-account|enable-account|accountManageable/i.test(apiC + storeC + viewC),
+    'AFI-4a2: no direct fetch, no query string on a write route, no account route or accountManageable');
+  check(/if\(!prepared\.ok\) return Object\.freeze\(\{ ok: false, kind: API_RESULT_KINDS\.VALIDATION, fields: prepared\.fields, local: true, recovery: 'none' \}\);/.test(apiC)
+    && /let out = outcome\(sent\.result, EmployeeDecoders\.detailResponse\);\s*if\(out\.ok && !confirms\(out\.data\)\) out = refused;/.test(apiC),
+    'AFI-4a2: a refused request is never sent; a write success counts only as a strictly decoded { employee: detail } that confirms the write');
+  // The request mirror: the server's field allowlist, version range and no numeric salary conversion.
+  const inputPhp = read(path.join(root, 'server', 'src', 'Employee', 'EmployeeInput.php'));
+  const serverFields = ((inputPhp.match(/public const FIELDS = \[([\s\S]*?)\];/) || ['', ''])[1].match(/'([A-Za-z]+)' =>/g) || []).map((m) => m.slice(1, -4));
+  const clientFields = ((apiC.match(/const EMPLOYEE_WRITABLE_FIELDS = Object\.freeze\(\[([^\]]*)\]\);/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
+  check(serverFields.length === 10 && clientFields.join() === serverFields.join() && /const EMPLOYEE_API_MAX_VERSION = 4294967295;/.test(apiC) && /public const MAX_VERSION = 4294967295;/.test(inputPhp),
+    'AFI-4a2: EMPLOYEE_WRITABLE_FIELDS equals server EmployeeInput::FIELDS (order included); expectedVersion range equals MAX_VERSION');
+  check(/if\(EMPLOYEE_WRITABLE_FIELDS\.indexOf\(k\) === -1\)\{ bad\.push\(k\); return; \}/.test(apiC) && !/companyId|company_id|userId|user_id|membership|accountState\s*:|password|csrfToken/.test(apiC.replace(/'accountState'|accountState: \(v\)/g, '')),
+    'AFI-4a2: the request body is built from the writable allowlist only; any other key is refused before transport');
+  const salaryConv = /(Number|parseFloat|parseInt)\s*\([^)]*[Ss]alary|\+\s*[A-Za-z_.]*[Ss]alary\b|[Ss]alary[A-Za-z_.]*\s*\*\s*1\b/;
+  check(![apiC, storeC, viewC].some((c) => salaryConv.test(c)) && /\^\\d\{1,13\}\(\\\.\\d\{1,2\}\)\?\$/.test(apiC),
+    'AFI-4a2: monthlyBaseSalary is sent as the entered decimal string (server pattern) — never Number / parseFloat / unary plus');
+  // The controller: CEO only, one write per action, no automatic resend, ambiguity reconciled by reads.
+  check(/function canAct\(\)\{ return ceoPrincipal\(principalNow\(\)\) && !pending\(\); \}/.test(storeC)
+    && /async submitForm\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /async confirmArchive\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC)
+    && /openCreate\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /openEdit\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /openArchive\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC),
+    'AFI-4a2: every write action fails closed unless the principal is a CEO with no write in flight');
+  check((storeC.match(/EmployeeApi\.create\(/g) || []).length === 1 && (storeC.match(/EmployeeApi\.update\(/g) || []).length === 1 && (storeC.match(/EmployeeApi\.archive\(/g) || []).length === 1
+    && !/while\s*\(|for\s*\(\s*;|AbortController|\.abort\(/.test(storeC),
+    'AFI-4a2: each write is sent from exactly one place — no retry loop, no abort of a sent POST');
+  const settleFn = (storeC.match(/function settle\([\s\S]*?\n  \}/) || [''])[0];
+  check(/const AMBIGUOUS = Object\.freeze\(\[API_RESULT_KINDS\.UNAVAILABLE, EMPLOYEE_API_INVALID\]\);/.test(storeC)
+    && /SessionEmployeeStore\.failMutation\(token, SESSION_MUTATION_STATUS\.AMBIGUOUS, out\);/.test(settleFn) && !/EmployeeApi\.(create|update|archive)/.test(settleFn)
+    && /if\(kind === 'create'\) loadList\(s\.listArchived\);\s*else if\(s\.detailId\) loadDetail\(s\.detailId\);/.test(settleFn),
+    'AFI-4a2: an unknowable outcome (503 / network / timeout / malformed success) is AMBIGUOUS and reconciled by reads — never resent');
+  check(/if\(out\.recovery === 'unavailable'\)\{ AuthBoot\.sessionUncertain\(\); return; \}/.test(settleFn) && (storeC.match(/AuthBoot\.sessionUncertain\(\)/g) || []).length === 1
+    && /if\(out\.recovery === 'principal_changed'\)\{ SessionEmployeeStore\.clear\(\); paint\(\); return; \}/.test(settleFn)
+    && /sessionUncertain\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.UNAVAILABLE, 'unavailable'\);\s*\}/.test(abC),
+    'AFI-4a2: only the recovery outcome "unavailable" calls AuthBoot.sessionUncertain() (AUTHENTICATED -> UNAVAILABLE, no request); principal_changed clears the data');
+  check(!/\baccountState\s*(===|!==|==|!=)|(===|!==)\s*[A-Za-z_.]*accountState\b|accountManageable/.test(storeC + viewC + apiC),
+    'AFI-4a2: accountState is display-only — never a condition for a write control or action');
+  // The view: CEO-only Employee CRUD controls, escaped drafts, existing classes.
+  const ceoControls = (viewC.match(/id="sw(AddBtn|EditBtn|ArchiveBtn|FormCancel|FormSave|ReloadBtn|ArchiveCancel|ArchiveConfirm)"/g) || []).sort().join();
+  check(ceoControls === 'id="swAddBtn",id="swArchiveBtn",id="swArchiveCancel",id="swArchiveConfirm",id="swEditBtn",id="swFormCancel",id="swFormSave",id="swReloadBtn",id="swReloadBtn"',
+    'AFI-4a2: the write controls are exactly Add employee, Edit, Archive, Cancel, Save, Reload record and the archive confirmation');
+  const listFn = (viewC.match(/function sessionWorkspaceListHTML\([\s\S]*?\n\}/) || [''])[0];
+  const detailFn = (viewC.match(/function sessionWorkspaceDetailHTML\([\s\S]*?\n\}/) || [''])[0];
+  const htmlFn = (viewC.match(/function sessionWorkspaceHTML\([\s\S]*?\n\}/) || [''])[0];
+  check(/if\(ceo\) body = w\.detailId \? sessionWorkspaceDetailHTML\(w\) : sessionWorkspaceListHTML\(w\);\s*else if\(employee\) body = sessionWorkspaceSelfHTML\(w\);/.test(htmlFn)
+    && /swAddBtn/.test(listFn) && /swEditBtn/.test(detailFn) && /swArchiveBtn/.test(detailFn) && /\(d\.archived \|\| w\.confirm\) \? ''/.test(detailFn),
+    'AFI-4a2: write controls are rendered only on the CEO branch; Edit / Archive only for a live (non-archived) record');
+  check(/value="' \+ escapeHtml\(value\) \+ '"/.test(viewC) && /'>' \+ escapeHtml\(value\) \+ '<\/textarea>'/.test(viewC) && /escapeHtml\(d\.fullName\) \+ ' \(' \+ escapeHtml\(d\.employeeCode\) \+ '\)/.test(viewC)
+    && !/\bconfirm\s*\(|window\.confirm|alert\s*\(|prompt\s*\(/.test(viewC.replace(/openConfirm|cancelArchive|confirmArchive|sessionWorkspaceConfirmHTML/g, '')),
+    'AFI-4a2: draft and confirmation values are escaped; archive uses an inline confirmation (no browser confirm())');
+  check(/aria-invalid="true"/.test(viewC) && /aria-describedby="/.test(viewC) && /aria-required="true"/.test(viewC) && /aria-busy="true"/.test(viewC) && /<label for="' \+ id \+ '">/.test(viewC)
+    && /id="swConfirmTitle" tabindex="-1"/.test(viewC),
+    'AFI-4a2: accessibility minimum — labels, required, aria-invalid, aria-describedby, aria-busy, focusable confirmation heading');
+  // Static class names in class="…" plus the one class added by concatenation.
+  const classes = (viewC.match(/class="([^"]+)"/g) || []).map((m) => m.slice(7, -1)).join(' ').split(/\s+/).filter((c) => /^[a-z][a-z0-9-]*$/.test(c)).concat(['auth-message-warn']);
+  const cssAll = ['base.css', 'components.css', 'shell.css', 'tokens.css', 'charts.css', 'fonts.css'].map((f) => fs.existsSync(path.join(root, 'css', f)) ? read(path.join(root, 'css', f)) : '').join('\n');
+  // Exact membership in the set of class selectors the CSS defines — no regular expression is
+  // ever built from a class name, so no name (backslash, quote, dot, bracket…) needs escaping.
+  const cssClassesOf = (css) => new Set((css.match(/\.-?[_A-Za-z][_A-Za-z0-9-]*/g) || []).map((s) => s.slice(1)));
+  const cssClassDefined = (defined, name) => typeof name === 'string' && defined.has(name);
+  const definedClasses = cssClassesOf(cssAll);
+  const missing = classes.filter((c, i) => classes.indexOf(c) === i && !cssClassDefined(definedClasses, c));
+  // Regression for the class lookup (code scanning js/incomplete-sanitization): hostile names are
+  // compared literally — never interpreted as a pattern, never thrown on, never a partial match.
+  const probeCss = '.auth-message{} .auth-message-warn{} .xzy{} .tabs{}';
+  const probe = cssClassesOf(probeCss);
+  const hostile = ['x.y', 'x\\', 'a\\b', "q'", 'q"', 'n\nl', 'c\rr', 't\tb', 'p(', 'x*', '[a]', 'tab', 'auth', '.auth-message', 'auth-message ', ''];
+  let hostileOk = true;
+  try { hostileOk = hostile.every((n) => cssClassDefined(probe, n) === false); } catch(_e){ hostileOk = false; }
+  check(hostileOk && cssClassDefined(probe, 'auth-message') && cssClassDefined(probe, 'auth-message-warn') && cssClassDefined(probe, 'tabs') && !cssClassDefined(probe, 'auth-message-w'),
+    'AFI-4a2: the CSS class lookup is exact — backslash, quotes, newline, CR, tab and pattern characters are never interpreted');
+  check(missing.length === 0, 'AFI-4a2: the view uses only CSS classes that already exist (CSS unchanged)' + (missing.length ? ' >> missing: ' + missing.join(', ') : ''));
+  check(!/localStorage|sessionStorage|indexedDB|document\s*\.\s*cookie|\bState\b|StorageAdapter/.test(storeC + viewC + apiC), 'AFI-4a2: drafts and write state live in memory only (no storage, no State)');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
