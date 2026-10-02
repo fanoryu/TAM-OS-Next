@@ -5934,9 +5934,9 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
     'BF-4a3: EmployeeView projects it right after accountState for the CEO only, as a strict boolean from SQL 1 / 0');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  check(migrations[migrations.length - 1].startsWith('0019_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  check(migrations[migrations.length - 1].startsWith('0021_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'BF-4a3: migration head stays 0019, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'BF-4a3: no migration of its own (head 0021 after BF-4b1), ACTIONS stay 21, AUTH_MODE stays LOCAL');
 }
 
 // ===== AFI-4a3 — CEO SESSION ACCOUNT ADMINISTRATION =====
