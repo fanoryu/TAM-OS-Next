@@ -314,4 +314,77 @@ return [
         $ok($post($w, 'ceoA', '/api/employees/disable-account', ['id' => 'e_a1']), 'disable');
         assertSame('Terminated', (string) $w['db']->select('SELECT employment_status FROM employees WHERE id = ?', ['e_a1'])[0]['employment_status'], 'disable never rewrites employment status');
     },
+    'BF-4a3: accountManageable follows the locked matrix in the CEO detail and both lists, which agree; accountState is unchanged' => static function () use ($world, $provision, $op, $ok, $get, $post): void {
+        $w = $world();
+        // [accountState, accountManageable] from the detail, the active list and the archived list.
+        $pair = static function (array $w, string $id) use ($ok, $get): array {
+            $d = $ok($get($w, 'ceoA', '/api/employee', 'id=' . $id), 'detail ' . $id)['employee'];
+            $all = array_column($ok($get($w, 'ceoA', '/api/employees', 'archived=1'), 'all')['employees'], null, 'id');
+            $live = array_column($ok($get($w, 'ceoA', '/api/employees'), 'live')['employees'], null, 'id');
+            assertSame([$d['accountState'], $d['accountManageable']], [$all[$id]['accountState'], $all[$id]['accountManageable']], $id . ': detail and archived list agree');
+            if (!$d['archived']) {
+                assertSame([$d['accountState'], $d['accountManageable']], [$live[$id]['accountState'], $live[$id]['accountManageable']], $id . ': detail and active list agree');
+            }
+            assertTrue(is_bool($d['accountManageable']), $id . ': a real boolean');
+            return [$d['accountState'], $d['accountManageable']];
+        };
+        assertSame(['none', true], $pair($w, 'e_new2'), 'live, no login');
+        assertSame(['active', true], $pair($w, 'e_a1'), 'live, active Employee login');
+        assertSame(['active', false], $pair($w, 'e_ceo'), 'CEO-bound: never manageable, whatever its state');
+        $ok($provision($w, 'e_new', 'new@example.test'), 'provision');
+        assertSame(['pending', true], $pair($w, 'e_new'), 'live, pending Employee login');
+        $ok($op($w, 'disable-account', 'e_new'), 'disable');
+        assertSame(['disabled', true], $pair($w, 'e_new'), 'live, Employee membership disabled, user active');
+        $ok($op($w, 'enable-account', 'e_new'), 'enable');
+        // D-BF4a3-1: a user disabled out of band (no route does this) fails closed; accountState keeps its mapping.
+        $w['db']->execute("UPDATE users u JOIN memberships m ON m.user_id = u.id SET u.status = 'disabled' WHERE m.employee_id = 'e_new'");
+        assertSame(['disabled', false], $pair($w, 'e_new'), 'live, Employee membership active, user disabled out of band');
+        $ok($post($w, 'ceoA', '/api/employees/archive', ['id' => 'e_new2', 'expectedVersion' => 1]), 'archive e_new2');
+        assertSame(['none', false], $pair($w, 'e_new2'), 'archived, no login');
+        $ok($op($w, 'disable-account', 'e_a1'), 'disable e_a1');
+        $ok($post($w, 'ceoA', '/api/employees/archive', ['id' => 'e_a1', 'expectedVersion' => 1]), 'archive e_a1');
+        assertSame(['disabled', false], $pair($w, 'e_a1'), 'archived, Employee membership disabled');
+    },
+    'BF-4a3: every one of the seven write responses carries accountManageable per the matrix' => static function () use ($world, $provision, $op, $ok, $post): void {
+        $w = $world();
+        $m = static fn (array $data): array => [$data['employee']['accountState'], $data['employee']['accountManageable']];
+        $created = $ok($post($w, 'ceoA', '/api/employees/create', ['employeeCode' => 'EMP-BF4A3', 'fullName' => 'Fabricated Manageable']), 'create');
+        assertSame(EmployeeView::DETAIL_FIELDS, array_keys($created['employee']), 'create: the CEO detail');
+        assertSame(['none', true], $m($created), 'create');
+        $id = $created['employee']['id'];
+        assertSame(['none', true], $m($ok($post($w, 'ceoA', '/api/employees/update', ['id' => $id, 'expectedVersion' => 1, 'jobTitle' => 'Analyst']), 'update')), 'update');
+        assertSame(['pending', true], $m($ok($provision($w, $id, 'manageable@example.test'), 'provision')), 'provision');
+        assertSame(['pending', true], $m($ok($op($w, 'reissue-activation', $id), 'reissue')), 'reissue');
+        assertSame(['disabled', true], $m($ok($op($w, 'disable-account', $id), 'disable')), 'disable');
+        assertSame(['pending', true], $m($ok($op($w, 'enable-account', $id), 'enable')), 'enable');
+        $ok($op($w, 'disable-account', $id), 'disable again');
+        assertSame(['disabled', false], $m($ok($post($w, 'ceoA', '/api/employees/archive', ['id' => $id, 'expectedVersion' => 2]), 'archive')), 'archive');
+    },
+    'BF-4a3: accountManageable is never input — a forged one is an unknown field on every write and changes nothing' => static function () use ($world, $post, $code, $counts, $conflicts): void {
+        $w = $world();
+        $before = $counts($w['db']);
+        $forged = ['accountManageable' => true];
+        foreach (['provision-account' => ['email' => 'f@example.test'], 'reissue-activation' => [], 'disable-account' => [], 'enable-account' => []] as $verb => $extra) {
+            foreach (['e_ceo', 'e_new', 'e_a1'] as $target) {
+                assertSame([400, 'validation_failed'], $code($post($w, 'ceoA', '/api/employees/' . $verb, ['id' => $target] + $extra + $forged)), $verb . ' on ' . $target);
+            }
+        }
+        assertSame([400, 'validation_failed'], $code($post($w, 'ceoA', '/api/employees/create', ['employeeCode' => 'EMP-F', 'fullName' => 'Forged'] + $forged)), 'create');
+        assertSame([400, 'validation_failed'], $code($post($w, 'ceoA', '/api/employees/update', ['id' => 'e_new', 'expectedVersion' => 1, 'jobTitle' => 'X'] + $forged)), 'update');
+        assertSame([400, 'validation_failed'], $code($post($w, 'ceoA', '/api/employees/archive', ['id' => 'e_new', 'expectedVersion' => 1] + $forged)), 'archive');
+        assertSame($before, $counts($w['db']), 'nothing written');
+        assertSame([], $conflicts($w), 'refused at input, before any guard or authorization');
+        assertSame(1, (int) $w['db']->select('SELECT version FROM employees WHERE id = ?', ['e_new'])[0]['version'], 'the record is untouched');
+    },
+    'BF-4a3: scope is unchanged — the Employee self view carries neither field, the list stays CEO-only, another company stays 404' => static function () use ($world, $ok, $get, $code): void {
+        $w = $world();
+        $self = $ok($get($w, 'empA1', '/api/employee', 'id=e_a1'), 'self')['employee'];
+        assertSame(EmployeeView::SELF_FIELDS, array_keys($self), 'the self DTO');
+        assertTrue(!array_key_exists('accountManageable', $self) && !array_key_exists('accountState', $self), 'no account projection for an Employee');
+        assertSame([403, 'forbidden'], $code($get($w, 'empA1', '/api/employees')), 'an Employee never lists');
+        assertSame([404, 'not_found'], $code($get($w, 'ceoB', '/api/employee', 'id=e_a1')), 'a foreign CEO');
+        $foreignList = $ok($get($w, 'ceoB', '/api/employees', 'archived=1'), 'foreign list')['employees'];
+        assertSame(['e_b1'], array_column($foreignList, 'id'), 'company B sees only its own record');
+        assertSame([true], array_column($foreignList, 'accountManageable'), 'with its own projection');
+    },
 ];

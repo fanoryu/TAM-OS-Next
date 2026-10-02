@@ -80,18 +80,31 @@ return [
     'BF-4a2: the CEO reads derive accountState from the bound login, in-company, without a hash; the self read does not join it' => static function (): void {
         $join = "FROM employees e LEFT JOIN memberships m ON m.company_id = e.company_id AND m.employee_id = e.id LEFT JOIN users u ON u.id = m.user_id WHERE ";
         $state = "CASE WHEN m.id IS NULL THEN 'none' WHEN m.status <> 'active' OR u.status <> 'active' THEN 'disabled' WHEN u.password_hash IS NULL THEN 'pending' ELSE 'active' END AS account_state";
+        $manageable = "CASE WHEN e.archived_at IS NULL AND (m.id IS NULL OR (m.role = 'employee' AND u.status = 'active')) THEN 1 ELSE 0 END AS account_manageable";
         foreach (['LIST_PROFILES_SQL', 'LIST_ALL_PROFILES_SQL', 'FIND_PROFILE_SQL'] as $name) {
             $sql = constant(EmployeeStore::class . '::' . $name);
-            assertTrue(str_contains($sql, ', ' . $state . ' ' . $join), $name . ' derives the state over the same-company binding');
+            // BF-4a3: account_manageable sits between the state and the join, over the same rows.
+            assertTrue(str_contains($sql, ', ' . $state . ', ' . $manageable . ' ' . $join), $name . ' derives the state over the same-company binding');
             assertTrue(!preg_match('/\bu\.password_hash\b(?! IS NULL THEN)/', $sql) && !str_contains($sql, 'u.email'), $name . ' never projects a hash or the login email');
         }
         foreach (['FIND_PROFILE_SELF_SQL', 'LOCK_PROFILE_SQL'] as $name) {
             $sql = constant(EmployeeStore::class . '::' . $name);
-            assertTrue(!str_contains($sql, 'memberships') && !str_contains($sql, 'users') && !str_contains($sql, 'account_state'), $name . ' has no account join');
+            assertTrue(!str_contains($sql, 'memberships') && !str_contains($sql, 'users') && !str_contains($sql, 'account_state') && !str_contains($sql, 'account_manageable'), $name . ' has no account join');
         }
         $base = 'SELECT m.id AS membership_id, m.company_id, m.employee_id AS owner_employee_id, m.user_id, m.role, m.status AS membership_status, u.status AS user_status, (u.password_hash IS NOT NULL) AS has_password FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.company_id = :company_id AND m.employee_id = :employee_id';
         assertSame($base, EmployeeStore::ACCOUNT_SQL, 'account read');
         assertSame($base . ' FOR UPDATE', EmployeeStore::LOCK_ACCOUNT_SQL, 'account lock');
+    },
+    'BF-4a3: account_manageable is derived inline, once per CEO read, from the joined rows only — no subquery, no further join, no per-row lookup' => static function (): void {
+        foreach (['LIST_PROFILES_SQL', 'LIST_ALL_PROFILES_SQL', 'FIND_PROFILE_SQL'] as $name) {
+            $sql = constant(EmployeeStore::class . '::' . $name);
+            assertSame(1, substr_count($sql, 'AS account_manageable'), $name . ' projects it once');
+            assertSame(1, substr_count($sql, 'SELECT'), $name . ' stays one SELECT (no subquery)');
+            assertSame(2, substr_count($sql, ' JOIN '), $name . ' keeps exactly the two existing joins');
+            assertSame(1, substr_count($sql, 'LEFT JOIN memberships m ON m.company_id = e.company_id AND m.employee_id = e.id'), $name . ' joins the binding in-company');
+        }
+        assertSame(1, preg_match("/CASE WHEN e\\.archived_at IS NULL AND \\(m\\.id IS NULL OR \\(m\\.role = 'employee' AND u\\.status = 'active'\\)\\) THEN 1 ELSE 0 END/", EmployeeStore::FIND_PROFILE_SQL), 'live AND (no login OR an active-user employee membership)');
+        assertTrue(!str_contains(EmployeeStore::ACCOUNT_SQL, 'account_manageable') && !str_contains(EmployeeStore::LOCK_ACCOUNT_SQL, 'account_manageable'), 'the account.manage reads never consult it');
     },
     'BF-4a2: the account read is account.manage-only and against a record, before the database' => static function () use ($db, $principal): void {
         $store = new EmployeeStore($db());
