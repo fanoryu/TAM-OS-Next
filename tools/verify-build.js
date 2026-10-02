@@ -5982,6 +5982,8 @@ console.log('== AFI-4a3 — ACCOUNT ADMINISTRATION ==');
     && (viewC.match(/sessionWorkspaceAccountRowHTML\(/g) || []).length === 2 && (viewC.match(/sessionWorkspaceAccountHTML\(/g) || []).length === 2
     && !/Account|account/.test(selfFn),
     'AFI-4a3: the Login access row comes only from sessionAccountOperations() on the CEO detail (none while another panel is open); the Employee self view has none');
+  check(!/\blocation\b|\bhistory\b|URLSearchParams|\bhashchange\b/.test(viewC + storeC + apiC),
+    'AFI-4a3: the SESSION Employee modules never read or write the URL (no email, draft or state in a hash, query or history entry)');
   check(!/activation[_ ]?(token|link|url)\s*[:=]|activationToken|activationLink|clipboard|#activation=|execCommand\(|Copy (link|token)/i.test(viewC + storeC + apiC),
     'AFI-4a3: no activation token, link or copy UI exists in the SESSION workspace');
 }

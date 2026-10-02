@@ -157,7 +157,7 @@ function loadRuntime(routes){
     // A value built in the PAGE realm, as JSON.parse in ApiClient builds every answer.
     + ' parse: function(json){ return JSON.parse(json); } };';
   const noop = function(){};
-  const access = { local: [], session: [] };
+  const access = { local: [], session: [], url: [] };
   const storageOf = (log) => {
     const mem = {};
     return {
@@ -198,6 +198,9 @@ function loadRuntime(routes){
     AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session), storage: undefined,
     addEventListener: noop, removeEventListener: noop, confirm: ()=>true,
+    // AFI-4a3: a recording URL — nothing in the SESSION workspace may write the address bar.
+    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
+    history: { replaceState: (a, b, u) => { access.url.push(String(u)); }, pushState: (a, b, u) => { access.url.push(String(u)); } },
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: { addEventListener:noop, removeEventListener:noop,
@@ -211,7 +214,7 @@ function loadRuntime(routes){
   const rt = sandbox.__TAM__;
   rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr;
   rt.appHTML = () => (els.app ? els.app.innerHTML : '');
-  rt.app = els.app; rt.dom = dom;
+  rt.app = els.app; rt.dom = dom; rt.loc = sandbox.location;
   rt.store = () => rt.SessionEmployeeStore.snapshot();
   rt.state = () => rt.AuthBoot.snapshot().state;
   return rt;
@@ -236,6 +239,7 @@ function firewall(rt, label){
     label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
     label + ': legacy State stays empty and the business shell is never granted');
+  check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');
   // AFI-4a3 authorized revision: account administration exists only for the CEO, only on the
   // record detail, and only as the exact BF-4a2 requests. Was: no account route or control at all.
   const acct = rt.net.calls.filter((c) => /provision-account|reissue-activation|disable-account|enable-account/.test(c.url));
