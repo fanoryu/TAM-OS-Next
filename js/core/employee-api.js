@@ -14,6 +14,12 @@
      update(id, expectedVersion, changed)   POST /api/employees/update   employee.update
      archive(id, expectedVersion)           POST /api/employees/archive  employee.delete (soft)
 
+     AFI-4a3 account administration (account.manage, BF-4a2; no expectedVersion):
+     provisionAccount(id, email)  POST /api/employees/provision-account   { id, email }
+     reissueActivation(id)        POST /api/employees/reissue-activation  { id }
+     disableAccount(id)           POST /api/employees/disable-account     { id }
+     enableAccount(id)            POST /api/employees/enable-account      { id }
+
    IDENTIFIERS: principal.employeeId (from GET /api/auth/me) is the OPAQUE Employee
    record id — the same value as the `id` of every DTO here. It is NOT the human
    `employeeCode`. getSelf() asks for exactly that id and accepts the answer only
@@ -33,6 +39,12 @@
    recovery — and its outcome carries that recovery. A success must decode as
    { employee: detail } and confirm the write, or it is INVALID_RESPONSE — never a
    success. Nothing is persisted, cached or logged, and nothing here resends a write.
+
+   ACCOUNT WRITES (AFI-4a3): the same path. The bodies are exactly { id, email } and
+   { id } — never an expectedVersion, accountState or accountManageable. No response
+   carries an activation token or link (SDR-0004 §3.5); a success counts only when the
+   decoded record is the same one in the state the operation produces (provision /
+   reissue: pending; disable: disabled; enable: active or pending).
 
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
@@ -224,6 +236,21 @@ const EmployeeRequests = (function(){
       const bad = [];
       target(id, expectedVersion, bad);
       return result(bad, { id: id, expectedVersion: expectedVersion });
+    },
+    // AFI-4a3 POST /api/employees/provision-account: exactly id and the login email (trimmed; the
+    // server lower-cases it). The login email is entered for this purpose — never contactEmail.
+    provisionAccount(id, email){
+      const bad = [];
+      if(typeof id !== 'string' || !EMPLOYEE_API_ID_PATTERN.test(id)) bad.push('id');
+      const t = typeof email === 'string' ? email.trim() : '';
+      if(!t || !isEmail(t)) bad.push('email');
+      return result(bad, { id: id, email: t });
+    },
+    // AFI-4a3 reissue-activation / disable-account / enable-account: exactly the Employee id.
+    accountTarget(id){
+      const bad = [];
+      if(typeof id !== 'string' || !EMPLOYEE_API_ID_PATTERN.test(id)) bad.push('id');
+      return result(bad, { id: id });
     }
   });
 })();
@@ -289,6 +316,20 @@ const EmployeeApi = (function(){
     // Soft archive: the same record, now archived. There is no unarchive.
     archive(id, expectedVersion){
       return write('/api/employees/archive', EmployeeRequests.archive(id, expectedVersion), (e) => e.id === id && e.archived === true);
+    },
+    // AFI-4a3: a login now bound to this live record, activation outstanding.
+    provisionAccount(id, email){
+      return write('/api/employees/provision-account', EmployeeRequests.provisionAccount(id, email), (e) => e.id === id && e.archived === false && e.accountState === 'pending');
+    },
+    reissueActivation(id){
+      return write('/api/employees/reissue-activation', EmployeeRequests.accountTarget(id), (e) => e.id === id && e.accountState === 'pending');
+    },
+    disableAccount(id){
+      return write('/api/employees/disable-account', EmployeeRequests.accountTarget(id), (e) => e.id === id && e.accountState === 'disabled');
+    },
+    // Enabling restores the membership: active with a password, pending without (no mail is sent).
+    enableAccount(id){
+      return write('/api/employees/enable-account', EmployeeRequests.accountTarget(id), (e) => e.id === id && (e.accountState === 'active' || e.accountState === 'pending'));
     }
   });
 })();
