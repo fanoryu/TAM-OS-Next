@@ -5795,9 +5795,14 @@ console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
   check((apiC.match(/authSessionMutation\(/g) || []).length === 1 && /const sent = await authSessionMutation\(route, prepared\.body\);/.test(apiC)
     && (apiC.match(/write\('\/api\/employees\/(create|update|archive)', EmployeeRequests\.(create|update|archive)\(/g) || []).join() === "write('/api/employees/create', EmployeeRequests.create(,write('/api/employees/update', EmployeeRequests.update(,write('/api/employees/archive', EmployeeRequests.archive(",
     'AFI-4a2: EmployeeApi writes exactly /api/employees/create, /update and /archive, each through authSessionMutation with the validated body');
+  // BF-4a3 authorized revision: accountManageable now exists in exactly two places of the CEO
+  // decoder (its key and its boolean check — pinned in BF-4a3 below); apiNoDecoder removes just
+  // those two, so it stays absent from every other part of the three modules. Was: absent everywhere.
+  const apiNoDecoder = apiC.replace("const EMPLOYEE_LIST_KEYS = Object.freeze(['accountManageable', ", "const EMPLOYEE_LIST_KEYS = Object.freeze([")
+    .replace('accountManageable: (v) => v === true || v === false,', '');
   check(!/\bfetch\s*\(|XMLHttpRequest/.test(apiC + storeC + viewC) && !/'\/api\/employees\/[^']*[?#&=][^']*'/.test(apiC)
-    && !/provision|reissue|disable-account|enable-account|accountManageable/i.test(apiC + storeC + viewC),
-    'AFI-4a2: no direct fetch, no query string on a write route, no account route or accountManageable');
+    && !/provision|reissue|disable-account|enable-account|accountManageable/i.test(apiNoDecoder + storeC + viewC),
+    'AFI-4a2/BF-4a3: no direct fetch, no query string on a write route, no account route; accountManageable only in the CEO decoder');
   check(/if\(!prepared\.ok\) return Object\.freeze\(\{ ok: false, kind: API_RESULT_KINDS\.VALIDATION, fields: prepared\.fields, local: true, recovery: 'none' \}\);/.test(apiC)
     && /let out = outcome\(sent\.result, EmployeeDecoders\.detailResponse\);\s*if\(out\.ok && !confirms\(out\.data\)\) out = refused;/.test(apiC),
     'AFI-4a2: a refused request is never sent; a write success counts only as a strictly decoded { employee: detail } that confirms the write');
@@ -5829,8 +5834,8 @@ console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
     && /if\(out\.recovery === 'principal_changed'\)\{ SessionEmployeeStore\.clear\(\); paint\(\); return; \}/.test(settleFn)
     && /sessionUncertain\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.UNAVAILABLE, 'unavailable'\);\s*\}/.test(abC),
     'AFI-4a2: only the recovery outcome "unavailable" calls AuthBoot.sessionUncertain() (AUTHENTICATED -> UNAVAILABLE, no request); principal_changed clears the data');
-  check(!/\baccountState\s*(===|!==|==|!=)|(===|!==)\s*[A-Za-z_.]*accountState\b|accountManageable/.test(storeC + viewC + apiC),
-    'AFI-4a2: accountState is display-only — never a condition for a write control or action');
+  check(!/\baccountState\s*(===|!==|==|!=)|(===|!==)\s*[A-Za-z_.]*accountState\b|accountManageable/.test(storeC + viewC + apiNoDecoder),
+    'AFI-4a2/BF-4a3: accountState is display-only and accountManageable is decoded only — neither is a condition for a write control or action');
   // The view: CEO-only Employee CRUD controls, escaped drafts, existing classes.
   const ceoControls = (viewC.match(/id="sw(AddBtn|EditBtn|ArchiveBtn|FormCancel|FormSave|ReloadBtn|ArchiveCancel|ArchiveConfirm)"/g) || []).sort().join();
   check(ceoControls === 'id="swAddBtn",id="swArchiveBtn",id="swArchiveCancel",id="swArchiveConfirm",id="swEditBtn",id="swFormCancel",id="swFormSave",id="swReloadBtn",id="swReloadBtn"',
@@ -5867,6 +5872,48 @@ console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
     'AFI-4a2: the CSS class lookup is exact — backslash, quotes, newline, CR, tab and pattern characters are never interpreted');
   check(missing.length === 0, 'AFI-4a2: the view uses only CSS classes that already exist (CSS unchanged)' + (missing.length ? ' >> missing: ' + missing.join(', ') : ''));
   check(!/localStorage|sessionStorage|indexedDB|document\s*\.\s*cookie|\bState\b|StorageAdapter/.test(storeC + viewC + apiC), 'AFI-4a2: drafts and write state live in memory only (no storage, no State)');
+}
+
+// ===== BF-4a3 — SERVER-DERIVED accountManageable (+ strict decoder compatibility) =====
+// The CEO Employee list and detail (and so every write answer) carry a server-derived boolean
+// accountManageable; the Employee self view never does; it is never request input, never read by
+// the account routes, and no frontend UI consumes it yet (AFI-4a3). Behaviour: server tests
+// (EmployeeViewTest, EmployeeSqlTest, AccountAdministrationTest) and the runtime harness section U.
+console.log('== BF-4a3 — accountManageable PROJECTION ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rdJs = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  const rdSrv = (f) => fs.existsSync(path.join(root, 'server', 'src', f)) ? read(path.join(root, 'server', 'src', f)) : '';
+  const apiC = code(rdJs('core/employee-api.js')), storeC = code(rdJs('core/session-employee.js')), viewC = code(rdJs('ui/session-workspace-view.js'));
+  // Frontend: required, strictly boolean, exact keys, CEO only.
+  check(/const EMPLOYEE_LIST_KEYS = Object\.freeze\(\['accountManageable', 'accountState', 'archived', 'department', 'employeeCode', 'employmentStatus', 'fullName', 'id', 'jobTitle'\]\);/.test(apiC)
+    && /const EMPLOYEE_DETAIL_KEYS = Object\.freeze\(EMPLOYEE_LIST_KEYS\.concat\(/.test(apiC)
+    && /if\(!isPlain\(o\) \|\| !exactKeys\(o, keys\)\) return null;/.test(apiC),
+    'BF-4a3: the CEO list and detail decoders require accountManageable among their exact keys (not optional)');
+  check((apiC.match(/accountManageable/g) || []).length === 2 && /accountManageable: \(v\) => v === true \|\| v === false,/.test(apiC),
+    'BF-4a3: accountManageable must be a real boolean — no string, number or null; named nowhere else in the client');
+  check(/const EMPLOYEE_SELF_KEYS = Object\.freeze\(\[[^\]]*\]\);/.test(apiC) && !/accountManageable/.test((apiC.match(/const EMPLOYEE_SELF_KEYS = [^\n]*/) || [''])[0])
+    && !/accountManageable/.test((apiC.match(/const EMPLOYEE_WRITABLE_FIELDS = [^\n]*/) || [''])[0]),
+    'BF-4a3: the Employee self decoder rejects it and EmployeeRequests never sends it (absent from both key lists)');
+  check(!/accountManageable/.test(storeC + viewC), 'BF-4a3: SessionEmployeeStore and the workspace view never use it (no authority, no control conditioned on it yet)');
+  check(!/Provision|Reissue|Disable login|Enable login|provision-account|reissue-activation|disable-account|enable-account/.test(viewC + storeC),
+    'BF-4a3: still no account-administration control or route in the SESSION workspace');
+  // Server: derived inline in the three CEO reads; projected only by the CEO views; never input or authority.
+  const storePhp = rdSrv('Data/Employee/EmployeeStore.php'), viewPhp = rdSrv('Employee/EmployeeView.php');
+  const caseSql = "CASE WHEN e.archived_at IS NULL AND (m.id IS NULL OR (m.role = 'employee' AND u.status = 'active')) THEN 1 ELSE 0 END AS account_manageable";
+  const ceoSql = ['LIST_PROFILES_SQL', 'LIST_ALL_PROFILES_SQL', 'FIND_PROFILE_SQL'].map((n) => (storePhp.match(new RegExp('public const ' + n + ' = "([^"]*)";')) || ['', ''])[1]);
+  check(ceoSql.every((s) => s.split(caseSql).length === 2 && s.indexOf("ELSE 'active' END AS account_state, " + caseSql + ' FROM employees e LEFT JOIN memberships m ON m.company_id = e.company_id AND m.employee_id = e.id LEFT JOIN users u ON u.id = m.user_id WHERE') !== -1),
+    'BF-4a3: all three CEO profile reads derive account_manageable inline (live AND (no login OR active-user employee membership)), over the same in-company join');
+  check(!/account_manageable/.test((storePhp.match(/public const FIND_PROFILE_SELF_SQL = [^\n]*/) || [''])[0]) && !/accountManageable|account_manageable/.test(rdSrv('Employee/AccountService.php') + rdSrv('Employee/EmployeeInput.php')),
+    'BF-4a3: the self read has no account projection; AccountService and EmployeeInput never read or accept it');
+  check(/public const LIST_FIELDS = \[[^\]]*'accountState', 'accountManageable'\];/.test(viewPhp) && /public const DETAIL_FIELDS = \[[^\]]*'version', 'accountState', 'accountManageable'\];/.test(viewPhp)
+    && !/accountManageable/.test((viewPhp.match(/public const SELF_FIELDS = [^\n]*/) || [''])[0]) && /if \(\$m === 1 \|\| \$m === '1'\)/.test(viewPhp),
+    'BF-4a3: EmployeeView projects it right after accountState for the CEO only, as a strict boolean from SQL 1 / 0');
+  // Invariants held by this slice.
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(migrations[migrations.length - 1].startsWith('0019_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    'BF-4a3: migration head stays 0019, ACTIONS stay 21, AUTH_MODE stays LOCAL');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

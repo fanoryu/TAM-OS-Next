@@ -1522,6 +1522,53 @@ error kind, ambiguity and reconciliation, CSRF recovery, identity loss, late ans
 lifecycle, focus) over a recording `#app`; the AFI-4a2 checks in `tools/verify-build.js`; write routes and error
 scenarios in `tools/serve-auth-stub.js` (test only).
 
+### Server-derived `accountManageable` — BF-4a3 (backend projection + strict decoder compatibility)
+
+BF-4a3 adds one CEO-only output field so the later account-administration UI (AFI-4a3) never infers eligibility from
+`accountState`, a membership or a role (owner decision D-AFI4a-D1 = A). No route, ACTION, migration, schema or account
+behaviour changes; SDR-0004 is unchanged.
+
+**Derivation** (`server/src/Data/Employee/EmployeeStore.php`). The three CEO profile reads (`LIST_PROFILES_SQL`,
+`LIST_ALL_PROFILES_SQL`, `FIND_PROFILE_SQL`) compute it inline, from the same in-company membership ⟕ user join that
+already yields `account_state` — one SELECT, no further join, no per-row lookup, no new index:
+
+```sql
+CASE WHEN e.archived_at IS NULL AND (m.id IS NULL OR (m.role = 'employee' AND u.status = 'active'))
+     THEN 1 ELSE 0 END AS account_manageable
+```
+
+| Record | accountState | accountManageable |
+|---|---|---|
+| live, no login | none | true |
+| live, `employee` login pending / active | pending / active | true |
+| live, `employee` membership disabled, user active | disabled | true |
+| live, `employee` membership active, user disabled out of band (D-BF4a3-1) | disabled | **false** |
+| bound to a CEO membership | any | **false** |
+| archived (no login, or a disabled membership — an active one blocks archiving) | none / disabled | **false** |
+
+With `true`, `accountState` names the applicable operations exactly (none → provision; pending → reissue, disable;
+active → disable; disabled → enable). It is not a promise that an operation succeeds (email conflicts, the reissue
+limit and concurrency are still decided by the server). `accountState` is unchanged.
+
+**Projection** (`server/src/Employee/EmployeeView.php`). `LIST_FIELDS` and `DETAIL_FIELDS` end `…, 'accountState',
+'accountManageable'`; exactly SQL `1` / `0` becomes `true` / `false`, anything else throws (never a default). Every
+Employee write answer — create, update, archive, provision, reissue, disable, enable — is the CEO detail, so it carries
+the value too. `SELF_FIELDS` is unchanged: the Employee self view carries neither field, and its query joins no login.
+
+**Authority.** Output only. `EmployeeInput` refuses it as an unknown key on every Employee and account route;
+`AccountService` never reads it and keeps its own scope, Policy (`account.manage`), CEO-target guard and per-operation
+state checks. (Carried debt, unchanged here: `disable` locks without the archive check the other three operations use —
+harmless today, since an archived record can only hold a disabled membership or none.)
+
+**Frontend compatibility** (D-BF4a3-2 = A). The strict exact-key CEO decoders in `js/core/employee-api.js` would reject
+the new field — every SESSION list / detail read would fail and every AFI-4a2 write would turn ambiguous — so the same
+slice adds `accountManageable` to `EMPLOYEE_LIST_KEYS` (and so the detail keys) as a required real boolean; the self
+decoder still rejects it and `EmployeeRequests` never sends it. Nothing in the store or the view uses it yet.
+
+**Proof.** `EmployeeViewTest`, `EmployeeSqlTest` and `AccountAdministrationTest` (the matrix over detail and both
+lists, all seven write answers, forged input, scope); runtime harness section U (strict decoder cases, old-shape write
+answers never confirmed, identical rendering for true / false); the BF-4a3 checks in `tools/verify-build.js`.
+
 ### Release engineering
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the

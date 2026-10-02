@@ -12,11 +12,16 @@ namespace TamOs\Employee;
  * BF-4a2 (SDR-0004): the CEO list and detail add `accountState` — none, pending, active or
  * disabled, derived by EmployeeStore — and nothing else about the login: no email, user id,
  * membership id, hash, token, session or mail detail. The self view gains nothing.
+ *
+ * BF-4a3: right after it, the CEO list and detail add `accountManageable` — a boolean derived by
+ * EmployeeStore: whether the record is currently a valid target for Employee account
+ * administration. It is output only (never read back from a request, never authority) and says
+ * nothing more about the login. The self view still gains nothing.
  */
 final class EmployeeView
 {
-    public const LIST_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState'];
-    public const DETAIL_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary', 'version', 'accountState'];
+    public const LIST_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState', 'accountManageable'];
+    public const DETAIL_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary', 'version', 'accountState', 'accountManageable'];
     public const SELF_FIELDS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'monthlyBaseSalary'];
 
     /**
@@ -90,6 +95,7 @@ final class EmployeeView
             'monthlyBaseSalary' => $text('monthly_base_salary'),
             'version' => (int) $row['version'],
             'accountState' => $row['account_state'] ?? null,
+            'accountManageable' => $row['account_manageable'] ?? null,
         ];
     }
 
@@ -106,6 +112,18 @@ final class EmployeeView
         }
         if (array_key_exists('accountState', $out) && !in_array($out['accountState'], AccountState::VALUES, true)) {
             throw new \LogicException('a CEO projection needs the derived account state');
+        }
+        // BF-4a3: exactly the SQL 1 / 0 (as the driver returns it) becomes a boolean; anything else
+        // — missing, NULL, another value — is a programming error, never a default.
+        if (array_key_exists('accountManageable', $out)) {
+            $m = $out['accountManageable'];
+            if ($m === 1 || $m === '1') {
+                $out['accountManageable'] = true;
+            } elseif ($m === 0 || $m === '0') {
+                $out['accountManageable'] = false;
+            } else {
+                throw new \LogicException('a CEO projection needs the derived account manageability');
+            }
         }
         return $out;
     }
