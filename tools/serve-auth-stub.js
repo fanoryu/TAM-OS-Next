@@ -50,6 +50,9 @@
  *   /__stub/scenario/employee-self-missing  signed in as Employee; their own record answers 404
  *   /__stub/scenario/employees-session-lost signed in as CEO; the Employee reads answer 401
  *
+ * BF-4a3: the CEO list, detail and write answers carry the derived accountManageable; the self
+ * answer never does.
+ *
  * AFI-4a2 CEO writes (POST /api/employees/create, /update, /archive): RouteAuth::Required, same
  * origin, JSON, X-CSRF-Token equal to the session token (else 403), CEO only (an Employee is
  * 403), exact body keys, the EmployeeInput value rules, server ids, version compare-and-swap;
@@ -100,7 +103,11 @@ const STUB_EMPLOYEES = [
     archived: true, accountState: 'disabled', joinDate: '2025-03-01', contactEmail: null, phone: null, notes: null, monthlyBaseSalary: '6000000.00', version: 4 }
 ];
 const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
-const LIST_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState'];
+const LIST_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState', 'accountManageable'];
+const DETAIL_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary', 'version', 'accountState', 'accountManageable'];
+// BF-4a3: the server-derived accountManageable, as EmployeeStore derives it. Every stub login is an
+// Employee-role membership with an active user and none is CEO-bound, so it is: not archived.
+const ceoView = (e, keys) => pick({ ...e, accountManageable: !e.archived }, keys);
 // AFI-4a2: EmployeeInput::FIELDS and STATUSES (test-only mirror).
 const WRITABLE = ['employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'joinDate', 'contactEmail', 'phone', 'notes', 'monthlyBaseSalary'];
 const STATUSES = ['Active', 'Inactive', 'On Leave', 'Resigned', 'Terminated'];
@@ -182,13 +189,13 @@ async function handleApi(req, res, p, query){
       if(keys.some((k) => k !== 'archived') || (query.has('archived') && query.get('archived') !== '1')) return api(res, 400, 'invalid_query');
       if(!ceo) return api(res, 403, 'forbidden');
       const all = query.get('archived') === '1';
-      return api(res, 200, { employees: employees.filter((e) => all || !e.archived).map((e) => pick(e, LIST_KEYS)) });
+      return api(res, 200, { employees: employees.filter((e) => all || !e.archived).map((e) => ceoView(e, LIST_KEYS)) });
     }
     if(keys.join() !== 'id' || !/^[A-Za-z0-9_-]{1,64}$/.test(query.get('id') || '')) return api(res, 400, 'validation_failed', null, ['id']);
     const id = query.get('id');
     if(ceo){
       const e = employees.find((x) => x.id === id);
-      return e ? api(res, 200, { employee: e }) : api(res, 404, 'not_found');
+      return e ? api(res, 200, { employee: ceoView(e, DETAIL_KEYS) }) : api(res, 404, 'not_found');
     }
     if(scenario === 'employee-self-missing' || id !== session.user.employeeId) return api(res, 404, 'not_found');
     return api(res, 200, { employee: pick(employees[0], SELF_KEYS) });
@@ -273,7 +280,7 @@ async function handleWrite(req, res, kind){
   if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
   if(scenario === 'write-conflict') return api(res, 409, 'conflict');
   if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
-  const done = (e) => (scenario === 'write-malformed' ? api(res, 200, { employee: { ...e, internalNote: 'x' } }) : api(res, 200, { employee: e }));
+  const done = (e) => (scenario === 'write-malformed' ? api(res, 200, { employee: { ...ceoView(e, DETAIL_KEYS), internalNote: 'x' } }) : api(res, 200, { employee: ceoView(e, DETAIL_KEYS) }));
   if(kind === 'create'){
     const missing = ['employeeCode', 'fullName'].filter((k) => !(k in b));
     const bad = missing.length ? missing : Object.keys(b).filter((k) => fieldValue(k, b[k]) === undefined);

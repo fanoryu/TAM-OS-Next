@@ -22,6 +22,9 @@
    and focus() is recorded — so bindings, disabled controls and focus moves are
    exercised, not assumed. Every write request (method, path, body, CSRF header) is
    recorded and asserted exactly.
+
+   BF-4a3 (section U): the CEO list / detail (and so every write answer) carry a required boolean
+   accountManageable; the self record never does; it is never request input and no UI uses it yet.
    ============================================================ */
 
 const fs = require('fs');
@@ -47,9 +50,9 @@ const NEVER = ['loadState', 'saveState', 'applyTheme', 'installGlobalUIHandlers'
   'renderExecutiveDashboard', 'renderTransactions', 'renderExecutionCenter'];
 
 /* ---------- fabricated records ---------- */
-const E1 = { id: 'e_1', employeeCode: 'EMP-001', fullName: 'Fabricated Alpha', jobTitle: 'Engineer', department: null, employmentStatus: 'Active', archived: false, accountState: 'active' };
-const E2 = { id: 'e_2', employeeCode: 'EMP-002', fullName: 'Fabricated Beta', jobTitle: null, department: 'Operations', employmentStatus: 'On Leave', archived: false, accountState: 'none' };
-const E3 = { id: 'e_3', employeeCode: 'EMP-003', fullName: 'Fabricated Gamma', jobTitle: 'Analyst', department: 'Operations', employmentStatus: 'Resigned', archived: true, accountState: 'disabled' };
+const E1 = { id: 'e_1', employeeCode: 'EMP-001', fullName: 'Fabricated Alpha', jobTitle: 'Engineer', department: null, employmentStatus: 'Active', archived: false, accountState: 'active', accountManageable: true };
+const E2 = { id: 'e_2', employeeCode: 'EMP-002', fullName: 'Fabricated Beta', jobTitle: null, department: 'Operations', employmentStatus: 'On Leave', archived: false, accountState: 'none', accountManageable: true };
+const E3 = { id: 'e_3', employeeCode: 'EMP-003', fullName: 'Fabricated Gamma', jobTitle: 'Analyst', department: 'Operations', employmentStatus: 'Resigned', archived: true, accountState: 'disabled', accountManageable: false };
 const D1 = Object.assign({}, E1, { joinDate: '2026-01-05', contactEmail: 'alpha@example.test', phone: '0812 000', notes: 'fabricated note <b>x</b>', monthlyBaseSalary: '7500000.00', version: 3 });
 const SELF = { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: 'Analyst', department: 'Operations', employmentStatus: 'Active',
   joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1234567890123.45' };
@@ -57,12 +60,13 @@ const LIST_ACTIVE = { employees: [E1, E2] };
 const LIST_ARCHIVED = { employees: [E1, E2, E3] };
 // AFI-4a2 fabricated write fixtures.
 const CSRF2 = 'C'.repeat(21) + '_' + 'd'.repeat(21);
-const LIST_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState'];
+const LIST_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', 'employmentStatus', 'archived', 'accountState', 'accountManageable'];
 const pick = (o, keys) => { const out = {}; keys.forEach((k) => { out[k] = o[k]; }); return out; };
-const D1V = (version, extra) => Object.assign({}, D1, { version: version }, extra || {});
+// BF-4a3: an archived variant is never manageable (the server derives it; a fixture follows it).
+const D1V = (version, extra) => { const d = Object.assign({}, D1, { version: version }, extra || {}); if(d.archived && !(extra && 'accountManageable' in extra)) d.accountManageable = false; return d; };
 const D3 = Object.assign({}, E3, { joinDate: null, contactEmail: null, phone: null, notes: null, monthlyBaseSalary: '6000000.00', version: 4 });
 const NEW_D = { id: 'e_new', employeeCode: 'EMP-010', fullName: 'Fabricated Delta', jobTitle: null, department: 'Operations', employmentStatus: 'Active', archived: false,
-  accountState: 'none', joinDate: '2026-03-01', contactEmail: 'delta@example.test', phone: null, notes: null, monthlyBaseSalary: '9000000.50', version: 1 };
+  accountState: 'none', accountManageable: true, joinDate: '2026-03-01', contactEmail: 'delta@example.test', phone: null, notes: null, monthlyBaseSalary: '9000000.50', version: 1 };
 const NEW_ITEM = pick(NEW_D, LIST_KEYS);
 const CREATE_INPUT = { employeeCode: ' EMP-010 ', fullName: 'Fabricated Delta', employmentStatus: 'Active', jobTitle: '', department: 'Operations',
   joinDate: '2026-03-01', contactEmail: 'delta@example.test', phone: '', notes: '', monthlyBaseSalary: '9000000.50' };
@@ -238,6 +242,8 @@ function firewall(rt, label){
 }
 
 /* ---------- AFI-4a2 helpers ---------- */
+// BF-4a3: a record in the pre-BF-4a3 shape (no accountManageable).
+const without4a3 = (o) => { const c = Object.assign({}, o); delete c.accountManageable; return c; };
 const writes = (rt) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && /^\/api\/employees\//.test(c.url));
 const bodyOf = (c) => JSON.parse(c.init.body);
 const countOf = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
@@ -937,7 +943,7 @@ async function archiveWith(archiveRoutes, extra){
 
   /* ---------- O. CEO archive ---------- */
   {
-    const archivedE1 = Object.assign({}, E1, { archived: true });
+    const archivedE1 = Object.assign({}, E1, { archived: true, accountManageable: false });
     const rt = await ceoDetail({ '/api/employees/archive': [ok({ employee: D1V(4, { archived: true }) })],
       '/api/employees': [ok(LIST_ACTIVE), ok({ employees: [E2] })], '/api/employees?archived=1': [ok({ employees: [archivedE1, E2, E3] })] });
     rt.app.fire('swArchiveBtn', 'click'); await flush();
@@ -1131,6 +1137,67 @@ async function archiveWith(archiveRoutes, extra){
     rt.AuthBoot.sessionLost(); await flush();
     late.resolve(err(401, 'unauthenticated')); await flush();
     check(rt.state() === 'SIGNED_OUT' && rt.store().principalKey === null && rt.store().form === null, 'Q. a stale write answer after the session already ended changes nothing');
+  }
+
+  /* ---------- U. BF-4a3: accountManageable — strict CEO contract, never in self, never input, unused by the UI ---------- */
+  {
+    const rt = loadRuntime({});
+    const Raw = rt.EmployeeDecoders;
+    const P = (x) => rt.parse(JSON.stringify(x));
+    const without = (o) => { const c = Object.assign({}, o); delete c.accountManageable; return c; };
+    for(const v of [true, false]){
+      check(!!Raw.listItem(P(Object.assign({}, E1, { accountManageable: v }))) && Raw.listItem(P(Object.assign({}, E1, { accountManageable: v }))).accountManageable === v
+        && Raw.detail(P(Object.assign({}, D1, { accountManageable: v }))).accountManageable === v, 'U. boolean ' + v + ' accepted in the CEO list item and detail');
+    }
+    const bad = [['missing', undefined], ['"true"', 'true'], ['"false"', 'false'], ['1', 1], ['0', 0], ['null', null], ['an object', {}], ['an array', [true]]];
+    for(const [label, v] of bad){
+      const item = v === undefined ? without(E1) : Object.assign({}, E1, { accountManageable: v });
+      const det = v === undefined ? without(D1) : Object.assign({}, D1, { accountManageable: v });
+      check(Raw.listItem(P(item)) === null && Raw.listResponse(P({ employees: [E2, item] })) === null, 'U. list rejects accountManageable ' + label);
+      check(Raw.detail(P(det)) === null && Raw.detailResponse(P({ employee: det })) === null, 'U. detail (and every write response) rejects accountManageable ' + label);
+    }
+    for(const v of [true, false]){
+      check(Raw.selfResponse(P({ employee: Object.assign({}, SELF, { accountManageable: v }) })) === null, 'U. the Employee self decoder rejects accountManageable ' + v);
+    }
+    check(!!Raw.selfResponse(P({ employee: SELF })), 'U. (control) the self record without it still decodes');
+    const R = rt.EmployeeRequests;
+    check(!R.create(P({ employeeCode: 'X', fullName: 'Y', accountManageable: true })).ok && R.create(P({ employeeCode: 'X', fullName: 'Y', accountManageable: true })).fields.indexOf('accountManageable') !== -1
+      && !R.update('e_1', 3, P({ fullName: 'N', accountManageable: true })).ok && JSON.stringify(R.archive('e_1', 3).body) === '{"id":"e_1","expectedVersion":3}',
+      'U. accountManageable is never request input (create / update refuse it; archive carries only id + expectedVersion)');
+  }
+  {
+    // A write answered in the pre-BF-4a3 shape (no accountManageable) is not a confirmed success.
+    const rt = await createWith([ok({ employee: without4a3(NEW_D) })], { '/api/employees': [ok(LIST_ACTIVE), ok(LIST_ACTIVE)] });
+    await rt.SessionWorkspace.submitForm(); await flush();
+    check(rt.store().mutation.status === 'ambiguous' && rt.store().detail === null && writes(rt).length === 1, 'U. a write response lacking accountManageable is never accepted as success (ambiguous, not resent)');
+  }
+  {
+    const rt = await createWith([ok({ employee: NEW_D })]);
+    await rt.SessionWorkspace.submitForm(); await flush();
+    check(rt.store().detail.accountManageable === true && rt.store().mutation.status === 'idle', 'U. AFI-4a2 create with the new contract stays a confirmed success');
+    check(!/accountManageable|manageable/i.test(rt.appHTML()), 'U. the value never reaches the page');
+  }
+  for(const [label, routes] of [['update', { '/api/employees/update': [ok({ employee: D1V(4, { fullName: 'Fabricated Alpha Prime' }) })] }],
+    ['archive', { '/api/employees/archive': [ok({ employee: D1V(4, { archived: true }) })], '/api/employees': [ok(LIST_ACTIVE), ok({ employees: [E2] })] }]]){
+    const rt = await ceoDetail(routes);
+    if(label === 'update'){ rt.SessionWorkspace.openEdit(); await flush(); rt.SessionWorkspace.setDraft('fullName', 'Fabricated Alpha Prime'); await rt.SessionWorkspace.submitForm(); }
+    else { rt.SessionWorkspace.openArchive(); await flush(); await rt.SessionWorkspace.confirmArchive(); }
+    await flush();
+    check(rt.store().mutation.status === 'idle' && (label === 'update' ? rt.store().detail.version === 4 : rt.store().detailId === null), 'U. AFI-4a2 ' + label + ' with the new contract stays a confirmed success');
+  }
+  {
+    // No UI depends on it yet: the same record renders identically with true and with false.
+    const html = {};
+    for(const v of [true, false]){
+      const item = Object.assign({}, E1, { accountManageable: v });
+      const rt = await boot(ME_CEO, { '/api/employees': [ok({ employees: [item, E2] })], '/api/employee?id=e_1': [ok({ employee: Object.assign({}, D1, { accountManageable: v }) })] });
+      const list = rt.appHTML();
+      await rt.SessionWorkspace.openDetail('e_1'); await flush();
+      html[v] = list + '\n' + rt.appHTML();
+      check(!/Provision|Reissue|Disable login|Enable login|manageable/i.test(html[v]), 'U. no account control and no manageability text (accountManageable ' + v + ')');
+      firewall(rt, 'U. accountManageable ' + v);
+    }
+    check(html[true] === html[false], 'U. the list and detail render byte-identically for true and false — nothing is conditioned on it yet');
   }
 
   /* ---------- T. the draft: memory only, survives re-render, destroyed with the identity ---------- */
