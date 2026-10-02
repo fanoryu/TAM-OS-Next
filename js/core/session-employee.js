@@ -23,6 +23,8 @@
                    strings, memory only; never persisted, destroyed with the identity
      confirm       AFI-4a2: the archive confirmation { id }
      notice        AFI-4a2: a fixed message key for the view
+     accountAction AFI-4a3: the open account-administration panel { kind, id, email } —
+                   the login email typed for "Create login" lives only here (memory)
 
    A request takes a token { gen, kind, seq } from begin() / beginMutation(); its
    answer is applied only while token.gen is the current generation AND token.seq is
@@ -41,6 +43,10 @@
    AFI-4a2, CEO only — for any other principal each one returns without a request:
      openCreate() / openEdit() / setDraft(name, value) / cancelForm() / submitForm()
      openArchive() / cancelArchive() / confirmArchive() / reloadRecord()
+   AFI-4a3, CEO only, the same way: openAccountAction(kind) / setAccountEmail(value) /
+     cancelAccountAction() / submitAccountAction() — kind is provision, reissue,
+     disable or enable, and only an operation sessionAccountOperations() offers for
+     the server projection (accountManageable + accountState) can be opened or sent.
    A write is sent once (a second submit while it is pending sends nothing). Only the
    strictly decoded server answer changes the data — nothing is optimistic. A 401
    (or a recovery that found the session gone) ends the session
@@ -55,7 +61,21 @@
 
 const SESSION_EMPLOYEE_STATUS = Object.freeze({ IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' });
 const SESSION_MUTATION_STATUS = Object.freeze({ IDLE: 'idle', PENDING: 'pending', ERROR: 'error', AMBIGUOUS: 'ambiguous' });
-const SESSION_MUTATION_KINDS = Object.freeze(['create', 'update', 'archive']);
+const SESSION_MUTATION_KINDS = Object.freeze(['create', 'update', 'archive', 'provision', 'reissue', 'disable', 'enable']);
+// AFI-4a3: the account operations the server projection allows — accountManageable first, then
+// accountState. Nothing else (role, membership, contact email, archive flag) is consulted: the
+// server derives accountManageable, and its account routes re-check everything themselves.
+const SESSION_ACCOUNT_KINDS = Object.freeze(['provision', 'reissue', 'disable', 'enable']);
+const SESSION_ACCOUNT_OPERATIONS = Object.freeze({
+  none: Object.freeze(['provision']),
+  pending: Object.freeze(['reissue', 'disable']),
+  active: Object.freeze(['disable']),
+  disabled: Object.freeze(['enable'])
+});
+function sessionAccountOperations(detail){
+  if(!detail || detail.accountManageable !== true) return [];
+  return Object.prototype.hasOwnProperty.call(SESSION_ACCOUNT_OPERATIONS, detail.accountState) ? SESSION_ACCOUNT_OPERATIONS[detail.accountState] : [];
+}
 const SESSION_MUTATION_IDLE = Object.freeze({ kind: null, status: SESSION_MUTATION_STATUS.IDLE, error: null, fields: null });
 
 const SessionEmployeeStore = (function(){
@@ -67,6 +87,7 @@ const SessionEmployeeStore = (function(){
   let error = null;
   let mutation = SESSION_MUTATION_IDLE, mutationSeq = 0;
   let form = null, confirm = null, notice = null, focus = null;
+  let accountAction = null;
 
   function keyOf(p){
     return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null;
@@ -84,7 +105,7 @@ const SessionEmployeeStore = (function(){
     self = null; selfStatus = SESSION_EMPLOYEE_STATUS.IDLE;
     error = null;
     mutation = SESSION_MUTATION_IDLE; mutationSeq++;
-    form = null; confirm = null; notice = null; focus = null;
+    form = null; confirm = null; notice = null; focus = null; accountAction = null;
     principalKey = null;
     generation++;
   }
@@ -156,6 +177,7 @@ const SessionEmployeeStore = (function(){
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_EMPLOYEE_STATUS.IDLE; clearError('detail');
       if(form && form.mode === 'edit') form = null;
       confirm = null;
+      accountAction = null;
     },
 
     /* ---------- AFI-4a2: the CEO's writes ---------- */
@@ -173,6 +195,17 @@ const SessionEmployeeStore = (function(){
     openConfirm(id){ mutationSeq++; mutation = SESSION_MUTATION_IDLE; notice = null; confirm = Object.freeze({ id: id }); },
     closeConfirm(){ mutationSeq++; mutation = SESSION_MUTATION_IDLE; confirm = null; },
     resetMutation(){ mutation = SESSION_MUTATION_IDLE; notice = null; },
+    // AFI-4a3: one account panel at a time, for one record; the email draft starts empty.
+    openAccountAction(kind, id){
+      mutationSeq++; mutation = SESSION_MUTATION_IDLE; notice = null; confirm = null;
+      accountAction = { kind: kind, id: id, email: '' };
+    },
+    setAccountEmail(value){
+      if(!accountAction || accountAction.kind !== 'provision' || typeof value !== 'string') return false;
+      accountAction.email = value;
+      return true;
+    },
+    closeAccountAction(){ mutationSeq++; mutation = SESSION_MUTATION_IDLE; accountAction = null; },
     beginMutation(kind){
       if(SESSION_MUTATION_KINDS.indexOf(kind) === -1) throw new Error('unknown session employee mutation kind');
       mutationSeq++;
@@ -186,6 +219,8 @@ const SessionEmployeeStore = (function(){
       const kind = mutation.kind;
       mutation = Object.freeze({ kind: kind, status: status, error: failure(failed), fields: failed.fields ? Object.freeze(failed.fields.slice()) : null });
       if(status === SESSION_MUTATION_STATUS.AMBIGUOUS && kind === 'archive') confirm = null;
+      // An unconfirmed account write closes its panel: the record read again decides what is offered.
+      if(status === SESSION_MUTATION_STATUS.AMBIGUOUS && SESSION_ACCOUNT_KINDS.indexOf(kind) !== -1) accountAction = null;
       return true;
     },
     // A request refused before transport: nothing was sent.
@@ -198,14 +233,14 @@ const SessionEmployeeStore = (function(){
     applySaved(token, item, noticeKey){
       if(!isCurrent(token) || token.kind !== 'mutation') return false;
       detailSeq++; detail = item; detailId = item.id; detailStatus = SESSION_EMPLOYEE_STATUS.READY; clearError('detail');
-      form = null; confirm = null; mutation = SESSION_MUTATION_IDLE; listStale = true; notice = noticeKey;
+      form = null; confirm = null; accountAction = null; mutation = SESSION_MUTATION_IDLE; listStale = true; notice = noticeKey;
       return true;
     },
     // A decoded archived record: the detail and its form close; the list is stale.
     applyArchived(token){
       if(!isCurrent(token) || token.kind !== 'mutation') return false;
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_EMPLOYEE_STATUS.IDLE; clearError('detail');
-      form = null; confirm = null; mutation = SESSION_MUTATION_IDLE; listStale = true; notice = 'archived';
+      form = null; confirm = null; accountAction = null; mutation = SESSION_MUTATION_IDLE; listStale = true; notice = 'archived';
       return true;
     },
     markListStale(){ listStale = true; },
@@ -220,7 +255,8 @@ const SessionEmployeeStore = (function(){
         list: list, listArchived: listArchived, listStatus: listStatus, listStale: listStale,
         detail: detail, detailId: detailId, detailStatus: detailStatus,
         self: self, selfStatus: selfStatus, error: error,
-        mutation: mutation, form: formView(), confirm: confirm, notice: notice
+        mutation: mutation, form: formView(), confirm: confirm, notice: notice,
+        accountAction: accountAction ? Object.freeze(Object.assign({}, accountAction)) : null
       });
     }
   });
@@ -274,13 +310,22 @@ const SessionWorkspace = (function(){
   }
   function focusFirst(fields){
     const first = EMPLOYEE_WRITABLE_FIELDS.filter((k) => (fields || []).indexOf(k) !== -1)[0];
-    SessionEmployeeStore.setFocus(first ? 'field:' + first : 'message');
+    if(first) SessionEmployeeStore.setFocus('field:' + first);
+    else SessionEmployeeStore.setFocus((fields || []).indexOf('email') !== -1 && SessionEmployeeStore.snapshot().accountAction ? 'account-email' : 'message');
   }
   function refuse(kind, fields){
     SessionEmployeeStore.refuseMutation(kind, fields);
     focusFirst(fields);
     paint();
   }
+
+  const ACCOUNT_NOTICES = Object.freeze({ provision: 'provisioned', reissue: 'reissued', disable: 'disabled', enable: 'enabled' });
+  const ACCOUNT_CALLS = Object.freeze({
+    provision: (id, a) => EmployeeApi.provisionAccount(id, a.email),
+    reissue: (id) => EmployeeApi.reissueActivation(id),
+    disable: (id) => EmployeeApi.disableAccount(id),
+    enable: (id) => EmployeeApi.enableAccount(id)
+  });
 
   // Applies a write's outcome. Late (another identity) and superseded answers are dropped.
   function settle(token, out){
@@ -295,6 +340,9 @@ const SessionWorkspace = (function(){
       if(kind === 'archive'){
         SessionEmployeeStore.applyArchived(token);
         loadList(s.listArchived);
+      } else if(SESSION_ACCOUNT_KINDS.indexOf(kind) !== -1){
+        // AFI-4a3: the decoded record (already confirmed by EmployeeApi) is the new detail.
+        SessionEmployeeStore.applySaved(token, out.data, kind === 'enable' && out.data.accountState === 'pending' ? 'enabled_pending' : ACCOUNT_NOTICES[kind]);
       } else {
         SessionEmployeeStore.applySaved(token, out.data, kind === 'create' ? 'created' : 'saved');
       }
@@ -388,7 +436,7 @@ const SessionWorkspace = (function(){
       if(!canAct()) return;
       const s = SessionEmployeeStore.snapshot();
       const d = s.detail;
-      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.archived || s.form || s.confirm) return;
+      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.archived || s.form || s.confirm || s.accountAction) return;
       SessionEmployeeStore.openForm('edit', d.id, formValues(d));
       SessionEmployeeStore.setFocus('form');
       paint();
@@ -441,6 +489,7 @@ const SessionWorkspace = (function(){
       if(!canAct()) return;
       const s = SessionEmployeeStore.snapshot();
       if(!s.detailId) return;
+      if(s.accountAction) SessionEmployeeStore.closeAccountAction();      // the record read again decides what is offered
       SessionEmployeeStore.resetMutation();
       if(s.form) SessionEmployeeStore.setNotice('reloaded');
       const loading = loadDetail(s.detailId);
@@ -452,7 +501,7 @@ const SessionWorkspace = (function(){
       if(!canAct()) return;
       const s = SessionEmployeeStore.snapshot();
       const d = s.detail;
-      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.archived || s.form) return;
+      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.archived || s.form || s.accountAction) return;
       SessionEmployeeStore.openConfirm(d.id);
       SessionEmployeeStore.setFocus('confirm');
       paint();
@@ -470,6 +519,45 @@ const SessionWorkspace = (function(){
       const token = SessionEmployeeStore.beginMutation('archive');
       paint();
       return settle(token, await EmployeeApi.archive(d.id, d.version));
+    },
+
+    /* ---------- AFI-4a3: account administration (CEO only) ---------- */
+    // Opens the panel of an operation the server projection offers for the record shown; nothing is sent.
+    openAccountAction(kind){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      const d = s.detail;
+      if(s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || s.form || s.confirm || s.accountAction) return;
+      if(sessionAccountOperations(d).indexOf(kind) === -1) return;
+      SessionEmployeeStore.openAccountAction(kind, d.id);
+      SessionEmployeeStore.setFocus('account');
+      paint();
+    },
+    // The login email as it is typed; memory only, no render.
+    setAccountEmail(value){
+      if(!ceoPrincipal(principalNow()) || pending()) return;
+      SessionEmployeeStore.setAccountEmail(value);
+    },
+    cancelAccountAction(){
+      if(!canAct() || !SessionEmployeeStore.snapshot().accountAction) return;
+      SessionEmployeeStore.closeAccountAction();
+      paint();
+    },
+    // Sends the open operation once, for the record it was opened on, if the projection still offers it.
+    async submitAccountAction(){
+      if(!canAct()) return;
+      const s = SessionEmployeeStore.snapshot();
+      const a = s.accountAction;
+      const d = s.detail;
+      if(!a || s.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !d || d.id !== a.id) return;
+      if(sessionAccountOperations(d).indexOf(a.kind) === -1){ SessionEmployeeStore.closeAccountAction(); paint(); return; }
+      if(a.kind === 'provision'){
+        const prepared = EmployeeRequests.provisionAccount(d.id, a.email);
+        if(!prepared.ok) return refuse('provision', prepared.fields);
+      }
+      const token = SessionEmployeeStore.beginMutation(a.kind);
+      paint();
+      return settle(token, await ACCOUNT_CALLS[a.kind](d.id, a));
     }
   });
 })();
