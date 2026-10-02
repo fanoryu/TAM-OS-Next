@@ -12,14 +12,20 @@
                AFI-4a2: "Add employee" (an inline form card above the list), "Edit"
                (the record's form in place of its detail) and "Archive" (an inline
                confirmation; soft archive, no unarchive) — Employee records only.
+               AFI-4a3: a "Login access" row under them offers exactly the account
+               operations sessionAccountOperations() allows for the server projection
+               (accountManageable + accountState) — Create login, Resend activation email,
+               Disable login, Enable login — each through an inline panel. With
+               accountManageable false the Login status text stays and nothing is offered.
      Employee  My profile: their own record, read-only, exactly the self fields —
                no form, no Add, no Edit, no Archive.
 
    Data comes only from SessionWorkspace / SessionEmployeeStore
    (js/core/session-employee.js); nothing is written here but the DOM. A draft is
    handed to SessionWorkspace.setDraft() as it is typed (memory only, no render),
-   so a re-render keeps it. There is no account control: the account state is never
-   a permission. Every message is a fixed string; every server value and every draft
+   so a re-render keeps it. The account state is never a permission on its own; the
+   login email typed for Create login starts empty (never the contact email) and is
+   memory only. No activation token or link exists in the browser. Every message is a fixed string; every server value and every draft
    value is escaped, and money is shown exactly as the server sent it. The opaque
    record id never appears in the page: a row is opened by its position in the list
    that was rendered, and the record version stays in memory.
@@ -70,19 +76,32 @@ const SESSION_WORKSPACE_MUTATION_ERRORS = Object.freeze({
 const SESSION_WORKSPACE_CONFLICTS = Object.freeze({
   create: 'The employee record could not be created because of a conflict. The employee code may already be in use.',
   update: 'The employee record changed or could not be saved because of a conflict. Reload the record, then review your changes before saving again.',
-  archive: 'The employee record changed or could not be archived because of a conflict. Reload the record before trying again.'
+  archive: 'The employee record changed or could not be archived because of a conflict. Reload the record before trying again.',
+  provision: 'This login changed or the action is no longer available. Reload the record to see what can be done now.',
+  reissue: 'This login changed or the action is no longer available. Reload the record to see what can be done now.',
+  disable: 'This login changed or the action is no longer available. Reload the record to see what can be done now.',
+  enable: 'This login changed or the action is no longer available. Reload the record to see what can be done now.'
 });
 const SESSION_WORKSPACE_AMBIGUOUS = Object.freeze({
   create: 'TAM OS could not confirm the change. The list below was read again from TAM OS — check whether the record was created before saving again.',
   update: 'TAM OS could not confirm the change. The record was read again from TAM OS — check it before saving again.',
-  archive: 'TAM OS could not confirm the change. The record was read again from TAM OS — check whether it is archived before trying again.'
+  archive: 'TAM OS could not confirm the change. The record was read again from TAM OS — check whether it is archived before trying again.',
+  provision: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether a login now exists.',
+  reissue: 'TAM OS could not confirm whether a new activation email was queued. The record was read again; you may request another resend deliberately.',
+  disable: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether sign-in is now blocked.',
+  enable: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether sign-in is restored.'
 });
 const SESSION_WORKSPACE_NOTICES = Object.freeze({
   created: 'Employee record created.',
   saved: 'Employee record saved.',
   archived: 'Employee record archived. Archived records are listed under "Including archived".',
   unchanged: 'No changes to save.',
-  reloaded: 'The record was read again from TAM OS. Your edits are kept; Save applies them to the latest version.'
+  reloaded: 'The record was read again from TAM OS. Your edits are kept; Save applies them to the latest version.',
+  provisioned: 'Login created. An activation email has been queued for the address entered.',
+  reissued: 'A new activation email has been queued. Earlier activation links no longer work.',
+  disabled: 'Login disabled. Sign-in is blocked and existing sessions end.',
+  enabled: 'Login enabled. Sign-in access is restored.',
+  enabled_pending: 'Login enabled. This person has not activated the login yet — the activation email may need to be resent.'
 });
 
 function sessionWorkspaceValue(v){
@@ -189,6 +208,58 @@ function sessionWorkspaceConfirmHTML(w){
     + '</section>';
 }
 
+/* ---------- AFI-4a3: Login access ---------- */
+const SESSION_ACCOUNT_BUTTONS = Object.freeze({
+  provision: { id: 'swAcctProvision', label: 'Create login' },
+  reissue: { id: 'swAcctReissue', label: 'Resend activation email' },
+  disable: { id: 'swAcctDisable', label: 'Disable login' },
+  enable: { id: 'swAcctEnable', label: 'Enable login' }
+});
+const SESSION_ACCOUNT_PANELS = Object.freeze({
+  provision: { title: 'Create a login', text: 'Enter the email address this person will sign in with. TAM OS queues an activation email to it; the login works once they set a password.', submit: 'Create login' },
+  reissue: { title: 'Resend the activation email?', text: 'A new activation email is queued. Activation links sent earlier stop working.', submit: 'Resend activation email' },
+  disable: { title: 'Disable this login?', text: 'Sign-in is blocked and every existing session of this person ends. Their employee record is not changed.', submit: 'Disable login' },
+  enable: { title: 'Enable this login?', text: 'Sign-in access is restored. No activation email is sent.', submit: 'Enable login' }
+});
+
+// The operations the server projection offers, as one row of buttons; none when it offers none.
+function sessionWorkspaceAccountRowHTML(w, dis){
+  const ops = sessionAccountOperations(w.detail);
+  if(!ops.length || w.form || w.confirm || w.accountAction) return '';
+  return '<div class="auth-actions" role="group" aria-label="Login access">' + ops.map(function(k){
+    return '<button class="btn" type="button" id="' + SESSION_ACCOUNT_BUTTONS[k].id + '"' + dis + '>' + escapeHtml(SESSION_ACCOUNT_BUTTONS[k].label) + '</button>';
+  }).join('') + '</div>';
+}
+
+// The inline panel of the open account operation. Create login carries the one email field (empty
+// at first); its form submission is the confirmation.
+function sessionWorkspaceAccountHTML(w){
+  const a = w.accountAction;
+  const d = w.detail;
+  const panel = SESSION_ACCOUNT_PANELS[a.kind];
+  const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING;
+  const dis = busy ? ' disabled' : '';
+  const conflict = w.mutation.status === SESSION_MUTATION_STATUS.ERROR && w.mutation.error && w.mutation.error.kind === 'CONFLICT';
+  const invalid = w.mutation.status === SESSION_MUTATION_STATUS.ERROR && (w.mutation.fields || []).indexOf('email') !== -1;
+  const actions = '<div class="auth-actions"><button class="btn" type="button" id="swAcctCancel"' + dis + '>Cancel</button>'
+    + (conflict ? '<button class="btn" type="button" id="swReloadBtn"' + dis + '>Reload record</button>' : '')
+    + '<button class="btn ' + (a.kind === 'disable' ? 'btn-danger' : 'btn-accent') + '" type="' + (a.kind === 'provision' ? 'submit' : 'button') + '" id="swAcctSubmit"' + dis + (busy ? ' aria-busy="true"' : '') + '>'
+    + (busy ? 'Working…' : escapeHtml(panel.submit)) + '</button></div>';
+  let body = '<p class="auth-lead">' + escapeHtml(d.fullName) + ' (' + escapeHtml(d.employeeCode) + '). ' + escapeHtml(panel.text) + '</p>';
+  if(a.kind === 'provision'){
+    body = '<form id="swAcctForm" method="post" novalidate' + (busy ? ' aria-busy="true"' : '') + '>' + body
+      + '<div class="field"><label for="swa-email">Login email <span aria-hidden="true">*</span></label>'
+      + '<input class="input" type="email" id="swa-email" name="email" autocomplete="off" required aria-required="true"'
+      + (invalid ? ' aria-invalid="true" aria-describedby="swa-email-error"' : '') + dis + ' value="' + escapeHtml(a.email) + '">'
+      + (invalid ? '<p class="hint auth-message-warn" id="swa-email-error">Enter a valid email address for the login.</p>' : '') + '</div>'
+      + sessionWorkspaceMutationHTML(w) + actions + '</form>';
+  } else {
+    body += sessionWorkspaceMutationHTML(w) + actions;
+  }
+  return '<section class="card" aria-labelledby="swAccountTitle"' + (busy ? ' aria-busy="true"' : '') + '>'
+    + '<h2 class="section-title" id="swAccountTitle" tabindex="-1">' + escapeHtml(panel.title) + '</h2>' + body + '</section>';
+}
+
 function sessionWorkspaceListHTML(w){
   const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING;
   const dis = busy ? ' disabled' : '';
@@ -231,14 +302,16 @@ function sessionWorkspaceDetailHTML(w){
   const actions = (d.archived || w.confirm) ? '' : '<button class="btn" type="button" id="swEditBtn"' + dis + '>Edit</button>'
     + '<button class="btn btn-danger" type="button" id="swArchiveBtn"' + dis + '>Archive</button>';
   return '<h2 class="section-title">' + escapeHtml(d.fullName) + (d.archived ? ' <span class="pill pill-status-archived">Archived</span>' : '') + '</h2>'
-    + (w.confirm ? '' : sessionWorkspaceMutationHTML(w))
+    + (w.confirm || w.accountAction ? '' : sessionWorkspaceMutationHTML(w))
     + sessionWorkspaceRows([
       ['Employee code', d.employeeCode], ['Full name', d.fullName], ['Job title', d.jobTitle], ['Department', d.department],
       ['Employment status', d.employmentStatus], ['Join date', d.joinDate], ['Contact email', d.contactEmail], ['Phone', d.phone],
       ['Notes', d.notes], ['Monthly base salary (Rp)', d.monthlyBaseSalary], ['Archived', d.archived ? 'Yes' : 'No'],
       ['Login', SESSION_WORKSPACE_ACCOUNT_LABELS[d.accountState]]
     ]) + back + actions + '</div>'
-    + (w.confirm && !d.archived ? sessionWorkspaceConfirmHTML(w) : '');
+    + sessionWorkspaceAccountRowHTML(w, dis)
+    + (w.confirm && !d.archived ? sessionWorkspaceConfirmHTML(w) : '')
+    + (w.accountAction && w.accountAction.id === d.id ? sessionWorkspaceAccountHTML(w) : '');
 }
 
 function sessionWorkspaceSelfHTML(w){
@@ -287,6 +360,21 @@ function bindSessionWorkspace(app){
   on('swArchiveBtn', function(){ SessionWorkspace.openArchive(); });
   on('swArchiveCancel', function(){ SessionWorkspace.cancelArchive(); });
   on('swArchiveConfirm', function(){ SessionWorkspace.confirmArchive(); });
+  // AFI-4a3: Login access.
+  Object.keys(SESSION_ACCOUNT_BUTTONS).forEach(function(k){ on(SESSION_ACCOUNT_BUTTONS[k].id, function(){ SessionWorkspace.openAccountAction(k); }); });
+  on('swAcctCancel', function(){ SessionWorkspace.cancelAccountAction(); });
+  const acctForm = app.querySelector('#swAcctForm');
+  if(acctForm){
+    const email = acctForm.querySelector('#swa-email');
+    if(email) email.addEventListener('input', function(){ SessionWorkspace.setAccountEmail(this.value); });
+    acctForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      if(email) SessionWorkspace.setAccountEmail(email.value);
+      SessionWorkspace.submitAccountAction();
+    });
+  } else {
+    on('swAcctSubmit', function(){ SessionWorkspace.submitAccountAction(); });
+  }
   const openers = app.querySelectorAll('[data-sw-open]');
   for(let i = 0; i < openers.length; i++){
     openers[i].addEventListener('click', function(){
@@ -323,6 +411,8 @@ function sessionWorkspaceFocus(app, hint, kept){
   else if(hint === 'message') el = app.querySelector('#swMutationMessage');
   else if(hint === 'confirm') el = app.querySelector('#swConfirmTitle');
   else if(hint === 'form') el = app.querySelector('#swFormTitle');
+  else if(hint === 'account') el = app.querySelector('#swAccountTitle');
+  else if(hint === 'account-email') el = app.querySelector('#swa-email');
   if(!el && !hint && kept){
     el = app.querySelector('#' + kept.id);
     if(el && typeof el.focus === 'function'){
