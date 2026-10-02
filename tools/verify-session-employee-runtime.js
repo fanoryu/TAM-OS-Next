@@ -1293,6 +1293,7 @@ async function archiveWith(archiveRoutes, extra){
       && !/alpha@example\.test/.test(html.split('id="swAccountTitle"')[1]),
       'V2. D-AFI4a3-1: the login email starts EMPTY — the contact email is never pre-filled');
     check(!/swEditBtn|swArchiveBtn|swAcctProvision/.test(html), 'V2. Edit, Archive and the other account buttons are withdrawn while the panel is open');
+    firewall(rt, 'V2. Create login panel open');
     const el = rt.app.el('swa-email'); el.value = ' Login.Person@Example.test '; rt.app.fire('swa-email', 'input');
     rt.app.fire('swAcctForm', 'submit'); await flush();
     const w = acctWrites(rt);
@@ -1342,6 +1343,7 @@ async function archiveWith(archiveRoutes, extra){
     const panelText = { reissue: /Activation links sent earlier stop working\./, disable: /Sign-in is blocked and every existing session of this person ends\./, enable: /Sign-in is allowed again\. No activation email is sent\./ }[kind];
     check(panelText.test(html) && /id="swAcctSubmit"/.test(html) && !/<input/.test(html.split('id="swAccountTitle"')[1]) && lastFocus(rt) === 'swAccountTitle',
       'V3. ' + kind + ': an inline confirmation explains the consequence (no native confirm, no input)');
+    firewall(rt, 'V3. ' + kind + ' panel open');
     rt.app.fire('swAcctSubmit', 'click'); await flush();
     const w = acctWrites(rt);
     check(w.length === 1 && w[0].url === ACCT_ROUTE[kind] && w[0].init.body === '{"id":"e_1"}' && w[0].init.headers['X-CSRF-Token'] === CSRF,
