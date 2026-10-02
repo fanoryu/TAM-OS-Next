@@ -5485,6 +5485,24 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1: X-CSRF-Token injected only on request, from the in-memory CsrfHolder');
   check(/const API_FORBIDDEN_BODY_KEYS = Object\.freeze\(\['role', 'companyId', 'company_id', 'employeeId', 'employee_id'\]\)/.test(apiCode),
     'AFI-1: request bodies may not carry role / companyId / employeeId authority fields');
+  // D-AFI4b1-3 authorized revision: the absolute "employee identity is never accepted in a mutation
+  // body" becomes a scoped invariant — client identity is never authority, and identity-shaped keys
+  // stay forbidden except for ONE pinned target-selector contract whose endpoint re-scopes and
+  // authorizes the target: employeeId on exactly POST /api/overtime-records/create. Was: no exception.
+  // Every pin below is exact, so another method, route, key (employee_id), all overtime routes, all
+  // create routes, all CSRF / SESSION requests or a caller-supplied opt-out turns this RED.
+  check((apiCode.match(/const API_BODY_KEY_EXCEPTION = /g) || []).length === 1
+    && /const API_BODY_KEY_EXCEPTION = Object\.freeze\(\{ method: 'POST', path: '\/api\/overtime-records\/create', key: 'employeeId' \}\);/.test(apiCode),
+    'D-AFI4b1-3: exactly one frozen body-key exception — method POST, path /api/overtime-records/create, key employeeId');
+  check(/for\(let i = 0; i < API_FORBIDDEN_BODY_KEYS\.length; i\+\+\)\{\s*const key = API_FORBIDDEN_BODY_KEYS\[i\];\s*if\(!Object\.prototype\.hasOwnProperty\.call\(body, key\)\) continue;\s*if\(method === API_BODY_KEY_EXCEPTION\.method && path === API_BODY_KEY_EXCEPTION\.path && key === API_BODY_KEY_EXCEPTION\.key\) continue;\s*return failure\(API_RESULT_KINDS\.CLIENT_FAULT\);\s*\}/.test(apiCode)
+    && (apiCode.match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4 && (apiCode.match(/API_FORBIDDEN_BODY_KEYS/g) || []).length === 3
+    && (apiCode.match(/\bcontinue;/g) || []).length === 2,
+    'D-AFI4b1-3: the forbidden-key check is central and exact — skipped only for the exception\'s exact method, exact path and exact key; every other forbidden key is CLIENT_FAULT');
+  check(!/allowIdentity|identityKeys|skipForbidden|bypass|unsafe|trusted|opts\.(allow|skip|unsafe|trust|keys|exception)/i.test(apiCode)
+    && apiCode.indexOf('API_FORBIDDEN_BODY_KEYS.length') < apiCode.indexOf("headers['Content-Type'] = 'application/json';"),
+    'D-AFI4b1-3: no generic bypass, caller flag or disable switch — the check runs before any request is built');
+  check(((apiCode.match(/'\/api\/[^']*'/g) || []).join() === "'/api/overtime-records/create'") && !/employee_id'\s*\}/.test(apiCode.replace("'company_id', 'employeeId', 'employee_id']", '')),
+    'D-AFI4b1-3: ApiClient names exactly one route (the exception path); employee_id is never excepted');
   check(!/while\s*\(|setInterval|\.request\(/.test(apiCode), 'AFI-1: ApiClient has no retry loop (no while, no interval, no re-entry)');
   check(!/Math\.random|crypto\.|Date\.now/.test(apiCode), 'AFI-1: ApiClient generates no request id (the server requestId is carried)');
   check(/case 403: return API_RESULT_KINDS\.DENIED;/.test(apiCode), 'AFI-1: 403 normalizes to DENIED');
@@ -5525,10 +5543,15 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   // The property is unchanged — every API caller and every API path is allowlisted.
   // AFI-4a1 authorized revision: core/employee-api.js (the Employee reads) is the one further
   // ApiClient caller, and core/session-employee.js reads API_RESULT_KINDS to tell a 401 apart.
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js']);
-  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || ''),
-    'AFI-1/AFI-2/AFI-3/AFI-4a1: only session-identity.js, auth-boot.js, auth-flow.js and employee-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
-  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+  // AFI-4b1 authorized revision: core/overtime-api.js (the Overtime reads) is the one further
+  // ApiClient caller, and core/session-overtime.js reads API_RESULT_KINDS to tell a 401 apart.
+  // Was: the AFI-4a1 set. The property is unchanged — every API caller is allowlisted.
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js', 'core/overtime-api.js', 'core/session-overtime.js']);
+  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-overtime.js'] || ''),
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4b1: only session-identity.js, auth-boot.js, auth-flow.js, employee-api.js and overtime-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+    // AFI-4b1 authorized revision: overtime-api.js names exactly the eight BF-4b1 Overtime paths.
+    && ((prodCode['core/overtime-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/overtime-record','/api/overtime-records','/api/overtime-records/create','/api/overtime-records/delete','/api/overtime-records/reject','/api/overtime-records/review','/api/overtime-records/submit','/api/overtime-records/update'"
     // AFI-4a2 authorized revision: employee-api.js also names the three Employee write routes
     // (create / update / archive). Was: the two Employee read paths only. The property is
     // unchanged — every /api/ path is an exact, allowlisted literal; no account route.
@@ -5536,7 +5559,7 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/disable-account','/api/employees/enable-account','/api/employees/provision-account','/api/employees/reissue-activation','/api/employees/update'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the eight Overtime routes');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -5747,7 +5770,8 @@ console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
     'AFI-4a1: the self decoder accepts exactly EmployeeView::SELF_FIELDS (no notes, archive, version or account state)');
   // ApiClient structured query: frozen key vocabulary, value shape, GET/HEAD only.
   const apiClientC = code(read(path.join(root, 'js', 'transport', 'api-client.js')));
-  check(/const API_QUERY_KEYS = Object\.freeze\(\['archived', 'id'\]\);/.test(apiClientC) && /const API_QUERY_VALUE_PATTERN = \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/;/.test(apiClientC)
+  // AFI-4b1 authorized revision: plus `month` (GET /api/overtime-records?month=YYYY-MM). Was: archived, id.
+  check(/const API_QUERY_KEYS = Object\.freeze\(\['archived', 'id', 'month'\]\);/.test(apiClientC) && /const API_QUERY_VALUE_PATTERN = \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/;/.test(apiClientC)
     && /const qs = mutation \? null : queryString\(opts\.query\);/.test(apiClientC) && /encodeURIComponent\(keys\[i\]\) \+ '=' \+ encodeURIComponent\(value\)/.test(apiClientC),
     'AFI-4a1: ApiClient queries are GET/HEAD only, allowlisted keys, identifier values, sorted and encoded');
   // Integration: the auth-view path only; identity loss destroys the data.
@@ -5755,9 +5779,15 @@ console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
   check(callers.join() === 'ui/auth-view.js' && (avC.match(/renderSessionWorkspace\(/g) || []).length === 1
     && /if\(s\.state === AUTH_STATES\.AUTHENTICATED\) return renderSessionWorkspace\(app, s\);/.test(avC),
     'AFI-4a1: renderAuthView() is the only caller of renderSessionWorkspace(), for AUTHENTICATED only');
+  // D-AFI4b1-1 authorized revision: core/session-overtime.js reads the canonical Employee list —
+  // exactly one EmployeeApi.list({ archived: true }) call, for the CEO owner labels and create
+  // selector — and names nothing else of the Employee modules. Was: AuthBoot only.
   const users = jsFiles.filter((f) => NEW.indexOf(f) === -1 && /\b(SessionEmployeeStore|SessionWorkspace|EmployeeApi|EmployeeDecoders)\b/.test(code(rd(f))));
-  check(users.join() === 'core/auth-boot.js' && /\bSessionEmployeeStore\.clear\(\)/.test(abC) && !/\b(SessionWorkspace|EmployeeApi)\b/.test(abC),
-    'AFI-4a1: outside its modules the SESSION Employee data is reached only by AuthBoot, and only to clear it');
+  const otStoreC = code(rd('core/session-overtime.js'));
+  check(users.join() === 'core/session-overtime.js,core/auth-boot.js' && /\bSessionEmployeeStore\.clear\(\)/.test(abC) && !/\b(SessionWorkspace|EmployeeApi)\b/.test(abC)
+    && (otStoreC.match(/\b(SessionEmployeeStore|SessionWorkspace|EmployeeApi|EmployeeDecoders|EmployeeRequests)\b/g) || []).join() === 'EmployeeApi'
+    && (otStoreC.match(/EmployeeApi\.list\(\{ archived: true \}\)/g) || []).length === 1,
+    'AFI-4a1/D-AFI4b1-1: outside its modules the SESSION Employee data is reached only by AuthBoot (to clear it) and by SessionOvertime (one read-only EmployeeApi.list({ archived: true }))');
   check(/if\(next !== AUTH_STATES\.AUTHENTICATED\)\{\s*SessionIdentityProvider\.clear\(\);\s*SessionEmployeeStore\.clear\(\);/.test(abC),
     'AFI-4a1: leaving AUTHENTICATED clears the identity and the SESSION Employee data together');
   check(/sessionLost\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.SIGNED_OUT, 'session_ended'\);\s*\}/.test(abC),
@@ -6000,12 +6030,168 @@ console.log('== BF-4b1 — OVERTIME WORKFLOW (BACKEND ONLY) ==');
   const jsFiles = [];
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).forEach((e) => { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.js$/.test(e.name)) jsFiles.push(p); });
   walk(path.join(root, 'js'));
-  check(jsFiles.length > 0 && jsFiles.every((f) => !/\/api\/overtime-record/.test(read(f))) && !/overtime-record/.test(read(path.join(root, 'index.html'))),
-    'BF-4b1: no production frontend module calls the overtime API (AFI-4b1 is not implemented)');
+  // AFI-4b1 authorized revision: the SESSION Overtime client exists — only js/core/overtime-api.js
+  // calls the overtime API (and ApiClient names the one create path of the D-AFI4b1-3 exception).
+  // Was: no production frontend module calls it.
+  const otCallers = jsFiles.filter((f) => /\/api\/overtime-record/.test(stripComments(read(f)))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).sort();
+  check(jsFiles.length > 0 && otCallers.join() === 'core/overtime-api.js,transport/api-client.js' && !/overtime-record/.test(read(path.join(root, 'index.html'))),
+    'BF-4b1/AFI-4b1: only js/core/overtime-api.js calls the overtime API (api-client.js names only its exception path)' + (otCallers.length ? '' : ' >> none'));
   const view = srv('src/Overtime/OvertimeView.php');
   check(/public const FIELDS = \['id', 'employeeId', 'monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes', 'status', 'version'\];/.test(view)
     && !/amount|rate|salary|schedule|contract|payroll/i.test((view.match(/public const FIELDS = [^\n]*/) || [''])[0]) && !/amount|hourly|salary|payroll/i.test(srv('migrations/0020_create_overtime_records.sql')),
     'BF-4b1: the overtime record and its DTO carry no money, rate, salary, schedule, contract or payroll field (BF-4b2 firewall)');
+}
+
+// ===== AFI-4b1 — SESSION OVERTIME NON-MONEY WORKSPACE =====
+// The BF-4b1 Overtime workflow as a SECTION of the SESSION workspace: a strict client (reads over
+// ApiClient, writes over authSessionMutation), memory-only data with generation / sequence guards,
+// the D-BF4b-5 control matrix, ambiguity reconciled by reads (never resent), CEO owner labels from
+// the canonical Employee list (D-AFI4b1-1), the D-AFI4b1-3 target selector, no money (BF-4b2), no
+// storage, no LOCAL Overtime, no business shell. Behaviour: tools/verify-session-overtime-runtime.js.
+console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
+{
+  const NEW = ['core/overtime-api.js', 'core/session-overtime.js', 'ui/session-overtime-view.js'];
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
+  check(NEW.every((f) => fs.existsSync(path.join(root, 'js', f))), 'AFI-4b1: overtime-api.js, session-overtime.js and session-overtime-view.js present');
+  const iTa = jsFiles.indexOf('transport/transport-adapter.js');
+  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 5).join() === NEW.concat(['core/employee-api.js']).join()
+    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/employee-api.js"></script>'),
+    'AFI-4b1: the three modules load in order right after transport-adapter.js and before employee-api.js (manifest and index.html)');
+  const apiC = code(rd('core/overtime-api.js')), storeC = code(rd('core/session-overtime.js')), viewC = code(rd('ui/session-overtime-view.js'));
+  const wsC = code(rd('ui/session-workspace-view.js')), abC = code(rd('core/auth-boot.js'));
+  // Firewall: the AFI-4a1 SESSION deny list (State, storage, legacy persistence, shell, "Acting as",
+  // local data tools, other domains — including the LOCAL renderOvertime / renderOvertimeWorksheet).
+  const DENY = /\b(State|StorageAdapter|loadState|saveState|persist[A-Za-z]*|localStorage|sessionStorage|indexedDB|EmployeeRepository|TransportAdapter|ApplicationGateway|renderShell|renderView|renderViewContent|renderIdentitySelectorHTML|bindIdentitySelector|LocalIdentityProvider|setIdentityProviderForTesting|openGlobalSearch|startFresh|maybeShowFirstRunChoice|restoreCompleteBackup|exportCompleteBackup|resetAppData|renderSmartImport|commitSmartImport|openEmployeeModal|setEmployeeActive|deleteEmployee|renderEmployees|renderEmployeeDetail|empById|getScopedRecords|renderOvertime|renderOvertimeWorksheet|renderPayrollWorkspace|renderPayrollDetail|renderDashboard|renderExecutiveDashboard|renderTransactions|renderExecutionCenter|XMLHttpRequest)\b|document\s*\.\s*cookie|\bfetch\s*\(/;
+  // LOCAL Overtime (js/people/overtime.js, constants.js) and LOCAL month helpers are never reached.
+  const LOCAL_OT = /\b(OVERTIME_STATUSES|todayKey|mkKey|monthKeyOf|saveOvertime|approveOvertime|commitOvertime|State\.overtime|ApplicationGateway|DomainLayer)\b/;
+  [['core/overtime-api.js', apiC], ['core/session-overtime.js', storeC], ['ui/session-overtime-view.js', viewC]].forEach(([name, c]) => {
+    const hit = c.match(DENY) || c.match(LOCAL_OT);
+    check(!hit, 'AFI-4b1: ' + name + ' reaches no State, storage, legacy repository, shell, "Acting as", local data tool, LOCAL Overtime or other domain' + (hit ? ' >> ' + hit[0] : ''));
+    check(!/\bconsole\s*\.|setInterval|setTimeout|\bwindow\.[A-Za-z]+\s*=|\blocation\b|\bhistory\b|URLSearchParams|hashchange|document\s*\.\s*cookie|indexedDB|caches\./.test(c),
+      'AFI-4b1: ' + name + ' does not log, schedule, publish on window or touch the URL, history, cookies or any store (memory only)');
+    // BF-4b2 money firewall: no rate, salary, schedule, amount, approval, contract, payroll or estimate.
+    const money = c.match(/\b(rate|rates|hourlyRate|overtimeRate|salary|monthlyBaseSalary|salarySnapshot|schedule|scheduleSnapshot|standardHours|monthlyStandardHours|amount|rawAmount|calculatedAmount|approvedAmount|approval|approve|approved|contract|contractId|payroll|payrollPlan|payrollId|transaction|estimate|estimated|pay|wage|Rp|currency|money|rounding)\b/i);
+    check(!money, 'AFI-4b1: ' + name + ' carries no money, rate, salary, schedule, approval, contract, payroll or pay estimate (BF-4b2 firewall)' + (money ? ' >> ' + money[0] : ''));
+  });
+  // The client: two GET reads over ApiClient (structured queries), six writes over authSessionMutation.
+  const apiCalls = apiC.match(/ApiClient\.request\([^;]*;/g) || [];
+  check(apiCalls.length === 2 && (apiC.match(/method: 'GET'/g) || []).length === 2 && !/'POST'|'PUT'|'PATCH'|'DELETE'|csrf/.test(apiC) && !apiCalls.some((c) => /body\s*:/.test(c))
+    && /ApiClient\.request\('\/api\/overtime-records', \{ method: 'GET', query: \{ month: monthKey \} \}\)/.test(apiC)
+    && /ApiClient\.request\('\/api\/overtime-record', \{ method: 'GET', query: \{ id: id \} \}\)/.test(apiC),
+    'AFI-4b1: OvertimeApi reads exactly GET /api/overtime-records?month= and GET /api/overtime-record?id= through ApiClient, structured queries only');
+  check((apiC.match(/authSessionMutation\(/g) || []).length === 1 && /const sent = await authSessionMutation\(route, prepared\.body\);/.test(apiC)
+    && (apiC.match(/write\('\/api\/overtime-records\/(create|update|delete)'/g) || []).join() === "write('/api/overtime-records/create',write('/api/overtime-records/update',write('/api/overtime-records/delete'"
+    && /submit: transition\('\/api\/overtime-records\/submit', 'Submitted'\)/.test(apiC) && /review: transition\('\/api\/overtime-records\/review', 'Reviewed'\)/.test(apiC)
+    && /reject: transition\('\/api\/overtime-records\/reject', 'Rejected'\)/.test(apiC) && !/\bfetch\s*\(/.test(apiC + storeC + viewC),
+    'AFI-4b1/D-AFI4b1-3: every Overtime write goes through the one authSessionMutation path (ApiClient, CSRF) — no raw fetch, no bypass');
+  check(/if\(!prepared\.ok\) return Object\.freeze\(\{ ok: false, kind: API_RESULT_KINDS\.VALIDATION, fields: prepared\.fields, local: true, recovery: 'none' \}\);/.test(apiC)
+    && /let out = outcome\(sent\.result, decode\);\s*if\(out\.ok && !confirms\(out\.data\)\) out = refused;/.test(apiC)
+    && apiC.indexOf("(r) => r.status === 'Draft' && r.version === 1 && r.employeeId === employeeId") !== -1
+    && apiC.indexOf("(r) => r.id === id && r.status === 'Draft'") !== -1
+    && apiC.indexOf('(deleted) => deleted === id') !== -1
+    && /write\(route, OvertimeRequests\.target\(id, expectedVersion\), record, \(r\) => r\.id === id && r\.status === status\)/.test(apiC),
+    'AFI-4b1: a refused request is never sent; success needs a decoded answer that confirms it (create: v1 Draft of that owner; update: same Draft; transitions: same id in the target status; delete: same id)');
+  // Strict decoding = the server's view and input.
+  const viewPhp = srv('Overtime/OvertimeView.php'), inputPhp = srv('Overtime/OvertimeInput.php'), statusPhp = srv('Overtime/OvertimeStatus.php');
+  const serverView = ((viewPhp.match(/public const FIELDS = \[([^\]]*)\];/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
+  const serverInput = ((inputPhp.match(/public const FIELDS = \[([\s\S]*?)\];/) || ['', ''])[1].match(/'([A-Za-z]+)' =>/g) || []).map((m) => m.slice(1, -4));
+  const clientKeys = ((apiC.match(/const OVERTIME_RECORD_KEYS = Object\.freeze\(\[([^\]]*)\]\);/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
+  const clientWritable = ((apiC.match(/const OVERTIME_WRITABLE_FIELDS = Object\.freeze\(\[([^\]]*)\]\);/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
+  check(serverView.length === 9 && clientKeys.join() === serverView.slice().sort().join() && serverInput.length === 5 && clientWritable.join() === serverInput.join(),
+    'AFI-4b1: OVERTIME_RECORD_KEYS equals OvertimeView::FIELDS and OVERTIME_WRITABLE_FIELDS equals OvertimeInput::FIELDS (order included)');
+  check(/public const VALUES = \[self::DRAFT, self::SUBMITTED, self::REVIEWED, self::REJECTED\];/.test(statusPhp)
+    && /const OVERTIME_RECORD_STATUSES = Object\.freeze\(\['Draft', 'Submitted', 'Reviewed', 'Rejected'\]\);/.test(apiC)
+    && /const OVERTIME_ID_PATTERN = \/\^\[0-9a-f\]\{32\}\$\/;/.test(apiC) && /public const ID_PATTERN = '\/\^\[0-9a-f\]\{32\}\$\/';/.test(inputPhp)
+    && /const OVERTIME_MAX_VERSION = 4294967295;/.test(apiC) && /const OVERTIME_MAX_HUNDREDTHS = 74400;/.test(apiC) && /const OVERTIME_STEP_HUNDREDTHS = 25;/.test(apiC)
+    && /public const MAX_HUNDREDTHS = 74400;/.test(inputPhp) && /public const STEP_HUNDREDTHS = 25;/.test(inputPhp),
+    'AFI-4b1: statuses, id pattern, version range and the hours rule (0 < h <= 744, quarter steps) equal the server');
+  check(/if\(!isPlain\(o\) \|\| !exactKeys\(o, OVERTIME_RECORD_KEYS\)\) return null;/.test(apiC) && /if\(!item \|\| item\.monthKey !== monthKey\) return null;/.test(apiC)
+    && /if\(o\.overtimeDate !== null && !OvertimeCalendar\.isDateIn\(o\.overtimeDate, o\.monthKey\)\) return null;/.test(apiC)
+    && /exactKeys\(data, \['overtimeRecords'\]\)/.test(apiC) && /exactKeys\(data, \['overtimeRecord'\]\)/.test(apiC) && /exactKeys\(data\.deleted, \['id'\]\)/.test(apiC),
+    'AFI-4b1: exact keys on every record and wrapper; one bad item (or another month) fails the whole list; a date always lies inside its month');
+  check(!/parseFloat|Number\s*\(|toFixed|Math\./.test((apiC + storeC + viewC).replace('eligible[Number(el.value)]', '')) && /hundredths % OVERTIME_STEP_HUNDREDTHS === 0/.test(apiC),
+    'AFI-4b1: hours stay the exact decimal string — checked in integer hundredths, never parseFloat / Number / toFixed');
+  // Requests: exact bodies; employeeId only on create (the D-AFI4b1-3 selector).
+  const createFn = (apiC.match(/create\(employeeId, fields\)\{\s*const body = \{ employeeId: employeeId \};[\s\S]*?\n    \},/) || [''])[0];
+  check(!!createFn && (apiC.match(/employeeId: employeeId/g) || []).length === 1 && /const body = \{ id: id, expectedVersion: expectedVersion \};/.test(apiC)
+    && /return result\(bad, \{ id: id, expectedVersion: expectedVersion \}\);/.test(apiC)
+    && /if\(OVERTIME_WRITABLE_FIELDS\.indexOf\(k\) === -1\)\{ bad\.push\(k\); return; \}/.test(apiC)
+    && !/companyId|company_id|employee_id|\brole\b|actor|userId|status\s*:\s*[a-z'"]|reason|version:\s/.test(apiC.replace(/expectedVersion/g, '').replace(/status: \(v\)/, '').replace(/version: \(v\)/, '')),
+    'D-AFI4b1-3/AFI-4b1: employeeId is sent only by create (the target selector); update / delete / transitions send { id, expectedVersion } (+ changed fields); never company, role, actor, status, reason or version');
+  // Store / controller.
+  check(/function sessionOvertimeActions\(principal, record\)\{/.test(storeC)
+    && /const SESSION_OVERTIME_EMPLOYEE_ACTIONS = Object\.freeze\(\{ Draft: Object\.freeze\(\['edit', 'delete', 'submit'\]\) \}\);/.test(storeC)
+    && /const SESSION_OVERTIME_CEO_ACTIONS = Object\.freeze\(\{\s*Draft: Object\.freeze\(\['edit', 'delete', 'submit'\]\),\s*Submitted: Object\.freeze\(\['review', 'reject'\]\),\s*Reviewed: Object\.freeze\(\['reject'\]\)\s*\}\);/.test(storeC)
+    && /record\.employeeId === principal\.employeeId\) return own\(SESSION_OVERTIME_EMPLOYEE_ACTIONS\);/.test(storeC),
+    'AFI-4b1: the control matrix is exactly D-BF4b-5 (Employee: own Draft edit/delete/submit; CEO: Draft edit/delete/submit, Submitted review/reject, Reviewed reject, Rejected nothing)');
+  check(/openEdit\(\)\{\s*if\(!canAct\(\)\) return;[\s\S]*?indexOf\('edit'\) === -1\) return;/.test(storeC)
+    && /openPanel\(kind\)\{\s*if\(!canAct\(\)[\s\S]*?sessionOvertimeActions\(principalNow\(\), d\)\.indexOf\(kind\) === -1\) return;/.test(storeC)
+    && /async confirmPanel\(\)\{\s*if\(!canAct\(\)\) return;[\s\S]*?sessionOvertimeActions\(principalNow\(\), d\)\.indexOf\(a\.kind\) === -1\)\{/.test(storeC)
+    && /async submitForm\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC),
+    'AFI-4b1: every action is checked again against the matrix in the controller (controls are UX only)');
+  check(/beginMutation\(a\.kind, \{ id: d\.id, version: d\.version \}\);[\s\S]*?PANEL_CALLS\[a\.kind\]\(d\.id, d\.version\)/.test(storeC)
+    && /OvertimeApi\.update\(d\.id, d\.version, changed, fields\)/.test(storeC),
+    'AFI-4b1: every existing-record write sends expectedVersion = the version of the decoded detail held');
+  const otSettle = (storeC.match(/function settle\([\s\S]*?\n  \}/) || [''])[0];
+  const otRun = (storeC.match(/async function run\([\s\S]*?\n  \}/) || [''])[0];
+  check(/const AMBIGUOUS = Object\.freeze\(\[API_RESULT_KINDS\.UNAVAILABLE, OVERTIME_API_INVALID\]\);/.test(storeC)
+    && /SessionOvertimeStore\.failMutation\(token, SESSION_OVERTIME_MUTATION_STATUS\.AMBIGUOUS, out\);/.test(otSettle)
+    && /if\(kind === 'create'\) loadMonth\(s\.month\);\s*else if\(s\.detailId\) loadDetail\(s\.detailId\);/.test(otSettle)
+    && !/OvertimeApi\.(create|update|remove|submit|review|reject)|PANEL_CALLS/.test(otSettle)
+    && (storeC.match(/OvertimeApi\.create\(/g) || []).length === 1 && (storeC.match(/OvertimeApi\.update\(/g) || []).length === 1
+    && !/while\s*\(|for\s*\(\s*;|AbortController|\.abort\(/.test(storeC),
+    'AFI-4b1: an unknowable outcome is AMBIGUOUS and reconciled by reading (month for create, record otherwise) — never resent, no retry loop');
+  check(/if\(out\.recovery === 'unavailable'\)\{ AuthBoot\.sessionUncertain\(\); return; \}\s*if\(!SessionOvertimeStore\.isLive\(token\)\) return;\s*if\(out\.recovery === 'principal_changed'\)\{ SessionOvertimeStore\.clear\(\); paint\(\); return; \}\s*if\(out\.recovery === 'signed_out' \|\| \(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)\)\{ AuthBoot\.sessionLost\(\); return; \}\s*if\(!SessionOvertimeStore\.isCurrent\(token\)\) return;/.test(otSettle)
+    && /if\(!SessionOvertimeStore\.isCurrent\(token\)\) return;\s*if\(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)\{\s*AuthBoot\.sessionLost\(\);/.test(otRun)
+    && (storeC.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 2 && (storeC.match(/AuthBoot\.sessionUncertain\(\)/g) || []).length === 1,
+    'AFI-4b1: CSRF recovery outcomes — unavailable fails closed (sessionUncertain), principal_changed clears, signed_out / 401 ends the session; stale answers are dropped first');
+  check(/function isCurrent\(token\)\{\s*return isLive\(token\) && token\.seq === seqOf\(token\.kind\);\s*\}/.test(storeC)
+    && /return kind === 'list' \? listSeq : kind === 'detail' \? detailSeq : kind === 'labels' \? labelsSeq : kind === 'mutation' \? mutationSeq : -1;/.test(storeC)
+    && /function clear\(\)\{[\s\S]*?principalKey = null;\s*generation\+\+;\s*\}/.test(storeC)
+    && ['list', 'detail', 'labels'].every((k) => new RegExp('apply' + k[0].toUpperCase() + k.slice(1) + '\\(token, (items|item)\\)\\{\\s*if\\(!isCurrent\\(token\\) \\|\\| token\\.kind !== \'' + k + '\'\\) return false;').test(storeC))
+    && /applyError\(token, failed\)\{\s*if\(!isCurrent\(token\)\) return false;/.test(storeC)
+    && /if\(next !== AUTH_STATES\.AUTHENTICATED\)\{\s*SessionIdentityProvider\.clear\(\);\s*SessionEmployeeStore\.clear\(\);\s*SessionOvertimeStore\.clear\(\);/.test(abC)
+    && /SessionOvertime\.ensureLoaded\(auth\.principal\);/.test(wsC),
+    'AFI-4b1: generation + per-kind sequence guards (list, detail, labels, mutation); leaving AUTHENTICATED and a principal change destroy the Overtime data');
+  check(/function sessionOvertimeCurrentMonth\(now\)\{\s*return OvertimeCalendar\.monthOf\(now \|\| new Date\(\)\);\s*\}/.test(storeC)
+    && /monthOf\(now\)\{\s*return String\(now\.getFullYear\(\)\)\.padStart\(4, '0'\) \+ '-' \+ String\(now\.getMonth\(\) \+ 1\)\.padStart\(2, '0'\);\s*\}/.test(apiC)
+    && !/Date\.now|getUTC|toISOString|Intl\.|toLocale/.test(apiC + storeC + viewC),
+    'AFI-4b1: the initial month is the local calendar month of an injectable clock; no LOCAL helper, no UTC / ISO / locale conversion');
+  // D-AFI4b1-1 labels and the create selector.
+  check(/function sessionOvertimeEligible\(people\)\{\s*return \(people \|\| \[\]\)\.filter\(\(e\) => e\.archived === false && e\.employmentStatus === 'Active'\);\s*\}/.test(storeC)
+    && /const hits = people\.filter\(\(e\) => e\.id === employeeId\);\s*if\(hits\.length !== 1\) return 'Unknown employee';/.test(storeC)
+    && /return employeeId === principal\.employeeId \? 'You' : 'Unknown employee';/.test(storeC)
+    && /return 'Loading…';/.test(storeC) && /\(hits\[0\]\.archived \? ' \(archived\)' : ''\)/.test(storeC),
+    'D-AFI4b1-1: owner labels come only from the decoded Employee list by exact id ("fullName (code)", "(archived)", "Loading…", "Unknown employee"; Employee: "You"); the create selector is live + Active only');
+  check(/else if\(sessionOvertimeEligible\(s\.people\)\.some\(\(e\) => e\.id === f\.values\.employeeId\)\) owner = f\.values\.employeeId;/.test(storeC)
+    && /if\(employeePrincipal\(p\)\) owner = p\.employeeId;/.test(storeC),
+    'D-AFI4b1-3: the create target is the Employee\'s own principal.employeeId or the CEO\'s selected eligible Employee — a selector, not authority');
+  // The view: a section of the SESSION workspace only; ids never in the page; escaped; CSS unchanged.
+  const otRenderers = jsFiles.filter((f) => f !== 'ui/session-overtime-view.js' && /\b(renderSessionOvertimeHTML|renderSessionOvertimeTitle|bindSessionOvertime)\s*\(/.test(code(rd(f))));
+  check(otRenderers.join() === 'ui/session-workspace-view.js' && /if\(overtime\)\{ title = renderSessionOvertimeTitle\(principal, ot\); body = renderSessionOvertimeHTML\(principal, ot\); \}/.test(wsC)
+    && /allowsWorkspace\(\)\{ return false; \}/.test(abC) && !/\bSessionOvertime(Store)?\b/.test(code(rd('ui/shell-render.js')) + code(rd('ui/auth-view.js')) + code(rd('core/app-bootstrap.js'))),
+    'AFI-4b1: Overtime is rendered only as a section of the SESSION workspace (renderAuthView -> renderSessionWorkspace); AuthBoot.allowsWorkspace() stays false; never the shell');
+  check(!/data-[a-z-]*="' \+ [a-z]+\.(id|employeeId)|value="' \+ (e|r|d|row)\.(id|employeeId)|>' \+ [a-z]+\.(id|employeeId) \+/.test(viewC) && /'<option value="' \+ i \+ '"'/.test(viewC) && /id="swoOpen' \+ i \+ '"/.test(viewC)
+    && /escapeHtml\(r\.hours\)/.test(viewC) && /escapeHtml\(value\)/.test(viewC),
+    'AFI-4b1: the view never writes an opaque record or Employee id into the page (rows and owners by position); values escaped; hours shown as sent');
+  check(!/\bconfirm\s*\(|window\.confirm|alert\s*\(|prompt\s*\(/.test(viewC.replace(/confirmPanel/g, '')) && /aria-invalid="true"/.test(viewC) && /aria-describedby="/.test(viewC)
+    && /aria-busy="true"/.test(viewC) && /role="status"/.test(viewC) && /role="alert"/.test(viewC) && /id="swoPanelTitle" tabindex="-1"/.test(viewC) && /inputmode="' \+ def\.inputmode/.test(viewC),
+    'AFI-4b1: inline panels (no browser confirm()); labels, aria-invalid, aria-describedby, aria-busy, status / alert roles, focusable panel heading, decimal hours input');
+  const classes = (viewC.match(/class="([^"]+)"/g) || []).map((m) => m.slice(7, -1)).join(' ').split(/\s+/).filter((c) => /^[a-z][a-z0-9-]*$/.test(c)).concat(['btn-danger', 'btn-accent']);
+  const cssAll = ['base.css', 'components.css', 'shell.css', 'tokens.css', 'charts.css', 'fonts.css'].map((f) => fs.existsSync(path.join(root, 'css', f)) ? read(path.join(root, 'css', f)) : '').join('\n');
+  const defined = new Set((cssAll.match(/\.-?[_A-Za-z][_A-Za-z0-9-]*/g) || []).map((x) => x.slice(1)));
+  const missing = classes.filter((c, i) => classes.indexOf(c) === i && !defined.has(c));
+  check(missing.length === 0, 'AFI-4b1: the Overtime view uses only CSS classes that already exist (CSS unchanged)' + (missing.length ? ' >> missing: ' + missing.join(', ') : ''));
+  check(/const SECTIONS|<nav aria-label="Workspace sections">/.test(wsC) && (wsC.match(/id="' \+ id \+ '"/g) || []).length >= 1 && /tab\('swSectionMain', ceo \? 'Employees' : 'My profile', !overtime\) \+ tab\('swSectionOvertime', ceo \? 'Overtime' : 'My overtime', overtime\)/.test(wsC),
+    'AFI-4b1: the workspace has exactly two SESSION sections — Employees | Overtime (CEO), My profile | My overtime (Employee); the existing one stays the default');
+  // Invariants held by this slice.
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(migrations[migrations.length - 1].startsWith('0021_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    'AFI-4b1: frontend only — migration head stays 0021, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-session-overtime-runtime.js')), 'AFI-4b1: runtime harness present — tools/verify-session-overtime-runtime.js');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
@@ -6014,16 +6200,19 @@ console.log('== BF-4b1 — OVERTIME WORKFLOW (BACKEND ONLY) ==');
 // Q10) is NOT wired: adding one is a deliberate change to this allowlist.
 // N1-B (owner decision D-N1): the three SESSION auth / Employee harnesses follow the
 // original five, each proven deterministic by repeated runs before it was added.
+// D-AFI4b1-2 authorized revision: the SESSION Overtime harness is the ninth, added after its
+// repeated-run and timezone (UTC, UTC+7) determinism proof. Was: eight.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
     'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js',
-    'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js'];
+    'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js',
+    'verify-session-overtime-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the eight allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the nine allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');

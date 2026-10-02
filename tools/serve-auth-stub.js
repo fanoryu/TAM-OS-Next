@@ -80,6 +80,18 @@
  *   /__stub/scenario/write-unavailable  503 (nothing applied — the browser cannot know that)
  *   /__stub/scenario/write-malformed    the write IS applied, then answered 200 with a malformed body
  *   /__stub/scenario/write-slow         the write is answered after 4 seconds
+ *
+ * AFI-4b1 Overtime (GET /api/overtime-records?month=YYYY-MM, GET /api/overtime-record?id=, POST
+ * /api/overtime-records/create | update | delete | submit | review | reject): a test-only model of
+ * BF-4b1 — session required, CSRF, exact body keys (create: employeeId + the record fields; update:
+ * id, expectedVersion + fields, never employeeId; the rest: id, expectedVersion), the OvertimeInput
+ * value rules (hours "N.NN" > 0, <= 744, quarter steps; a date inside its month), scope (the CEO: the
+ * company; an Employee: own records only — another owner is 404), Policy (an Employee may not review
+ * or reject: 403), eligibility (an archived or not-Active owner is 409), status and version
+ * compare-and-swap (409), hard delete of a Draft. The employeeId of a create is resolved in scope:
+ * the browser never decides. Fixtures are in the current month (from this process's clock) and the
+ * month before. The write-* scenarios apply to these routes too (write-validation names hours).
+ * No money, rate, approval or payroll exists here (BF-4b2).
  */
 'use strict';
 const http = require('http');
@@ -133,12 +145,48 @@ const SELF_KEYS = ['id', 'employeeCode', 'fullName', 'jobTitle', 'department', '
 // AFI-3 fabricated one-time tokens (43 base64url characters, the server shape).
 const STUB_TOKENS = { activation: 'stub-activation-token-' + 'a'.repeat(21), recovery: 'stub-recovery-token-' + 'r'.repeat(23) };
 
+// AFI-4b1 fabricated Overtime records, in this process's current month and the month before.
+const stubMonth = (delta) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + delta); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+const OT_FIELDS = ['monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes'];
+const OT_VIEW = ['id', 'employeeId', 'monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes', 'status', 'version'];
+function stubOvertime(){
+  const m = stubMonth(0), prev = stubMonth(-1);
+  const r = (n, emp, month, day, hours, status, version, text) => ({ id: String(n).repeat(32).slice(0, 32), employeeId: emp, monthKey: month,
+    overtimeDate: day ? month + '-' + day : null, hours: hours, workDescription: text, notes: null, status: status, version: version });
+  return [r(1, 'emp_stub_1', m, '03', '7.50', 'Draft', 1, 'Fabricated <b>release</b> support'), r(2, 'emp_stub_1', m, '05', '2.25', 'Submitted', 2, 'Fabricated audit prep'),
+    r(3, 'emp_stub_2', m, null, '1.00', 'Reviewed', 3, null), r(4, 'emp_stub_3', m, '09', '0.25', 'Rejected', 4, 'Fabricated duplicate entry'),
+    r(5, 'emp_stub_5', m, '11', '4.00', 'Draft', 1, null), r(6, 'emp_stub_1', prev, '20', '3.00', 'Reviewed', 2, 'Fabricated month-end close')];
+}
+const otHours = (v) => { const m = typeof v === 'string' ? /^(0|[1-9]\d{0,2})\.(\d{2})$/.exec(v) : null; if(!m) return false; const h = +m[1] * 100 + +m[2]; return h > 0 && h <= 74400 && h % 25 === 0; };
+const otMonth = (v) => typeof v === 'string' && /^(\d{4})-(0[1-9]|1[0-2])$/.test(v) && +v.slice(0, 4) >= 1900;
+const otDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && +v.slice(0, 4) >= 1900 && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
+// One OvertimeInput value: the normalized value, or undefined when it is not acceptable.
+function otValue(k, v){
+  const text = (max, multiline) => {
+    if(v === null) return null;
+    if(typeof v !== 'string') return undefined;
+    const t = v.trim();
+    if(t === '') return null;
+    if((multiline ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/ : /[\u0000-\u001F\u007F-\u009F]/).test(t) || Array.from(t).length > max) return undefined;
+    return t;
+  };
+  switch(k){
+    case 'monthKey': return otMonth(v) ? v : undefined;
+    case 'overtimeDate': return (v === null || v === '') ? null : (otDate(v) ? v : undefined);
+    case 'hours': return otHours(v) ? v : undefined;
+    case 'workDescription': return text(160, false);
+    case 'notes': return text(2000, true);
+    default: return undefined;
+  }
+}
+
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '': 'text/plain; charset=utf-8' };
 
 let scenario = 'signed-out';
 let session = null;            // { user, csrf, staleOnce }
 let usedTokens = [];           // AFI-3: tokens consumed since the last scenario switch
 let employees = [];            // AFI-4a2: this scenario's copy of STUB_EMPLOYEES
+let overtime = [];             // AFI-4b1: this scenario's Overtime records
 
 const token = () => crypto.randomBytes(32).toString('base64url');        // 43 characters, the server shape
 const rid = () => crypto.randomBytes(16).toString('hex');
@@ -146,6 +194,7 @@ function reset(name){
   scenario = name;
   usedTokens = [];
   employees = STUB_EMPLOYEES.map((e) => ({ ...e }));
+  overtime = stubOvertime();
   session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
@@ -218,6 +267,24 @@ async function handleApi(req, res, p, query){
     if(scenario === 'employee-self-missing' || id !== session.user.employeeId) return api(res, 404, 'not_found');
     return api(res, 200, { employee: pick(employees[0], SELF_KEYS) });
   }
+  // AFI-4b1 Overtime reads: session required; the CEO's company, an Employee's own records only.
+  if((p === '/api/overtime-records' || p === '/api/overtime-record') && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    const keys = [...query.keys()];
+    const visible = (r) => session.user.role === 'ceo' || r.employeeId === session.user.employeeId;
+    if(p === '/api/overtime-records'){
+      if(keys.join() !== 'month' || !otMonth(query.get('month'))) return api(res, 400, 'invalid_query');
+      return api(res, 200, { overtimeRecords: overtime.filter((r) => r.monthKey === query.get('month') && visible(r)).map((r) => pick(r, OT_VIEW)) });
+    }
+    if(keys.join() !== 'id' || !/^[0-9a-f]{32}$/.test(query.get('id') || '')) return api(res, 400, 'validation_failed', null, ['id']);
+    const r = overtime.find((x) => x.id === query.get('id'));
+    return (r && visible(r)) ? api(res, 200, { overtimeRecord: pick(r, OT_VIEW) }) : api(res, 404, 'not_found');
+  }
+  const otWrite = { '/api/overtime-records/create': 'create', '/api/overtime-records/update': 'update', '/api/overtime-records/delete': 'delete',
+    '/api/overtime-records/submit': 'submit', '/api/overtime-records/review': 'review', '/api/overtime-records/reject': 'reject' }[p];
+  if(otWrite && req.method === 'POST') return handleOvertimeWrite(req, res, otWrite);
   // AFI-4a2 Employee writes (test-only model of BF-4a1; see the header).
   const write = { '/api/employees/create': 'create', '/api/employees/update': 'update', '/api/employees/archive': 'archive',
     '/api/employees/provision-account': 'provision', '/api/employees/reissue-activation': 'reissue', '/api/employees/disable-account': 'disable', '/api/employees/enable-account': 'enable' }[p];
@@ -335,6 +402,69 @@ async function handleWrite(req, res, kind){
   if(next.employeeCode !== e.employeeCode && employees.some((x) => x.employeeCode === next.employeeCode)) return api(res, 409, 'conflict');
   if(WRITABLE.some((k) => next[k] !== e[k])){ Object.assign(e, next); e.version++; }        // a no-op writes nothing
   return done(e);
+}
+
+/* ---------- AFI-4b1: the Overtime writes (test-only model of BF-4b1) ---------- */
+const OT_TRANSITIONS = { submit: [['Draft'], 'Submitted'], review: [['Submitted'], 'Reviewed'], reject: [['Submitted', 'Reviewed'], 'Rejected'] };
+async function handleOvertimeWrite(req, res, kind){
+  const b = await readJson(req);
+  if(!session) return api(res, 401, 'unauthenticated');
+  if(scenario === 'write-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+  if(scenario === 'write-stale-csrf' && !session.rotated){ session.rotated = true; session.csrf = token(); return api(res, 403, 'forbidden'); }
+  if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
+  if(!b) return api(res, 400, 'validation_failed');
+  const allowed = kind === 'create' ? ['employeeId'].concat(OT_FIELDS) : kind === 'update' ? ['id', 'expectedVersion'].concat(OT_FIELDS) : ['id', 'expectedVersion'];
+  const unknown = Object.keys(b).filter((k) => allowed.indexOf(k) === -1);
+  if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
+  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [kind === 'create' || kind === 'update' ? 'hours' : 'id']);
+  if(scenario === 'write-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '45' });
+  if(scenario === 'write-error') return api(res, 500, 'internal_error');
+  if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
+  if(scenario === 'write-conflict') return api(res, 409, 'conflict');
+  if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
+  const ceo = session.user.role === 'ceo';
+  const visible = (r) => ceo || r.employeeId === session.user.employeeId;
+  const done = (payload) => (scenario === 'write-malformed' ? api(res, 200, Object.assign({ internalNote: 'x' }, payload)) : api(res, 200, payload));
+  if(kind === 'create'){
+    const missing = ['employeeId', 'monthKey', 'hours'].filter((k) => !(k in b));
+    if(missing.length) return api(res, 400, 'validation_failed', null, missing);
+    const bad = Object.keys(b).filter((k) => k === 'employeeId' ? !(typeof b.employeeId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(b.employeeId)) : otValue(k, b[k]) === undefined);
+    if(bad.length) return api(res, 400, 'validation_failed', null, bad);
+    const rec = { id: crypto.randomBytes(16).toString('hex'), employeeId: b.employeeId, status: 'Draft', version: 1 };
+    OT_FIELDS.forEach((k) => { rec[k] = k in b ? otValue(k, b[k]) : null; });
+    if(rec.overtimeDate !== null && rec.overtimeDate.slice(0, 7) !== rec.monthKey) return api(res, 400, 'validation_failed', null, ['overtimeDate']);
+    // The selector is resolved in scope: an Employee only for themself, the CEO in the company.
+    const owner = employees.find((e) => e.id === b.employeeId);
+    if(!owner || (!ceo && owner.id !== session.user.employeeId)) return api(res, 404, 'not_found');
+    if(owner.archived || owner.employmentStatus !== 'Active') return api(res, 409, 'conflict');
+    overtime.push(rec);
+    return done({ overtimeRecord: pick(rec, OT_VIEW) });
+  }
+  const target = [];
+  if(typeof b.id !== 'string' || !/^[0-9a-f]{32}$/.test(b.id)) target.push('id');
+  if(!Number.isInteger(b.expectedVersion) || b.expectedVersion < 1 || b.expectedVersion > 4294967295) target.push('expectedVersion');
+  if(target.length) return api(res, 400, 'validation_failed', null, target);
+  const patch = Object.keys(b).filter((k) => k !== 'id' && k !== 'expectedVersion');
+  if(kind === 'update'){
+    if(!patch.length) return api(res, 400, 'validation_failed', null, OT_FIELDS);
+    const bad = patch.filter((k) => otValue(k, b[k]) === undefined);
+    if(bad.length) return api(res, 400, 'validation_failed', null, bad);
+  }
+  const r = overtime.find((x) => x.id === b.id);
+  if(!r || !visible(r)) return api(res, 404, 'not_found');
+  if(!ceo && (kind === 'review' || kind === 'reject')) return api(res, 403, 'forbidden');
+  const from = kind === 'update' || kind === 'delete' ? ['Draft'] : OT_TRANSITIONS[kind][0];
+  if(from.indexOf(r.status) === -1 || r.version !== b.expectedVersion) return api(res, 409, 'conflict');
+  if(kind === 'delete'){ overtime = overtime.filter((x) => x !== r); return done({ deleted: { id: r.id } }); }
+  if(kind === 'update'){
+    const next = { ...r };
+    patch.forEach((k) => { next[k] = otValue(k, b[k]); });
+    if(next.overtimeDate !== null && next.overtimeDate.slice(0, 7) !== next.monthKey) return api(res, 400, 'validation_failed', null, ['overtimeDate']);
+    if(OT_FIELDS.some((k) => next[k] !== r[k])){ Object.assign(r, next); r.version++; }           // a no-op writes nothing
+    return done({ overtimeRecord: pick(r, OT_VIEW) });
+  }
+  r.status = OT_TRANSITIONS[kind][1]; r.version++;
+  return done({ overtimeRecord: pick(r, OT_VIEW) });
 }
 
 // AFI-4a3: the account operations (test-only model of AccountService's guards).
