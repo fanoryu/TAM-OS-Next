@@ -82,7 +82,7 @@ is parsed strictly (one 43-character token, nothing else), read once and strippe
 without CSRF and with exact bodies; the confirmation field (D-B) is compared locally and never sent; the
 recovery request always ends on one generic confirmation; activation and reset create no session, and an
 explicit "Continue to sign in" returns to `AuthBoot`, where `/me` decides. LOCAL never parses the fragment.
-Proven by `tools/verify-auth-flow-runtime.js` (176 checks, seventeen mutations; local-only, not in CI) and
+Proven by `tools/verify-auth-flow-runtime.js` (176 checks, seventeen mutations; local-only until N1-B added it to CI with the AFI-2 and SESSION Employee harnesses) and
 AFI-3 guards in `verify-build.js` (2631 checks). AFI-4 Phase 0 found the authenticated workspace blocked on
 server business contracts; owner decisions **D-AFI4-1 = B** (server-authoritative only — the earlier D2 interim of
 a device-local CEO workspace behind SESSION is superseded) and **D-AFI4-2 = A** (Employee domain first, then

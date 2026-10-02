@@ -1419,7 +1419,7 @@ user. **Continue to sign in** (or **Back to sign in**) returns `AuthFlow` to `ID
 shell, "Acting as" or Global Search, reach the local identity, or fall back to LOCAL; `allowsWorkspace()` is
 still always false. The frontend knows nothing about the mail outbox, the worker or the provider.
 
-**Proof.** `tools/verify-auth-flow-runtime.js` (176 checks; **local-only**, not in the CI allowlist) runs the
+**Proof.** `tools/verify-auth-flow-runtime.js` (176 checks; local-only when AFI-3 landed, a CI harness since N1-B) runs the
 real modules with a fake `location` / `history` and a small `#app` DOM that drives the real form handlers;
 seventeen controlled mutations (local state, "Acting as", an echoed address, a stored token, a stored password,
 a local identity, a dead link treated as success or retried, no busy guard, LOCAL stripping the fragment, a

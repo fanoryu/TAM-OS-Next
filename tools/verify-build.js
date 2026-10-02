@@ -5621,8 +5621,8 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
 }
 
 // ===== AFI-3 — CREDENTIAL FLOWS (activation, recovery request, reset) =====
-// STRUCTURE only; behaviour is proven by tools/verify-auth-flow-runtime.js (local-only, not
-// in CI). Pins: a subordinate machine reached only from AuthBoot.start() in SESSION mode;
+// STRUCTURE only; behaviour is proven by tools/verify-auth-flow-runtime.js (a CI runtime
+// harness since N1-B). Pins: a subordinate machine reached only from AuthBoot.start() in SESSION mode;
 // a strict fragment parser that strips the link at once; exactly three CSRF-free endpoints
 // with exact bodies; the token memory-only and never in the view; the business firewall.
 console.log('== AFI-3 — CREDENTIAL FLOWS ==');
@@ -5992,15 +5992,18 @@ console.log('== AFI-4a3 — ACCOUNT ADMINISTRATION ==');
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
 // Q10) is NOT wired: adding one is a deliberate change to this allowlist.
+// N1-B (owner decision D-N1): the three SESSION auth / Employee harnesses follow the
+// original five, each proven deterministic by repeated runs before it was added.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
-    'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js'];
+    'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js',
+    'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the five allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the eight allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');
