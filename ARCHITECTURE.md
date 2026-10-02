@@ -1569,6 +1569,48 @@ decoder still rejects it and `EmployeeRequests` never sends it. Nothing in the s
 lists, all seven write answers, forged input, scope); runtime harness section U (strict decoder cases, old-shape write
 answers never confirmed, identical rendering for true / false); the BF-4a3 checks in `tools/verify-build.js`.
 
+### CEO account administration — AFI-4a3 (frontend; SESSION mode only, LOCAL still shipped)
+
+AFI-4a3 puts the BF-4a2 account operations on the SESSION CEO's Employee detail. No backend, route, ACTION, migration,
+CSS or SDR change; no new module.
+
+**Matrix** (`sessionAccountOperations()`, `js/core/session-employee.js`) — the server projection only; role,
+membership, contact email or any other value is never consulted:
+
+| accountManageable | accountState | "Login access" offers |
+|---|---|---|
+| false | any | nothing — the existing Login status text stays, with no explanation |
+| true | none | Create login |
+| true | pending | Resend activation email, Disable login |
+| true | active | Disable login |
+| true | disabled | Enable login |
+
+**Client** (`js/core/employee-api.js`). `provisionAccount(id, email)`, `reissueActivation(id)`, `disableAccount(id)`,
+`enableAccount(id)` reuse the `write()` path — `authSessionMutation` with its bounded CSRF recovery — with exact bodies
+(`{ id, email }` / `{ id }`; never `expectedVersion`, `accountState` or `accountManageable`; these routes take no version
+and do not bump it). A success must decode strictly as `{ employee: detail }` **and** be the same record in the state the
+operation produces (provision: live, pending; reissue: pending; disable: disabled; enable: active or pending); anything
+else is unconfirmed. No response carries an activation token or link (SDR-0004 §3.5): there is no secret in the browser.
+
+**State and view.** The shared mutation model gains the kinds `provision`, `reissue`, `disable`, `enable`; one memory-only
+`accountAction { kind, id, email }` holds the open panel and the login email (empty at first — D-AFI4a3-1 — never the
+contact email; destroyed on Cancel, success, leaving the record, sign-out, 401, a principal change and "session
+uncertain"). Each operation opens an inline panel (no `confirm()`): Create login is a form whose submission is the
+confirmation; Resend, Disable and Enable explain their effect. While pending, submit and Cancel are disabled and Back,
+Edit, Archive, another record and another account action are refused; a second submit sends nothing.
+
+| Outcome | Behaviour |
+|---|---|
+| success | the decoded record becomes the detail; a fixed notice ("queued", never "sent"); list stale |
+| 400 | email field marked and focused; the typed email kept |
+| 401 / 403 / 404 / 429 / 500 | as AFI-4a2 (session ended / denied / record gone / wait shown / "not saved") |
+| 409 | generic "This login changed or the action is no longer available" + Reload record (the re-read decides) |
+| 503, network, timeout, malformed or non-confirming success | unconfirmed: never resent; the record is read again — a pending re-read proves a provision; a resend stays explicitly unconfirmed |
+
+**Proof.** Runtime harness section V (matrix, each operation's success and failure classes, unconfirmed outcomes and
+reconciliation, CSRF recovery, races, the email draft lifecycle, Employee containment); the AFI-4a3 checks in
+`tools/verify-build.js`; the four account routes in `tools/serve-auth-stub.js` (test only).
+
 ### Release engineering
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the

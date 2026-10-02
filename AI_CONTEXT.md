@@ -110,15 +110,24 @@ existing `authSessionMutation` CSRF path; changed fields + `expectedVersion` on 
 server stays authoritative: only its strictly decoded answer changes the in-memory data, an unknowable outcome (503,
 network, timeout, malformed success) is never resent but reconciled by re-reading, and a recovery that cannot confirm
 the session fails closed via the new `AuthBoot.sessionUncertain()`. An **Employee stays read-only**.
-**BF-4a3** (implemented as source on a feature branch; not pushed, not deployed; D-AFI4a-D1 = A, D-BF4a3-1 = A,
+**BF-4a3** (merged to `main` as source, PR #37; not deployed; D-AFI4a-D1 = A, D-BF4a3-1 = A,
 D-BF4a3-2 = A) adds the server-derived boolean `accountManageable` to the CEO Employee list and detail (and so to
 every Employee write answer): true only for a live record with no login or an `employee` membership whose user is
 active; false for a CEO-bound record, an archived record and an out-of-band disabled user (fail closed). The Employee
 self view carries neither it nor `accountState`; it is output only — never request input, never read by the account
 routes, which keep enforcing scope, Policy, the CEO-target guard and their own state rules. The frontend's strict
-CEO decoders were updated in the same slice so SESSION reads and AFI-4a2 writes keep decoding; no UI consumes the
-value and there is still no account control (AFI-4a3). `accountState` is unchanged and display-only. No migration;
-ACTIONS stay 21. Production `AUTH_MODE` is still LOCAL, "Acting as" remains LOCAL-only, and AFI-4a is not closed.
+CEO decoders were updated in the same slice so SESSION reads and AFI-4a2 writes keep decoding. `accountState` is
+unchanged. **AFI-4a3** (implemented as source on a feature branch; not pushed, not deployed; D-AFI4a3-1 = A) adds the
+CEO's account-administration UI on the record detail, over the BF-4a2 routes: a "Login access" row offers exactly what
+the server projection allows — `accountManageable` false → nothing (the Login status text stays, unexplained); true +
+none → Create login; pending → Resend activation email, Disable login; active → Disable login; disabled → Enable login
+— each through an inline panel, sent once through `authSessionMutation` with the exact body (`{ id, email }` /
+`{ id }`, never an `expectedVersion`), and accepted only when the strictly decoded record is in the state the operation
+produces. The login email starts empty (never the contact email) and lives in memory only; no activation token or
+link ever reaches the browser — the activation email is **queued** by the server. An unconfirmed write (503, network,
+timeout, malformed or non-confirming success) is never resent: the record is read again, and an unconfirmed resend
+is reported as such. An Employee still has no account control. No backend change, no migration; ACTIONS stay 21.
+Production `AUTH_MODE` is still LOCAL, "Acting as" remains LOCAL-only, and AFI-4a is not closed.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

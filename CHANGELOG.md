@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **AFI-4a3 CEO login administration (frontend; SESSION mode only, not shipped).** On an Employee record the CEO
+  can create a login (entering the login email; it is never taken from the contact email), resend the activation
+  email, disable a login and enable it again — only the actions TAM OS's server allows for that record, each after
+  an inline confirmation. TAM OS queues the activation email; no activation link ever appears in the browser. If a
+  result cannot be confirmed, nothing is sent again: the record is read again and shown as it really is. Employees
+  still have no account controls. No backend change; the shipped `AUTH_MODE` stays **LOCAL**.
 - **BF-4a3 server-derived `accountManageable` (backend source + frontend contract; not deployed, no UI).** The
   CEO's Employee list and record detail — and every Employee write answer — now say whether the record can be the
   target of Employee account administration: yes for a live record with no login or an Employee login whose user is

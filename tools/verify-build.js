@@ -5532,10 +5532,11 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     // AFI-4a2 authorized revision: employee-api.js also names the three Employee write routes
     // (create / update / archive). Was: the two Employee read paths only. The property is
     // unchanged — every /api/ path is an exact, allowlisted literal; no account route.
-    && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/update'"
+    // AFI-4a3 authorized revision: plus the four BF-4a2 account routes. Was: reads + three Employee writes.
+    && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/disable-account','/api/employees/enable-account','/api/employees/provision-account','/api/employees/reissue-activation','/api/employees/update'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads and the three Employee writes');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -5689,7 +5690,11 @@ console.log('== AFI-3 — CREDENTIAL FLOWS ==');
     'AFI-3: the recovery-request confirmation is one fixed generic text (no echo of the address)');
   check(/'Continue to sign in'|>Continue to sign in</.test(avCode) && /AuthFlow\.leave\(\)/.test(avCode), 'AFI-3: success screens end with an explicit "Continue to sign in" (no timed redirect)');
   // No mail provider or secret in the frontend.
-  const secretHits = allCode.filter((x) => /resend|\bre_[A-Za-z0-9_]{8,}|api_key|apiKey|smtp/i.test(x.c)).map((x) => x.f);
+  // AFI-4a3 authorized revision: the account UI's fixed phrases "Resend activation email" and "another
+  // resend" are removed before matching (the verb, not the Resend provider); every other
+  // occurrence — an import, a host, a key prefix — still fails. Was: no exception.
+  const uiPhrases = (c) => c.replace(/Resend activation email|request another resend/g, '');
+  const secretHits = allCode.filter((x) => /resend|\bre_[A-Za-z0-9_]{8,}|api_key|apiKey|smtp/i.test(uiPhrases(x.c))).map((x) => x.f);
   check(secretHits.length === 0 && !/resend|api_key|smtp/i.test(indexHtml),
     'AFI-3: no mail provider, API key or SMTP reference in the frontend' + (secretHits.length ? ' >> VIOLATION: ' + secretHits.join(', ') : ''));
   check(fs.existsSync(path.join(root, 'tools', 'verify-auth-flow-runtime.js')), 'AFI-3: runtime harness present — tools/verify-auth-flow-runtime.js');
@@ -5800,9 +5805,15 @@ console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
   // those two, so it stays absent from every other part of the three modules. Was: absent everywhere.
   const apiNoDecoder = apiC.replace("const EMPLOYEE_LIST_KEYS = Object.freeze(['accountManageable', ", "const EMPLOYEE_LIST_KEYS = Object.freeze([")
     .replace('accountManageable: (v) => v === true || v === false,', '');
+  // AFI-4a3 authorized revision: the account routes are named in employee-api.js (pinned exactly in
+  // AFI-1 above) and accountManageable is read once more — by sessionAccountOperations() in the store
+  // (pinned in AFI-4a3 below). Was: no account route and no accountManageable outside the decoder.
+  const accountOpsFn = (storeC.match(/function sessionAccountOperations\(detail\)\{[\s\S]*?\n\}/) || [''])[0];
+  const storeNoOps = storeC.replace(accountOpsFn, '');
   check(!/\bfetch\s*\(|XMLHttpRequest/.test(apiC + storeC + viewC) && !/'\/api\/employees\/[^']*[?#&=][^']*'/.test(apiC)
-    && !/provision|reissue|disable-account|enable-account|accountManageable/i.test(apiNoDecoder + storeC + viewC),
-    'AFI-4a2/BF-4a3: no direct fetch, no query string on a write route, no account route; accountManageable only in the CEO decoder');
+    && !/provision-account|reissue-activation|disable-account|enable-account/.test(storeC + viewC) && !/accountManageable/.test(storeNoOps + viewC)
+    && (apiNoDecoder.match(/accountManageable/g) || []).length === 0 && /accountManageable/.test(accountOpsFn),
+    'AFI-4a2/BF-4a3/AFI-4a3: no direct fetch, no query string on a write route; account routes only in EmployeeApi; accountManageable only in the decoder and sessionAccountOperations()');
   check(/if\(!prepared\.ok\) return Object\.freeze\(\{ ok: false, kind: API_RESULT_KINDS\.VALIDATION, fields: prepared\.fields, local: true, recovery: 'none' \}\);/.test(apiC)
     && /let out = outcome\(sent\.result, EmployeeDecoders\.detailResponse\);\s*if\(out\.ok && !confirms\(out\.data\)\) out = refused;/.test(apiC),
     'AFI-4a2: a refused request is never sent; a write success counts only as a strictly decoded { employee: detail } that confirms the write');
@@ -5834,17 +5845,23 @@ console.log('== AFI-4a2 — SESSION EMPLOYEE WRITES ==');
     && /if\(out\.recovery === 'principal_changed'\)\{ SessionEmployeeStore\.clear\(\); paint\(\); return; \}/.test(settleFn)
     && /sessionUncertain\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.UNAVAILABLE, 'unavailable'\);\s*\}/.test(abC),
     'AFI-4a2: only the recovery outcome "unavailable" calls AuthBoot.sessionUncertain() (AUTHENTICATED -> UNAVAILABLE, no request); principal_changed clears the data');
-  check(!/\baccountState\s*(===|!==|==|!=)|(===|!==)\s*[A-Za-z_.]*accountState\b|accountManageable/.test(storeC + viewC + apiNoDecoder),
-    'AFI-4a2/BF-4a3: accountState is display-only and accountManageable is decoded only — neither is a condition for a write control or action');
+  // AFI-4a3 authorized revision: both now decide the account controls — only inside
+  // sessionAccountOperations() — and EmployeeApi confirms an account write by the state it produced;
+  // the one other use picks the enable notice. Was: neither was ever a condition.
+  const apiNoConfirm = apiNoDecoder.replace(/e\.accountState === '(pending|disabled|active)'/g, '').replace(/write\('\/api\/employees\/provision-account'[^\n]*accountManageable[^\n]*/, '');
+  check(!/\baccountState\s*(===|!==|==|!=)|(===|!==)\s*[A-Za-z_.]*accountState\b|accountManageable/.test(storeNoOps.replace("kind === 'enable' && out.data.accountState === 'pending'", '') + viewC + apiNoConfirm),
+    'AFI-4a2/BF-4a3/AFI-4a3: accountState / accountManageable decide account controls only in sessionAccountOperations() (and confirm account writes in EmployeeApi)');
   // The view: CEO-only Employee CRUD controls, escaped drafts, existing classes.
   const ceoControls = (viewC.match(/id="sw(AddBtn|EditBtn|ArchiveBtn|FormCancel|FormSave|ReloadBtn|ArchiveCancel|ArchiveConfirm)"/g) || []).sort().join();
-  check(ceoControls === 'id="swAddBtn",id="swArchiveBtn",id="swArchiveCancel",id="swArchiveConfirm",id="swEditBtn",id="swFormCancel",id="swFormSave",id="swReloadBtn",id="swReloadBtn"',
+  // AFI-4a3 authorized revision: one more Reload record (the account panel); the account buttons are
+  // pinned in AFI-4a3 below. Was: two Reload record buttons.
+  check(ceoControls === 'id="swAddBtn",id="swArchiveBtn",id="swArchiveCancel",id="swArchiveConfirm",id="swEditBtn",id="swFormCancel",id="swFormSave",id="swReloadBtn",id="swReloadBtn",id="swReloadBtn"',
     'AFI-4a2: the write controls are exactly Add employee, Edit, Archive, Cancel, Save, Reload record and the archive confirmation');
   const listFn = (viewC.match(/function sessionWorkspaceListHTML\([\s\S]*?\n\}/) || [''])[0];
   const detailFn = (viewC.match(/function sessionWorkspaceDetailHTML\([\s\S]*?\n\}/) || [''])[0];
   const htmlFn = (viewC.match(/function sessionWorkspaceHTML\([\s\S]*?\n\}/) || [''])[0];
   check(/if\(ceo\) body = w\.detailId \? sessionWorkspaceDetailHTML\(w\) : sessionWorkspaceListHTML\(w\);\s*else if\(employee\) body = sessionWorkspaceSelfHTML\(w\);/.test(htmlFn)
-    && /swAddBtn/.test(listFn) && /swEditBtn/.test(detailFn) && /swArchiveBtn/.test(detailFn) && /\(d\.archived \|\| w\.confirm\) \? ''/.test(detailFn),
+    && /swAddBtn/.test(listFn) && /swEditBtn/.test(detailFn) && /swArchiveBtn/.test(detailFn) && /\(d\.archived \|\| w\.confirm \|\| w\.accountAction\) \? ''/.test(detailFn),
     'AFI-4a2: write controls are rendered only on the CEO branch; Edit / Archive only for a live (non-archived) record');
   check(/value="' \+ escapeHtml\(value\) \+ '"/.test(viewC) && /'>' \+ escapeHtml\(value\) \+ '<\/textarea>'/.test(viewC) && /escapeHtml\(d\.fullName\) \+ ' \(' \+ escapeHtml\(d\.employeeCode\) \+ '\)/.test(viewC)
     && !/\bconfirm\s*\(|window\.confirm|alert\s*\(|prompt\s*\(/.test(viewC.replace(/openConfirm|cancelArchive|confirmArchive|sessionWorkspaceConfirmHTML/g, '')),
@@ -5895,9 +5912,15 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
   check(/const EMPLOYEE_SELF_KEYS = Object\.freeze\(\[[^\]]*\]\);/.test(apiC) && !/accountManageable/.test((apiC.match(/const EMPLOYEE_SELF_KEYS = [^\n]*/) || [''])[0])
     && !/accountManageable/.test((apiC.match(/const EMPLOYEE_WRITABLE_FIELDS = [^\n]*/) || [''])[0]),
     'BF-4a3: the Employee self decoder rejects it and EmployeeRequests never sends it (absent from both key lists)');
-  check(!/accountManageable/.test(storeC + viewC), 'BF-4a3: SessionEmployeeStore and the workspace view never use it (no authority, no control conditioned on it yet)');
-  check(!/Provision|Reissue|Disable login|Enable login|provision-account|reissue-activation|disable-account|enable-account/.test(viewC + storeC),
-    'BF-4a3: still no account-administration control or route in the SESSION workspace');
+  // AFI-4a3 authorized revision: the store reads it in exactly one place, sessionAccountOperations(),
+  // to offer account controls; the view never names it. Was: no use at all (no UI yet).
+  const opsFnB = (storeC.match(/function sessionAccountOperations\(detail\)\{[\s\S]*?\n\}/) || [''])[0];
+  check((storeC.match(/accountManageable/g) || []).length === 1 && /if\(!detail \|\| detail\.accountManageable !== true\) return \[\];/.test(opsFnB) && !/accountManageable/.test(viewC),
+    'BF-4a3/AFI-4a3: the store reads accountManageable only in sessionAccountOperations() (false offers nothing); the view never names it');
+  // AFI-4a3 authorized revision: the account controls exist now (pinned in AFI-4a3 below); the
+  // store and view still name no account route and no "Provision" / "Reissue" wording. Was: no control.
+  check(!/Provision|Reissue|provision-account|reissue-activation|disable-account|enable-account/.test((viewC + storeC).replace(/swAcct(Provision|Reissue)/g, '')),
+    'BF-4a3/AFI-4a3: the SESSION workspace names no account route and no internal account wording');
   // Server: derived inline in the three CEO reads; projected only by the CEO views; never input or authority.
   const storePhp = rdSrv('Data/Employee/EmployeeStore.php'), viewPhp = rdSrv('Employee/EmployeeView.php');
   const caseSql = "CASE WHEN e.archived_at IS NULL AND (m.id IS NULL OR (m.role = 'employee' AND u.status = 'active')) THEN 1 ELSE 0 END AS account_manageable";
@@ -5914,6 +5937,55 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
   check(migrations[migrations.length - 1].startsWith('0019_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
     'BF-4a3: migration head stays 0019, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+}
+
+// ===== AFI-4a3 — CEO SESSION ACCOUNT ADMINISTRATION =====
+// The four BF-4a2 account operations, offered only as sessionAccountOperations() maps the server
+// projection (accountManageable + accountState), sent only through authSessionMutation with exact
+// bodies (no expectedVersion), confirmed only by the state they produce, never resent, and with no
+// activation secret in the browser. Behaviour: runtime harness section V.
+console.log('== AFI-4a3 — ACCOUNT ADMINISTRATION ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rdJs = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  const apiC = code(rdJs('core/employee-api.js')), storeC = code(rdJs('core/session-employee.js')), viewC = code(rdJs('ui/session-workspace-view.js'));
+  // Client: four methods, exact routes and bodies, the shared write() path, state-confirmed success.
+  check(apiC.indexOf("write('/api/employees/provision-account', EmployeeRequests.provisionAccount(id, email), (e) => e.id === id && e.archived === false && e.accountState === 'pending')") !== -1
+    && apiC.indexOf("write('/api/employees/reissue-activation', EmployeeRequests.accountTarget(id), (e) => e.id === id && e.accountState === 'pending')") !== -1
+    && apiC.indexOf("write('/api/employees/disable-account', EmployeeRequests.accountTarget(id), (e) => e.id === id && e.accountState === 'disabled')") !== -1
+    && apiC.indexOf("write('/api/employees/enable-account', EmployeeRequests.accountTarget(id), (e) => e.id === id && (e.accountState === 'active' || e.accountState === 'pending'))") !== -1
+    && (apiC.match(/authSessionMutation\(/g) || []).length === 1,
+    'AFI-4a3: EmployeeApi provisionAccount / reissueActivation / disableAccount / enableAccount use the four exact routes, the one authSessionMutation path, and a strictly decoded detail in the produced state');
+  const provFn = (apiC.match(/provisionAccount\(id, email\)\{\s*const bad = \[\];[\s\S]*?\n    \}/) || [''])[0];
+  const targetFn = (apiC.match(/accountTarget\(id\)\{[\s\S]*?\n    \}/) || [''])[0];
+  check(/return result\(bad, \{ id: id, email: t \}\);/.test(provFn) && /return result\(bad, \{ id: id \}\);/.test(targetFn)
+    && !/expectedVersion|accountState|accountManageable|contactEmail/.test(provFn + targetFn),
+    'AFI-4a3: account request bodies are exactly { id, email } and { id } — no expectedVersion, accountState, accountManageable or contact email');
+  // The matrix — the projection only.
+  check(/const SESSION_ACCOUNT_OPERATIONS = Object\.freeze\(\{\s*none: Object\.freeze\(\['provision'\]\),\s*pending: Object\.freeze\(\['reissue', 'disable'\]\),\s*active: Object\.freeze\(\['disable'\]\),\s*disabled: Object\.freeze\(\['enable'\]\)\s*\}\);/.test(storeC)
+    && /function sessionAccountOperations\(detail\)\{\s*if\(!detail \|\| detail\.accountManageable !== true\) return \[\];\s*return Object\.prototype\.hasOwnProperty\.call\(SESSION_ACCOUNT_OPERATIONS, detail\.accountState\) \? SESSION_ACCOUNT_OPERATIONS\[detail\.accountState\] : \[\];\s*\}/.test(storeC),
+    'AFI-4a3: the operation matrix is exactly accountManageable then accountState (none → provision; pending → reissue, disable; active → disable; disabled → enable); false or unknown → nothing');
+  check(/openAccountAction\(kind\)\{\s*if\(!canAct\(\)\) return;[\s\S]*?if\(sessionAccountOperations\(d\)\.indexOf\(kind\) === -1\) return;/.test(storeC)
+    && /async submitAccountAction\(\)\{\s*if\(!canAct\(\)\) return;[\s\S]*?if\(sessionAccountOperations\(d\)\.indexOf\(a\.kind\) === -1\)\{/.test(storeC)
+    && /const SESSION_MUTATION_KINDS = Object\.freeze\(\['create', 'update', 'archive', 'provision', 'reissue', 'disable', 'enable'\]\);/.test(storeC),
+    'AFI-4a3: opening and sending fail closed for a non-CEO, while pending, and for any operation the projection does not offer; one shared mutation model');
+  check(/accountAction = \{ kind: kind, id: id, email: '' \};/.test(storeC) && /accountAction = null;\s*principalKey = null;|accountAction = null;\n    principalKey = null;/.test(storeC.replace(/form = null; confirm = null; notice = null; focus = null; /, ''))
+    && !/contactEmail/.test((viewC.match(/function sessionWorkspaceAccountHTML\([\s\S]*?\n\}/) || [''])[0]),
+    'AFI-4a3: D-AFI4a3-1 — the login email starts empty, is never pre-filled from the contact email, and clear() destroys it with the identity');
+  check(/if\(status === SESSION_MUTATION_STATUS\.AMBIGUOUS && SESSION_ACCOUNT_KINDS\.indexOf\(kind\) !== -1\) accountAction = null;/.test(storeC)
+    && /reissue: 'TAM OS could not confirm whether a new activation email was queued\./.test(viewC) && !/EmployeeApi\.(provisionAccount|reissueActivation|disableAccount|enableAccount)/.test((storeC.match(/function settle\([\s\S]*?\n  \}/) || [''])[0]),
+    'AFI-4a3: an unconfirmed account write closes its panel and is reconciled by reading the record — never resent; an unconfirmed resend is never reported as queued');
+  // The view: controls only from the matrix, only on the CEO detail; no secret UI.
+  const rowFn = (viewC.match(/function sessionWorkspaceAccountRowHTML\([\s\S]*?\n\}/) || [''])[0];
+  const selfFn = (viewC.match(/function sessionWorkspaceSelfHTML\([\s\S]*?\n\}/) || [''])[0];
+  check(/const ops = sessionAccountOperations\(w\.detail\);\s*if\(!ops\.length \|\| w\.form \|\| w\.confirm \|\| w\.accountAction\) return '';/.test(rowFn)
+    && (viewC.match(/sessionWorkspaceAccountRowHTML\(/g) || []).length === 2 && (viewC.match(/sessionWorkspaceAccountHTML\(/g) || []).length === 2
+    && !/Account|account/.test(selfFn),
+    'AFI-4a3: the Login access row comes only from sessionAccountOperations() on the CEO detail (none while another panel is open); the Employee self view has none');
+  check(!/\blocation\b|\bhistory\b|URLSearchParams|\bhashchange\b/.test(viewC + storeC + apiC),
+    'AFI-4a3: the SESSION Employee modules never read or write the URL (no email, draft or state in a hash, query or history entry)');
+  check(!/activation[_ ]?(token|link|url)\s*[:=]|activationToken|activationLink|clipboard|#activation=|execCommand\(|Copy (link|token)/i.test(viewC + storeC + apiC),
+    'AFI-4a3: no activation token, link or copy UI exists in the SESSION workspace');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
