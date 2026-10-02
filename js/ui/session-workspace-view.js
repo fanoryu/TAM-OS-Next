@@ -89,7 +89,7 @@ const SESSION_WORKSPACE_AMBIGUOUS = Object.freeze({
   provision: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether a login now exists.',
   reissue: 'TAM OS could not confirm whether a new activation email was queued. The record was read again; you may request another resend deliberately.',
   disable: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether sign-in is now blocked.',
-  enable: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether sign-in is restored.'
+  enable: 'TAM OS could not confirm the change. The record was read again from TAM OS — its login status shows whether sign-in is allowed again.'
 });
 const SESSION_WORKSPACE_NOTICES = Object.freeze({
   created: 'Employee record created.',
@@ -100,7 +100,7 @@ const SESSION_WORKSPACE_NOTICES = Object.freeze({
   provisioned: 'Login created. An activation email has been queued for the address entered.',
   reissued: 'A new activation email has been queued. Earlier activation links no longer work.',
   disabled: 'Login disabled. Sign-in is blocked and existing sessions end.',
-  enabled: 'Login enabled. Sign-in access is restored.',
+  enabled: 'Login enabled. Sign-in is allowed again.',
   enabled_pending: 'Login enabled. This person has not activated the login yet — the activation email may need to be resent.'
 });
 
@@ -219,7 +219,7 @@ const SESSION_ACCOUNT_PANELS = Object.freeze({
   provision: { title: 'Create a login', text: 'Enter the email address this person will sign in with. TAM OS queues an activation email to it; the login works once they set a password.', submit: 'Create login' },
   reissue: { title: 'Resend the activation email?', text: 'A new activation email is queued. Activation links sent earlier stop working.', submit: 'Resend activation email' },
   disable: { title: 'Disable this login?', text: 'Sign-in is blocked and every existing session of this person ends. Their employee record is not changed.', submit: 'Disable login' },
-  enable: { title: 'Enable this login?', text: 'Sign-in access is restored. No activation email is sent.', submit: 'Enable login' }
+  enable: { title: 'Enable this login?', text: 'Sign-in is allowed again. No activation email is sent.', submit: 'Enable login' }
 });
 
 // The operations the server projection offers, as one row of buttons; none when it offers none.
@@ -299,7 +299,7 @@ function sessionWorkspaceDetailHTML(w){
   if(w.detailStatus !== SESSION_EMPLOYEE_STATUS.READY || !w.detail) return sessionWorkspaceMutationHTML(w) + '<p class="auth-lead" role="status">Loading the record…</p>' + back + '</div>';
   const d = w.detail;
   // Edit and Archive: CEO Employee CRUD only, for a live record; the confirmation replaces them.
-  const actions = (d.archived || w.confirm) ? '' : '<button class="btn" type="button" id="swEditBtn"' + dis + '>Edit</button>'
+  const actions = (d.archived || w.confirm || w.accountAction) ? '' : '<button class="btn" type="button" id="swEditBtn"' + dis + '>Edit</button>'
     + '<button class="btn btn-danger" type="button" id="swArchiveBtn"' + dis + '>Archive</button>';
   return '<h2 class="section-title">' + escapeHtml(d.fullName) + (d.archived ? ' <span class="pill pill-status-archived">Archived</span>' : '') + '</h2>'
     + (w.confirm || w.accountAction ? '' : sessionWorkspaceMutationHTML(w))
