@@ -123,8 +123,17 @@ const TOKEN_PRINTERS = new Set(['server/bin/account.php']);
 const EMPLOYEE_STORE = 'server/src/Data/Employee/EmployeeStore.php';
 const AUDIT_LOG = 'server/src/Data/Audit/AuditLog.php';
 const ROUTES_FILE = 'server/src/Http/Routes.php';
-// BF-4b1: the overtime record has one writer, and its only hard delete removes a Draft.
+// BF-4b1: the overtime record has one writer, and its only hard delete removes a Draft. Each
+// overtime write route declares exactly its existing overtime Action (ACTIONS stay 21).
 const OVERTIME_STORE = 'server/src/Data/Overtime/OvertimeStore.php';
+const OVERTIME_ROUTES = {
+  '/api/overtime-records/create': 'OvertimeCreateSelfDraft',
+  '/api/overtime-records/update': 'OvertimeUpdateSelfDraft',
+  '/api/overtime-records/delete': 'OvertimeDeleteSelfDraft',
+  '/api/overtime-records/submit': 'OvertimeSubmitSelf',
+  '/api/overtime-records/review': 'OvertimeManage',
+  '/api/overtime-records/reject': 'OvertimeManage',
+};
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -334,7 +343,12 @@ function checkRouteActions(src) {
     if (ACCOUNT_ROUTES.includes(m[2]) && !accountManage) out.push('Routes.php: account route ' + key + ' must declare Action::AccountManage');
     if (!ACCOUNT_ROUTES.includes(m[2]) && accountManage) out.push('Routes.php: ' + key + ' is not an Employee account route and must not declare Action::AccountManage');
   }
-  for (const path of ACCOUNT_ROUTES) if (!src.includes("new Route('POST', '" + path + "'")) out.push('Routes.php: account route POST ' + path + ' is missing');  return out;
+  for (const path of ACCOUNT_ROUTES) if (!src.includes("new Route('POST', '" + path + "'")) out.push('Routes.php: account route POST ' + path + ' is missing');
+  for (const [path, action] of Object.entries(OVERTIME_ROUTES)) {
+    const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
+    if (!line) out.push('Routes.php: overtime route POST ' + path + ' is missing');
+    else if (!new RegExp('\\bAction::' + action + '\\)').test(line)) out.push('Routes.php: overtime route POST ' + path + ' must declare Action::' + action);
+  }  return out;
 }
 
 // BF-4a1, SDR-0002 §9.2: a business mutation and its audit row commit in one transaction. Every
@@ -1124,6 +1138,9 @@ function selftest() {
   cases.push({ name: 'a business mutation without an Action is caught', run: () => checkRouteActions(realRoutes.replace(', [], RouteAuth::Required, Action::EmployeeDelete)', ', [], RouteAuth::Required)')), expect: 'must declare its Action' });
   cases.push({ name: 'an account route without account.manage is caught', run: () => checkRouteActions(realRoutes.replace("$employees->disableAccount(...), [], RouteAuth::Required, Action::AccountManage)", "$employees->disableAccount(...), [], RouteAuth::Required, Action::EmployeeUpdate)")), expect: 'must declare Action::AccountManage' });
   cases.push({ name: 'account.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$employees->archive(...), [], RouteAuth::Required, Action::EmployeeDelete)", "$employees->archive(...), [], RouteAuth::Required, Action::AccountManage)")), expect: 'must not declare Action::AccountManage' });
+  cases.push({ name: 'an overtime review route with a weaker Action is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->review(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->review(...), [], RouteAuth::Required, Action::OvertimeSubmitSelf)")), expect: 'must declare Action::OvertimeManage' });
+  cases.push({ name: 'an overtime delete route under another Action is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->delete(...), [], RouteAuth::Required, Action::OvertimeDeleteSelfDraft)", "$overtime->delete(...), [], RouteAuth::Required, Action::OvertimeManage)")), expect: 'must declare Action::OvertimeDeleteSelfDraft' });
+  cases.push({ name: 'a missing overtime route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/overtime-records/reject', $overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage),\n", '')), expect: 'overtime route POST /api/overtime-records/reject is missing' });
   cases.push({ name: 'a missing account route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),\n", '')), expect: 'is missing' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 
