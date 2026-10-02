@@ -1293,10 +1293,10 @@ never names a token primitive or a mail builder; every audit append and outbox e
 **Not production-ready.** Everything BF-3A–BF-4a1 list, SDR-0003 §7 for the activation mail, and SDR-0004 §8
 (A1 activation delivery, A2 disable evidence).
 
-### Overtime workflow — BF-4b1 (candidate on a feature branch; source only, not deployed, no UI)
+### Overtime workflow — BF-4b1 (merged as PR #40, canonical `9fbdd448`; source only, not deployed)
 
 BF-4b1 makes overtime the second server-authoritative business record — the **non-money** workflow only (owner
-decisions D-BF4b-1 = A, D-BF4b-2 = A). Backend only: no frontend module calls it (AFI-4b1), `AUTH_MODE` stays
+decisions D-BF4b-1 = A, D-BF4b-2 = A). Backend only — its SESSION client is AFI-4b1 (below) — `AUTH_MODE` stays
 LOCAL, ACTIONS stay **21** and "Acting as" is unchanged. Valuation, approval and every payroll effect are BF-4b2;
 its inputs (D-BF4b-3) and exact-decimal method (D-BF4b-4) are not decided.
 
@@ -1341,7 +1341,7 @@ atomic audit and its rollback, hostile principals, and lock, loser and worker-dr
 additions:** `overtime_records` is a company table with one writer; its DELETE is pinned to the Draft predicate;
 no TRUNCATE; each overtime route declares its Action; double-quoted `*_SELF_SQL` constants are checked too.
 
-**Not production-ready.** Everything BF-3A–BF-4a2 list; no SESSION UI exists yet (AFI-4b1).
+**Not production-ready.** Everything BF-3A–BF-4a2 list; the SESSION UI is AFI-4b1 (a candidate, below).
 
 ### Session identity foundation — AFI-1 (frontend; headless and inert, not wired)
 
@@ -1355,7 +1355,7 @@ there is no automatic fallback between the two providers in either direction.
 
 | Module (load order) | Role |
 |---|---|
-| `js/transport/api-client.js` (after `core/identity.js`) | `ApiClient.request(path, {method, body, csrf})` — the **only** `fetch()` caller. Relative `/api/...` paths only (absolute, protocol-relative, dot-segment, query and fragment forms refused locally); `credentials` and `mode` `'same-origin'`, `cache: 'no-store'`, `redirect: 'error'`; a 10 s `AbortController` timeout; JSON mutations; `X-CSRF-Token` only when the caller asks, from `CsrfHolder`; bodies may not carry `role` / `companyId` / `employeeId`. No retry, no logging, no persistence. Not the `TransportAdapter`, which stays the inbound, in-process boundary |
+| `js/transport/api-client.js` (after `core/identity.js`) | `ApiClient.request(path, {method, body, csrf})` — the **only** `fetch()` caller. Relative `/api/...` paths only (absolute, protocol-relative, dot-segment, query and fragment forms refused locally); `credentials` and `mode` `'same-origin'`, `cache: 'no-store'`, `redirect: 'error'`; a 10 s `AbortController` timeout; JSON mutations; `X-CSRF-Token` only when the caller asks, from `CsrfHolder`; bodies may not carry `role` / `companyId` / `company_id` / `employeeId` / `employee_id` — except the one pinned target selector of D-AFI4b1-3 (`employeeId` on `POST /api/overtime-records/create`; see AFI-4b1), which selects a record the server re-scopes and is never authority. No retry, no logging, no persistence. Not the `TransportAdapter`, which stays the inbound, in-process boundary |
 | `js/core/session-identity.js` (after the API client) | `SessionIdentityProvider` — satisfies the canonical `getCurrentUser()` seam from `GET /api/auth/me`; `refresh()` is the only way its identity changes. `CsrfHolder` — the session's CSRF token in memory only (`get` / `replace` / `clear`, begins empty) |
 
 **Normalized results.** `{ok:true, data, requestId}` or `{ok:false, kind, fields?, retryAfter?, requestId?}`.
@@ -1665,6 +1665,77 @@ reconciliation, CSRF recovery, races, the email draft lifecycle, Employee contai
 2026-10-02 at canonical merge `f545733b19466262530bc1d1bc53de687dc5d29a` (tree `ee354f3b…`); source only, not
 deployed. The next domain is Overtime, as BF-4b1 → AFI-4b1 (non-money workflow) then BF-4b2 → AFI-4b2 (valuation
 and approval); its valuation inputs and exact-decimal method are deferred to BF-4b2 Phase 0 (see `AI_CONTEXT.md`).
+BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`); AFI-4b1 follows.
+
+### SESSION Overtime workspace — AFI-4b1 (candidate on a feature branch; frontend; SESSION mode only)
+
+AFI-4b1 is the SESSION frontend of the BF-4b1 non-money overtime workflow — no backend change, no migration
+(head stays `0021`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, "Acting as" is unchanged. It is a candidate on
+`feature/afi-4b1-session-overtime`, not merged and not deployed.
+
+**Placement.** Overtime is a **section** of the one authenticated SESSION workspace, never the business shell
+(`AuthBoot.allowsWorkspace()` stays false) and never the LOCAL Overtime page (`js/people/overtime.js`). Under the
+heading, a labelled nav of two buttons switches sections — CEO "Employees | Overtime", Employee "My profile | My
+overtime" — and the existing section stays the default. Sections do not switch while a write of either is pending.
+
+**Modules** (loaded right after `transport/transport-adapter.js`, before the AFI-4a1 trio):
+`js/core/overtime-api.js` — `OvertimeDecoders` (exactly `OvertimeView::FIELDS`; hours kept as the exact `"N.NN"`
+string, checked in integer hundredths; a date always inside its month; one bad item, or another month's record,
+fails the list), `OvertimeRequests` (the `OvertimeInput` allowlist: create `{ employeeId, monthKey, hours,
+overtimeDate, workDescription, notes }`, update `{ id, expectedVersion, changed fields }`, the rest `{ id,
+expectedVersion }`; human hours normalized string-wise, `7.5` → `7.50`) and `OvertimeApi` (two GET reads over
+`ApiClient` with the structured `month` / `id` query; six writes through `authSessionMutation`).
+`js/core/session-overtime.js` — `SessionOvertimeStore` (memory only: section, month, list, detail, owner labels,
+form, action panel, mutation, generation and per-kind sequence guards) and the `SessionOvertime` controller.
+`js/ui/session-overtime-view.js` — the section's HTML and bindings, existing CSS classes only (**no CSS change**).
+
+**Month.** The section opens on the browser's local calendar month, from a pure helper with an injectable clock (no
+LOCAL `todayKey` / `mkKey`); Previous, Next and a month field change it. It lives in memory: it survives re-renders
+and section switches, not a reload, logout, principal change or session loss — no storage, no URL or history.
+
+**Owner labels (D-AFI4b1-1 = A).** For the CEO the section reads the canonical `EmployeeApi.list({ archived: true })`
+through the one strict Employee decoder — no second decoder, no Employee or Overtime DTO change — and labels each
+record by exact id: `fullName (employeeCode)`, `(archived)` when archived, `Loading…` while it loads, `Unknown
+employee` when the id is absent, duplicated or the read failed. An Employee sees only their own records, labelled
+`You`. The CEO's create selector lists only live Employees whose `employmentStatus` is Active (UX only).
+
+**Target selector, not authority (D-AFI4b1-3 = A).** BF-4b1's create body names the owner of the new record with
+`employeeId`. `ApiClient` keeps its forbidden body keys (`role`, `companyId`, `company_id`, `employeeId`,
+`employee_id`) and admits exactly **one** pinned exception, `API_BODY_KEY_EXCEPTION`: `employeeId` on `POST
+/api/overtime-records/create` — no other method, path or key, no caller flag, no generic opt-out. The value only
+selects the target: an Employee sends their own `principal.employeeId`, the CEO the selected eligible record's id.
+The server still decides everything — it resolves the id inside the session's company and scope (a colleague or
+another company is 404), applies Policy and the live + Active eligibility (409). Client identity is never authority;
+identity-shaped mutation keys stay forbidden everywhere else (SDR-0002 §23.8's intent is unchanged).
+
+**Matrix (D-BF4b-5, UX only — the controller re-checks it and the server decides).**
+
+| Principal + status | Actions |
+|---|---|
+| Employee + own Draft | Edit, Delete, Submit |
+| Employee + Submitted / Reviewed / Rejected | view only |
+| CEO + Draft | Edit, Delete, Submit |
+| CEO + Submitted | Review, Reject |
+| CEO + Reviewed | Reject |
+| CEO + Rejected | view only |
+
+**Writes.** Create / edit in an inline form (edit sends only changed fields; nothing changed sends nothing);
+delete, submit, review and reject through an inline panel naming owner, month, date and hours (no browser
+`confirm()`, no optimistic removal). Every existing-record write sends `expectedVersion` from the decoded detail
+held. A success counts only when the decoded answer confirms it (create: a version 1 Draft of the requested owner;
+update: the same Draft; transitions: the same id in the target status; delete: `{ deleted: { id } }` with that id).
+409 keeps the panel or draft and offers Reload record. An unknowable outcome (503, network, timeout, malformed or
+non-confirming success) is never resent: create re-reads the month ("check the list before adding again"), every
+other write re-reads the record and the message reports what that read shows (now in the target state; unchanged;
+for delete, gone or still there unchanged). CSRF recovery is the canonical `authSessionMutation` (one `/me`, at most
+one replay); `unavailable` fails closed (`sessionUncertain`), `signed_out` / 401 end the session,
+`principal_changed` clears the section's data. Late answers of an earlier generation or a superseded request are
+dropped. No money, rate, salary, schedule, approval, contract, payroll or pay estimate exists anywhere (BF-4b2).
+
+**Proof.** `tools/verify-session-overtime-runtime.js` (fetch stub, virtual timers, injected clock; the ninth CI
+harness after a repeated-run and UTC / UTC+7 determinism proof); `tools/verify-session-identity-runtime.js` section
+3b (the selector exception, every other route and key still refused); the AFI-4b1 and D-AFI4b1-3 checks in
+`tools/verify-build.js`; test-only Overtime routes in `tools/serve-auth-stub.js` for browser QA.
 
 ### Release engineering
 

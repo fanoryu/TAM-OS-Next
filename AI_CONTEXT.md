@@ -137,14 +137,23 @@ overtime workflow) and **BF-4b2 → AFI-4b2** (server-authoritative valuation an
 D-BF4b-5 = A — a strict state machine (Draft → Submitted → Reviewed; Submitted or Reviewed → Rejected; Rejected is
 terminal; editing only while Draft; no approval in 4b1) — and D-BF4b-6 = A — a Draft is hard-deleted, Drafts only,
 with its audit row in the same transaction. **D-BF4b-3** (valuation inputs) and **D-BF4b-4** (exact-decimal
-implementation) are **deferred** to BF-4b2 Phase 0 and are not decided. **BF-4b1** (candidate on
-`feature/bf-4b1-overtime-workflow`; not merged, not deployed, no UI; D-BF4b1-1/2/3 = A) adds the backend-only
+implementation) are **deferred** to BF-4b2 Phase 0 and are not decided. **BF-4b1** (merged to `main` as source,
+PR #40, canonical merge `9fbdd448ea36dea57a74c254fb49b5017081e9c6`; not deployed; D-BF4b1-1/2/3 = A) adds the backend-only
 overtime workflow: migrations `0020`–`0021` (`overtime_records` and the overtime audit vocabulary — migration head
 `0021`), a required-month list and a detail scoped like the Employee reads, and Draft create / update / hard delete
 plus submit / review / reject under the five existing overtime ACTIONS (**ACTIONS stay 21**). `monthKey` is a
 required `YYYY-MM` with an optional date inside it; hours are the exact string `"N.NN"`, > 0, ≤ 744, in quarter
 hours; every write is versioned, row-locked and audited in its transaction. No money, no approval, no payroll
-effect, and no frontend change: AFI-4b1 (the SESSION UI) and BF-4b2 (valuation and approval) are not started.
+effect, and no frontend change of its own; BF-4b2 (valuation and approval) is not started. **AFI-4b1** (candidate
+on `feature/afi-4b1-session-overtime`; not merged, not deployed; D-AFI4b1-1/2/3 = A) is its SESSION frontend: an
+Overtime section of the SESSION workspace (CEO "Employees | Overtime", Employee "My profile | My overtime"), a
+memory-only month view starting at the local calendar month, CEO owner labels from the canonical
+`EmployeeApi.list({ archived: true })`, the D-BF4b-5 control matrix, create / edit / delete / submit / review /
+reject with `expectedVersion`, unconfirmed writes reconciled by reading (never resent), and no money anywhere.
+D-AFI4b1-3 = A: `ApiClient` admits exactly one identity-shaped body key — `employeeId` on `POST
+/api/overtime-records/create` — as a **target selector**, not authority: the server re-scopes and authorizes it, and
+every other route, method and identity key stays refused. Its runtime harness is the **ninth** CI harness. No backend
+change; ACTIONS stay 21; migration head `0021`; `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
