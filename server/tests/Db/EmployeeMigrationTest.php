@@ -74,9 +74,9 @@ return [
 
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0014_extend_employees_profile', '0015_backfill_legacy_employees', '0016_enforce_employees_profile', '0017_create_audit_events',
-            '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation'],
+            '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation', '0020_create_overtime_records', '0021_replace_audit_events_overtime_checks'],
             array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2');
-        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 19)), $history($db), 'every marker complete — none stranded');
+        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 21)), $history($db), 'every marker complete — none stranded');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'status: current');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->apply(), 'a second apply is a no-op');
 

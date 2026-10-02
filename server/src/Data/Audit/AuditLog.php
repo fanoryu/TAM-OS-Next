@@ -25,6 +25,10 @@ use TamOs\Policy\Scope;
  * account.manage, but each row names its OPERATION — provision, reissue, disable or enable — and
  * the target user, so the four are never indistinguishable. Those rows carry no field list and
  * never an email, a password, a token or a hash; employee rows carry no operation.
+ *
+ * BF-4b1 (migration 0021): overtime rows name the overtime Action and the record id; a status
+ * transition also names its operation (submit, review, reject). The audit row of a hard-deleted
+ * Draft survives the record: audit_events has no foreign key to overtime_records.
  */
 final class AuditLog
 {
@@ -33,10 +37,16 @@ final class AuditLog
     /** BF-4a2: the account.manage operations appendAccount() audits (migration 0019's CHECK). */
     public const ACCOUNT_OPERATIONS = ['provision', 'reissue', 'disable', 'enable'];
     public const ENTITIES = ['employee'];
+    /** BF-4b1: the overtime Actions appendOvertime() audits, and the operation each transition names (0021). */
+    public const OVERTIME_ACTIONS = [Action::OvertimeCreateSelfDraft, Action::OvertimeUpdateSelfDraft, Action::OvertimeDeleteSelfDraft, Action::OvertimeSubmitSelf, Action::OvertimeManage];
+    public const OVERTIME_OPERATIONS = ['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
-    public const APPEND_ACCOUNT_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
+    public const APPEND_OVERTIME_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields)';
+    /** BF-4b1: the first audited Employee-principal writes. Under a self scope the row is written only for the actor's own record. */
+    public const APPEND_OVERTIME_SELF_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) SELECT :company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields FROM DUAL WHERE :owner_employee_id = :self_employee_id';
+    public const APPEND_ACCOUNT_SQL ='INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
 
     public function __construct(private readonly ScopedDatabase $db)
     {
@@ -93,6 +103,46 @@ final class AuditLog
             'target_user_id' => $targetUserId,
             'request_id' => $requestId,
         ]);
+    }
+
+    /**
+     * BF-4b1: appends one overtime row for the record the Authorization was decided on — the
+     * create candidate included, so the row of a later hard delete still names its record. A
+     * create or update names its field names; a transition names its operation (submit, review,
+     * reject) and no field; a delete names neither. Must run inside the transaction of the change.
+     *
+     * @param list<string> $fields changed field names (camelCase), never values
+     */
+    public function appendOvertime(Authorization $auth, Principal $actor, ?string $operation, array $fields, string $requestId): void
+    {
+        if (!in_array($auth->action, self::OVERTIME_ACTIONS, true) || $auth->record === null || $auth->record->entity !== 'overtime') {
+            throw new \LogicException('an overtime audit row is written only under an overtime Action, against its record');
+        }
+        $expected = array_search($auth->action, self::OVERTIME_OPERATIONS, true);
+        if ($operation !== null ? (self::OVERTIME_OPERATIONS[$operation] ?? null) !== $auth->action : $expected !== false) {
+            throw new \LogicException('an overtime transition names its operation, and only a transition does');
+        }
+        if (($operation !== null || $auth->action === Action::OvertimeDeleteSelfDraft) && $fields !== []) {
+            throw new \LogicException('an overtime transition or delete names no field');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $params = [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => $auth->record->entity,
+            'id' => $auth->record->id,
+            'operation' => $operation,
+            'request_id' => $requestId,
+            'fields' => self::fieldList($fields),
+        ];
+        if (!$auth->scope->isSelf()) {
+            $this->db->execute($auth, self::APPEND_OVERTIME_SQL, $params);
+            return;
+        }
+        if ($this->db->execute($auth, self::APPEND_OVERTIME_SELF_SQL, $params + ['owner_employee_id' => (string) $auth->record->ownerEmployeeId]) !== 1) {
+            throw new \LogicException('an Employee overtime audit row is written only for their own record');
+        }
     }
 
     /**

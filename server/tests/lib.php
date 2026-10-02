@@ -132,6 +132,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
             new \TamOs\Employee\EmployeeService($business = \TamOs\Data\BusinessData::fromConnector($auth->connector())),
             new \TamOs\Employee\AccountService($business, $auth),
         ),
+        new \TamOs\Controller\OvertimeController(new \TamOs\Overtime\OvertimeService($business)),
     );
 }
 

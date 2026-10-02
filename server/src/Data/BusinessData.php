@@ -5,10 +5,11 @@ namespace TamOs\Data;
 
 use TamOs\Data\Audit\AuditLog;
 use TamOs\Data\Employee\EmployeeStore;
+use TamOs\Data\Overtime\OvertimeStore;
 use TamOs\Data\Scope\ScopedDatabase;
 
 /**
- * The business data access point (BF-4a1): the scoped business stores over one lazily opened,
+ * The business data access point (BF-4a1; overtime BF-4b1): the scoped business stores over one lazily opened,
  * request-scoped connection — shared with TamOs\Data\Auth\AuthData in production, so the
  * session lookup and the business statements of a request use the same connection — and
  * atomically() for the transaction boundaries the business services own. The stores receive
@@ -19,6 +20,7 @@ final class BusinessData
     private ?Database $db = null;
     private ?ScopedDatabase $scoped = null;
     private ?EmployeeStore $employees = null;
+    private ?OvertimeStore $overtime = null;
     private ?AuditLog $audit = null;
 
     /** @param \Closure(): Database $connect */
@@ -41,6 +43,11 @@ final class BusinessData
     public function employees(): EmployeeStore
     {
         return $this->employees ??= new EmployeeStore($this->scoped());
+    }
+
+    public function overtime(): OvertimeStore
+    {
+        return $this->overtime ??= new OvertimeStore($this->scoped());
     }
 
     public function audit(): AuditLog

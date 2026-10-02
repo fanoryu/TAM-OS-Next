@@ -6,6 +6,7 @@ namespace TamOs\Http;
 use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\HealthController;
+use TamOs\Controller\OvertimeController;
 use TamOs\Controller\ReadyController;
 use TamOs\Data\Readiness;
 use TamOs\Policy\Action;
@@ -22,6 +23,11 @@ use TamOs\Policy\Action;
  * kernel) and employee.update / employee.delete (record-bearing, decided by the handler after
  * its scoped load: 404 before 403). BF-4a2 (SDR-0004): the four Employee account routes declare
  * account.manage, record-bearing the same way.
+ *
+ * BF-4b1: the overtime reads need a session and add no Action (role and Scope decide them; the
+ * month list requires ?month=). Each overtime write declares its existing overtime Action —
+ * createSelfDraft, updateSelfDraft, deleteSelfDraft, submitSelf, or manage for review and reject —
+ * all record-bearing, decided by the handler after its scoped load (404 before 403).
  *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
@@ -42,7 +48,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -69,6 +75,15 @@ final class Routes
             new Route('POST', '/api/employees/reissue-activation', $employees->reissueActivation(...), [], RouteAuth::Required, Action::AccountManage),
             new Route('POST', '/api/employees/disable-account', $employees->disableAccount(...), [], RouteAuth::Required, Action::AccountManage),
             new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),
+            // BF-4b1: the non-money overtime workflow (company scope for the CEO, own rows for an Employee).
+            new Route('GET', '/api/overtime-records', $overtime->month(...), ['month'], RouteAuth::Required),
+            new Route('GET', '/api/overtime-record', $overtime->find(...), ['id'], RouteAuth::Required),
+            new Route('POST', '/api/overtime-records/create', $overtime->create(...), [], RouteAuth::Required, Action::OvertimeCreateSelfDraft),
+            new Route('POST', '/api/overtime-records/update', $overtime->update(...), [], RouteAuth::Required, Action::OvertimeUpdateSelfDraft),
+            new Route('POST', '/api/overtime-records/delete', $overtime->delete(...), [], RouteAuth::Required, Action::OvertimeDeleteSelfDraft),
+            new Route('POST', '/api/overtime-records/submit', $overtime->submit(...), [], RouteAuth::Required, Action::OvertimeSubmitSelf),
+            new Route('POST', '/api/overtime-records/review', $overtime->review(...), [], RouteAuth::Required, Action::OvertimeManage),
+            new Route('POST', '/api/overtime-records/reject', $overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage),
         ]);
     }
 
