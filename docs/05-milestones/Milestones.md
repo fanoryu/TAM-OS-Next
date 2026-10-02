@@ -360,7 +360,11 @@ under the existing employee ACTIONS; *owner decisions D-AFI4-1 = B, D-AFI4-2 = A
 is implemented as source only on the same terms, backend only. **BF-4a2** (Employee account administration under
 the CEO-only `account.manage` ACTION — provision, reissue activation, disable, enable — with activation through the
 governed outbox; *SDR-0004, owner decision C1 = A, 2026-10-01*) is implemented as source on the same terms; ACTIONS
-become 21 and the authenticated Employee workspace (AFI-4a) is still pending. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+become 21. **BF-4a3** (the CEO-only `accountManageable` projection) and the authenticated Employee workspace
+**AFI-4a1–AFI-4a3** followed, and **AFI-4a is CLOSED** as one Employee capability (owner acceptance 2026-10-02;
+canonical merge `f545733b`, source only, not deployed). The next domain is **Overtime** — BF-4b1 → AFI-4b1 (the
+non-money workflow), then BF-4b2 → AFI-4b2 (valuation and approval) *(owner decisions D-BF4b-1 = A, D-BF4b-2 = A,
+2026-10-02; the valuation inputs D-BF4b-3 and the exact-decimal method D-BF4b-4 are deferred to BF-4b2 Phase 0)*. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

@@ -10,7 +10,7 @@ use TamOs\Identity\Principal;
 use TamOs\Identity\Role;
 
 /**
- * The authoritative server POLICY over the 20 ACTIONS (SDR-0002 §7). The browser's can() is UX
+ * The authoritative server POLICY over the 21 ACTIONS (SDR-0002 §7, SDR-0004). The browser's can() is UX
  * only; this is the decision.
  *
  * Default deny: an action outside the vocabulary cannot be expressed (Action is an enum); a
