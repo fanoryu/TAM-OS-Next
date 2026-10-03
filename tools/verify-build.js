@@ -5964,9 +5964,10 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
     'BF-4a3: EmployeeView projects it right after accountState for the CEO only, as a strict boolean from SQL 1 / 0');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  check(migrations[migrations.length - 1].startsWith('0021_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4b2 authorized revision: the head moved to 0023 (BF-4b2 valuation + approval). Was: 0021 after BF-4b1.
+  check(migrations[migrations.length - 1].startsWith('0023_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'BF-4a3: no migration of its own (head 0021 after BF-4b1), ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'BF-4a3: no migration of its own (head 0023 after BF-4b2), ACTIONS stay 21, AUTH_MODE stays LOCAL');
 }
 
 // ===== AFI-4a3 — CEO SESSION ACCOUNT ADMINISTRATION =====
@@ -6101,12 +6102,15 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   const clientWritable = ((apiC.match(/const OVERTIME_WRITABLE_FIELDS = Object\.freeze\(\[([^\]]*)\]\);/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
   check(serverView.length === 9 && clientKeys.join() === serverView.slice().sort().join() && serverInput.length === 5 && clientWritable.join() === serverInput.join(),
     'AFI-4b1: OVERTIME_RECORD_KEYS equals OvertimeView::FIELDS and OVERTIME_WRITABLE_FIELDS equals OvertimeInput::FIELDS (order included)');
-  check(/public const VALUES = \[self::DRAFT, self::SUBMITTED, self::REVIEWED, self::REJECTED\];/.test(statusPhp)
+  // BF-4b2 authorized revision (owner decision D-BF4b2-5 = A): the server vocabulary gains Approved
+  // while the AFI-4b1 decoder deliberately keeps the four BF-4b1 statuses — it fails closed on an
+  // Approved record until AFI-4b2, and BF-4b2 and AFI-4b2 deploy together. Was: equal four-status lists.
+  check(/public const VALUES = \[self::DRAFT, self::SUBMITTED, self::REVIEWED, self::APPROVED, self::REJECTED\];/.test(statusPhp)
     && /const OVERTIME_RECORD_STATUSES = Object\.freeze\(\['Draft', 'Submitted', 'Reviewed', 'Rejected'\]\);/.test(apiC)
     && /const OVERTIME_ID_PATTERN = \/\^\[0-9a-f\]\{32\}\$\/;/.test(apiC) && /public const ID_PATTERN = '\/\^\[0-9a-f\]\{32\}\$\/';/.test(inputPhp)
     && /const OVERTIME_MAX_VERSION = 4294967295;/.test(apiC) && /const OVERTIME_MAX_HUNDREDTHS = 74400;/.test(apiC) && /const OVERTIME_STEP_HUNDREDTHS = 25;/.test(apiC)
     && /public const MAX_HUNDREDTHS = 74400;/.test(inputPhp) && /public const STEP_HUNDREDTHS = 25;/.test(inputPhp),
-    'AFI-4b1: statuses, id pattern, version range and the hours rule (0 < h <= 744, quarter steps) equal the server');
+    'AFI-4b1: id pattern, version range and the hours rule (0 < h <= 744, quarter steps) equal the server; the decoder keeps the four BF-4b1 statuses, the server adds Approved (D-BF4b2-5)');
   check(/if\(!isPlain\(o\) \|\| !exactKeys\(o, OVERTIME_RECORD_KEYS\)\) return null;/.test(apiC) && /if\(!item \|\| item\.monthKey !== monthKey\) return null;/.test(apiC)
     && /if\(o\.overtimeDate !== null && !OvertimeCalendar\.isDateIn\(o\.overtimeDate, o\.monthKey\)\) return null;/.test(apiC)
     && /exactKeys\(data, \['overtimeRecords'\]\)/.test(apiC) && /exactKeys\(data, \['overtimeRecord'\]\)/.test(apiC) && /exactKeys\(data\.deleted, \['id'\]\)/.test(apiC),
@@ -6188,10 +6192,67 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
     'AFI-4b1: the workspace has exactly two SESSION sections — Employees | Overtime (CEO), My profile | My overtime (Employee); the existing one stays the default');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  check(migrations[migrations.length - 1].startsWith('0021_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4b2 authorized revision: the head moved to 0023 (BF-4b2). Was: stays 0021.
+  check(migrations[migrations.length - 1].startsWith('0023_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4b1: frontend only — migration head stays 0021, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'AFI-4b1: frontend only — migration head 0023 after BF-4b2, ACTIONS stay 21, AUTH_MODE stays LOCAL');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-overtime-runtime.js')), 'AFI-4b1: runtime harness present — tools/verify-session-overtime-runtime.js');
+}
+
+// ===== BF-4b2 — OVERTIME VALUATION + APPROVAL (backend only) =====
+// Owner decisions D-BF4b-3 = A (fixed internal method TAM-OT-1: salary × hours ÷ 160, multiplier 1,
+// IDR, one half-up rounding to the whole Rupiah — never a statutory formula), D-BF4b-4 = A (integer
+// sen × quarter-hours), D-BF4b2-1..5 = A (Approved terminal; eligibility = not archived + salary > 0;
+// CEO preview + expectedAmount; the owner reads only their own Approved valuation; backend only).
+// The frontend and the package do not change: the AFI-4b1 decoder fails closed on Approved until
+// AFI-4b2, so BF-4b2 and AFI-4b2 must be deployed together.
+console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  const m22 = srv('migrations/0022_add_overtime_records_valuation.sql');
+  const m23 = srv('migrations/0023_replace_audit_events_overtime_approve.sql');
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(/^ALTER TABLE overtime_records\b/.test(m22) && /^ALTER TABLE audit_events\b/.test(m23) && migrations[migrations.length - 1] === '0023_replace_audit_events_overtime_approve.sql'
+    && (m22.match(/;/g) || []).length === 1 && (m23.match(/;/g) || []).length === 1,
+    'BF-4b2: migrations 0022 (valuation snapshot) and 0023 (approve audit operation) exist, one statement each; head 0023');
+  check(/ADD COLUMN valuation_method\b[\s\S]*ADD COLUMN valuation_salary DECIMAL\(15,2\)[\s\S]*ADD COLUMN valuation_standard_hours DECIMAL\(5,2\)[\s\S]*ADD COLUMN approved_amount DECIMAL\(16,2\)[\s\S]*ADD COLUMN approved_at DATETIME\(6\)/.test(m22)
+    && /overtime_records_status_v2 CHECK \(status IN \('Draft', 'Submitted', 'Reviewed', 'Approved', 'Rejected'\)\)/.test(m22)
+    && /overtime_records_valuation CHECK \(\(status = 'Approved'\) = \(valuation_method IS NOT NULL\)/.test(m22) && /valuation_method IN \('TAM-OT-1'\)/.test(m22)
+    && !/payroll|payment|finance|rate|multiplier|173|1\.5/i.test(m22),
+    'BF-4b2: 0022 adds exactly the snapshot (method, salary, standard hours, amount, time) with Approved ⇔ snapshot; no payroll, rate or statutory column');
+  check(/operation IN \('review', 'reject', 'approve'\)/.test(m23) && /WHEN 'overtime.submitSelf' THEN operation IS NOT NULL AND operation = 'submit'/.test(m23),
+    'BF-4b2: 0023 admits approve under overtime.manage only');
+  const val = srv('src/Overtime/OvertimeValuation.php');
+  check(/public const METHOD = 'TAM-OT-1';/.test(val) && /public const STANDARD_MONTHLY_HOURS = '160\.00';/.test(val) && /intdiv\(\$numerator, \$denominator\)/.test(val)
+    && /if \(2 \* \(\$numerator % \$denominator\) >= \$denominator\)/.test(val) && /PHP_INT_SIZE !== 8/.test(val)
+    && !/\b173\b|\(float\)|floatval|\bround\(|\bbc[a-z]+\(/.test(val.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'BF-4b2: TAM-OT-1 is fixed (160.00 h, multiplier 1), integer division with one explicit half-up, 64-bit asserted; no float, BCMath or 1/173');
+  const routes = srv('src/Http/Routes.php');
+  check(/new Route\('POST', '\/api\/overtime-records\/approve', \$overtime->approve\(\.\.\.\), \[\], RouteAuth::Required, Action::OvertimeManage\)/.test(routes)
+    && /new Route\('GET', '\/api\/overtime-record\/valuation', \$overtime->valuation\(\.\.\.\), \['id'\], RouteAuth::Required\)/.test(routes)
+    && !/status['"]?\s*=>\s*['"]Approved/.test(routes),
+    'BF-4b2: approve declares overtime.manage; the valuation read takes only ?id=; no generic status route');
+  const valView = srv('src/Overtime/OvertimeValuationView.php');
+  check(/public const FIELDS = \['id', 'kind', 'method', 'hours', 'monthlySalaryBasis', 'standardMonthlyHours', 'amount'\];/.test(valView)
+    && /public const FIELDS = \['id', 'employeeId', 'monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes', 'status', 'version'\];/.test(srv('src/Overtime/OvertimeView.php')),
+    'BF-4b2: the valuation is a separate seven-field projection; the record DTO keeps its nine BF-4b1 fields');
+  const input = srv('src/Overtime/OvertimeInput.php');
+  check(/self::onlyKeys\(\$json, \['id', 'expectedVersion', 'expectedAmount'\]\);/.test(input),
+    'BF-4b2: approve accepts exactly id, expectedVersion and expectedAmount (no salary, hours, rate, method, status or employee)');
+  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && !/overtime\.approve/.test(read(path.join(root, 'js', 'core', 'authz.js')) + read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
+    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4b2: ACTIONS stay 21 (no overtime.approve), AUTH_MODE stays LOCAL');
+  const otApi = read(path.join(root, 'js', 'core', 'overtime-api.js'));
+  check(!/Approved|\/approve|valuation|amount/i.test(stripComments(otApi)) && /const OVERTIME_RECORD_STATUSES = Object\.freeze\(\['Draft', 'Submitted', 'Reviewed', 'Rejected'\]\);/.test(otApi),
+    'BF-4b2: backend only — the frontend overtime client knows no Approved, approve, valuation or amount (AFI-4b2 not started)');
+  const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(manifest.packageDigest === 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3' && Array.isArray(manifest.files) && manifest.files.length === 97,
+    'BF-4b2: the production package is unchanged (97 files, digest c5d69dc1…)');
+  const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
+  check(deployRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && deployRule.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && deployRule.test(read(path.join(root, 'ARCHITECTURE.md'))),
+    'BF-4b2: the deployment dependency is documented — BF-4b2 and AFI-4b2 must be deployed together (AI_CONTEXT, ARCHITECTURE, DEPLOYMENT)');
+  check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'OvertimeValuationTest.php')) && fs.existsSync(path.join(root, 'server', 'tests', 'Db', 'OvertimeApprovalTest.php')),
+    'BF-4b2: the valuation unit test and the approval DB test exist');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

@@ -133,7 +133,14 @@ const OVERTIME_ROUTES = {
   '/api/overtime-records/submit': 'OvertimeSubmitSelf',
   '/api/overtime-records/review': 'OvertimeManage',
   '/api/overtime-records/reject': 'OvertimeManage',
+  // BF-4b2: approval reuses overtime.manage (ACTIONS stay 21).
+  '/api/overtime-records/approve': 'OvertimeManage',
 };
+// BF-4b2 (D-BF4b-3/4 = A): the TAM-OT-1 valuation is integer arithmetic only, and the Overtime
+// code paths carry no payroll or finance side effect.
+const OVERTIME_VALUATION = 'server/src/Overtime/OvertimeValuation.php';
+const OVERTIME_DIR = 'server/src/Overtime/';
+const OVERTIME_CONTROLLER = 'server/src/Controller/OvertimeController.php';
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -470,7 +477,50 @@ function checkPhp(file, src) {
   for (const v of checkScopedData(file, src, lex)) out.push(v);
   for (const v of checkAuditInTransaction(lex)) out.push(v);
   for (const v of checkOvertimeDelete(lex)) out.push(v);
+  for (const v of checkOvertimeApproval(file, lex)) out.push(v);
+  if (file === OVERTIME_VALUATION) for (const v of checkIntegerValuation(lex)) out.push(v);
+  if (file.startsWith(OVERTIME_DIR) || file === OVERTIME_STORE || file === OVERTIME_CONTROLLER) for (const v of checkOvertimeFirewall(lex)) out.push(v);
   return out;
+}
+
+// BF-4b2, D-BF4b2-1 = A: exactly one statement writes the valuation snapshot or the Approved status
+// — the approval compare-and-swap from 'Reviewed' at the expected version in company scope (an
+// Employee never approves: no self variant, no OR). No other UPDATE or INSERT of overtime_records
+// names a valuation column or 'Approved', so an Approved valuation can never be changed, and the
+// overtime store never reads the owner's salary through a self-scope statement (the Employee's own
+// profile read in EmployeeStore is a different, BF-4a1 projection).
+const VALUATION_COLUMNS = /\b(valuation_method|valuation_salary|valuation_standard_hours|approved_amount|approved_at)\b|'Approved'/;
+function checkOvertimeApproval(file, lex) {
+  const out = [];
+  let approvals = 0;
+  for (const s of lex.strings) {
+    if (file === OVERTIME_STORE && /monthly_base_salary/.test(s) && /:self_employee_id\b/.test(s)) out.push('the employee salary is never read through a self-scope statement');
+    if (!/^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?overtime_records\b/i.test(s) || !VALUATION_COLUMNS.test(s)) continue;
+    approvals++;
+    const [set, where = ''] = s.split(/\bWHERE\b/i);
+    if (!/^\s*UPDATE\s+overtime_records\s+SET\s+status = 'Approved', /.test(set) || !/\bcompany_id = :company_id\b/.test(where) || !/\bversion = :expected_version\b/.test(where)
+      || !/\bstatus = 'Reviewed'/.test(where) || /:self_employee_id\b/.test(s) || /\bOR\b/i.test(where) || VALUATION_COLUMNS.test(where)) {
+      out.push("the overtime valuation snapshot and 'Approved' are written only by the approval: UPDATE overtime_records SET status = 'Approved', … WHERE company_id = :company_id, version = :expected_version and status = 'Reviewed' (company scope, no OR)");
+    }
+  }
+  if (approvals > 1) out.push('exactly one statement writes the overtime valuation snapshot');
+  return out;
+}
+
+// BF-4b2, D-BF4b-4 = A: no binary floating point, BCMath, GMP or rounding helper becomes monetary
+// authority. On the lexed code (comments removed, strings blanked) of the valuation: no float
+// cast or literal, no float or decimal-library function, no `/` or `**` operator — intdiv() only.
+const FLOAT_AUTHORITY = /\((float|double|real)\)|\b(floatval|doubleval|round|floor|ceil|fdiv|fmod|number_format|pow|sqrt|bc[a-z]+|gmp_[a-z_]+)\s*\(|\*\*|\/|\b\d+\.\d+|\b\d+[eE][+-]?\d+|\bINF\b|\bNAN\b|\bPHP_FLOAT_/;
+function checkIntegerValuation(lex) {
+  return FLOAT_AUTHORITY.test(lex.code) ? ['the overtime valuation is integer arithmetic only (no float, BCMath, GMP, rounding helper or division operator: intdiv())'] : [];
+}
+
+// BF-4b2: the Overtime code (domain, store, controller) names no payroll, payment or finance
+// identifier or statement: an Approved valuation is an upstream result, never a side effect.
+const PAYROLL_FINANCE = /payroll|payslip|payment|ledger|journal|finance|transaction_|disburse|\bpaid\b|Committed to Payroll/i;
+function checkOvertimeFirewall(lex) {
+  const code = lex.code.replace(/->\s*atomically\s*\(/g, '');
+  return PAYROLL_FINANCE.test(code) || lex.strings.some((s) => PAYROLL_FINANCE.test(s)) ? ['the Overtime code has no payroll or finance side effect (no payroll, payment, ledger, journal or finance identifier or statement)'] : [];
 }
 
 // BF-4b1, owner decision D-BF4b-6: the only hard delete of overtime removes a Draft. Every
@@ -1113,6 +1163,32 @@ function selftest() {
   dirty('an overtime write outside OvertimeStore is caught', STORE, inStore(realStore, "public const OT_SQL = 'UPDATE overtime_records SET status = :s WHERE company_id = :company_id';"), 'written only by ' + OVERTIME_STORE);
   dirty('an overtime TRUNCATE is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const T_SQL = 'TRUNCATE TABLE overtime_records';\n    public const ENTITY"), 'never truncated');
   dirty('a double-quoted *_SELF_SQL without :self_employee_id is caught', OVERTIME_STORE, realOvertime.replace("employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL", "version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL"), 'UPDATE_SELF_SQL must name :self_employee_id');
+  // BF-4b2: the approval is the one writer of the snapshot; the valuation is integers only; no payroll / finance.
+  dirty('a second writer of the valuation snapshot is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const FIX_SQL = \"UPDATE overtime_records SET approved_amount = :approved_amount WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Approved'\";\n    public const ENTITY"), 'written only by the approval');
+  dirty('a generic UPDATE to Approved is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const GEN_SQL = \"UPDATE overtime_records SET status = 'Approved', version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status\";\n    public const ENTITY"), 'written only by the approval');
+  dirty('an approval from Submitted is caught', OVERTIME_STORE, realOvertime.replace("AND version = :expected_version AND status = 'Reviewed'\"", "AND version = :expected_version AND status = 'Submitted'\""), 'written only by the approval');
+  dirty('an approval without its version predicate is caught', OVERTIME_STORE, realOvertime.replace("AND company_id = :company_id AND version = :expected_version AND status = 'Reviewed'\"", "AND company_id = :company_id AND status = 'Reviewed'\""), 'written only by the approval');
+  dirty('an approval widened with OR is caught', OVERTIME_STORE, realOvertime.replace("AND status = 'Reviewed'\"", "AND (status = 'Reviewed' OR status = 'Submitted')\""), 'written only by the approval');
+  dirty('a self-scope approval is caught', OVERTIME_STORE, realOvertime.replace("WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Reviewed'\"", "WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND version = :expected_version AND status = 'Reviewed'\""), 'written only by the approval');
+  dirty('a Draft update that touches the snapshot is caught', OVERTIME_STORE, realOvertime.replace("notes = :notes, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";\n    public const UPDATE_SELF_SQL", "notes = :notes, approved_amount = NULL, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";\n    public const UPDATE_SELF_SQL"), 'written only by the approval');
+  dirty('a salary read through a self statement is caught', OVERTIME_STORE, realOvertime.replace("monthly_base_salary, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id';", "monthly_base_salary, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id AND id = :self_employee_id';"), 'never read through a self-scope statement');
+  const realValuation = fs.readFileSync(path.join(root, OVERTIME_VALUATION), 'utf8');
+  clean('the real OvertimeValuation is integer arithmetic only', OVERTIME_VALUATION, realValuation);
+  clean('the real Overtime domain has no payroll or finance side effect', 'server/src/Overtime/OvertimeService.php', fs.readFileSync(path.join(root, 'server/src/Overtime/OvertimeService.php'), 'utf8'));
+  for (const [label, from, to] of [
+    ['a float cast', '$numerator = $salarySen * $hoursQ;', '$numerator = (float) $salarySen * $hoursQ;'],
+    ['a division operator', '$rupiah = intdiv($numerator, $denominator);', '$rupiah = (int) ($numerator / $denominator);'],
+    ['round()', '$rupiah = intdiv($numerator, $denominator);', '$rupiah = (int) round($numerator / $denominator);'],
+    ['a BCMath call', '$numerator = $salarySen * $hoursQ;', '$numerator = (int) bcmul((string) $salarySen, (string) $hoursQ);'],
+    ['a float literal', '$rupiah++;', '$rupiah += 0.5;'],
+    ['floatval()', '$numerator = $salarySen * $hoursQ;', '$numerator = floatval($salarySen) * $hoursQ;'],
+  ]) {
+    if (!realValuation.includes(from)) throw new Error('selftest fixture drift: ' + from);
+    dirty('float authority in the valuation is caught: ' + label, OVERTIME_VALUATION, realValuation.replace(from, to), 'integer arithmetic only');
+  }
+  dirty('a payroll call from the Overtime domain is caught', 'server/src/Overtime/OvertimeService.php', S + "$this->data->payroll()->commit($auth);\n", 'no payroll or finance side effect');
+  dirty('a finance statement in the overtime store is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const T_SQL = 'INSERT INTO finance_transactions (company_id) VALUES (:company_id)';\n    public const ENTITY"), 'no payroll or finance side effect');
+  dirty('a paid flag in the overtime controller is caught', OVERTIME_CONTROLLER, S + "$out = ['paid' => true];\n", 'no payroll or finance side effect');
   dirty('overtime SQL in an auth store is caught', 'server/src/Data/Auth/AccountStore.php', S + "$this->db->select('SELECT id FROM overtime_records WHERE id = ?', [$e]);\n", 'read and written only by business stores');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
@@ -1141,6 +1217,8 @@ function selftest() {
   cases.push({ name: 'an overtime review route with a weaker Action is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->review(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->review(...), [], RouteAuth::Required, Action::OvertimeSubmitSelf)")), expect: 'must declare Action::OvertimeManage' });
   cases.push({ name: 'an overtime delete route under another Action is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->delete(...), [], RouteAuth::Required, Action::OvertimeDeleteSelfDraft)", "$overtime->delete(...), [], RouteAuth::Required, Action::OvertimeManage)")), expect: 'must declare Action::OvertimeDeleteSelfDraft' });
   cases.push({ name: 'a missing overtime route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/overtime-records/reject', $overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage),\n", '')), expect: 'overtime route POST /api/overtime-records/reject is missing' });
+  cases.push({ name: 'an overtime approve route under a weaker Action is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->approve(...), [], RouteAuth::Required, Action::OvertimeSubmitSelf)")), expect: 'must declare Action::OvertimeManage' });
+  cases.push({ name: 'a missing overtime approve route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/overtime-records/approve', $overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage),\n", '')), expect: 'overtime route POST /api/overtime-records/approve is missing' });
   cases.push({ name: 'a missing account route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),\n", '')), expect: 'is missing' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 
