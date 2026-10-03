@@ -167,8 +167,8 @@ in one transaction, locks the employee then the record, requires Reviewed, the v
 Approved is terminal; a later salary change rewrites nothing. The owner may read their own Approved valuation; an
 Employee never gets a preview; month lists carry no money. Migrations `0022`–`0023` (head `0023`). No payroll, no
 finance, no frontend change and an unchanged package: the AFI-4b1 decoder fails closed on an Approved record, so
-**BF-4b2 and AFI-4b2 must be deployed together** (owner decision D-BF4b2-5 = A). **AFI-4b2** (local candidate on
-`feature/afi-4b2-session-overtime-valuation`; not pushed, not merged, not deployed; owner decisions D-AFI4b2-1 = A,
+**BF-4b2 and AFI-4b2 must be deployed together** (owner decision D-BF4b2-5 = A). **AFI-4b2** (merged to `main` as
+source, PR #43, canonical merge `58e1127a0e44b60bf771e2d399ea15336b6f9610`; not deployed; owner decisions D-AFI4b2-1 = A,
 D-AFI4b2-2 = A) is the SESSION counterpart, inside the existing Overtime section (no new module, page or
 navigation): the strict decoder now knows `Approved` and the exact seven-key valuation projection; the CEO sees the
 **preview** of a Reviewed record ("Valuation preview — not yet approved") and approves exactly that preview —
@@ -180,7 +180,25 @@ strings and requires a new Approve → Confirm; an unconfirmed approval is recon
 never resent. Money stays a string end to end (no float, no `fmtIDR`, no TAM-OT-1 in JavaScript). D-AFI4b2-2 = A:
 the existing SESSION Overtime harness is extended (289 → 624 checks) and CI stays at **nine** harnesses. The package
 keeps 97 files (digest `2d826d4d…`); no backend change, no migration, ACTIONS stay 21, D-AFI4b1-3 unchanged,
-`AUTH_MODE` stays LOCAL. With AFI-4b2 both halves exist, and they must still be deployed together.
+`AUTH_MODE` stays LOCAL. With AFI-4b2 both halves exist, and they must still be deployed together. Overtime is complete
+as source. **BF-4c1** (local candidate on `feature/bf-4c1-payroll-foundation`; not
+pushed, not merged, not deployed; owner decisions D-PAY-1..6 = A) is the first Payroll backend slice, backend only.
+Migrations `0024`–`0026` (head `0026`) add `payroll_plans` — one plan per employee and month, enforced by a stored
+generated live key that a Cancelled plan does not occupy — `payroll_plan_overtime`, whose key is the consumed overtime
+record so the database refuses double consumption, and the `payroll.manage` audit vocabulary. Payroll is **Base Salary +
+Approved Overtime only**: the employee's `monthly_base_salary` plus the frozen `approved_amount` of the month's Approved
+overtime, summed in integer sen and rounded half-up once to the whole Rupiah. Payroll never recomputes TAM-OT-1, never
+writes an overtime record and has no statutory component (no PPh 21, BPJS, THR, allowance, deduction, bonus or loan).
+`POST /api/payroll-plans/generate` (`{ month }`) creates a Draft for each eligible employee (not archived, Active, salary
+> 0; the others are reported in `excluded` with a reason code), recalculates existing Drafts (an unchanged Draft is not
+written) and never alters a Reviewed, Ready or Committed plan; review / approve / return / cancel follow the canonical
+LOCAL pre-commit graph with `expectedVersion`, and cancel releases the plan's overtime. Everything runs under the
+existing `payroll.manage` (**ACTIONS stay 21**) and is CEO-only: an Employee is 403 on every payroll route. Generate runs
+at READ COMMITTED and locks employees and plans by primary key in id order, so it serializes with salary edits, archives
+and overtime approvals without a deadlock. **Ready is an approved obligation, not a payment. Commit is BF-4c2**, with the
+Employee's read of their own Committed plan, the D-PAY-4 drift guard and the MU-4 privacy proof; Finance posting comes
+later. No frontend change and an unchanged package (97 files, `2d826d4d…`); BF-4c1 only adds routes, so it can be
+deployed without a Payroll AFI. `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

@@ -1743,7 +1743,8 @@ deployed. The next domain is Overtime, as BF-4b1 → AFI-4b1 (non-money workflow
 and approval); its valuation inputs and exact-decimal method were deferred to BF-4b2 Phase 0 and are decided (see
 `AI_CONTEXT.md`). BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`), AFI-4b1 is merged
 (PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), BF-4b2 is merged (PR #42, canonical
-`78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is a local candidate (below).
+`78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is merged (PR #43, canonical `58e1127a0e44b60bf771e2d399ea15336b6f9610`).
+Payroll follows: BF-4c1 (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -1816,12 +1817,12 @@ harness after a repeated-run and UTC / UTC+7 determinism proof); `tools/verify-s
 3b (the selector exception, every other route and key still refused); the AFI-4b1 and D-AFI4b1-3 checks in
 `tools/verify-build.js`; test-only Overtime routes in `tools/serve-auth-stub.js` for browser QA.
 
-### SESSION Overtime valuation and approval — AFI-4b2 (local candidate; frontend; SESSION mode only)
+### SESSION Overtime valuation and approval — AFI-4b2 (merged as PR #43, canonical `58e1127a`; frontend; SESSION mode only)
 
 AFI-4b2 is the SESSION counterpart of BF-4b2, inside the existing Overtime section — no new module, page, navigation
 or CSS; no backend change, no migration, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, D-AFI4b1-3 unchanged (the
-approve body carries no `employeeId`). Owner decisions D-AFI4b2-1 = A and D-AFI4b2-2 = A. It is a local candidate on
-`feature/afi-4b2-session-overtime-valuation`; not pushed, merged or deployed. BF-4b2 and AFI-4b2 must be deployed
+approve body carries no `employeeId`). Owner decisions D-AFI4b2-1 = A and D-AFI4b2-2 = A. It is merged to `main` as
+source (PR #43, canonical merge `58e1127a0e44b60bf771e2d399ea15336b6f9610`), not deployed. BF-4b2 and AFI-4b2 must be deployed
 together.
 
 **Client** (`js/core/overtime-api.js`). The status list equals `OvertimeStatus::VALUES` (Approved included, order
@@ -1875,6 +1876,82 @@ vocabulary; no float formatter (`fmtIDR`), no arithmetic on a money value.
 stays at nine harnesses); the AFI-4b2 section and the revised AFI-4b1 / BF-4b2 pins in `tools/verify-build.js`
 (including equality of every client constant with the BF-4b2 PHP source); a mutation campaign (17 mutants, all
 killed); test-only valuation / approve routes and `/__stub/bump-salary` in `tools/serve-auth-stub.js` for browser QA.
+
+### Payroll plan foundation — BF-4c1 (local candidate; backend only, not deployed)
+
+BF-4c1 is the first Payroll backend slice (Phase 0 owner decisions D-PAY-1..6 = A, 2026-10-03). Backend only: no
+frontend change, the package is unchanged (97 files, digest `2d826d4d…`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
+It is a local candidate on `feature/bf-4c1-payroll-foundation`; not pushed, merged or deployed.
+
+**Formula (D-PAY-2 = A, D-PAY-3 = A).** Payroll is **Base Salary + Approved Overtime only** — an internal TAM
+calculation, never statutory payroll: `total = round_half_up_to_whole_rupiah(monthly_base_salary + Σ approved_amount)`
+over the month's **Approved** overtime of that employee. The overtime amount is the frozen `approved_amount` of BF-4b2,
+consumed exactly: Payroll never calls `OvertimeValuation`, never recomputes TAM-OT-1, never derives money from hours
+(hours are only summed for display) and never writes an overtime record. There is no salary override, allowance,
+deduction, bonus, benefit, loan, PPh 21, BPJS or THR. `TamOs\Payroll\PayrollCalculation` is pure integer arithmetic:
+the exact `"N.NN"` strings become sen, sums are overflow-checked, the one rounding is an `intdiv` with an explicit
+half-up remainder test (only the base salary can carry sen), and a result above `DECIMAL(17,2)` is refused (409), never
+wrapped. The boundary tool holds it to the same integer-only rule as the valuation.
+
+**Schema.** Migration `0024` creates `payroll_plans`: the employee, `month_key`, `status` (`Draft`, `Reviewed`, `Ready`,
+`Committed`, `Cancelled` — the frontend `PAYROLL_STATUSES`), the calculation snapshot (`employee_code_snapshot`,
+`employee_name_snapshot`, `department_snapshot`, `base_salary DECIMAL(15,2)`, `overtime_amount DECIMAL(17,2)`,
+`overtime_hours DECIMAL(9,2)`, `overtime_count`, `total_amount DECIMAL(17,2)`, `calculated_at`), `committed_at` (set if
+and only if Committed — nothing in BF-4c1 sets it), `version`, and a stored generated `live_key` (NULL when Cancelled)
+under `UNIQUE (company_id, month_key, employee_id, live_key)`: at most one non-Cancelled plan per employee and month,
+while Cancelled plans stay as history. Migration `0025` creates `payroll_plan_overtime`, whose primary key is the
+consumed overtime record (composite FK to `overtime_records`), so one Approved record contributes to at most one plan,
+ever; links are written at calculation, replaced when a Draft is recalculated, released when a plan is cancelled, and
+their only DELETE requires the plan to be pre-commit. Migration `0026` admits `create`, `recalculate`, `review`,
+`approve`, `return` and `cancel` under `payroll.manage` on entity `payrollPlan`. No foreign key cascades; no row is
+seeded. Head `0026`; one statement per migration.
+
+**Lifecycle (D-PAY-1 = A, D-PAY-6 = A).** The canonical LOCAL pre-commit graph (`PAYROLL_LIFECYCLE_TRANSITIONS`):
+Draft → Reviewed | Ready | Cancelled; Reviewed → Ready | Draft | Cancelled; Ready → Draft | Cancelled. Each is a named
+operation with `expectedVersion`; Committed and Cancelled are terminal and every statement that writes a plan is a
+compare-and-swap on a pre-commit status. **Commit is BF-4c2**: Ready is an approved obligation awaiting commit, never a
+payment, and nothing here posts to Finance.
+
+**Generate.** `POST /api/payroll-plans/generate` takes exactly `{ month }`. In one READ COMMITTED transaction it locks
+every employee of the company by primary key in id order, reads the month's Approved overtime (an approval locks its
+employee first, so those locks freeze the Approved set), locks the month's live plans by primary key and reads their
+links. Each employee who is not archived, `Active` and has a salary > 0 gets a Draft (audit `create`); an existing Draft
+is recalculated from the current inputs with its links replaced (audit `recalculate`) — or left alone when nothing
+differs; a Reviewed, Ready or Committed plan is never touched. Ineligible employees get no plan and are reported as
+`excluded: [{ employeeId, reason }]` with `archived`, `not_active` or `salary_missing`. The answer is `{ payrollPlans,
+excluded }`, the month's live plans. An approval serialized before a generate is included; one after it is not (the next
+generate of a Draft includes it) and is never blocked. Payroll takes no secondary-index range lock and no overtime lock,
+which would otherwise cycle with an overtime create's foreign-key check or a cancel's live-key update.
+
+**Routes and authority.** `GET /api/payroll-plans?month=` (every plan of the month, Cancelled included) and
+`GET /api/payroll-plan?id=` (`{ payrollPlan, payrollPlanOvertime: [{ id, hours, amount }] }`, the frozen amounts) need a
+session and add no Action; `POST /api/payroll-plans/generate|review|approve|return|cancel` declare the existing
+`payroll.manage`. Transitions take exactly `{ id, expectedVersion }`. No browser company, employee, role, salary, amount,
+total or status is accepted, and no new identity exception exists (D-AFI4b1-3 is unchanged). BF-4c1 is CEO-only: an
+Employee is 403 on every payroll route before any lookup; another company's plan is 404. The plan projection is exactly
+thirteen fields (`id, employeeId, monthKey, status, employeeCode, employeeName, department, baseSalary,
+overtimeAmount, overtimeHours, overtimeCount, totalAmount, version`) — never the company, the live key or a timestamp.
+
+**Audit.** One `payroll.manage` row per plan mutation, naming the operation and no field or value, written in the same
+transaction; if it fails, the whole generate or transition rolls back.
+
+**Firewalls.** No finance transaction, ledger, journal, payment, monthly plan or paid state: a DB test compares every
+table's row count around generate and the transitions. The boundary tool pins one writer for both payroll tables, no
+plan DELETE or TRUNCATE, no `'Committed'` write, pre-commit compare-and-swaps, primary-key-only locks, Approved-only
+overtime reads, the exact inputs and route Actions, and no valuation, finance or statutory vocabulary in the Payroll code.
+
+**Deferred.** BF-4c2: Commit (with the D-PAY-4 drift guard: a salary or Approved-overtime change since calculation is a
+409 that requires return to Draft and regeneration), the Employee's read of their own Committed plan, the drift read and
+the MU-4 privacy proof. Later: the Payroll AFI, Supplemental payroll for overtime approved after commit, Finance posting.
+BF-4c1 adds only routes and changes no existing DTO, so it does not need to be deployed together with a frontend.
+
+**Proof.** Unit tests (`PayrollCalculationTest`: reference cases, every sen against an independent reference, the
+half-up boundaries, bounds, malformed inputs, the integer-only source; `PayrollDomainTest`: the lifecycle against the
+LOCAL graph, the exact inputs, the projection, the statements and guards, Policy and the audit vocabulary); HTTP tests
+(`PayrollRoutingTest`); MariaDB tests (`PayrollSchemaTest`, `PayrollWorkflowTest`, `PayrollConcurrencyTest`: generate,
+idempotence, recalculation, the lifecycle matrix, terminality, cancel and replacement, reads, hostile principals, the
+snapshot, audit rollback, out-of-bounds, the firewalls, migration from `0023`, lock, loser and race proofs including
+generate against generate, salary change, archive and overtime approval).
 
 ### Release engineering
 
