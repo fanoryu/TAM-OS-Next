@@ -13,6 +13,10 @@ declare(strict_types=1);
  *   3. Race proofs. A worker process passes its scoped load and Policy, is observed blocked on the
  *      row lock (bounded polling of PROCESSLIST), and the competing change commits meanwhile:
  *      the worker's locked re-check must refuse it.
+ *
+ * BF-4b2: approval locks the owning employee, then the record. It waits on either lock; it loses
+ * deterministically to a concurrent approve, reject, salary change or archive; and a salary change
+ * committed while it waits makes it refuse (the amount the CEO was shown no longer holds).
  */
 
 use TamOs\Data\Auth\AuthData;
@@ -42,6 +46,7 @@ $world = static function (): array {
     $ceo = authFixture($db);
     $emp = authFixture($db, ['companyId' => $ceo['companyId'], 'role' => 'employee', 'employeeId' => 'e_1']);
     employeeAnchor($db, $ceo['companyId'], 'e_2');
+    $db->execute("UPDATE employees SET monthly_base_salary = '3500000.00' WHERE id IN ('e_1', 'e_2')");
     $s = [];
     foreach (['ceo' => $ceo, 'emp' => $emp] as $name => $f) {
         $r = $k->handle(loginRequest($f['email'], (string) $f['password']), requestId());
@@ -107,6 +112,14 @@ $race = static function (array $w, string $who, string $op, array $body, string 
 };
 $lockOvertime = 'SELECT id FROM overtime_records WHERE id = ? FOR UPDATE';
 $blockedOnOvertime = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key';
+$lockEmployee = 'SELECT id FROM employees WHERE id = ? FOR UPDATE';
+$blockedOnValuation = 'SELECT id, company_id, id AS owner_employee_id, monthly_base_salary';
+/** A Reviewed record of e_1, 1.00 hour: TAM-OT-1 values it at 21 875.00 at the fixture salary. */
+$reviewed = static function (array $w) use ($draft, $apply): array {
+    return $apply($w, 'review', $apply($w, 'submit', $draft($w)));
+};
+$approveBody = static fn (array $rec, string $amount = '21875.00'): array => ['id' => $rec['id'], 'expectedVersion' => $rec['version'], 'expectedAmount' => $amount];
+$frozen = static fn (Database $db, string $id): ?array => $db->select('SELECT status, version, valuation_method, valuation_salary, approved_amount FROM overtime_records WHERE id = ?', [$id])[0] ?? null;
 
 return [
     'every overtime write waits on the overtime row lock: while it is held, nothing is written (503)' => static function () use ($world, $draft, $apply, $post, $code, $state, $audits, $whileLocked, $lockOvertime): void {
@@ -120,6 +133,64 @@ return [
             assertSame([503, 'service_unavailable'], $code($r), $op . ' waited on the row');
             assertSame($before, [$state($w['db'], $rec['id']), $audits($w['db'])], $op . ' wrote nothing');
         }
+    },
+    'approve waits on the employee row lock and on the overtime row lock: while either is held, nothing is written (503)' => static function () use ($world, $reviewed, $post, $code, $frozen, $audits, $whileLocked, $lockOvertime, $lockEmployee, $approveBody): void {
+        $w = $world();
+        $r = $reviewed($w);
+        foreach (['employee' => [$lockEmployee, 'e_1'], 'overtime' => [$lockOvertime, $r['id']]] as $label => [$sql, $key]) {
+            $before = [$frozen($w['db'], $r['id']), $audits($w['db'])];
+            $resp = $whileLocked(secondConnection(), $sql, [$key], $w['db'], static fn () => $post($w, 'ceo', 'approve', $approveBody($r)));
+            assertSame([503, 'service_unavailable'], $code($resp), 'approve waited on the ' . $label . ' row');
+            assertSame($before, [$frozen($w['db'], $r['id']), $audits($w['db'])], $label . ': nothing written');
+        }
+        $resp = $post($w, 'ceo', 'approve', $approveBody($r));
+        assertSame(200, $resp->status, 'and succeeds once the locks are free');
+    },
+    'approve against approve, reject or review of the same version: exactly one wins; the loser is 409 and changes nothing' => static function () use ($world, $reviewed, $draft, $apply, $post, $code, $frozen, $approveBody): void {
+        $w = $world();
+        $r = $reviewed($w);
+        assertSame(200, $post($w, 'ceo', 'approve', $approveBody($r))->status, 'first approve');
+        $after = $frozen($w['db'], $r['id']);
+        assertSame([409, 'conflict'], $code($post($w, 'ceo', 'approve', $approveBody($r))), 'approve/approve');
+        assertSame([409, 'conflict'], $code($post($w, 'ceo', 'reject', ['id' => $r['id'], 'expectedVersion' => $r['version']])), 'approve/reject');
+        assertSame($after, $frozen($w['db'], $r['id']), 'the approval stands, with one snapshot');
+        $x = $reviewed($w);
+        $apply($w, 'reject', $x);
+        assertSame([409, 'conflict'], $code($post($w, 'ceo', 'approve', $approveBody($x))), 'reject/approve');
+        assertSame('Rejected', (string) $frozen($w['db'], $x['id'])['status']);
+        $s = $apply($w, 'submit', $draft($w));
+        $apply($w, 'review', $s);
+        assertSame([409, 'conflict'], $code($post($w, 'ceo', 'approve', $approveBody($s))), 'review/approve: the Submitted version is stale');
+        assertSame(1, (int) $w['db']->select("SELECT COUNT(*) AS n FROM audit_events WHERE operation = 'approve'")[0]['n'], 'exactly one approval audited');
+    },
+    'race: an approval waiting on the employee lock while the salary changes is refused (409); nothing is approved at either amount' => static function () use ($world, $reviewed, $frozen, $race, $lockEmployee, $blockedOnValuation, $approveBody): void {
+        $w = $world();
+        $r = $reviewed($w);
+        $out = $race($w, 'ceo', 'approve', $approveBody($r), $lockEmployee, ['e_1'], $blockedOnValuation,
+            static fn (Database $tx) => $tx->execute("UPDATE employees SET monthly_base_salary = '4000000.00', version = version + 1 WHERE id = ?", ['e_1']));
+        assertSame('409 conflict', $out, 'valuation_changed');
+        assertSame(['Reviewed', null, null], [(string) $frozen($w['db'], $r['id'])['status'], $frozen($w['db'], $r['id'])['valuation_salary'], $frozen($w['db'], $r['id'])['approved_amount']]);
+    },
+    'race: an approval waiting on the employee lock while the employee is archived is refused (409)' => static function () use ($world, $reviewed, $frozen, $race, $lockEmployee, $blockedOnValuation, $approveBody): void {
+        $w = $world();
+        $r = $reviewed($w);
+        $out = $race($w, 'ceo', 'approve', $approveBody($r), $lockEmployee, ['e_1'], $blockedOnValuation,
+            static fn (Database $tx) => $tx->execute('UPDATE employees SET archived_at = UTC_TIMESTAMP(6), version = version + 1 WHERE id = ?', ['e_1']));
+        assertSame('409 conflict', $out);
+        assertSame('Reviewed', (string) $frozen($w['db'], $r['id'])['status']);
+    },
+    'race: an approval waiting on the overtime lock while the record is rejected, or approved, meanwhile is refused (409)' => static function () use ($world, $reviewed, $frozen, $race, $lockOvertime, $blockedOnOvertime, $approveBody): void {
+        $w = $world();
+        $r = $reviewed($w);
+        $out = $race($w, 'ceo', 'approve', $approveBody($r), $lockOvertime, [$r['id']], $blockedOnOvertime,
+            static fn (Database $tx) => $tx->execute("UPDATE overtime_records SET status = 'Rejected', version = version + 1 WHERE id = ?", [$r['id']]));
+        assertSame('409 conflict', $out, 'reject wins');
+        assertSame('Rejected', (string) $frozen($w['db'], $r['id'])['status'], 'Rejected stays terminal');
+        $q = $reviewed($w);
+        $out = $race($w, 'ceo', 'approve', $approveBody($q), $lockOvertime, [$q['id']], $blockedOnOvertime,
+            static fn (Database $tx) => $tx->execute("UPDATE overtime_records SET status = 'Approved', valuation_method = 'TAM-OT-1', valuation_salary = '3500000.00', valuation_standard_hours = '160.00', approved_amount = '21875.00', approved_at = UTC_TIMESTAMP(6), version = version + 1 WHERE id = ?", [$q['id']]));
+        assertSame('409 conflict', $out, 'the first approval wins');
+        assertSame(0, (int) $w['db']->select("SELECT COUNT(*) AS n FROM audit_events WHERE operation = 'approve'")[0]['n'], 'the losing worker audited nothing');
     },
     'create waits on the employee row lock: while it is held, nothing is written (503)' => static function () use ($world, $post, $code, $audits, $whileLocked): void {
         $w = $world();

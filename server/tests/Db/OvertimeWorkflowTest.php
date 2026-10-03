@@ -181,7 +181,7 @@ return [
         $ds = $ok($step($w, 'ceoA', 'submit', $direct), 'the CEO submits on the owner\'s behalf')['overtimeRecord'];
         assertSame('Rejected', $ok($step($w, 'ceoA', 'reject', $ds), 'Submitted → Rejected')['overtimeRecord']['status']);
     },
-    'illegal transitions are 409 and change nothing; Rejected is terminal; there is no approve route' => static function () use ($world, $create, $step, $ok, $code, $post, $row): void {
+    'illegal transitions are 409 and change nothing; Rejected is terminal, approve included (BF-4b2)' => static function () use ($world, $create, $step, $ok, $code, $post, $row): void {
         $w = $world();
         $draft = $create($w, 'ceoA', []);
         assertSame([409, 'conflict'], $code($step($w, 'ceoA', 'review', $draft)), 'Draft → Reviewed');
@@ -199,7 +199,9 @@ return [
         assertSame([409, 'conflict'], $code($post($w, 'ceoA', '/api/overtime-records/update', ['id' => $rej['id'], 'expectedVersion' => $rej['version'], 'hours' => '1.00'])), 'Rejected is not editable');
         assertSame([409, 'conflict'], $code($post($w, 'ceoA', '/api/overtime-records/delete', ['id' => $rej['id'], 'expectedVersion' => $rej['version']])), 'or deletable');
         assertSame(['Rejected', '4'], [(string) $row($w['db'], $rej['id'])['status'], (string) $row($w['db'], $rej['id'])['version']], 'unchanged');
-        assertSame([404, 'not_found'], $code($post($w, 'ceoA', '/api/overtime-records/approve', ['id' => $rej['id'], 'expectedVersion' => 4])), 'no approve route in BF-4b1');
+        // BF-4b2 revision (was: no approve route in BF-4b1): the route exists, and Rejected stays terminal.
+        assertSame([409, 'conflict'], $code($post($w, 'ceoA', '/api/overtime-records/approve', ['id' => $rej['id'], 'expectedVersion' => 4, 'expectedAmount' => '0.00'])), 'Rejected → approve');
+        assertSame(['Rejected', '4'], [(string) $row($w['db'], $rej['id'])['status'], (string) $row($w['db'], $rej['id'])['version']], 'still unchanged');
     },
     'delete: a Draft only, hard, at its version; the audit row survives the record and names it' => static function () use ($world, $create, $post, $ok, $code, $get, $audits, $row): void {
         $w = $world();

@@ -1297,8 +1297,8 @@ never names a token primitive or a mail builder; every audit append and outbox e
 
 BF-4b1 makes overtime the second server-authoritative business record — the **non-money** workflow only (owner
 decisions D-BF4b-1 = A, D-BF4b-2 = A). Backend only — its SESSION client is AFI-4b1 (below) — `AUTH_MODE` stays
-LOCAL, ACTIONS stay **21** and "Acting as" is unchanged. Valuation, approval and every payroll effect are BF-4b2;
-its inputs (D-BF4b-3) and exact-decimal method (D-BF4b-4) are not decided.
+LOCAL, ACTIONS stay **21** and "Acting as" is unchanged. Valuation and approval are BF-4b2 (below); every payroll
+effect is later still.
 
 **Schema.** Migration `0020` creates `overtime_records`: a server hex `id`, the tenant key, `employee_id` with a
 composite RESTRICT FK to `employees (company_id, id)`, `month_key` (`YYYY-MM`, required), `overtime_date` (optional
@@ -1341,7 +1341,82 @@ atomic audit and its rollback, hostile principals, and lock, loser and worker-dr
 additions:** `overtime_records` is a company table with one writer; its DELETE is pinned to the Draft predicate;
 no TRUNCATE; each overtime route declares its Action; double-quoted `*_SELF_SQL` constants are checked too.
 
-**Not production-ready.** Everything BF-3A–BF-4a2 list; the SESSION UI is AFI-4b1 (a candidate, below).
+**Not production-ready.** Everything BF-3A–BF-4a2 list; the SESSION UI is AFI-4b1 (merged, below).
+
+### Overtime valuation and approval — BF-4b2 (local candidate; backend only, not deployed)
+
+BF-4b2 makes an overtime record's money **server-authoritative** — valuation and approval only, never payroll (owner
+decisions D-BF4b-3 = A, D-BF4b-4 = A, D-BF4b2-1..5 = A, 2026-10-03). Backend only: no frontend change, the package is
+unchanged, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL. It is a local candidate on
+`feature/bf-4b2-overtime-approval`; not pushed, merged or deployed.
+
+**Method (D-BF4b-3 = A).** `TAM-OT-1`, a fixed, versioned **internal TAM** method — the LOCAL "TAM Internal Overtime
+Calculation Method" (`js/people/overtime.js`) at the LOCAL company defaults — and never a statutory or legal formula:
+amount = monthly salary × overtime hours ÷ 160.00, multiplier 1, in IDR (the single-currency invariant), with no
+intermediate rounding and one final half-up rounding to the whole Rupiah. The salary is the server's
+`employees.monthly_base_salary`, read at approval; there is no schedule, contract, company setting, 1/173 divisor or
+multiplier tier. A future rule gets a new method identity and never reinterprets Approved history.
+
+**Exact arithmetic (D-BF4b-4 = A).** `TamOs\Overtime\OvertimeValuation` is pure: the exact `"N.NN"` strings are parsed
+into integers — salary in sen, hours and standard hours in quarter-hours — and the amount is
+`round_half_up(salary_sen × hours_q ÷ (640 × 100))`, one `intdiv` with an explicit remainder test. The largest
+numerator (999 999 999 999 999 sen × 2976) is < `PHP_INT_MAX`; the multiplication is checked first, 64-bit integers
+are asserted, and the largest amount (46 500 000 000 000) fits `approved_amount DECIMAL(16,2)`. No float, BCMath, GMP
+or SQL arithmetic is ever monetary authority (the boundary tool forbids float, rounding helpers and the `/` operator
+in that file).
+
+**State machine (D-BF4b2-1 = A).** Draft → Submitted → Reviewed → **Approved**; Submitted or Reviewed → Rejected.
+Approved and Rejected are terminal: no reject, return, edit, delete or revaluation after approval. Approve is not one
+of the generic transitions: the store's generic transition refuses an Approved source or target, and the database
+refuses an Approved row without a complete snapshot.
+
+**Schema.** Migration `0022` appends five nullable columns to `overtime_records` — `valuation_method`,
+`valuation_salary DECIMAL(15,2)`, `valuation_standard_hours DECIMAL(5,2)`, `approved_amount DECIMAL(16,2)`,
+`approved_at DATETIME(6)` — and CHECKs: status adds Approved; the snapshot is all-or-none and present **if and only
+if** the record is Approved; method `TAM-OT-1`; salary > 0; standard hours 160.00 for `TAM-OT-1`; a whole, non-negative
+amount. The hourly rate is never stored. Migration `0023` admits `approve` as an `overtime.manage` audit operation.
+Head `0023`; one statement per migration.
+
+**Routes and authority.** `GET /api/overtime-record/valuation?id=` (session; no route Action): an Approved record's
+frozen valuation for the CEO and for its owner; otherwise the CEO's **preview** of a Reviewed record under
+`overtime.manage` (an Employee is 403, a colleague or another company 404, any other status 409), computed from the
+current salary and never stored. `POST /api/overtime-records/approve` under the existing `overtime.manage` with exactly
+`{ id, expectedVersion, expectedAmount }`: no salary, hours, rate, multiplier, method, status or employee from a
+browser; `expectedAmount` is only an optimistic guard. No `employeeId`, so D-AFI4b1-3 is unchanged.
+
+**Approval transaction (D-BF4b2-2/3 = A).** Validate (400) → scoped load (404) → Policy (403) → one transaction: lock
+the owning employee, then the record (the create lock order) → Reviewed and the expected version (409) → the employee
+is not archived and has a salary > 0 (409; employment status and the login account are deliberately not checked) →
+`TAM-OT-1` → the amount must equal `expectedAmount` exactly (409 `valuation_changed`: the CEO never approves an amount
+they were not shown) → one compare-and-swap writes Approved, the snapshot and `version + 1` → the `approve` audit row →
+commit. A salary edit or archive serializes on the employee lock; a concurrent approve or reject on the record lock.
+
+**DTOs and disclosure (D-BF4b2-4 = A).** The record DTO keeps its nine fields; only its status gains Approved, and
+month lists carry no money. The separate projection `overtimeValuation` is `{ id, kind, method, hours,
+monthlySalaryBasis, standardMonthlyHours, amount }` (`kind` preview or approved, exact strings, no hourly rate). An
+approved projection is the frozen snapshot — the owner's own past salary, never the live one — and must reproduce its
+amount or it is a 500. Approve answers `{ overtimeRecord, overtimeValuation }`.
+
+**Audit.** `overtime.manage` with operation `approve`, no field list and no value — never the salary or the amount;
+the immutable row is the valuation evidence. It is written in the approval transaction.
+
+**Firewalls.** No payroll run, plan, payslip, committed or paid state, tax, finance transaction, journal, ledger,
+payment or cash effect: an approval writes its overtime row and one audit row only (a DB test compares every table's
+row count). The boundary tool rejects any payroll or finance identifier in the Overtime code.
+
+**Frontend compatibility (D-BF4b2-5 = A).** No frontend change: the AFI-4b1 decoder keeps the four BF-4b1 statuses and
+fails closed (shows an error, never wrong data) on an Approved record. BF-4b2 and AFI-4b2 must be deployed together
+(also recorded in `docs/DEPLOYMENT.md`).
+
+**Proof.** Unit tests (`OvertimeValuationTest`: the reference cases, half-up boundaries, the bounds, every quarter hour
+against an independent reference, reproducibility, the integer-only source, the projection and the approve
+allowlist; the revised state machine, statements and audit vocabulary); HTTP tests (401, CSRF and origin, the
+valuation query, every forged valuation input 400); prepared MariaDB tests (`OvertimeApprovalTest`, and additions to
+the schema, hostile and concurrency suites: preview, approval, eligibility, terminality, disclosure, the payroll /
+finance firewall, rollback, lock and race proofs against salary change, archive, approve and reject). **Boundary
+additions:** one writer of the snapshot and of Approved (from Reviewed, versioned, company scope), no salary read in a
+self-scope overtime statement, integer-only valuation, no payroll or finance in the Overtime code, approve under
+`overtime.manage`.
 
 ### Session identity foundation — AFI-1 (frontend; headless and inert, not wired)
 
@@ -1664,14 +1739,17 @@ reconciliation, CSRF recovery, races, the email draft lifecycle, Employee contai
 **Status.** AFI-4a (AFI-4a1–AFI-4a3 with BF-4a1–BF-4a3) is **closed** as one Employee capability, owner-accepted on
 2026-10-02 at canonical merge `f545733b19466262530bc1d1bc53de687dc5d29a` (tree `ee354f3b…`); source only, not
 deployed. The next domain is Overtime, as BF-4b1 → AFI-4b1 (non-money workflow) then BF-4b2 → AFI-4b2 (valuation
-and approval); its valuation inputs and exact-decimal method are deferred to BF-4b2 Phase 0 (see `AI_CONTEXT.md`).
-BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`); AFI-4b1 follows.
+and approval); its valuation inputs and exact-decimal method were deferred to BF-4b2 Phase 0 and are decided (see
+`AI_CONTEXT.md`). BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`), AFI-4b1 is merged
+(PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), and BF-4b2 is a local candidate (above).
 
-### SESSION Overtime workspace — AFI-4b1 (candidate on a feature branch; frontend; SESSION mode only)
+### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
-AFI-4b1 is the SESSION frontend of the BF-4b1 non-money overtime workflow — no backend change, no migration
-(head stays `0021`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, "Acting as" is unchanged. It is a candidate on
-`feature/afi-4b1-session-overtime`, not merged and not deployed.
+AFI-4b1 is the SESSION frontend of the BF-4b1 non-money overtime workflow — no backend change, no migration of its
+own, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, "Acting as" is unchanged. It is merged to `main` as source (PR #41,
+canonical merge `77332ca20ccc01c56845938b214c7238646ff90f`), not deployed. Its decoder knows the four BF-4b1
+statuses only and fails closed on a BF-4b2 Approved record until AFI-4b2 (BF-4b2 and AFI-4b2 must be deployed
+together).
 
 **Placement.** Overtime is a **section** of the one authenticated SESSION workspace, never the business shell
 (`AuthBoot.allowsWorkspace()` stays false) and never the LOCAL Overtime page (`js/people/overtime.js`). Under the

@@ -34,7 +34,23 @@ use TamOs\Policy\Scope;
  *           version (409) → compare-and-swap + audit naming the operation (D-BF4b-5)
  *
  * Policy decides on the record as loaded; the locked row decides again, so a change that lands
- * between the two loses deterministically (409). Nothing here values overtime or touches payroll.
+ * between the two loses deterministically (409).
+ *
+ * BF-4b2 (owner decisions D-BF4b-3/4 = A, D-BF4b2-1..5 = A):
+ *
+ *   valuation  scoped load (404) → an Approved record: its frozen snapshot, for the CEO and the
+ *              owner → otherwise overtime.manage (403: an Employee never sees a preview) →
+ *              Reviewed only (409) → the owner's CURRENT salary in company scope → eligibility
+ *              (409) → TAM-OT-1, computed and never stored
+ *   approve    validate → scoped load (404) → overtime.manage (403) → one transaction: lock the
+ *              owning employee, then the record (create's lock order) → Reviewed and the expected
+ *              version (409) → eligibility (409) → TAM-OT-1 → the amount must equal expectedAmount
+ *              exactly (409 valuation_changed) → write the snapshot and Approved, compare-and-swap
+ *              → audit 'approve' → commit
+ *
+ * Eligibility (D-BF4b2-2 = A): the employee is not archived and has a salary greater than 0.
+ * Employment status and the login account are deliberately NOT checked. Approved is terminal.
+ * Nothing here creates payroll, a payment, a finance transaction or any other side effect.
  */
 final class OvertimeService
 {
@@ -146,6 +162,74 @@ final class OvertimeService
             $this->data->audit()->appendOvertime($auth, $actor, $operation, [], $requestId);
         });
         return $this->data->overtime()->record($auth->scope, $in['id']) ?? throw new \LogicException('transitioned overtime not readable');
+    }
+
+    /**
+     * BF-4b2: the frozen valuation of an Approved record (CEO or owner), or the CEO's preview of a
+     * Reviewed one.
+     *
+     * @return array<string, string>
+     */
+    public function valuation(Principal $actor, ?string $id): array
+    {
+        $id = OvertimeInput::id($id);                       // 400 before any lookup
+        $scope = Scope::of($actor);
+        $record = $this->data->overtime()->find($scope, $id) ?? throw new ApiError(ErrorCode::NotFound);
+        if ($record->status === OvertimeStatus::APPROVED) {
+            return OvertimeValuationView::approved($this->data->overtime()->valuation($scope, $id) ?? throw new ApiError(ErrorCode::NotFound));
+        }
+        $auth = Policy::authorize($actor, OvertimeStatus::APPROVE[1], $record);
+        if ($record->status !== OvertimeStatus::APPROVE[2]) {
+            throw new ApiError(ErrorCode::Conflict, logReason: 'overtime_state');
+        }
+        $row = $this->data->overtime()->valuation($auth->scope, $id) ?? throw new ApiError(ErrorCode::NotFound);
+        $inputs = $this->data->overtime()->valuationInputs($auth->scope, (string) $record->ownerEmployeeId) ?? throw new ApiError(ErrorCode::NotFound);
+        return OvertimeValuationView::preview($id, self::value($inputs, (string) $row['hours']));
+    }
+
+    /**
+     * BF-4b2: Reviewed → Approved with its frozen TAM-OT-1 valuation.
+     *
+     * @param array<string, mixed> $json
+     * @return array{record: array<string, mixed>, valuation: array<string, string>}
+     */
+    public function approve(Principal $actor, array $json, string $requestId): array
+    {
+        $in = OvertimeInput::approve($json);
+        $auth = $this->authorized($actor, OvertimeStatus::APPROVE[1], $in['id']);
+        $this->data->atomically(function () use ($auth, $actor, $in, $requestId): void {
+            $inputs = $this->data->overtime()->lockValuationInputs($auth) ?? throw new ApiError(ErrorCode::NotFound);
+            $current = $this->locked($auth, [OvertimeStatus::APPROVE[2]], $in['expectedVersion']);
+            $valuation = self::value($inputs, (string) $current['hours']);
+            if ($valuation['amount'] !== $in['expectedAmount']) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'valuation_changed');
+            }
+            if ($this->data->overtime()->approve($auth, $in['expectedVersion'], $valuation) !== 1) {
+                throw new \LogicException('approve: the locked Reviewed record did not change');
+            }
+            $this->data->audit()->appendOvertime($auth, $actor, OvertimeStatus::APPROVE[0], [], $requestId);
+        });
+        return [
+            'record' => $this->data->overtime()->record($auth->scope, $in['id']) ?? throw new \LogicException('approved overtime not readable'),
+            'valuation' => OvertimeValuationView::approved($this->data->overtime()->valuation($auth->scope, $in['id']) ?? throw new \LogicException('approved overtime not readable')),
+        ];
+    }
+
+    /**
+     * Eligibility (D-BF4b2-2 = A), then TAM-OT-1. The salary is never echoed into an error.
+     *
+     * @param array{salary: ?string, archived: bool} $inputs
+     * @return array{method: string, salary: string, standardHours: string, hours: string, amount: string}
+     */
+    private static function value(array $inputs, string $hours): array
+    {
+        if ($inputs['archived']) {
+            throw new ApiError(ErrorCode::Conflict, logReason: 'employee_archived');
+        }
+        if ($inputs['salary'] === null || !OvertimeValuation::isSalary($inputs['salary'])) {
+            throw new ApiError(ErrorCode::Conflict, logReason: 'valuation_input_missing');
+        }
+        return OvertimeValuation::value($inputs['salary'], $hours);
     }
 
     /** The record loaded under the principal's scope (404 when absent or out of scope), then Policy (403). */

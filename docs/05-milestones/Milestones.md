@@ -364,13 +364,18 @@ become 21. **BF-4a3** (the CEO-only `accountManageable` projection) and the auth
 **AFI-4a1–AFI-4a3** followed, and **AFI-4a is CLOSED** as one Employee capability (owner acceptance 2026-10-02;
 canonical merge `f545733b`, source only, not deployed). The next domain is **Overtime** — BF-4b1 → AFI-4b1 (the
 non-money workflow), then BF-4b2 → AFI-4b2 (valuation and approval) *(owner decisions D-BF4b-1 = A, D-BF4b-2 = A,
-2026-10-02; the valuation inputs D-BF4b-3 and the exact-decimal method D-BF4b-4 are deferred to BF-4b2 Phase 0)*. **BF-4b1** (the
+2026-10-02; the valuation inputs D-BF4b-3 and the exact-decimal method D-BF4b-4, deferred to BF-4b2 Phase 0, are decided = A
+on 2026-10-03)*. **BF-4b1** (the
 non-money overtime record and workflow — migrations `0020`–`0021`, a required-month list, Draft create / update / hard
 delete and submit / review / reject under the existing overtime ACTIONS; *D-BF4b1-1/2/3 = A, D-BF4b-5 = A, D-BF4b-6 = A*)
 is merged as source (PR #40, canonical `9fbdd448`), backend only; it extends the hostile-principal suite to
 overtime. **AFI-4b1** (its SESSION frontend — an Overtime section of the SESSION workspace; *D-AFI4b1-1/2/3 = A*,
-D-AFI4b1-3 being the one route-scoped `employeeId` target selector on Overtime create, never authority) is a
-candidate on a feature branch, frontend only. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+D-AFI4b1-3 being the one route-scoped `employeeId` target selector on Overtime create, never authority) is merged
+as source (PR #41, canonical `77332ca2`), frontend only. **BF-4b2** (server-authoritative valuation and approval —
+Reviewed → Approved under the existing `overtime.manage`, the fixed internal method `TAM-OT-1`, exact integer
+arithmetic, a CEO preview plus an `expectedAmount` guard, an immutable snapshot, migrations `0022`–`0023`;
+*D-BF4b-3/4 = A, D-BF4b2-1..5 = A*) is a local candidate on a feature branch, backend only, with no payroll or
+finance effect; BF-4b2 and AFI-4b2 must be deployed together. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

@@ -29,6 +29,10 @@ use TamOs\Policy\Action;
  * createSelfDraft, updateSelfDraft, deleteSelfDraft, submitSelf, or manage for review and reject —
  * all record-bearing, decided by the handler after its scoped load (404 before 403).
  *
+ * BF-4b2: the valuation read adds no route-level Action (an Approved record's frozen valuation is
+ * read by scope; a preview is decided by the handler under overtime.manage), and approve declares
+ * the existing overtime.manage — record-bearing, 404 before 403. ACTIONS stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -84,6 +88,9 @@ final class Routes
             new Route('POST', '/api/overtime-records/submit', $overtime->submit(...), [], RouteAuth::Required, Action::OvertimeSubmitSelf),
             new Route('POST', '/api/overtime-records/review', $overtime->review(...), [], RouteAuth::Required, Action::OvertimeManage),
             new Route('POST', '/api/overtime-records/reject', $overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage),
+            // BF-4b2: valuation and approval (TAM-OT-1); no payroll, no finance.
+            new Route('GET', '/api/overtime-record/valuation', $overtime->valuation(...), ['id'], RouteAuth::Required),
+            new Route('POST', '/api/overtime-records/approve', $overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage),
         ]);
     }
 

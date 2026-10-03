@@ -117,6 +117,12 @@ operator CLI — no authorization policy or business schema) exists in source; i
 production-ready**. See [`Milestones.md`](05-milestones/Milestones.md)
 for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
 
+**Deployment dependency — Overtime approval (owner decision D-BF4b2-5 = A).**
+BF-4b2 and AFI-4b2 must be deployed together. BF-4b2 lets the CEO approve overtime (an `Approved`
+status), and the AFI-4b1 SESSION Overtime client deliberately fails closed on that status, so there must
+never be a production interval in which the backend can create Approved records while the deployed
+frontend is AFI-4b1 only.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

@@ -29,6 +29,10 @@ use TamOs\Policy\Scope;
  * BF-4b1 (migration 0021): overtime rows name the overtime Action and the record id; a status
  * transition also names its operation (submit, review, reject). The audit row of a hard-deleted
  * Draft survives the record: audit_events has no foreign key to overtime_records.
+ *
+ * BF-4b2 (migration 0023): the approval is overtime.manage with operation 'approve'. Like every
+ * transition it names no field and carries no value — never the salary or the amount; the
+ * Approved row's immutable snapshot is the valuation evidence.
  */
 final class AuditLog
 {
@@ -39,7 +43,7 @@ final class AuditLog
     public const ENTITIES = ['employee'];
     /** BF-4b1: the overtime Actions appendOvertime() audits, and the operation each transition names (0021). */
     public const OVERTIME_ACTIONS = [Action::OvertimeCreateSelfDraft, Action::OvertimeUpdateSelfDraft, Action::OvertimeDeleteSelfDraft, Action::OvertimeSubmitSelf, Action::OvertimeManage];
-    public const OVERTIME_OPERATIONS = ['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage];
+    public const OVERTIME_OPERATIONS = ['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage, 'approve' => Action::OvertimeManage];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';

@@ -17,7 +17,7 @@ $router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly twenty-seven routes; activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account and overtime routes require one' => static function () use ($production): void {
+    'production has exactly twenty-nine routes; activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account and overtime routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -48,6 +48,8 @@ return [
             ['POST', '/api/overtime-records/submit', [], RouteAuth::Required],
             ['POST', '/api/overtime-records/review', [], RouteAuth::Required],
             ['POST', '/api/overtime-records/reject', [], RouteAuth::Required],
+            ['GET', '/api/overtime-record/valuation', ['id'], RouteAuth::Required],
+            ['POST', '/api/overtime-records/approve', [], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

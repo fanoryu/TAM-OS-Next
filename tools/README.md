@@ -23,7 +23,7 @@ All commands are run from the repository root.
 | [`integration-surface-manifest.js`](integration-surface-manifest.js) | The frozen UX-006C3 integration surface (43 entries), consumed by the verifier and the authorization harness |
 | [`check-commit-attribution.js`](check-commit-attribution.js) | Owner-only authorship guard — the single source of attribution policy, shared by the tracked hook and CI (`CLAUDE.md` §15.7) |
 | [`install-hooks.js`](install-hooks.js) | Points this repository at the tracked `.githooks/` directory (repository-local; never global) |
-| [`verify-backend-boundary.js`](verify-backend-boundary.js) | Static boundary check for the PHP backend under `server/` (data-access boundary, forbidden APIs, API-header parity, `.gitignore` traps; BF-3C: capability construction, scoped business stores, company-table confinement, migration tenant key, and ACTION parity with `js/core/authz.js`; BF-4b1: `overtime_records` has one writer, its only DELETE is pinned to the Draft, version and company predicate, no TRUNCATE, each overtime route declares its existing Action, and double-quoted `*_SELF_SQL` constants must bind `:self_employee_id` too) |
+| [`verify-backend-boundary.js`](verify-backend-boundary.js) | Static boundary check for the PHP backend under `server/` (data-access boundary, forbidden APIs, API-header parity, `.gitignore` traps; BF-3C: capability construction, scoped business stores, company-table confinement, migration tenant key, and ACTION parity with `js/core/authz.js`; BF-4b1: `overtime_records` has one writer, its only DELETE is pinned to the Draft, version and company predicate, no TRUNCATE, each overtime route declares its existing Action, and double-quoted `*_SELF_SQL` constants must bind `:self_employee_id` too; BF-4b2: the approval is the one writer of the valuation snapshot and of `Approved` — from `'Reviewed'`, at the expected version, in company scope — the overtime store never reads the salary through a self-scope statement, the `TAM-OT-1` valuation is integer arithmetic only (no float, rounding helper, BCMath or `/`), the Overtime code names no payroll or finance, and approve declares `overtime.manage`) |
 
 ### Backend (BF-1)
 
@@ -52,7 +52,7 @@ php server/bin/migrate.php apply    # create and verify history, then run pendin
 
 Migration tests write their fixture files to temporary directories; nothing under `server/migrations/`
 is a test fixture. `server/migrations/` holds the production schema (BF-3A: `0001`–`0006`; BF-3B:
-`0007`–`0008`; BF-3C: `0009`–`0010`; BF-3D: `0011`–`0013`; BF-4a1: `0014`–`0017`; BF-4a2: `0018`–`0019`; BF-4b1: `0020`–`0021`); the boundary tool refuses any migration that inserts, updates or
+`0007`–`0008`; BF-3C: `0009`–`0010`; BF-3D: `0011`–`0013`; BF-4a1: `0014`–`0017`; BF-4a2: `0018`–`0019`; BF-4b1: `0020`–`0021`; BF-4b2: `0022`–`0023`); the boundary tool refuses any migration that inserts, updates or
 deletes rows (the one exception, `0015_backfill_legacy_employees`, is admitted only at its pinned digest), any cascading foreign key, and any new table that is not an auth/system table or a
 registered company table carrying the tenant key.
 
