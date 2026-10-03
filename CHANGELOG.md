@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **AFI-4c1 SESSION Payroll (frontend; SESSION mode only, CEO only, not shipped).** Signed in through the backend session,
+  the CEO has a Payroll section next to Employees and Overtime. It shows one month's payroll plans — employee, status,
+  base salary, overtime and total, exactly as TAM OS's server calculated them — and a plan's detail with the approved
+  overtime it counts. "Prepare payroll for <month>" asks first, then creates or refreshes the Draft plans and lists the
+  employees who were not included and why. A plan can be reviewed, approved (it becomes "Ready — approved, not paid"),
+  returned to Draft or cancelled, each after a confirmation; if the plan changed meanwhile, TAM OS reads it again and
+  nothing is sent twice. Nothing is paid, posted to Finance or committed. Employees do not see Payroll. The shipped
+  `AUTH_MODE` stays **LOCAL**.
 - **BF-4c1 Payroll plans (backend only, not shipped).** The server can now prepare a month's payroll: for each active
   employee with a salary it calculates a plan of the monthly base salary plus the overtime already approved for that
   month, using exactly the approved amounts (it never re-values overtime), rounded once to the whole Rupiah. Employees

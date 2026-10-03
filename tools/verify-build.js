@@ -6481,6 +6481,73 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
     'BF-4c1: documented — Commit is BF-4c2 (AI_CONTEXT, ARCHITECTURE) and the deployment note (DEPLOYMENT)');
 }
 
+// ===== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE =====
+// Owner decisions D-AFI4c1-1 = A (Committed decoded, display-only), D-AFI4c1-2 = A (a dedicated tenth
+// CI harness), D-AFI4c1-3 = A (the server status words; Ready is "Ready — approved, not paid"),
+// D-AFI4c1-4 = A (exclusions named from the CEO Employee list). CEO only, over BF-4c1; frontend only.
+console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
+  const apiC = code(rd('core/payroll-api.js')), storeC = code(rd('core/session-payroll.js')), viewC = code(rd('ui/session-payroll-view.js'));
+  const all = apiC + '\n' + storeC + '\n' + viewC;
+  const phpList = (src, name) => { const m = new RegExp('const ' + name + " = \\[([^\\]]*)\\]").exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  const jsList = (src, name) => { const m = new RegExp('const ' + name + ' = Object\\.freeze\\(\\[([^\\]]*)\\]\\)').exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  const viewFields = phpList(srv('Payroll/PayrollView.php'), 'FIELDS');
+  check(!!viewFields && JSON.stringify(jsList(apiC, 'PAYROLL_PLAN_KEYS')) === JSON.stringify(viewFields.slice().sort())
+    && JSON.stringify(jsList(apiC, 'PAYROLL_OVERTIME_KEYS')) === JSON.stringify((phpList(srv('Payroll/PayrollView.php'), 'OVERTIME_FIELDS') || []).slice().sort())
+    && JSON.stringify(jsList(apiC, 'PAYROLL_EXCLUSION_REASONS')) === JSON.stringify(phpList(srv('Payroll/PayrollService.php'), 'EXCLUSIONS'))
+    && JSON.stringify(jsList(apiC, 'PAYROLL_PLAN_STATUSES')) === JSON.stringify(['Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled']),
+    'AFI-4c1: contract = BF-4c1 — the plan keys (PayrollView::FIELDS), contributing overtime keys, exclusion reasons (PayrollService::EXCLUSIONS) and the five statuses, Committed included (D-AFI4c1-1 = A)');
+  check(/PAYROLL_SALARY_PATTERN = \/\^\(0\|\[1-9\]\[0-9\]\{0,12\}\)\\\.\(\[0-9\]\{2\}\)\$\//.test(apiC) && /PAYROLL_AMOUNT_PATTERN = \/\^\(0\|\[1-9\]\[0-9\]\{0,14\}\)\\\.00\$\//.test(apiC),
+    'AFI-4c1: money shapes are the server column shapes (DECIMAL(15,2) base, whole-Rupiah DECIMAL(17,2) amounts), checked as strings');
+  check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|BigInt/.test(all),
+    'AFI-4c1: no number conversion, Math, currency formatter or BigInt in the Payroll modules — money is display-only exact strings');
+  check(!/\b(State|PayrollRepository|payrollPlansForMonth|computePayrollPlanned|commitReadyPayroll|generatePayrollForMonth|transitionPayrollLifecycle|persistPayrollPlans|localStorage|sessionStorage|TransportAdapter|ApplicationGateway|StorageAdapter)\b/.test(all),
+    'AFI-4c1: no LOCAL State, repository, payroll engine, storage, Transport or Gateway — never a fallback');
+  check(!/\b(OvertimeApi|OvertimeDecoders|OvertimeRequests|SessionOvertime|SessionOvertimeStore|OvertimeValuation|overtimeIsAmount|overtimeIsSalary)\b|TAM-OT-1/.test(all) && /OvertimeCalendar\.isMonth/.test(apiC),
+    'AFI-4c1: no Overtime authority (only the pure OvertimeCalendar helper); contributing overtime comes from the Payroll detail answer');
+  check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|payslip)\b/i.test(all) && !/ledger|journal|payment|execut|\/finance|commit\(|expectedTotal|idempotency/i.test(all.replace(/posted to Finance/g, '')),
+    'AFI-4c1: no statutory payroll, payslip, Finance, payment, execution, Commit, expectedTotal or idempotency code');
+  check(/const PAYROLL_TRANSITIONS = Object\.freeze\(\{\s*review:[\s\S]*approve:[\s\S]*return:[\s\S]*cancel:[^}]*\}\)/.test(apiC) && !/commit/i.test((/const PAYROLL_TRANSITIONS = [\s\S]*?\}\);/.exec(apiC) || [''])[0])
+    && /Draft: Object\.freeze\(\['review', 'approve', 'cancel'\]\),\s*Reviewed: Object\.freeze\(\['approve', 'return', 'cancel'\]\),\s*Ready: Object\.freeze\(\['return', 'cancel'\]\)\s*\}\)/.test(storeC)
+    && !/Committed:|Cancelled:/.test((/const SESSION_PAYROLL_ACTIONS = [\s\S]*?\}\);/.exec(storeC) || [''])[0]),
+    'AFI-4c1: the control matrix is exactly BF-4c1 (Draft: review / approve / cancel; Reviewed: approve / return / cancel; Ready: return / cancel); Committed and Cancelled offer nothing — no BF-4c2 control');
+  check(/body: \{ month: monthKey \}/.test(apiC) && /body: \{ id: id, expectedVersion: expectedVersion \}/.test(apiC) && !/employeeId:|companyId|role:|status:\s*[a-z]|amount:\s*[a-z]/.test((apiC.match(/body: \{[^}]*\}/g) || []).join(' ')),
+    'AFI-4c1: the request bodies are exactly { month } and { id, expectedVersion } — no employee, company, role, status or money');
+  check(/p\.id === id && p\.status === t\[1\] && p\.version === expectedVersion \+ 1/.test(apiC),
+    'AFI-4c1: a transition is confirmed only by the same plan in the target status at expectedVersion + 1');
+  const abC = code(rd('core/auth-boot.js')), wsC = code(rd('ui/session-workspace-view.js'));
+  check(/SessionOvertimeStore\.clear\(\);\s*SessionPayrollStore\.clear\(\);/.test(abC) && /allowsWorkspace\(\)\{ return false; \}/.test(abC)
+    && jsFiles.filter((f) => /\brenderSessionPayrollHTML\(/.test(code(rd(f))) && f !== 'ui/session-payroll-view.js').join() === 'ui/session-workspace-view.js'
+    && /if\(payroll\)\{ title = renderSessionPayrollTitle\(pr\); body = renderSessionPayrollHTML\(principal, pr\); \}/.test(wsC),
+    'AFI-4c1: AuthBoot clears the Payroll data with the other SESSION stores; Payroll renders only as a section of the SESSION workspace; allowsWorkspace() stays false');
+  check(/if\(value === true && !sessionPayrollIsCeo\(principalNow\(\)\)\) return;/.test(storeC) && /if\(!s\.open \|\| !sessionPayrollIsCeo\(principal\)\) return;/.test(storeC)
+    && /function canAct\(\)\{ return sessionPayrollIsCeo\(principalNow\(\)\)/.test(storeC),
+    'AFI-4c1: CEO only — an Employee can neither open the section nor cause any Payroll read or write');
+  check(/Ready: 'Ready — approved, not paid'/.test(viewC) && !/'Approved'|Posted|Executed|\bPaid\b/.test(viewC.replace(/Approved overtime counted/g, '')),
+    'AFI-4c1: the server status words are shown (D-AFI4c1-3 = A) — Ready reads "Ready — approved, not paid"; never the LOCAL Approved, Posted or Executed');
+  check(/escapeHtml\(p\.baseSalary\)/.test(viewC) && /escapeHtml\(p\.totalAmount\)/.test(viewC) && /id="swpOpen' \+ i \+ '"/.test(viewC) && !/escapeHtml\(p\.id\)|escapeHtml\(row\.id\)/.test(viewC),
+    'AFI-4c1: amounts are the escaped server strings; rows open by position (no plan id in the page)');
+  const classes = (viewC.match(/class="([^"]+)"/g) || []).map((m) => m.slice(7, -1)).join(' ').split(/\s+/).filter((c) => /^[a-z][a-z0-9-]*$/.test(c)).concat(['btn-danger', 'btn-accent']);
+  const cssAll = ['base.css', 'components.css', 'shell.css', 'tokens.css', 'charts.css', 'fonts.css'].map((f) => fs.existsSync(path.join(root, 'css', f)) ? read(path.join(root, 'css', f)) : '').join('\n');
+  const defined = new Set((cssAll.match(/\.-?[_A-Za-z][_A-Za-z0-9-]*/g) || []).map((x) => x.slice(1)));
+  const missing = classes.filter((c, i) => classes.indexOf(c) === i && !defined.has(c));
+  check(missing.length === 0, 'AFI-4c1: the Payroll view uses only CSS classes that already exist (CSS unchanged)' + (missing.length ? ' >> missing: ' + missing.join(', ') : ''));
+  check((code(rd('transport/api-client.js')).match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4
+    && /const API_BODY_KEY_EXCEPTION = Object\.freeze\(\{ method: 'POST', path: '\/api\/overtime-records\/create', key: 'employeeId' \}\);/.test(rd('transport/api-client.js')),
+    'AFI-4c1: D-AFI4b1-3 is unchanged — the one body-key exception stays employeeId on POST /api/overtime-records/create; Payroll needs none');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-session-payroll-runtime.js')), 'AFI-4c1: the dedicated runtime harness exists — tools/verify-session-payroll-runtime.js (D-AFI4c1-2 = A)');
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(migrations[migrations.length - 1].startsWith('0026_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    'AFI-4c1: frontend only — migration head 0026, ACTIONS 21, AUTH_MODE LOCAL');
+  const docs = read(path.join(root, 'AI_CONTEXT.md')) + read(path.join(root, 'ARCHITECTURE.md'));
+  check(['D-AFI4c1-1 = A', 'D-AFI4c1-2 = A', 'D-AFI4c1-3 = A', 'D-AFI4c1-4 = A'].every((d) => docs.indexOf(d) !== -1) && /AFI-4c1/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
+    'AFI-4c1: the four owner decisions are recorded (AI_CONTEXT, ARCHITECTURE) and the deployment note exists (DEPLOYMENT)');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
