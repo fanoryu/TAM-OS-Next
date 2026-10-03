@@ -211,6 +211,14 @@ return [
         $auth = Policy::authorize($emp, Action::OvertimeUpdateSelfDraft, $own);
         assertThrows(\LogicException::class, static fn () => $store->approve($auth, 1, ['method' => 'TAM-OT-1', 'salary' => '1.00', 'standardHours' => '160.00', 'hours' => '1.00', 'amount' => '0.00']), 'no approval in self scope');
         assertThrows(\LogicException::class, static fn () => $store->lockValuationInputs($auth), 'no owner lock in self scope');
+        // A forged overtime.manage Authorization under the Employee's own scope (only Policy mints one in
+        // production, and Policy never would): the store's own self-scope guards refuse it first — before
+        // ScopedDatabase's structural refusal of a company statement under a self scope.
+        $forged = new \TamOs\Policy\Authorization(Action::OvertimeManage, Scope::of($emp), new ScopedRecord(Scope::of($emp), 'overtime', str_repeat('c', 32), 'emp_1', 'Reviewed'));
+        $e = assertThrows(\LogicException::class, static fn () => $store->approve($forged, 1, ['method' => 'TAM-OT-1', 'salary' => '1.00', 'standardHours' => '160.00', 'hours' => '1.00', 'amount' => '0.00']), 'a forged self-scope approval');
+        assertSame('overtime is approved only under overtime.manage, in company scope', $e->getMessage(), 'refused by the store itself');
+        $e = assertThrows(\LogicException::class, static fn () => $store->lockValuationInputs($forged), 'a forged self-scope owner lock');
+        assertSame('the owner is locked for valuation only under overtime.manage, in company scope', $e->getMessage(), 'refused by the store itself');
         assertTrue(!Policy::allows($emp, Action::OvertimeManage, new ScopedRecord(Scope::of($emp), 'overtime', str_repeat('c', 32), 'emp_1', 'Reviewed')), 'overtime.manage is CEO-only, own record or not');
     },
 ];
