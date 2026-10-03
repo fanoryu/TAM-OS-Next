@@ -312,8 +312,18 @@ function firewall(rt, label){
   // everywhere; approval and money are allowed ONLY where BF-4b2 discloses them — the valuation
   // block, the approve panel and the approval message — and only while the detail shown is one
   // whose valuation this principal reads (CEO: Reviewed / Approved; Employee: own Approved).
-  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Payslip|Finance|ledger|journal|payment|\btax\b|Smart Import|Backup|Restore|Start fresh|Commit|Post to/i.test(html),
-    label + ': the DOM carries no "Acting as", navigation, Payroll / Finance entry or vocabulary, commit / post control or local data tool');
+  // AFI-4c1 authorized revision: the CEO's section switch carries a third button, "Payroll" (not
+  // pressed — the Payroll section is never open in this harness). Only that exact button is
+  // removed before the deny test, only for the CEO; an Employee's switch has none, and any other
+  // Payroll / Finance text still fails. Was: no "Payroll" text at all.
+  const PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><\/div><\/nav>/;
+  const pNow = rt.AuthBoot.snapshot().principal;
+  const ceoNow = !!pNow && pNow.principalType === 'ceo';
+  check(ceoNow ? (html.match(/id="swSectionPayroll"/g) || []).length === (PAYROLL_TAB.test(html) ? 1 : 0) : !/swSectionPayroll|id="swp/.test(html),
+    label + ': the Payroll section button exists only for the CEO, unpressed; no Payroll section control is ever rendered here');
+  const denyHtml = ceoNow ? html.replace(PAYROLL_TAB, '</div></nav>') : html;
+  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Payslip|Finance|ledger|journal|payment|\btax\b|Smart Import|Backup|Restore|Start fresh|Commit|Post to/i.test(denyHtml) && !/id="swp/.test(html),
+    label + ': the DOM carries no "Acting as", navigation, Payroll / Finance entry or vocabulary (beyond the CEO\'s exact Payroll section button), commit / post control or local data tool');
   const w = rt.ot();
   const p = rt.AuthBoot.snapshot().principal;
   const disclosed = !!w.detailId && !!w.detail && rt.sessionOvertimeValuationWanted(p, w.detail);

@@ -128,6 +128,10 @@ valuation projection); both halves now exist as source, neither is deployed, and
 no change to any existing response, so it carries no frontend pairing constraint of its own: it may be deployed
 before a Payroll frontend exists. Its migrations must run before its routes are reachable. It is not deployed.
 
+**Deployment note — SESSION Payroll (AFI-4c1).** AFI-4c1 calls the BF-4c1 payroll routes, so it needs BF-4c1 deployed
+first (or with it). It changes no existing backend contract and adds no deploy-together constraint of its own: it
+decodes every BF-4c1 status, Committed included (display-only). It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

@@ -181,8 +181,8 @@ never resent. Money stays a string end to end (no float, no `fmtIDR`, no TAM-OT-
 the existing SESSION Overtime harness is extended (289 → 624 checks) and CI stays at **nine** harnesses. The package
 keeps 97 files (digest `2d826d4d…`); no backend change, no migration, ACTIONS stay 21, D-AFI4b1-3 unchanged,
 `AUTH_MODE` stays LOCAL. With AFI-4b2 both halves exist, and they must still be deployed together. Overtime is complete
-as source. **BF-4c1** (local candidate on `feature/bf-4c1-payroll-foundation`; not
-pushed, not merged, not deployed; owner decisions D-PAY-1..6 = A) is the first Payroll backend slice, backend only.
+as source. **BF-4c1** (merged to `main` as source, PR #44, canonical merge
+`ff53e7b475341030f33e8c882492dc4858f1815c`; not deployed; owner decisions D-PAY-1..6 = A) is the first Payroll backend slice, backend only.
 Migrations `0024`–`0026` (head `0026`) add `payroll_plans` — one plan per employee and month, enforced by a stored
 generated live key that a Cancelled plan does not occupy — `payroll_plan_overtime`, whose key is the consumed overtime
 record so the database refuses double consumption, and the `payroll.manage` audit vocabulary. Payroll is **Base Salary +
@@ -198,7 +198,23 @@ at READ COMMITTED and locks employees and plans by primary key in id order, so i
 and overtime approvals without a deadlock. **Ready is an approved obligation, not a payment. Commit is BF-4c2**, with the
 Employee's read of their own Committed plan, the D-PAY-4 drift guard and the MU-4 privacy proof; Finance posting comes
 later. No frontend change and an unchanged package (97 files, `2d826d4d…`); BF-4c1 only adds routes, so it can be
-deployed without a Payroll AFI. `AUTH_MODE` stays LOCAL.
+deployed without a Payroll AFI. `AUTH_MODE` stays LOCAL. **AFI-4c1** (local candidate on `feature/afi-4c1-session-payroll`; not pushed, not
+merged, not deployed; owner decisions D-AFI4c1-1 = A, D-AFI4c1-2 = A, D-AFI4c1-3 = A, D-AFI4c1-4 = A) is the SESSION
+Payroll workspace over BF-4c1, **CEO only**: a third section, "Payroll", beside Employees | Overtime (an Employee's
+sections are unchanged and make no Payroll request). It shows one month at a time (memory only, the local calendar month
+first), the month's plans in the server's order with the exact money strings the server sends (labelled "(Rp)"; nothing
+is computed, summed, rounded or reformatted in the browser), a plan's detail with its contributing Approved overtime
+(id, hours, frozen amount), "Prepare payroll for <month>" (generate, after an inline confirmation that says nothing is
+paid or posted to Finance) with the employees it left out named from the CEO Employee list (D-AFI4c1-4 = A — an id it
+cannot name is shown as the id), and Review / Approve / Return to draft / Cancel exactly as BF-4c1 allows, each confirmed
+first and sent once with `{ id, expectedVersion }`. The status words are the server's (D-AFI4c1-3 = A): Ready reads
+"Ready — approved, not paid"; Committed is decoded and display-only, with no control (D-AFI4c1-1 = A). Any 409 closes the
+confirmation and reads the plan again; an unconfirmed write is never resent. New modules `core/payroll-api.js`,
+`core/session-payroll.js`, `ui/session-payroll-view.js`; the package grows to 100 files (its digest changes); no CSS,
+backend, migration or ACTION change (still 21), no new body-key exception (D-AFI4b1-3 unchanged), `AUTH_MODE` stays
+LOCAL. Its dedicated harness, `tools/verify-session-payroll-runtime.js`, is the **tenth** CI harness (D-AFI4c1-2 = A,
+after a repeated-run and UTC-12 … UTC+14 determinism proof). AFI-4c1 needs BF-4c1 at runtime; it adds no
+deploy-together constraint of its own.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

@@ -148,6 +148,13 @@ module.exports = [
   'core/overtime-api.js',
   'core/session-overtime.js',
   'ui/session-overtime-view.js',
+  // --- AFI-4c1 SESSION Payroll (CEO only, BF-4c1): the strict Payroll client (reads over
+  //     ApiClient, writes over authSessionMutation), the in-memory Payroll section data and its
+  //     controller, and its view (a section of the SESSION workspace). Never State, never the
+  //     LOCAL payroll modules; the money is the server's exact strings. ---
+  'core/payroll-api.js',
+  'core/session-payroll.js',
+  'ui/session-payroll-view.js',
   // --- AFI-4a1 read-only SESSION Employee workspace: the strict Employee read client
   //     (over ApiClient), the in-memory SESSION Employee data and its controller, and
   //     the view auth-view.js renders while AUTHENTICATED. Defined before the auth

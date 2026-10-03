@@ -66,6 +66,9 @@ jobs:
       - name: Runtime harness - SESSION Overtime workspace (AFI-4b1)
         run: node tools/verify-session-overtime-runtime.js
 
+      - name: Runtime harness - SESSION Payroll workspace (AFI-4c1)
+        run: node tools/verify-session-payroll-runtime.js
+
       - name: Build deployment package
         run: node tools/build-package.js
 

@@ -1744,7 +1744,7 @@ and approval); its valuation inputs and exact-decimal method were deferred to BF
 `AI_CONTEXT.md`). BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`), AFI-4b1 is merged
 (PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), BF-4b2 is merged (PR #42, canonical
 `78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is merged (PR #43, canonical `58e1127a0e44b60bf771e2d399ea15336b6f9610`).
-Payroll follows: BF-4c1 (below) is a local candidate.
+Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`) and AFI-4c1 (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -1877,11 +1877,11 @@ stays at nine harnesses); the AFI-4b2 section and the revised AFI-4b1 / BF-4b2 p
 (including equality of every client constant with the BF-4b2 PHP source); a mutation campaign (17 mutants, all
 killed); test-only valuation / approve routes and `/__stub/bump-salary` in `tools/serve-auth-stub.js` for browser QA.
 
-### Payroll plan foundation — BF-4c1 (local candidate; backend only, not deployed)
+### Payroll plan foundation — BF-4c1 (merged as PR #44, canonical `ff53e7b4`; backend only, not deployed)
 
 BF-4c1 is the first Payroll backend slice (Phase 0 owner decisions D-PAY-1..6 = A, 2026-10-03). Backend only: no
 frontend change, the package is unchanged (97 files, digest `2d826d4d…`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
-It is a local candidate on `feature/bf-4c1-payroll-foundation`; not pushed, merged or deployed.
+It is merged to `main` as source (PR #44, canonical merge `ff53e7b475341030f33e8c882492dc4858f1815c`), not deployed.
 
 **Formula (D-PAY-2 = A, D-PAY-3 = A).** Payroll is **Base Salary + Approved Overtime only** — an internal TAM
 calculation, never statutory payroll: `total = round_half_up_to_whole_rupiah(monthly_base_salary + Σ approved_amount)`
@@ -1952,6 +1952,60 @@ LOCAL graph, the exact inputs, the projection, the statements and guards, Policy
 idempotence, recalculation, the lifecycle matrix, terminality, cancel and replacement, reads, hostile principals, the
 snapshot, audit rollback, out-of-bounds, the firewalls, migration from `0023`, lock, loser and race proofs including
 generate against generate, salary change, archive and overtime approval).
+
+### SESSION Payroll CEO workspace — AFI-4c1 (local candidate; frontend; SESSION mode only)
+
+AFI-4c1 is the SESSION counterpart of BF-4c1 (owner decisions D-AFI4c1-1 = A, D-AFI4c1-2 = A, D-AFI4c1-3 = A,
+D-AFI4c1-4 = A). It is a local candidate on `feature/afi-4c1-session-payroll`; not pushed, merged or deployed. Frontend
+only: no backend change, no migration, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, no CSS change.
+
+**Placement and authority.** A third section of the SESSION workspace, "Payroll", for the **CEO only** (Employees |
+Overtime | Payroll); an Employee keeps My profile | My overtime and never causes a Payroll request — `SessionPayroll`
+refuses every entry point for a non-CEO, and the server answers 403 anyway. It renders on the auth-view path
+(`renderAuthView` → `renderSessionWorkspace`); `AuthBoot.allowsWorkspace()` stays false; `AuthBoot` clears its data with the
+other SESSION stores on logout, session loss or a different principal.
+
+**Modules.** `core/payroll-api.js` — `PayrollDecoders` (strict: exactly BF-4c1's thirteen plan keys, the contributing
+overtime `{ id, hours, amount }`, the exclusion `{ employeeId, reason }` with the three BF-4c1 reasons, the five
+statuses; one bad item fails the whole answer), `PayrollRequests` (exactly `{ month }` and `{ id, expectedVersion }`) and
+`PayrollApi` (two reads over `ApiClient`, five writes over `authSessionMutation`; a transition is confirmed only by the
+same plan in its target status at `expectedVersion + 1`). `core/session-payroll.js` — `SessionPayrollStore` (memory
+only; generation and per-kind sequence tokens drop superseded and post-logout answers) and `SessionPayroll`.
+`ui/session-payroll-view.js` — the section. They load after the AFI-4b1 Overtime modules and before `employee-api.js`.
+The package grows from 97 to 100 files.
+
+**Money (D-PAY-2/3).** Display only: every amount is the exact string the server sent, escaped and labelled "(Rp)" — no
+`Number`, `parseFloat`, `Math`, `fmtIDR` or locale formatting, no sum, no month total, no TAM-OT-1. The month's plans are
+shown in the server's order, Cancelled and Committed included.
+
+**Flows.** The month bar (Previous / the field / Next; memory only; a change clears exclusions and the detail). "Prepare
+payroll for <month>" opens an inline confirmation (Drafts created and recalculated, Reviewed / Ready unchanged, nothing
+paid or posted to Finance), is sent once, and on confirmation shows "Not included (N)" — the excluded employees named from
+the CEO `EmployeeApi.list({ archived: true })` (D-AFI4c1-4 = A; an unknown id is shown as the id, never guessed) — and
+reads the month again (the generate answer lists live plans only). The detail shows the snapshot, money, hours, count,
+version and the contributing overtime from the Payroll detail answer only. Controls follow BF-4c1 exactly: Draft — Review,
+Approve, Cancel; Reviewed — Approve, Return to draft, Cancel; Ready — Return to draft, Cancel; Committed and Cancelled —
+none. Each asks first and sends `{ id, expectedVersion }` once; a confirmed transition is shown and the plan read again.
+
+**Words (D-AFI4c1-3 = A).** The server's statuses: Draft, Reviewed, Ready ("Ready — approved, not paid"), Committed,
+Cancelled — never the LOCAL "Approved", "Posted" or "Executed". **Committed (D-AFI4c1-1 = A)** is decoded because it is in
+BF-4c1's vocabulary, and is display-only: no Commit control, `expectedTotal`, idempotency key, drift or Employee read.
+
+**Failure handling.** Any 409 closes the confirmation, marks the list stale, reads the plan (or the month, for generate)
+again and asks for a new deliberate action; 404 closes the detail and reads the month; an outcome that cannot be known
+(503, network, timeout, malformed or non-confirming success) is reported from a fresh read and never resent; 401 ends the
+session; an unconfirmable CSRF recovery fails closed (`sessionUncertain`).
+
+**Firewalls.** No LOCAL `State`, repository, payroll engine or storage; no Overtime authority (only the pure
+`OvertimeCalendar` helper); no Finance, payment, execution, posting or Commit; no statutory term; no new body-key
+exception (D-AFI4b1-3 unchanged).
+
+**Proof.** `tools/verify-session-payroll-runtime.js` (D-AFI4c1-2 = A: dedicated; the **tenth** CI harness after a
+repeated-run and UTC-12 … UTC+14 determinism proof) runs every production module in the SESSION vm loader with a fetch
+stub and a fixed clock; its fabricated plans are deliberately inconsistent (a total of "999.00"), so only verbatim strings
+pass. The Employee and Overtime harnesses were revised narrowly to admit exactly the CEO's Payroll section button.
+`tools/serve-auth-stub.js` models BF-4c1 for browser QA (`/__stub/bump-payroll` makes a shown plan stale). AFI-4c1 needs
+BF-4c1 at runtime and adds no deploy-together constraint of its own.
 
 ### Release engineering
 
