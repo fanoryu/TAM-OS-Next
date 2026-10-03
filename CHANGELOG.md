@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **BF-4b2 Overtime valuation and approval (backend only, not shipped).** The CEO can see what a reviewed overtime
+  record is worth and approve it. The amount uses TAM's own internal method (TAM-OT-1: monthly salary × overtime
+  hours ÷ 160, rounded once to the whole Rupiah) — not a statutory formula — and is calculated exactly by the server.
+  Approval only goes through if the amount is still the one the CEO was shown; it then stays fixed, even if the
+  salary changes later. An employee can see the approved amount of their own overtime. Approval does not create
+  payroll, payments or finance entries. The screens for it come with AFI-4b2, which must be released together with it.
 - **AFI-4b1 SESSION Overtime (frontend; SESSION mode only, not shipped).** Signed in through the backend session,
   the CEO has an Overtime section next to Employees, and an Employee a "My overtime" section next to their profile.
   It shows one month at a time (starting at the current month; Previous / Next / a month field), the company's or
