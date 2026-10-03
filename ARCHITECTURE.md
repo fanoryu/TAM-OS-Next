@@ -1343,12 +1343,12 @@ no TRUNCATE; each overtime route declares its Action; double-quoted `*_SELF_SQL`
 
 **Not production-ready.** Everything BF-3A–BF-4a2 list; the SESSION UI is AFI-4b1 (merged, below).
 
-### Overtime valuation and approval — BF-4b2 (local candidate; backend only, not deployed)
+### Overtime valuation and approval — BF-4b2 (merged as PR #42, canonical `78ec019d`; backend only, not deployed)
 
 BF-4b2 makes an overtime record's money **server-authoritative** — valuation and approval only, never payroll (owner
 decisions D-BF4b-3 = A, D-BF4b-4 = A, D-BF4b2-1..5 = A, 2026-10-03). Backend only: no frontend change, the package is
-unchanged, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL. It is a local candidate on
-`feature/bf-4b2-overtime-approval`; not pushed, merged or deployed.
+unchanged, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL. It is merged to `main` as source (PR #42, canonical merge
+`78ec019d5820241d89fc518f0c6bf24a405a4738`), not deployed.
 
 **Method (D-BF4b-3 = A).** `TAM-OT-1`, a fixed, versioned **internal TAM** method — the LOCAL "TAM Internal Overtime
 Calculation Method" (`js/people/overtime.js`) at the LOCAL company defaults — and never a statutory or legal formula:
@@ -1404,8 +1404,9 @@ the immutable row is the valuation evidence. It is written in the approval trans
 payment or cash effect: an approval writes its overtime row and one audit row only (a DB test compares every table's
 row count). The boundary tool rejects any payroll or finance identifier in the Overtime code.
 
-**Frontend compatibility (D-BF4b2-5 = A).** No frontend change: the AFI-4b1 decoder keeps the four BF-4b1 statuses and
-fails closed (shows an error, never wrong data) on an Approved record. BF-4b2 and AFI-4b2 must be deployed together
+**Frontend compatibility (D-BF4b2-5 = A).** BF-4b2 itself changes no frontend file: the AFI-4b1 decoder keeps the
+four BF-4b1 statuses and fails closed (shows an error, never wrong data) on an Approved record. AFI-4b2 (below) is the
+frontend counterpart that understands Approved and the valuation projection. BF-4b2 and AFI-4b2 must be deployed together
 (also recorded in `docs/DEPLOYMENT.md`).
 
 **Proof.** Unit tests (`OvertimeValuationTest`: the reference cases, half-up boundaries, the bounds, every quarter hour
@@ -1741,15 +1742,15 @@ reconciliation, CSRF recovery, races, the email draft lifecycle, Employee contai
 deployed. The next domain is Overtime, as BF-4b1 → AFI-4b1 (non-money workflow) then BF-4b2 → AFI-4b2 (valuation
 and approval); its valuation inputs and exact-decimal method were deferred to BF-4b2 Phase 0 and are decided (see
 `AI_CONTEXT.md`). BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`), AFI-4b1 is merged
-(PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), and BF-4b2 is a local candidate (above).
+(PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), BF-4b2 is merged (PR #42, canonical
+`78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is a local candidate (below).
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
 AFI-4b1 is the SESSION frontend of the BF-4b1 non-money overtime workflow — no backend change, no migration of its
 own, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, "Acting as" is unchanged. It is merged to `main` as source (PR #41,
-canonical merge `77332ca20ccc01c56845938b214c7238646ff90f`), not deployed. Its decoder knows the four BF-4b1
-statuses only and fails closed on a BF-4b2 Approved record until AFI-4b2 (BF-4b2 and AFI-4b2 must be deployed
-together).
+canonical merge `77332ca20ccc01c56845938b214c7238646ff90f`), not deployed. As merged, its decoder knows the four
+BF-4b1 statuses only and fails closed on a BF-4b2 Approved record; AFI-4b2 (below) extends it deliberately.
 
 **Placement.** Overtime is a **section** of the one authenticated SESSION workspace, never the business shell
 (`AuthBoot.allowsWorkspace()` stays false) and never the LOCAL Overtime page (`js/people/overtime.js`). Under the
@@ -1814,6 +1815,66 @@ dropped. No money, rate, salary, schedule, approval, contract, payroll or pay es
 harness after a repeated-run and UTC / UTC+7 determinism proof); `tools/verify-session-identity-runtime.js` section
 3b (the selector exception, every other route and key still refused); the AFI-4b1 and D-AFI4b1-3 checks in
 `tools/verify-build.js`; test-only Overtime routes in `tools/serve-auth-stub.js` for browser QA.
+
+### SESSION Overtime valuation and approval — AFI-4b2 (local candidate; frontend; SESSION mode only)
+
+AFI-4b2 is the SESSION counterpart of BF-4b2, inside the existing Overtime section — no new module, page, navigation
+or CSS; no backend change, no migration, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, D-AFI4b1-3 unchanged (the
+approve body carries no `employeeId`). Owner decisions D-AFI4b2-1 = A and D-AFI4b2-2 = A. It is a local candidate on
+`feature/afi-4b2-session-overtime-valuation`; not pushed, merged or deployed. BF-4b2 and AFI-4b2 must be deployed
+together.
+
+**Client** (`js/core/overtime-api.js`). The status list equals `OvertimeStatus::VALUES` (Approved included, order
+kept); the record decoder is otherwise unchanged (nine keys, no money). `OvertimeDecoders.valuation(o, held)` decodes
+exactly `OvertimeValuationView::FIELDS` for the decoded record it was read for: the kind its status calls for
+(Reviewed → `preview`, Approved → `approved`, any other → none), the same id and hours, method `TAM-OT-1`, standard
+hours `160.00`, the server's exact salary (`> 0.00`) and whole-Rupiah amount shapes — frozen, nothing computed; a new
+method never decodes silently. `OvertimeApi.valuation(record)` is a third `ApiClient` GET;
+`OvertimeApi.approve(id, expectedVersion, expectedAmount)` posts exactly `{ id, expectedVersion, expectedAmount }`
+through the one `authSessionMutation` path and succeeds only on `{ overtimeRecord, overtimeValuation }` with the same
+record Approved and a frozen valuation of exactly the amount sent.
+
+**Disclosure.** `sessionOvertimeValuationWanted`: the CEO reads the preview of a Reviewed record and the frozen
+valuation of an Approved one; an Employee reads only the frozen valuation of their own Approved record and never
+requests a preview. The month list never carries money.
+
+| Principal + status | Actions | Valuation |
+|---|---|---|
+| Employee + own Draft | Edit, Delete, Submit | — |
+| Employee + own Submitted / Reviewed / Rejected | view only | none (no request) |
+| Employee + own Approved | view only | frozen |
+| CEO + Draft | Edit, Delete, Submit | — |
+| CEO + Submitted | Review, Reject | — |
+| CEO + Reviewed | Approve, Reject | preview |
+| CEO + Approved | view only (terminal) | frozen |
+| CEO + Rejected | view only | — |
+
+**Approval.** Approve is enabled only while a preview is ready that matches the detail (a preview, same id, same
+hours, record Reviewed); the inline panel repeats the exact amount; Confirm sends once, with `expectedVersion` from the
+held record and `expectedAmount` = the held preview's exact string. A confirmed approval applies the Approved record and
+its frozen valuation from the same answer. **D-AFI4b2-1 = A:** the server reports one generic 409 (`valuation_changed`
+is a log reason only), so ANY approve 409 drops the preview and the panel, reads the record again and — if still
+Reviewed — a fresh preview; the view compares the fresh amount with the amount sent as exact strings ("The amount
+changed from Rp X to Rp Y" / "The record changed" / "cannot be valued now" when the preview itself is a 409) and a new
+Approve → Confirm is required. An unconfirmed approval (503, network, timeout, malformed or non-confirming answer) is
+reconciled the same way ("now Approved" with the frozen amount, or "still Reviewed: not approved"). Reconciliation only
+reads; the approval is never resent.
+
+**State** (`js/core/session-overtime.js`). `valuation`, `valuationId`, `valuationStatus`, `valuationError` with its own
+sequence; memory only; dropped on clear, a new or closed detail, a saved or deleted record, a section switch (a salary
+may change under Employees) and a refused or unconfirmed approval; a late answer for another record, generation or
+request is refused.
+
+**Presentation** (`js/ui/session-overtime-view.js`). One block in the detail: "Valuation preview — not yet approved"
+or "Approved valuation (frozen at approval)", with Amount (Rp), Monthly salary basis (Rp), Overtime hours, Standard
+monthly hours and Method "TAM-OT-1 — internal TAM overtime method (not a statutory calculation)" — each the exact
+escaped server string (the SESSION money convention). No hourly rate, multiplier, statutory claim, payroll or finance
+vocabulary; no float formatter (`fmtIDR`), no arithmetic on a money value.
+
+**Proof.** `tools/verify-session-overtime-runtime.js` extended (D-AFI4b2-2 = A; sections S–Z; 289 → 624 checks; CI
+stays at nine harnesses); the AFI-4b2 section and the revised AFI-4b1 / BF-4b2 pins in `tools/verify-build.js`
+(including equality of every client constant with the BF-4b2 PHP source); a mutation campaign (17 mutants, all
+killed); test-only valuation / approve routes and `/__stub/bump-salary` in `tools/serve-auth-stub.js` for browser QA.
 
 ### Release engineering
 

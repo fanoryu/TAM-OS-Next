@@ -121,7 +121,8 @@ for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the
 BF-4b2 and AFI-4b2 must be deployed together. BF-4b2 lets the CEO approve overtime (an `Approved`
 status), and the AFI-4b1 SESSION Overtime client deliberately fails closed on that status, so there must
 never be a production interval in which the backend can create Approved records while the deployed
-frontend is AFI-4b1 only.
+frontend is AFI-4b1 only. AFI-4b2 is that frontend counterpart (it understands Approved and the
+valuation projection); both halves now exist as source, neither is deployed, and they ship together.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
