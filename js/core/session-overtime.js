@@ -1,13 +1,15 @@
 /* ============================================================
-   SESSION OVERTIME DATA (AFI-4b1) — js/core/session-overtime.js
+   SESSION OVERTIME DATA (AFI-4b1, AFI-4b2) — js/core/session-overtime.js
    ------------------------------------------------------------
-   The SESSION-mode Overtime section of the authenticated workspace: the non-money workflow of
-   BF-4b1 (Draft → Submitted → Reviewed, Submitted / Reviewed → Rejected; edit and hard delete of
-   a Draft only). Held in memory only and owned here — never in the LOCAL `State`, never in
-   storage, the URL or history, never through a LOCAL repository or the LOCAL Overtime module
+   The SESSION-mode Overtime section of the authenticated workspace: the workflow of BF-4b1
+   (Draft → Submitted → Reviewed, Submitted / Reviewed → Rejected; edit and hard delete of a
+   Draft only) and BF-4b2 (Reviewed → Approved with the server's frozen valuation; Approved is
+   terminal). Held in memory only and owned here — never in the LOCAL `State`, never in storage,
+   the URL or history, never through a LOCAL repository or the LOCAL Overtime module
    (js/people/overtime.js). The server (OvertimeApi, js/core/overtime-api.js) is the only source;
-   this module only remembers its last decoded answers for the view. No rate, salary, schedule,
-   amount, approval, contract or payroll value exists here (valuation is BF-4b2).
+   this module only remembers its last decoded answers for the view. It computes no valuation and
+   holds no rate, schedule, contract or payroll value; an amount is only ever the exact string of
+   a decoded server valuation.
 
    SessionOvertimeStore — the data:
      principalKey  the principal the data belongs to (user, role, binding)
@@ -21,19 +23,26 @@
      people, labelsSeq, labelsStatus   CEO: the Employee list (EmployeeApi.list({ archived: true }),
                    the one strict Employee decoder — D-AFI4b1-1) behind the owner labels and the
                    create selector; never stored on a record, never guessed
+     valuation, valuationId, valuationSeq, valuationStatus, valuationError   AFI-4b2: the decoded
+                   valuation of the detail shown — the CEO's preview of a Reviewed record, or the
+                   frozen valuation of an Approved one (CEO, or the owning Employee). Read only
+                   when the detail calls for it (sessionOvertimeValuationWanted): an Employee never
+                   asks for a preview. Dropped whenever the detail, the section, the principal or
+                   the session changes, and after any approval that was not confirmed.
      error         { scope, kind, retryAfter?, requestId? } of the last failed list / detail read
      labelsError   the same for the Employee list
      form          the create / edit draft { mode, id, base, values } — strings, memory only
-     panel         the open action panel { kind, id }: delete | submit | review | reject
+     panel         the open action panel { kind, id }: delete | submit | review | reject | approve
      mutation      { kind, status, error, fields, target } of the write — status idle | pending |
-                   error | ambiguous; target { id, version } of the record it was sent for
+                   error | ambiguous; target { id, version } of the record it was sent for (approve:
+                   { id, version, amount }, the amount sent)
      mutationSeq   the sequence of the write in flight
      notice, focus a fixed message key / a focus hint for the view
 
    A request takes a token { gen, kind, seq }; its answer is applied only while token.gen is the
    current generation AND token.seq is still the latest of its kind (list, detail, labels,
-   mutation). A superseded read is ignored; a sent write is never aborted, and its late answer is
-   dropped the same way.
+   valuation, mutation). A superseded read is ignored; a sent write is never aborted, and its late
+   answer is dropped the same way.
 
    SessionOvertime — the controller the view calls. Controls are UX only: every action is checked
    again here (sessionOvertimeActions) and the server decides. A write is sent once; only the
@@ -44,6 +53,15 @@
    success) is AMBIGUOUS: never resent — the month (create) or the record (every other write) is
    read again and the view reports what that read shows.
 
+   APPROVAL (AFI-4b2, owner decision D-AFI4b2-1 = A): the CEO approves exactly the preview shown —
+   the approve body's expectedAmount is the amount of the decoded preview held for that record,
+   and Approve is offered only while that preview is ready and matches the detail. ANY approve 409
+   (the server reports one generic conflict) drops the preview and the panel and reads the record
+   again; a record still Reviewed then gets a fresh preview, and the view compares its amount with
+   the amount sent, as exact strings. An unconfirmed approval is reconciled the same way. The
+   approval itself is NEVER sent again by this module: a new approval is always a new, deliberate
+   Approve → Confirm.
+
    TARGET SELECTOR (D-AFI4b1-3): the owner a create names is the Employee's own
    principal.employeeId, or the CEO's selected live, Active Employee — a selector the server
    re-scopes, never authority.
@@ -53,21 +71,22 @@
 
 const SESSION_OVERTIME_STATUS = Object.freeze({ IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' });
 const SESSION_OVERTIME_MUTATION_STATUS = Object.freeze({ IDLE: 'idle', PENDING: 'pending', ERROR: 'error', AMBIGUOUS: 'ambiguous' });
-const SESSION_OVERTIME_MUTATION_KINDS = Object.freeze(['create', 'update', 'delete', 'submit', 'review', 'reject']);
-const SESSION_OVERTIME_PANEL_KINDS = Object.freeze(['delete', 'submit', 'review', 'reject']);
+const SESSION_OVERTIME_MUTATION_KINDS = Object.freeze(['create', 'update', 'delete', 'submit', 'review', 'reject', 'approve']);
+const SESSION_OVERTIME_PANEL_KINDS = Object.freeze(['delete', 'submit', 'review', 'reject', 'approve']);
 // The form fields, in form order: the owner (CEO create only) and OVERTIME_WRITABLE_FIELDS.
 const SESSION_OVERTIME_FORM_FIELDS = Object.freeze(['employeeId', 'monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes']);
 const SESSION_OVERTIME_MUTATION_IDLE = Object.freeze({ kind: null, status: SESSION_OVERTIME_MUTATION_STATUS.IDLE, error: null, fields: null, target: null });
 
-// The control matrix (D-BF4b-5) — UX only; the server decides every write again.
+// The control matrix (D-BF4b-5, AFI-4b2) — UX only; the server decides every write again.
 //   Employee + Draft: edit, delete, submit. Employee + anything else: view only.
-//   CEO + Draft: edit, delete, submit. CEO + Submitted: review, reject. CEO + Reviewed: reject.
-//   CEO + Rejected: view only. An Employee is offered nothing on a record that is not their own.
+//   CEO + Draft: edit, delete, submit. CEO + Submitted: review, reject. CEO + Reviewed: approve,
+//   reject. CEO + Approved / Rejected: view only (both terminal). An Employee is offered nothing on
+//   a record that is not their own, and never approve.
 const SESSION_OVERTIME_EMPLOYEE_ACTIONS = Object.freeze({ Draft: Object.freeze(['edit', 'delete', 'submit']) });
 const SESSION_OVERTIME_CEO_ACTIONS = Object.freeze({
   Draft: Object.freeze(['edit', 'delete', 'submit']),
   Submitted: Object.freeze(['review', 'reject']),
-  Reviewed: Object.freeze(['reject'])
+  Reviewed: Object.freeze(['approve', 'reject'])
 });
 const SESSION_OVERTIME_NONE = Object.freeze([]);
 function sessionOvertimeActions(principal, record){
@@ -76,6 +95,24 @@ function sessionOvertimeActions(principal, record){
   if(principal.principalType === PRINCIPAL_TYPES.CEO) return own(SESSION_OVERTIME_CEO_ACTIONS);
   if(principal.principalType === PRINCIPAL_TYPES.EMPLOYEE && typeof principal.employeeId === 'string' && record.employeeId === principal.employeeId) return own(SESSION_OVERTIME_EMPLOYEE_ACTIONS);
   return SESSION_OVERTIME_NONE;
+}
+
+// AFI-4b2 disclosure (BF-4b2): whether the detail shown has a valuation this principal reads —
+// the CEO: a Reviewed record's preview or an Approved record's frozen valuation; an Employee: the
+// frozen valuation of their OWN Approved record only. Never a preview for an Employee, so it is
+// never even requested.
+function sessionOvertimeValuationWanted(principal, record){
+  if(!principal || !record) return false;
+  if(principal.principalType === PRINCIPAL_TYPES.CEO) return record.status === 'Reviewed' || record.status === 'Approved';
+  return principal.principalType === PRINCIPAL_TYPES.EMPLOYEE && typeof principal.employeeId === 'string'
+    && record.employeeId === principal.employeeId && record.status === 'Approved';
+}
+
+// AFI-4b2: the preview the CEO may approve — ready, a preview, of this very Reviewed record and
+// its hours. Approve is offered and sent only against it.
+function sessionOvertimePreviewMatches(record, valuationStatus, valuation){
+  return !!record && !!valuation && valuationStatus === SESSION_OVERTIME_STATUS.READY && record.status === 'Reviewed'
+    && valuation.kind === 'preview' && valuation.id === record.id && valuation.hours === record.hours;
 }
 
 // The month the section opens on: the local calendar month of `now` (injectable; a Date by default).
@@ -109,6 +146,7 @@ const SessionOvertimeStore = (function(){
   let list = null, listMonth = null, listSeq = 0, listStatus = SESSION_OVERTIME_STATUS.IDLE, listStale = false;
   let detail = null, detailId = null, detailSeq = 0, detailStatus = SESSION_OVERTIME_STATUS.IDLE;
   let people = null, labelsSeq = 0, labelsStatus = SESSION_OVERTIME_STATUS.IDLE, labelsError = null;
+  let valuation = null, valuationId = null, valuationSeq = 0, valuationStatus = SESSION_OVERTIME_STATUS.IDLE, valuationError = null;
   let error = null;
   let mutation = SESSION_OVERTIME_MUTATION_IDLE, mutationSeq = 0;
   let form = null, panel = null, notice = null, focus = null;
@@ -117,16 +155,21 @@ const SessionOvertimeStore = (function(){
     return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null;
   }
   function seqOf(kind){
-    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'mutation' ? mutationSeq : -1;
+    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'valuation' ? valuationSeq : kind === 'mutation' ? mutationSeq : -1;
   }
   function isLive(token){ return !!token && token.gen === generation; }
   function isCurrent(token){
     return isLive(token) && token.seq === seqOf(token.kind);
   }
+  // AFI-4b2: forgets the valuation; a pending valuation answer is dropped.
+  function dropValuation(){
+    valuationSeq++; valuation = null; valuationId = null; valuationStatus = SESSION_OVERTIME_STATUS.IDLE; valuationError = null;
+  }
   function clear(){
     open = false; month = null;
     list = null; listMonth = null; listStatus = SESSION_OVERTIME_STATUS.IDLE; listStale = false; listSeq++;
     detail = null; detailId = null; detailStatus = SESSION_OVERTIME_STATUS.IDLE; detailSeq++;
+    dropValuation();
     people = null; labelsStatus = SESSION_OVERTIME_STATUS.IDLE; labelsError = null; labelsSeq++;
     error = null;
     mutation = SESSION_OVERTIME_MUTATION_IDLE; mutationSeq++;
@@ -144,6 +187,16 @@ const SessionOvertimeStore = (function(){
   function formView(){
     return form ? Object.freeze({ mode: form.mode, id: form.id, base: form.base, values: Object.freeze(Object.assign({}, form.values)) }) : null;
   }
+  // A confirmed record from create / update / submit / review / reject / approve: it becomes the
+  // detail (its valuation, if any, is read again); the list is stale and shows the record's month.
+  function applySaved(token, item, noticeKey){
+    if(!isCurrent(token) || token.kind !== 'mutation') return false;
+    detailSeq++; detail = item; detailId = item.id; detailStatus = SESSION_OVERTIME_STATUS.READY; clearError('detail');
+    dropValuation();
+    form = null; panel = null; mutation = SESSION_OVERTIME_MUTATION_IDLE; listStale = true; notice = noticeKey;
+    if(month !== item.monthKey){ month = item.monthKey; list = null; listMonth = null; listStatus = SESSION_OVERTIME_STATUS.IDLE; listSeq++; clearError('list'); }
+    return true;
+  }
 
   return Object.freeze({
     clear: clear,
@@ -155,8 +208,10 @@ const SessionOvertimeStore = (function(){
       principalKey = key;
       return true;
     },
-    // Shows or leaves the section. The month is chosen once, when it is first shown.
+    // Shows or leaves the section. The month is chosen once, when it is first shown. Any switch
+    // drops the valuation (a salary may change in the other section): it is read again on return.
     setOpen(value, initialMonth){
+      if(open !== (value === true)) dropValuation();
       open = value === true;
       if(open && month === null) month = initialMonth;
     },
@@ -172,7 +227,12 @@ const SessionOvertimeStore = (function(){
       }
       if(kind === 'detail'){
         detailSeq++; detailId = arg; detail = null; detailStatus = SESSION_OVERTIME_STATUS.LOADING; clearError('detail');
+        dropValuation();
         return Object.freeze({ gen: generation, kind: kind, seq: detailSeq });
+      }
+      if(kind === 'valuation'){
+        valuationSeq++; valuationId = arg; valuation = null; valuationStatus = SESSION_OVERTIME_STATUS.LOADING; valuationError = null;
+        return Object.freeze({ gen: generation, kind: kind, seq: valuationSeq });
       }
       if(kind === 'labels'){
         labelsSeq++; people = null; labelsStatus = SESSION_OVERTIME_STATUS.LOADING; labelsError = null;
@@ -197,9 +257,16 @@ const SessionOvertimeStore = (function(){
       people = items; labelsStatus = SESSION_OVERTIME_STATUS.READY;
       return true;
     },
+    // AFI-4b2: only for the record it was asked for, while that record is still the detail.
+    applyValuation(token, item){
+      if(!isCurrent(token) || token.kind !== 'valuation' || !item || item.id !== valuationId || !detail || detail.id !== item.id) return false;
+      valuation = item; valuationStatus = SESSION_OVERTIME_STATUS.READY;
+      return true;
+    },
     applyError(token, failed){
       if(!isCurrent(token)) return false;
       if(token.kind === 'labels'){ people = null; labelsStatus = SESSION_OVERTIME_STATUS.ERROR; labelsError = failure(failed); return true; }
+      if(token.kind === 'valuation'){ valuation = null; valuationStatus = SESSION_OVERTIME_STATUS.ERROR; valuationError = failure(failed); return true; }
       if(token.kind === 'list'){ list = null; listStatus = SESSION_OVERTIME_STATUS.ERROR; }
       else { detail = null; detailStatus = SESSION_OVERTIME_STATUS.ERROR; }
       error = Object.freeze(Object.assign({ scope: token.kind }, failure(failed)));
@@ -209,6 +276,7 @@ const SessionOvertimeStore = (function(){
     // panel of that record go with it.
     closeDetail(){
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_OVERTIME_STATUS.IDLE; clearError('detail');
+      dropValuation();
       if(form && form.mode === 'edit') form = null;
       panel = null;
     },
@@ -247,25 +315,29 @@ const SessionOvertimeStore = (function(){
       if(status === SESSION_OVERTIME_MUTATION_STATUS.AMBIGUOUS) panel = null;
       return true;
     },
+    // AFI-4b2 (D-AFI4b2-1): an approval that was refused (409) or not confirmed — the preview it
+    // was sent against and its panel are dropped at once; the record read again decides the rest.
+    dropApproval(){ panel = null; dropValuation(); },
     // A request refused before transport: nothing was sent.
     refuseMutation(kind, fields){
       mutationSeq++;
       mutation = Object.freeze({ kind: kind, status: SESSION_OVERTIME_MUTATION_STATUS.ERROR, error: Object.freeze({ kind: 'VALIDATION' }), fields: Object.freeze(fields.slice()), target: null });
       notice = null;
     },
-    // A confirmed record from create / update / submit / review / reject: it becomes the detail;
-    // the list is stale and shows the record's month.
-    applySaved(token, item, noticeKey){
-      if(!isCurrent(token) || token.kind !== 'mutation') return false;
-      detailSeq++; detail = item; detailId = item.id; detailStatus = SESSION_OVERTIME_STATUS.READY; clearError('detail');
-      form = null; panel = null; mutation = SESSION_OVERTIME_MUTATION_IDLE; listStale = true; notice = noticeKey;
-      if(month !== item.monthKey){ month = item.monthKey; list = null; listMonth = null; listStatus = SESSION_OVERTIME_STATUS.IDLE; listSeq++; clearError('list'); }
+    applySaved: applySaved,
+    // AFI-4b2: a confirmed approval — the Approved record and its frozen valuation, from the same
+    // answer, become the detail together.
+    applyApproved(token, item, frozen){
+      if(!isCurrent(token) || token.kind !== 'mutation' || !item || !frozen || frozen.id !== item.id || frozen.kind !== 'approved') return false;
+      if(!applySaved(token, item, 'approved')) return false;
+      valuationSeq++; valuation = frozen; valuationId = item.id; valuationStatus = SESSION_OVERTIME_STATUS.READY; valuationError = null;
       return true;
     },
     // A confirmed delete: the detail and its form close; the list is stale.
     applyDeleted(token){
       if(!isCurrent(token) || token.kind !== 'mutation') return false;
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_OVERTIME_STATUS.IDLE; clearError('detail');
+      dropValuation();
       form = null; panel = null; mutation = SESSION_OVERTIME_MUTATION_IDLE; listStale = true; notice = 'deleted';
       return true;
     },
@@ -280,6 +352,7 @@ const SessionOvertimeStore = (function(){
         list: list, listMonth: listMonth, listStatus: listStatus, listStale: listStale,
         detail: detail, detailId: detailId, detailStatus: detailStatus,
         people: people, labelsStatus: labelsStatus, labelsError: labelsError, error: error,
+        valuation: valuation, valuationId: valuationId, valuationStatus: valuationStatus, valuationError: valuationError,
         mutation: mutation, form: formView(), panel: panel, notice: notice
       });
     }
@@ -302,6 +375,7 @@ const SessionOvertime = (function(){
     if(!out.ok) applied = SessionOvertimeStore.applyError(token, out);
     else if(kind === 'list') applied = SessionOvertimeStore.applyList(token, out.data);
     else if(kind === 'detail') applied = SessionOvertimeStore.applyDetail(token, out.data);
+    else if(kind === 'valuation') applied = SessionOvertimeStore.applyValuation(token, out.data);
     else applied = SessionOvertimeStore.applyLabels(token, out.data);
     if(applied) paint();
   }
@@ -318,11 +392,13 @@ const SessionOvertime = (function(){
   function loadDetail(id){ return run('detail', id, () => OvertimeApi.get(id)); }
   // D-AFI4b1-1: the canonical Employee list, archived records included, read-only.
   function loadLabels(){ return run('labels', null, () => EmployeeApi.list({ archived: true })); }
+  // AFI-4b2: the valuation of the decoded record `d` (a read; reconciliation may repeat it).
+  function loadValuation(d){ return run('valuation', d.id, () => OvertimeApi.valuation(d)); }
 
   /* ---------- writes ---------- */
   // Outcomes that cannot be known: the write may or may not have been applied.
   const AMBIGUOUS = Object.freeze([API_RESULT_KINDS.UNAVAILABLE, OVERTIME_API_INVALID]);
-  const NOTICES = Object.freeze({ create: 'created', update: 'saved', submit: 'submitted', review: 'reviewed', reject: 'rejected' });
+  const NOTICES = Object.freeze({ create: 'created', update: 'saved', submit: 'submitted', review: 'reviewed', reject: 'rejected', approve: 'approved' });
   const PANEL_CALLS = Object.freeze({
     delete: (id, v) => OvertimeApi.remove(id, v),
     submit: (id, v) => OvertimeApi.submit(id, v),
@@ -370,6 +446,9 @@ const SessionOvertime = (function(){
         SessionOvertimeStore.applyDeleted(token);
         SessionOvertimeStore.setFocus('message');
         loadMonth(SessionOvertimeStore.snapshot().month);
+      } else if(kind === 'approve'){
+        SessionOvertimeStore.applyApproved(token, out.data.record, out.data.valuation);
+        SessionOvertimeStore.setFocus('message');
       } else {
         SessionOvertimeStore.applySaved(token, out.data, NOTICES[kind]);
         SessionOvertimeStore.setFocus('message');
@@ -380,6 +459,7 @@ const SessionOvertime = (function(){
     if(AMBIGUOUS.indexOf(out.kind) !== -1){
       // Never resent: read the server state again instead.
       SessionOvertimeStore.failMutation(token, SESSION_OVERTIME_MUTATION_STATUS.AMBIGUOUS, out);
+      if(kind === 'approve') SessionOvertimeStore.dropApproval();
       SessionOvertimeStore.markListStale();
       SessionOvertimeStore.setFocus('message');
       if(kind === 'create') loadMonth(s.month);
@@ -388,7 +468,14 @@ const SessionOvertime = (function(){
       return;
     }
     SessionOvertimeStore.failMutation(token, SESSION_OVERTIME_MUTATION_STATUS.ERROR, out);
-    if(out.kind === API_RESULT_KINDS.NOT_FOUND && kind !== 'create'){
+    if(kind === 'approve' && out.kind === API_RESULT_KINDS.CONFLICT){
+      // D-AFI4b2-1 = A: ANY approve 409 — the preview and the panel go now, the record is read
+      // again (a Reviewed record then gets a fresh preview). The approval is not sent again.
+      SessionOvertimeStore.dropApproval();
+      SessionOvertimeStore.markListStale();
+      SessionOvertimeStore.setFocus('message');
+      if(s.detailId) loadDetail(s.detailId);
+    } else if(out.kind === API_RESULT_KINDS.NOT_FOUND && kind !== 'create'){
       SessionOvertimeStore.closeDetail();
       SessionOvertimeStore.setFocus('message');
       loadMonth(s.month);
@@ -421,6 +508,9 @@ const SessionOvertime = (function(){
       if(!s.open || !knownPrincipal(principal)) return;
       if(s.listStatus === SESSION_OVERTIME_STATUS.IDLE || (s.listStale && !s.detailId && s.listStatus !== SESSION_OVERTIME_STATUS.LOADING)) loadMonth(s.month);
       if(ceoPrincipal(principal) && s.labelsStatus === SESSION_OVERTIME_STATUS.IDLE) loadLabels();
+      // AFI-4b2: the valuation the detail shown calls for — never a preview for an Employee.
+      if(s.detailId && s.detailStatus === SESSION_OVERTIME_STATUS.READY && s.detail && s.detail.id === s.detailId
+        && s.valuationStatus === SESSION_OVERTIME_STATUS.IDLE && sessionOvertimeValuationWanted(principal, s.detail)) loadValuation(s.detail);
     },
     // The section switch of the workspace view. Nothing changes while a write is in flight.
     show(value){
@@ -469,6 +559,16 @@ const SessionOvertime = (function(){
       const s = SessionOvertimeStore.snapshot();
       if(!ceoPrincipal(p) || pending() || !s.open || s.labelsStatus !== SESSION_OVERTIME_STATUS.ERROR) return;
       const loading = loadLabels();
+      paint();
+      return loading;
+    },
+    // AFI-4b2: a failed valuation read, read again — only where the detail calls for one.
+    retryValuation(){
+      const p = principalNow();
+      const s = SessionOvertimeStore.snapshot();
+      if(!knownPrincipal(p) || pending() || !s.open || s.valuationStatus !== SESSION_OVERTIME_STATUS.ERROR) return;
+      if(s.detailStatus !== SESSION_OVERTIME_STATUS.READY || !s.detail || !sessionOvertimeValuationWanted(p, s.detail)) return;
+      const loading = loadValuation(s.detail);
       paint();
       return loading;
     },
@@ -566,6 +666,7 @@ const SessionOvertime = (function(){
       const d = s.detail;
       if(s.detailStatus !== SESSION_OVERTIME_STATUS.READY || !d || s.form || s.panel) return;
       if(sessionOvertimeActions(principalNow(), d).indexOf(kind) === -1) return;
+      if(kind === 'approve' && !sessionOvertimePreviewMatches(d, s.valuationStatus, s.valuation)) return;
       SessionOvertimeStore.openPanel(kind, d.id);
       SessionOvertimeStore.setFocus('panel');
       paint();
@@ -576,7 +677,8 @@ const SessionOvertime = (function(){
       paint();
     },
     // Sends the open action once, for the record it was opened on, at the version now held —
-    // only if the matrix still offers it for that record.
+    // only if the matrix still offers it for that record. Approve sends the amount of the preview
+    // held for that record (D-AFI4b2-1): the exact string the CEO was shown, never anything else.
     async confirmPanel(){
       if(!canAct()) return;
       const s = SessionOvertimeStore.snapshot();
@@ -584,6 +686,13 @@ const SessionOvertime = (function(){
       const d = s.detail;
       if(!a || s.detailStatus !== SESSION_OVERTIME_STATUS.READY || !d || d.id !== a.id) return;
       if(sessionOvertimeActions(principalNow(), d).indexOf(a.kind) === -1){ SessionOvertimeStore.closePanel(); paint(); return; }
+      if(a.kind === 'approve'){
+        if(!sessionOvertimePreviewMatches(d, s.valuationStatus, s.valuation)){ SessionOvertimeStore.closePanel(); paint(); return; }
+        const shown = s.valuation.amount;
+        const sent = SessionOvertimeStore.beginMutation('approve', { id: d.id, version: d.version, amount: shown });
+        paint();
+        return settle(sent, await OvertimeApi.approve(d.id, d.version, shown));
+      }
       const token = SessionOvertimeStore.beginMutation(a.kind, { id: d.id, version: d.version });
       paint();
       return settle(token, await PANEL_CALLS[a.kind](d.id, d.version));

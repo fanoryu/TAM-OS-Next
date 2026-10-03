@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION OVERTIME VIEW (AFI-4b1) — js/ui/session-overtime-view.js
+   SESSION OVERTIME VIEW (AFI-4b1, AFI-4b2) — js/ui/session-overtime-view.js
    ------------------------------------------------------------
    The Overtime section of the authenticated SESSION workspace, rendered by
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js) — its only caller — when the
@@ -10,18 +10,26 @@
      CEO       Overtime: the month bar (Previous, the month, Next), the company's records of
                that month (date, owner, hours, status), a record's detail, "Add overtime" for a
                live, Active Employee, and the actions the matrix offers for the record shown —
-               Edit / Delete / Submit on a Draft, Review / Reject on a Submitted record, Reject
-               on a Reviewed one.
+               Edit / Delete / Submit on a Draft, Review / Reject on a Submitted record, Approve /
+               Reject on a Reviewed one (Approve against the valuation preview shown with it),
+               nothing on an Approved one (its frozen valuation is shown) or a Rejected one.
      Employee  My overtime: the same, for their own records only — Edit / Delete / Submit on
-               their own Draft; never Review or Reject.
+               their own Draft; the frozen valuation of their own Approved record; never a
+               preview, never Review, Reject or Approve.
 
    Data comes only from SessionOvertime / SessionOvertimeStore (js/core/session-overtime.js);
    nothing is written here but the DOM. A draft is handed to SessionOvertime.setDraft() as it
    is typed (memory only, no render). Every message is a fixed string; every server value and
    every draft value is escaped; hours are shown exactly as the server sent them. The opaque
    record and Employee ids never appear in the page: a row is opened by its position in the
-   list that was rendered, and the CEO's owner choice by its position in the selector. No
-   rate, salary, amount or pay estimate exists here (valuation is BF-4b2).
+   list that was rendered, and the CEO's owner choice by its position in the selector.
+
+   VALUATION (AFI-4b2): shown only in a record's detail, in one block that says which it is —
+   "Valuation preview — not yet approved" or "Approved valuation (frozen at approval)" — with the
+   amount, the monthly salary basis, the overtime hours, the standard monthly hours and the
+   method, each exactly the string the server sent (the SESSION money convention: "(Rp)" in the
+   label, the exact value). Nothing is computed, rounded, converted or reformatted here; no hourly
+   rate, multiplier or pay result is ever shown, and the month list never carries money.
 
    Classic shared global scope; existing CSS classes only.
    ============================================================ */
@@ -73,22 +81,35 @@ const SESSION_OVERTIME_NOTICES = Object.freeze({
   submitted: 'Overtime record submitted.',
   reviewed: 'Overtime record marked as reviewed.',
   rejected: 'Overtime record rejected.',
+  approved: 'Overtime record approved. Its valuation is now frozen.',
   unchanged: 'No changes to save.',
   reloaded: 'The record was read again from TAM OS. Your edits are kept; Save applies them to the latest version.'
 });
-const SESSION_OVERTIME_TARGETS = Object.freeze({ submit: 'Submitted', review: 'Reviewed', reject: 'Rejected' });
+const SESSION_OVERTIME_TARGETS = Object.freeze({ submit: 'Submitted', review: 'Reviewed', reject: 'Rejected', approve: 'Approved' });
 const SESSION_OVERTIME_PANELS = Object.freeze({
   delete: { title: 'Delete this Draft?', text: 'The Draft is deleted permanently. This cannot be undone.', submit: 'Delete Draft', busy: 'Deleting…', danger: true },
   submit: { title: 'Submit this record?', text: 'It is sent for review and can no longer be edited or deleted.', submit: 'Submit', busy: 'Submitting…', danger: false },
   review: { title: 'Mark this record as reviewed?', text: 'A reviewed record can still be rejected later.', submit: 'Mark reviewed', busy: 'Working…', danger: false },
-  reject: { title: 'Reject this record?', text: 'A rejected record is final: it cannot be edited, submitted or reviewed again.', submit: 'Reject', busy: 'Rejecting…', danger: true }
+  reject: { title: 'Reject this record?', text: 'A rejected record is final: it cannot be edited, submitted or reviewed again.', submit: 'Reject', busy: 'Rejecting…', danger: true },
+  approve: { title: 'Approve this overtime?', text: 'Approval freezes this valuation. An approved record is final: it cannot be edited, rejected or valued again.', submit: 'Approve', busy: 'Approving…', danger: false }
+});
+// AFI-4b2: the valuation block's fixed wording (BF-4b2 / D-BF4b-3: an internal TAM method).
+const SESSION_OVERTIME_VALUATION_TEXT = Object.freeze({
+  preview: 'Valuation preview — not yet approved',
+  approved: 'Approved valuation (frozen at approval)',
+  previewLead: 'Computed by TAM OS from the current monthly salary. It may change until the record is approved.',
+  approvedLead: 'Frozen when the record was approved. Later salary changes do not alter it.',
+  method: 'TAM-OT-1 — internal TAM overtime method (not a statutory calculation)',
+  loading: 'Reading the valuation…',
+  unvalued: 'This record cannot be valued now (the employee may be archived or have no salary).'
 });
 const SESSION_OVERTIME_ACTION_BUTTONS = Object.freeze({
   edit: { id: 'swoEditBtn', label: 'Edit', cls: 'btn' },
   delete: { id: 'swoDeleteBtn', label: 'Delete', cls: 'btn btn-danger' },
   submit: { id: 'swoSubmitBtn', label: 'Submit', cls: 'btn' },
   review: { id: 'swoReviewBtn', label: 'Review', cls: 'btn' },
-  reject: { id: 'swoRejectBtn', label: 'Reject', cls: 'btn btn-danger' }
+  reject: { id: 'swoRejectBtn', label: 'Reject', cls: 'btn btn-danger' },
+  approve: { id: 'swoApproveBtn', label: 'Approve', cls: 'btn btn-accent' }
 });
 
 function sessionOvertimeValue(v){
@@ -118,6 +139,12 @@ function sessionOvertimeAmbiguousText(w){
   if(reading) return 'TAM OS could not confirm the change. The record is being read again…';
   const gone = w.detailStatus === SESSION_OVERTIME_STATUS.ERROR && w.error && w.error.scope === 'detail' && w.error.kind === 'NOT_FOUND';
   const d = w.detailStatus === SESSION_OVERTIME_STATUS.READY ? w.detail : null;
+  // AFI-4b2: an unconfirmed approval, by what the record read again shows — never resent.
+  if(m.kind === 'approve' && d && d.status === 'Approved'){
+    const frozen = w.valuationStatus === SESSION_OVERTIME_STATUS.READY && w.valuation && w.valuation.kind === 'approved' ? ' Its frozen amount is Rp ' + w.valuation.amount + '.' : '';
+    return 'TAM OS could not confirm the approval, but the record read again is now Approved.' + frozen;
+  }
+  if(m.kind === 'approve' && d && d.status === 'Reviewed') return 'TAM OS could not confirm the approval. The record read again is still Reviewed: it was not approved. Check the current amount, then approve again.';
   if(m.kind === 'delete'){
     if(gone) return 'TAM OS could not confirm the deletion. When the record was read again it no longer existed: the Draft is gone.';
     if(d && m.target && d.id === m.target.id && d.version === m.target.version && d.status === 'Draft') return 'TAM OS could not confirm the deletion. The record read again still exists unchanged: the Draft was not deleted, and you may try again.';
@@ -132,6 +159,20 @@ function sessionOvertimeAmbiguousText(w){
   return 'TAM OS could not confirm the change, and the record could not be read again. Use Retry to read it.';
 }
 
+// AFI-4b2 (D-AFI4b2-1): a refused approval (409 — the server names no cause), explained by the
+// record and the fresh preview read after it. Amounts are compared as the exact strings sent.
+function sessionOvertimeApproveConflictText(w){
+  const sent = w.mutation.target ? w.mutation.target.amount : null;
+  if(w.detailStatus === SESSION_OVERTIME_STATUS.LOADING || w.detailStatus === SESSION_OVERTIME_STATUS.IDLE) return 'TAM OS did not approve the record: it or its amount changed. The record is being read again…';
+  if(w.detailStatus === SESSION_OVERTIME_STATUS.ERROR) return (w.error && w.error.kind === 'NOT_FOUND') ? 'TAM OS did not approve the record. When it was read again it was not found.' : 'TAM OS did not approve the record, and it could not be read again. Use Retry to read it.';
+  const d = w.detail;
+  if(!d || d.status !== 'Reviewed') return 'The record changed: it is now ' + (d ? d.status : 'unknown') + ' and can no longer be approved.';
+  if(w.valuationStatus === SESSION_OVERTIME_STATUS.ERROR) return (w.valuationError && w.valuationError.kind === 'CONFLICT') ? SESSION_OVERTIME_VALUATION_TEXT.unvalued : 'TAM OS did not approve the record, and its current amount could not be read. Use Retry to read it.';
+  if(!sessionOvertimePreviewMatches(d, w.valuationStatus, w.valuation)) return 'TAM OS did not approve the record: it or its amount changed. The current amount is being read again…';
+  if(w.valuation.amount !== sent) return 'The amount changed from Rp ' + sent + ' to Rp ' + w.valuation.amount + '. Check it, then approve again.';
+  return 'The record changed. Check it, then approve again.';
+}
+
 // The one message about the write (or a notice), shown where that write is.
 function sessionOvertimeMutationHTML(w){
   const m = w.mutation;
@@ -139,7 +180,8 @@ function sessionOvertimeMutationHTML(w){
   if(m.status === SESSION_OVERTIME_MUTATION_STATUS.AMBIGUOUS) text = sessionOvertimeAmbiguousText(w);
   else if(m.status === SESSION_OVERTIME_MUTATION_STATUS.ERROR && m.error){
     const k = m.error.kind;
-    if(k === 'CONFLICT') text = SESSION_OVERTIME_CONFLICTS[m.kind];
+    if(k === 'CONFLICT' && m.kind === 'approve') text = sessionOvertimeApproveConflictText(w);
+    else if(k === 'CONFLICT') text = SESSION_OVERTIME_CONFLICTS[m.kind];
     else if(k === 'VALIDATION') text = (m.fields || []).some((f) => SESSION_OVERTIME_FORM_FIELDS.indexOf(f) !== -1) ? SESSION_OVERTIME_MUTATION_ERRORS.VALIDATION : SESSION_OVERTIME_MUTATION_ERRORS.VALIDATION_UNNAMED;
     else if(k === 'NOT_FOUND' && m.kind === 'create') text = SESSION_OVERTIME_MUTATION_ERRORS.NOT_FOUND_CREATE;
     else text = SESSION_OVERTIME_MUTATION_ERRORS[k] || SESSION_OVERTIME_MUTATION_ERRORS.CLIENT_FAULT;
@@ -231,9 +273,11 @@ function sessionOvertimePanelHTML(principal, w){
   const dis = busy ? ' disabled' : '';
   const conflict = w.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.ERROR && w.mutation.error && w.mutation.error.kind === 'CONFLICT';
   const what = sessionOvertimeLabel(principal, w, d.employeeId) + ' — ' + sessionOvertimeMonthLabel(d.monthKey) + (d.overtimeDate ? ', ' + d.overtimeDate : '') + ' — ' + d.hours + ' hours (' + d.status + ').';
+  // AFI-4b2: the approval repeats the exact amount of the preview it is sent against.
+  const amount = (w.panel.kind === 'approve' && w.valuation) ? '<p class="auth-lead">Amount to approve (Rp): <strong>' + escapeHtml(w.valuation.amount) + '</strong></p>' : '';
   return '<section class="card" aria-labelledby="swoPanelTitle"' + (busy ? ' aria-busy="true"' : '') + '>'
     + '<h2 class="section-title" id="swoPanelTitle" tabindex="-1">' + escapeHtml(panel.title) + '</h2>'
-    + '<p class="auth-lead">' + escapeHtml(what) + ' ' + escapeHtml(panel.text) + '</p>'
+    + '<p class="auth-lead">' + escapeHtml(what) + ' ' + escapeHtml(panel.text) + '</p>' + amount
     + sessionOvertimeMutationHTML(w)
     + '<div class="auth-actions"><button class="btn" type="button" id="swoPanelCancel"' + dis + '>Cancel</button>'
     + (conflict ? '<button class="btn" type="button" id="swoReloadBtn"' + dis + '>Reload record</button>' : '')
@@ -274,6 +318,31 @@ function sessionOvertimeListHTML(principal, w){
     + '<tbody>' + rows + '</tbody></table></div>';
 }
 
+// AFI-4b2: the valuation block of the detail shown, when this principal reads one — the CEO's
+// preview of a Reviewed record, the frozen valuation of an Approved one. Exact strings only.
+function sessionOvertimeValuationHTML(principal, w){
+  const d = w.detail;
+  if(!sessionOvertimeValuationWanted(principal, d)) return '';
+  const approved = d.status === 'Approved';
+  const T = SESSION_OVERTIME_VALUATION_TEXT;
+  const dis = sessionOvertimeBusy(w) ? ' disabled' : '';
+  let body;
+  if(w.valuationStatus === SESSION_OVERTIME_STATUS.ERROR && w.valuationError){
+    const unvalued = !approved && w.valuationError.kind === 'CONFLICT';
+    const retry = (unvalued || w.valuationError.kind === 'DENIED' || w.valuationError.kind === 'NOT_FOUND') ? '' : '<div class="auth-actions"><button class="btn" type="button" id="swoValuationRetryBtn"' + dis + '>Retry valuation</button></div>';
+    body = (unvalued ? '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(T.unvalued) + '</p>' : sessionOvertimeErrorHTML(w.valuationError)) + retry;
+  } else if(w.valuationStatus !== SESSION_OVERTIME_STATUS.READY || !w.valuation || w.valuation.id !== d.id){
+    body = '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(T.loading) + '</p>';
+  } else {
+    const v = w.valuation;
+    const rows = [['Amount (Rp)', v.amount], ['Monthly salary basis (Rp)', v.monthlySalaryBasis], ['Overtime hours', v.hours],
+      ['Standard monthly hours', v.standardMonthlyHours], ['Method', v.method === OVERTIME_VALUATION_METHOD ? T.method : null]];
+    body = '<p class="hint">' + escapeHtml(approved ? T.approvedLead : T.previewLead) + '</p>'
+      + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionOvertimeValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  }
+  return '<section class="card" id="swoValuation" aria-labelledby="swoValuationTitle"><h2 class="section-title" id="swoValuationTitle">' + escapeHtml(approved ? T.approved : T.preview) + '</h2>' + body + '</section>';
+}
+
 function sessionOvertimeDetailHTML(principal, w){
   if(w.form) return sessionOvertimeFormHTML(principal, w);
   const busy = sessionOvertimeBusy(w);
@@ -286,8 +355,10 @@ function sessionOvertimeDetailHTML(principal, w){
   if(w.detailStatus !== SESSION_OVERTIME_STATUS.READY || !w.detail) return sessionOvertimeMutationHTML(w) + '<p class="auth-lead" role="status" aria-busy="true">Loading the record…</p>' + back + '</div>';
   const d = w.detail;
   // Only the actions the matrix offers for this record and principal; the panel replaces them.
+  // Approve waits for a ready preview of this very record (AFI-4b2).
   const actions = w.panel ? '' : sessionOvertimeActions(principal, d).map(function(k){
-    return '<button class="' + SESSION_OVERTIME_ACTION_BUTTONS[k].cls + '" type="button" id="' + SESSION_OVERTIME_ACTION_BUTTONS[k].id + '"' + dis + '>' + escapeHtml(SESSION_OVERTIME_ACTION_BUTTONS[k].label) + '</button>';
+    const off = busy || (k === 'approve' && !sessionOvertimePreviewMatches(d, w.valuationStatus, w.valuation));
+    return '<button class="' + SESSION_OVERTIME_ACTION_BUTTONS[k].cls + '" type="button" id="' + SESSION_OVERTIME_ACTION_BUTTONS[k].id + '"' + (off ? ' disabled' : '') + '>' + escapeHtml(SESSION_OVERTIME_ACTION_BUTTONS[k].label) + '</button>';
   }).join('');
   const rows = [
     ['Employee', sessionOvertimeLabel(principal, w, d.employeeId)], ['Month', sessionOvertimeMonthLabel(d.monthKey)], ['Date', d.overtimeDate],
@@ -296,6 +367,7 @@ function sessionOvertimeDetailHTML(principal, w){
   return '<h2 class="section-title">' + escapeHtml(sessionOvertimeMonthLabel(d.monthKey)) + ' — ' + escapeHtml(d.hours) + ' hours</h2>'
     + (w.panel ? '' : sessionOvertimeMutationHTML(w))
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionOvertimeValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    + sessionOvertimeValuationHTML(principal, w)
     + back + actions + '</div>'
     + (w.panel && w.panel.id === d.id ? sessionOvertimePanelHTML(principal, w) : '');
 }
@@ -322,7 +394,8 @@ function bindSessionOvertime(app){
   click('swoLabelsRetryBtn', function(){ SessionOvertime.retryLabels(); });
   click('swoReloadBtn', function(){ SessionOvertime.reloadRecord(); });
   click('swoEditBtn', function(){ SessionOvertime.openEdit(); });
-  ['delete', 'submit', 'review', 'reject'].forEach(function(k){ click(SESSION_OVERTIME_ACTION_BUTTONS[k].id, function(){ SessionOvertime.openPanel(k); }); });
+  ['delete', 'submit', 'review', 'reject', 'approve'].forEach(function(k){ click(SESSION_OVERTIME_ACTION_BUTTONS[k].id, function(){ SessionOvertime.openPanel(k); }); });
+  click('swoValuationRetryBtn', function(){ SessionOvertime.retryValuation(); });
   click('swoPanelCancel', function(){ SessionOvertime.cancelPanel(); });
   click('swoPanelConfirm', function(){ SessionOvertime.confirmPanel(); });
   click('swoFormCancel', function(){ SessionOvertime.cancelForm(); });

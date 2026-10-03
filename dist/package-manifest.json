@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3",
+  "packageDigest": "2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2820917,
-    "sha256": "d8dda81b06dc3ed23464b438e1b90e8a390650832717a62b845059f2a41090f2"
+    "bytes": 2841512,
+    "sha256": "6c7d65dc81addc97d44dd25cc7731e27cf30a825416a725bf01e1a554a4482d1"
   },
   "files": [
     {
@@ -164,8 +164,8 @@
     },
     {
       "path": "js/core/overtime-api.js",
-      "bytes": 16922,
-      "sha256": "ccd4ca93757ccb5823f152b7b9b0a96ba9d07531068fc38246cc36516315345a"
+      "bytes": 22737,
+      "sha256": "bc68362994c4b45c92afddbeb9784bda1d8702f3035e555f8f960ca41b189275"
     },
     {
       "path": "js/core/session-employee.js",
@@ -179,8 +179,8 @@
     },
     {
       "path": "js/core/session-overtime.js",
-      "bytes": 30970,
-      "sha256": "f221d072f40eeb72f459e98b0c8382085c00f706272ab70ab883bba7fa103d7f"
+      "bytes": 38805,
+      "sha256": "044c5bb2a99fadbfd3ca3f253fa69884638fe2eda5d919c059ecc04fd3c09024"
     },
     {
       "path": "js/core/stabilization.js",
@@ -469,8 +469,8 @@
     },
     {
       "path": "js/ui/session-overtime-view.js",
-      "bytes": 27325,
-      "sha256": "12e92514b920b1968ee29e3c585a52532131d67998c4e3d129120c3b689841f2"
+      "bytes": 34270,
+      "sha256": "9770fd1a68b6fc82b22cef8b88a23b48f3de2a79e4d9a18017c356838871706d"
     },
     {
       "path": "js/ui/session-workspace-view.js",
