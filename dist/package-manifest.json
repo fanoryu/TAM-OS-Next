@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7",
+  "packageDigest": "a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2841512,
-    "sha256": "6c7d65dc81addc97d44dd25cc7731e27cf30a825416a725bf01e1a554a4482d1"
+    "bytes": 2902832,
+    "sha256": "b0a62a9bfc3a29e4c4cc226d0a681ea3aa22cb93d98d9956761c634f15b3a9a2"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9771,
-      "sha256": "cb74043989c26ad5cb4e5edb453014b79337b0a1533d1fde58d783204afa04fc"
+      "bytes": 9923,
+      "sha256": "d3948ffee0bfc04ab3b4f10c886216b6b7415c856c5e73863eda3091fd03cb4b"
     },
     {
       "path": "js/analytics/compare.js",
@@ -109,8 +109,8 @@
     },
     {
       "path": "js/core/auth-boot.js",
-      "bytes": 10374,
-      "sha256": "bbe21eb322da2d27c4f88670b17071371f2c68684d5cf3806a56f8b89e7546a2"
+      "bytes": 10460,
+      "sha256": "016c0a473c0c699815c2e30dbf6021c0a3500004d7a04dc04707ef514ae1e3db"
     },
     {
       "path": "js/core/auth-flow.js",
@@ -168,6 +168,11 @@
       "sha256": "bc68362994c4b45c92afddbeb9784bda1d8702f3035e555f8f960ca41b189275"
     },
     {
+      "path": "js/core/payroll-api.js",
+      "bytes": 14189,
+      "sha256": "bce5d173badbb757c4afaf1c7d77f857de05c18b4a89f4af5d93ceb55f9d3cf0"
+    },
+    {
       "path": "js/core/session-employee.js",
       "bytes": 28501,
       "sha256": "c5916659507188ab52d52fd63de23baba3d75644e87539024ac0d1c9436e487e"
@@ -181,6 +186,11 @@
       "path": "js/core/session-overtime.js",
       "bytes": 38805,
       "sha256": "044c5bb2a99fadbfd3ca3f253fa69884638fe2eda5d919c059ecc04fd3c09024"
+    },
+    {
+      "path": "js/core/session-payroll.js",
+      "bytes": 25007,
+      "sha256": "d988149e6c57bc63c7d2bc398d89d341c15d5b37eb45b8af22950a18f2cb0699"
     },
     {
       "path": "js/core/stabilization.js",
@@ -473,9 +483,14 @@
       "sha256": "9770fd1a68b6fc82b22cef8b88a23b48f3de2a79e4d9a18017c356838871706d"
     },
     {
+      "path": "js/ui/session-payroll-view.js",
+      "bytes": 19772,
+      "sha256": "b7d45ff7ed1198a3a0f994e3d925b90b1cfa8a8b4b2660b6ef1c443ce14319db"
+    },
+    {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 33941,
-      "sha256": "3140c53d2f76ede69c81f78e3358057caa90ced5b8e2aa702e796d044c340c21"
+      "bytes": 35673,
+      "sha256": "a8e68e9b3a2ba71fac7699daed6310359c73b4219c79877a9a037f1220c92598"
     },
     {
       "path": "js/ui/settings-about.js",

@@ -240,9 +240,12 @@ function firewall(rt, label){
   // Overtime section is never open in this harness (its button is not pressed, no swo* control).
   // Only that exact markup is removed before the deny test; any other Overtime / Payroll /
   // Finance text, navigation or local data tool still fails. Was: no "Overtime" text at all.
-  const SECTIONS = /<nav aria-label="Workspace sections"><div class="tabs"><button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>(Employees|My profile)<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>(Overtime|My overtime)<\/button><\/div><\/nav>/g;
+  // AFI-4c1 authorized revision: the CEO's switch has a third button, Payroll (not pressed — the
+  // Payroll section is never open in this harness); an Employee's switch is exactly the two
+  // buttons, with no Payroll. Was: exactly two buttons for both.
+  const SECTIONS = /<nav aria-label="Workspace sections"><div class="tabs">(<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>Employees<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>Overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button>|<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>My profile<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>My overtime<\/button>)<\/div><\/nav>/g;
   const sections = html.match(SECTIONS) || [];
-  check(sections.length <= 1 && !/id="swo|id="swSection/.test(html.replace(SECTIONS, ''))
+  check(sections.length <= 1 && !/id="swo|id="swp|id="swSection/.test(html.replace(SECTIONS, ''))
     && !/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Overtime|Payroll|Finance|Smart Import|Backup|Restore|Start fresh/i.test(html.replace(SECTIONS, '')),
     label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool (beyond the exact SESSION section switch, Overtime not open)');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,

@@ -5546,10 +5546,16 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   // AFI-4b1 authorized revision: core/overtime-api.js (the Overtime reads) is the one further
   // ApiClient caller, and core/session-overtime.js reads API_RESULT_KINDS to tell a 401 apart.
   // Was: the AFI-4a1 set. The property is unchanged — every API caller is allowlisted.
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js', 'core/overtime-api.js', 'core/session-overtime.js']);
-  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-overtime.js'] || ''),
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4b1: only session-identity.js, auth-boot.js, auth-flow.js, employee-api.js and overtime-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
-  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+  // AFI-4c1 authorized revision: core/payroll-api.js (the Payroll reads) is the one further
+  // ApiClient caller, and core/session-payroll.js reads API_RESULT_KINDS to tell a 401 apart.
+  // Was: the AFI-4b1 set. The property is unchanged — every API caller is allowlisted.
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js', 'core/overtime-api.js', 'core/session-overtime.js', 'core/payroll-api.js', 'core/session-payroll.js']);
+  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-overtime.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-payroll.js'] || ''),
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4b1/AFI-4c1: only session-identity.js, auth-boot.js, auth-flow.js, employee-api.js, overtime-api.js and payroll-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
+  // AFI-4c1 authorized revision: payroll-api.js names exactly the seven BF-4c1 Payroll paths. Was:
+  // no /api/ path outside the AFI-4b2 set of session modules.
+  check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js', 'core/payroll-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
+    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/payroll-plan','/api/payroll-plans','/api/payroll-plans/approve','/api/payroll-plans/cancel','/api/payroll-plans/generate','/api/payroll-plans/return','/api/payroll-plans/review'"
     // AFI-4b1 authorized revision: overtime-api.js names exactly the eight BF-4b1 Overtime paths.
     // AFI-4b2 authorized revision: plus the two BF-4b2 paths (valuation read, approve). Was: eight.
     && ((prodCode['core/overtime-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/overtime-record','/api/overtime-record/valuation','/api/overtime-records','/api/overtime-records/approve','/api/overtime-records/create','/api/overtime-records/delete','/api/overtime-records/reject','/api/overtime-records/review','/api/overtime-records/submit','/api/overtime-records/update'"
@@ -5560,7 +5566,7 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/disable-account','/api/employees/enable-account','/api/employees/provision-account','/api/employees/reissue-activation','/api/employees/update'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve)');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1/AFI-4c1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve), payroll-api.js only the seven BF-4c1 Payroll routes');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -5785,10 +5791,16 @@ console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
   // selector — and names nothing else of the Employee modules. Was: AuthBoot only.
   const users = jsFiles.filter((f) => NEW.indexOf(f) === -1 && /\b(SessionEmployeeStore|SessionWorkspace|EmployeeApi|EmployeeDecoders)\b/.test(code(rd(f))));
   const otStoreC = code(rd('core/session-overtime.js'));
-  check(users.join() === 'core/session-overtime.js,core/auth-boot.js' && /\bSessionEmployeeStore\.clear\(\)/.test(abC) && !/\b(SessionWorkspace|EmployeeApi)\b/.test(abC)
+  // D-AFI4c1-4 authorized revision: core/session-payroll.js reads the same canonical Employee
+  // list — exactly one EmployeeApi.list({ archived: true }) call, to name excluded employees —
+  // and names nothing else of the Employee modules. Was: SessionOvertime and AuthBoot only.
+  const prStoreC = code(rd('core/session-payroll.js'));
+  check(users.join() === 'core/session-overtime.js,core/session-payroll.js,core/auth-boot.js' && /\bSessionEmployeeStore\.clear\(\)/.test(abC) && !/\b(SessionWorkspace|EmployeeApi)\b/.test(abC)
     && (otStoreC.match(/\b(SessionEmployeeStore|SessionWorkspace|EmployeeApi|EmployeeDecoders|EmployeeRequests)\b/g) || []).join() === 'EmployeeApi'
-    && (otStoreC.match(/EmployeeApi\.list\(\{ archived: true \}\)/g) || []).length === 1,
-    'AFI-4a1/D-AFI4b1-1: outside its modules the SESSION Employee data is reached only by AuthBoot (to clear it) and by SessionOvertime (one read-only EmployeeApi.list({ archived: true }))');
+    && (otStoreC.match(/EmployeeApi\.list\(\{ archived: true \}\)/g) || []).length === 1
+    && (prStoreC.match(/\b(SessionEmployeeStore|SessionWorkspace|EmployeeApi|EmployeeDecoders|EmployeeRequests)\b/g) || []).join() === 'EmployeeApi'
+    && (prStoreC.match(/EmployeeApi\.list\(\{ archived: true \}\)/g) || []).length === 1,
+    'AFI-4a1/D-AFI4b1-1/D-AFI4c1-4: outside its modules the SESSION Employee data is reached only by AuthBoot (to clear it), SessionOvertime and SessionPayroll (one read-only EmployeeApi.list({ archived: true }) each)');
   check(/if\(next !== AUTH_STATES\.AUTHENTICATED\)\{\s*SessionIdentityProvider\.clear\(\);\s*SessionEmployeeStore\.clear\(\);/.test(abC),
     'AFI-4a1: leaving AUTHENTICATED clears the identity and the SESSION Employee data together');
   check(/sessionLost\(\)\{\s*if\(state !== AUTH_STATES\.AUTHENTICATED\) return;\s*go\(AUTH_STATES\.SIGNED_OUT, 'session_ended'\);\s*\}/.test(abC),
@@ -6059,9 +6071,12 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
   check(NEW.every((f) => fs.existsSync(path.join(root, 'js', f))), 'AFI-4b1: overtime-api.js, session-overtime.js and session-overtime-view.js present');
   const iTa = jsFiles.indexOf('transport/transport-adapter.js');
-  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 5).join() === NEW.concat(['core/employee-api.js']).join()
-    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/employee-api.js"></script>'),
-    'AFI-4b1: the three modules load in order right after transport-adapter.js and before employee-api.js (manifest and index.html)');
+  // AFI-4c1 authorized revision: the three AFI-4c1 Payroll modules follow the Overtime modules,
+  // before employee-api.js. Was: the Overtime modules directly before employee-api.js.
+  const PAYROLL_NEW = ['core/payroll-api.js', 'core/session-payroll.js', 'ui/session-payroll-view.js'];
+  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 8).join() === NEW.concat(PAYROLL_NEW, ['core/employee-api.js']).join()
+    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/employee-api.js"></script>'),
+    'AFI-4b1/AFI-4c1: the three Overtime modules load right after transport-adapter.js, then the three Payroll modules, then employee-api.js (manifest and index.html)');
   const apiC = code(rd('core/overtime-api.js')), storeC = code(rd('core/session-overtime.js')), viewC = code(rd('ui/session-overtime-view.js'));
   const wsC = code(rd('ui/session-workspace-view.js')), abC = code(rd('core/auth-boot.js'));
   // Firewall: the AFI-4a1 SESSION deny list (State, storage, legacy persistence, shell, "Acting as",
@@ -6206,8 +6221,12 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   const defined = new Set((cssAll.match(/\.-?[_A-Za-z][_A-Za-z0-9-]*/g) || []).map((x) => x.slice(1)));
   const missing = classes.filter((c, i) => classes.indexOf(c) === i && !defined.has(c));
   check(missing.length === 0, 'AFI-4b1: the Overtime view uses only CSS classes that already exist (CSS unchanged)' + (missing.length ? ' >> missing: ' + missing.join(', ') : ''));
-  check(/const SECTIONS|<nav aria-label="Workspace sections">/.test(wsC) && (wsC.match(/id="' \+ id \+ '"/g) || []).length >= 1 && /tab\('swSectionMain', ceo \? 'Employees' : 'My profile', !overtime\) \+ tab\('swSectionOvertime', ceo \? 'Overtime' : 'My overtime', overtime\)/.test(wsC),
-    'AFI-4b1: the workspace has exactly two SESSION sections — Employees | Overtime (CEO), My profile | My overtime (Employee); the existing one stays the default');
+  // AFI-4c1 authorized revision (D-AFI4c1 Phase 0): the CEO gets a third section, Payroll; an
+  // Employee keeps exactly My profile | My overtime. Was: exactly two sections for both.
+  check(/const SECTIONS|<nav aria-label="Workspace sections">/.test(wsC) && (wsC.match(/id="' \+ id \+ '"/g) || []).length >= 1
+    && /tab\('swSectionMain', ceo \? 'Employees' : 'My profile', !overtime && !payroll\) \+ tab\('swSectionOvertime', ceo \? 'Overtime' : 'My overtime', overtime\)/.test(wsC)
+    && /\+ \(ceo \? tab\('swSectionPayroll', 'Payroll', payroll === true\) : ''\)/.test(wsC) && /const payroll = ceo && pr\.open;/.test(wsC),
+    'AFI-4b1/AFI-4c1: the workspace sections are Employees | Overtime | Payroll (CEO) and exactly My profile | My overtime (Employee); the existing one stays the default');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   // BF-4c1 authorized revision: the head moved to 0026 (BF-4c1). Was: 0023 after BF-4b2 (stays 0021 before).
@@ -6271,8 +6290,12 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   check(/'\/api\/overtime-records\/approve'/.test(otApi) && /'\/api\/overtime-record\/valuation'/.test(otApi),
     'BF-4b2 + AFI-4b2: the frontend overtime client consumes the BF-4b2 valuation and approve routes (AFI-4b2)');
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(Array.isArray(manifest.files) && manifest.files.length === 97 && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
-    'BF-4b2 + AFI-4b2: no production module added — the package keeps 97 files; its digest is no longer the AFI-4b1 c5d69dc1… (three modules changed)');
+  // AFI-4c1 authorized revision: AFI-4c1 adds exactly its three Payroll modules (97 → 100 files).
+  // Was: 97 files (AFI-4b2 added no module). AFI-4b2 itself still added none.
+  const AFI4C1_MODULES = ['js/core/payroll-api.js', 'js/core/session-payroll.js', 'js/ui/session-payroll-view.js'];
+  check(Array.isArray(manifest.files) && manifest.files.length === 100 && AFI4C1_MODULES.every((f) => manifest.files.some((x) => x.path === f))
+    && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
+    'BF-4b2 + AFI-4b2 + AFI-4c1: AFI-4b2 added no production module; the package now holds 100 files — the 97 plus exactly the three AFI-4c1 Payroll modules');
   const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
   check(deployRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && deployRule.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && deployRule.test(read(path.join(root, 'ARCHITECTURE.md'))),
     'BF-4b2: the deployment dependency is documented — BF-4b2 and AFI-4b2 must be deployed together (AI_CONTEXT, ARCHITECTURE, DEPLOYMENT)');
@@ -6441,11 +6464,15 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   const jsFiles = [];
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
   walkJs(path.join(root, 'js'));
-  check(!jsFiles.some((f) => /\/api\/payroll/.test(read(f))),
-    'BF-4c1: backend only — no frontend module names a payroll API route (Payroll AFI not started)');
+  // AFI-4c1 authorized revision: the SESSION Payroll client exists. Was: no frontend module names a
+  // payroll API route. Now: only js/core/payroll-api.js does (its exact paths are pinned above).
+  check(jsFiles.filter((f) => /\/api\/payroll/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js',
+    'BF-4c1 + AFI-4c1: BF-4c1 changed no frontend; the only frontend module naming a payroll API route is the AFI-4c1 core/payroll-api.js');
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(manifest.files.length === 97 && manifest.packageDigest === '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions === 21,
-    'BF-4c1: the production package is unchanged (97 files, digest 2d826d4d…, ACTIONS 21)');
+  // AFI-4c1 authorized revision: BF-4c1 changed no package (it stayed 97 files, digest 2d826d4d…);
+  // AFI-4c1 then added its three modules. Was: 97 files at digest 2d826d4d….
+  check(manifest.files.length === 100 && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions === 21,
+    'BF-4c1 + AFI-4c1: BF-4c1 changed no package; the package is now the AFI-4c1 one (100 files, no longer 2d826d4d…), ACTIONS 21');
   check(['Unit/PayrollCalculationTest.php', 'Unit/PayrollDomainTest.php', 'Http/PayrollRoutingTest.php', 'Db/PayrollSchemaTest.php', 'Db/PayrollWorkflowTest.php', 'Db/PayrollConcurrencyTest.php', 'Support/payroll-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))),
     'BF-4c1: the calculation, domain, routing, schema, workflow and concurrency tests exist');

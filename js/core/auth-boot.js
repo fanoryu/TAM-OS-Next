@@ -99,6 +99,7 @@ const AuthBoot = (function(){
       SessionIdentityProvider.clear();
       SessionEmployeeStore.clear();          // AFI-4a1: no server business data outlives the identity
       SessionOvertimeStore.clear();          // AFI-4b1: nor the SESSION Overtime data
+      SessionPayrollStore.clear();           // AFI-4c1: nor the SESSION Payroll data
     }
     paint();
   }
