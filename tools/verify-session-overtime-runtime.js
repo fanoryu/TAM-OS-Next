@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 /* ============================================================
-   AFI-4b1 — SESSION OVERTIME WORKSPACE RUNTIME VERIFICATION
+   AFI-4b1 / AFI-4b2 — SESSION OVERTIME WORKSPACE RUNTIME VERIFICATION
    ------------------------------------------------------------
-   tools/verify-build.js proves the STRUCTURE of AFI-4b1. This harness proves its
-   BEHAVIOUR by executing every production module (module-order.js, the boot included)
+   tools/verify-build.js proves the STRUCTURE of AFI-4b1 and AFI-4b2. This harness proves
+   their BEHAVIOUR by executing every production module (module-order.js, the boot included)
    in the dependency-free Node `vm` loader of the SESSION Employee harness, with the ONE
    source line `const AUTH_MODE = AUTH_MODES.LOCAL;` rewritten to SESSION in the
    concatenated text — the committed value is untouched.
@@ -24,6 +24,11 @@
    fired, and focus() is recorded — so bindings, disabled controls and focus moves are
    exercised, not assumed. Every write request (method, path, body, CSRF header) is
    recorded and asserted exactly.
+
+   AFI-4b2 (owner decision D-AFI4b2-2 = A: this harness is extended, CI stays at nine):
+   valuation and approval. The fabricated valuations are deliberately NOT what TAM-OT-1
+   would give for their inputs (preview 12345.00 for 7.50 h at 8000000.00), so a page that
+   computed an amount itself could not show — or send — the server's string. Sections S–Z.
    ============================================================ */
 
 const fs = require('fs');
@@ -74,11 +79,30 @@ const EMP_MONTH = { overtimeRecords: [S1, S2, S3, S4] };
 const SELF = { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active',
   joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' };
 
+/* ---------- AFI-4b2 fabricated valuations ---------- */
+const ID5 = '5'.repeat(32), IDA = '6'.repeat(32), IDS5 = 'f'.repeat(32), IDX = '9'.repeat(32);
+const R5 = rec(ID5, 'e_1', 'Reviewed', 3);                                   // a live owner's Reviewed record, 7.50 h
+const RA = rec(IDA, 'e_4', 'Approved', 4, { hours: '2.25' });
+const S5 = rec(IDS5, 'emp_srv_1', 'Approved', 4);
+const val = (id, kind, hours, extra) => Object.assign({ id: id, kind: kind, method: 'TAM-OT-1', hours: hours,
+  monthlySalaryBasis: '8000000.00', standardMonthlyHours: '160.00', amount: '12345.00' }, extra || {});
+const PV5 = val(ID5, 'preview', '7.50');                                     // NOT 8000000 × 7.5 ÷ 160 (= 375000)
+const PV5b = val(ID5, 'preview', '7.50', { monthlySalaryBasis: '8500000.00', amount: '13000.00' });
+const AV5 = val(ID5, 'approved', '7.50');
+const AVA = val(IDA, 'approved', '2.25', { monthlySalaryBasis: '7000000.00', amount: '98765.00' });
+const AVS5 = val(IDS5, 'approved', '7.50', { monthlySalaryBasis: '900000.00', amount: '54321.00' });   // SELF's current salary is 1000000.00
+const R5A = Object.assign({}, R5, { status: 'Approved', version: 4 });
+const CEO_MONTH5 = { overtimeRecords: [R1, R2, R3, R4, R5, RA] };
+const EMP_MONTH5 = { overtimeRecords: [S1, S2, S3, S4, S5] };
+const approved = (r, v) => ({ overtimeRecord: r, overtimeValuation: v });
+
 const OT = (m) => '/api/overtime-records?month=' + m;
 const REC = (id) => '/api/overtime-record?id=' + id;
+const VAL = (id) => '/api/overtime-record/valuation?id=' + id;
 const EMPS = '/api/employees?archived=1';
 const W = { create: '/api/overtime-records/create', update: '/api/overtime-records/update', delete: '/api/overtime-records/delete',
-  submit: '/api/overtime-records/submit', review: '/api/overtime-records/review', reject: '/api/overtime-records/reject' };
+  submit: '/api/overtime-records/submit', review: '/api/overtime-records/review', reject: '/api/overtime-records/reject',
+  approve: '/api/overtime-records/approve' };
 
 /* ---------- scripted responses ---------- */
 function resp(status, body, headers){
@@ -170,6 +194,7 @@ function loadRuntime(routes){
     + ' SessionOvertimeStore: SessionOvertimeStore, SessionOvertime: SessionOvertime, SessionEmployeeStore: SessionEmployeeStore,'
     + ' sessionOvertimeActions: sessionOvertimeActions, sessionOvertimeCurrentMonth: sessionOvertimeCurrentMonth,'
     + ' sessionOvertimeOwnerLabel: sessionOvertimeOwnerLabel, sessionOvertimeEligible: sessionOvertimeEligible,'
+    + ' sessionOvertimeValuationWanted: sessionOvertimeValuationWanted, sessionOvertimePreviewMatches: sessionOvertimePreviewMatches,'
     + ' render: render, parse: function(json){ return JSON.parse(json); } };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
@@ -249,7 +274,10 @@ const bodyOf = (c) => JSON.parse(c.init.body);
 const countOf = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
 const lastFocus = (rt) => rt.dom.focused[rt.dom.focused.length - 1];
 const keys = (o) => Object.keys(o).sort().join();
-const buttons = (html) => ['swoEditBtn', 'swoDeleteBtn', 'swoSubmitBtn', 'swoReviewBtn', 'swoRejectBtn'].filter((b) => html.indexOf('id="' + b + '"') !== -1).map((b) => b.slice(3, -3)).join();
+// AFI-4b2 authorized revision: Approve is one of the action buttons. Was: Edit, Delete, Submit, Review, Reject.
+const buttons = (html) => ['swoEditBtn', 'swoDeleteBtn', 'swoSubmitBtn', 'swoReviewBtn', 'swoApproveBtn', 'swoRejectBtn'].filter((b) => html.indexOf('id="' + b + '"') !== -1).map((b) => b.slice(3, -3)).join();
+const valuationCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/overtime-record\/valuation/.test(c.url)).length;
+const enabled = (html, id) => new RegExp('<button[^>]*id="' + id + '"(?![^>]*\\sdisabled)[^>]*>').test(html);
 
 async function boot(me, routes){
   const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1, E2, E4] })] } : { '/api/employee?id=emp_srv_1': [ok({ employee: SELF })] };
@@ -279,9 +307,26 @@ function firewall(rt, label){
     label + ': zero localStorage / sessionStorage / cookie access' + (rt.access.local.length + rt.access.session.length + rt.access.cookie.length ? ' >> ' + rt.access.local.concat(rt.access.session, rt.access.cookie).join(', ') : ''));
   check(rt.spy.length === 0, label + ': no LOCAL boot, shell, "Acting as", local data tool, Global Search, LOCAL Overtime page or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
   const html = rt.appHTML();
-  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Finance|Smart Import|Backup|Restore|Start fresh|Approv|Commit/i.test(html),
-    label + ': the DOM carries no "Acting as", navigation, Payroll / Finance entry, approval / commit control or local data tool');
-  check(!/\b(Rp|salary|rate|amount|wage|estimat)/i.test(html), label + ': no money, rate, salary, amount or pay estimate in the DOM (BF-4b2 firewall)');
+  // AFI-4b2 authorized revision. Was: no "Approv" and no money word anywhere in the DOM (BF-4b2 had
+  // not reached the frontend). Now: Payroll / Finance and their vocabulary stay forbidden
+  // everywhere; approval and money are allowed ONLY where BF-4b2 discloses them — the valuation
+  // block, the approve panel and the approval message — and only while the detail shown is one
+  // whose valuation this principal reads (CEO: Reviewed / Approved; Employee: own Approved).
+  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Payslip|Finance|ledger|journal|payment|\btax\b|Smart Import|Backup|Restore|Start fresh|Commit|Post to/i.test(html),
+    label + ': the DOM carries no "Acting as", navigation, Payroll / Finance entry or vocabulary, commit / post control or local data tool');
+  const w = rt.ot();
+  const p = rt.AuthBoot.snapshot().principal;
+  const disclosed = !!w.detailId && !!w.detail && rt.sessionOvertimeValuationWanted(p, w.detail);
+  const outside = html.replace(/<section class="card" id="swoValuation"[\s\S]*?<\/section>/, '')
+    .replace(/<section class="card" aria-labelledby="swoPanelTitle"[^>]*><h2 [^>]*>Approve this overtime\?<\/h2>[\s\S]*?<\/section>/, '')
+    .replace(/<p [^>]*id="swoMutationMessage"[^>]*>[\s\S]*?<\/p>/, '');
+  const MONEY = /\b(Rp|salary|rate|amount|wage|estimat|hourly|multiplier)/i;
+  check(!MONEY.test(disclosed ? outside : html), label + ': no money, rate, salary, amount or pay estimate in the DOM outside the BF-4b2 valuation disclosure' + (disclosed ? '' : ' (none here: nothing is disclosed)'));
+  check(!/Approv/i.test(outside.replace(/<td>Approved<\/td>/g, '').replace(/<button class="btn btn-accent" type="button" id="swoApproveBtn"[^>]*>Approve<\/button>/, '')),
+    label + ': "Approv…" appears only as the Approved status, the Approve control or inside the approval disclosure');
+  const ceoReviewed = !!p && p.principalType === 'ceo' && !!w.detail && w.detail.status === 'Reviewed' && !!w.detailId;
+  check((html.indexOf('id="swoApproveBtn"') === -1 || ceoReviewed) && (!/Approve this overtime\?/.test(html) || ceoReviewed),
+    label + ': an Approve control or approval panel exists only for the CEO on a Reviewed record');
   check(!/[0-9a-f]{32}|"e_[0-9a-z]+"|emp_srv_/.test(html.replace(RID, '')), label + ': no opaque record or Employee id in the page');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
     label + ': legacy State stays empty and the business shell is never granted');
@@ -289,10 +334,13 @@ function firewall(rt, label){
   const bad = posts(rt).filter((c) => /"(role|companyId|company_id|employee_id|actor|status|version|amount|rate|salary|payroll|contract|reason)"\s*:/.test(c.init.body)
     || (c.url !== W.create && /"employeeId"/.test(c.init.body)) || c.init.headers['X-CSRF-Token'] === undefined);
   check(bad.length === 0, label + ': every Overtime write is a CSRF POST; only create carries employeeId; none carries company, role, actor, status, version or money');
+  const approvals = posts(rt, W.approve);
+  check(approvals.every((c) => keys(bodyOf(c)) === 'expectedAmount,expectedVersion,id') && posts(rt).filter((c) => c.url !== W.approve).every((c) => !/expectedAmount|salary|monthlySalaryBasis|hours"\s*:\s*"[^"]*"\s*,\s*"kind/.test(c.init.body)),
+    label + ': an approval body is exactly { id, expectedVersion, expectedAmount }; no other write carries an amount or salary');
 }
 
 (async function main(){
-  console.log('== AFI-4b1 SESSION OVERTIME WORKSPACE — RUNTIME VERIFICATION ==');
+  console.log('== AFI-4b1 + AFI-4b2 SESSION OVERTIME WORKSPACE — RUNTIME VERIFICATION ==');
 
   /* ---------- 0. the harness itself ---------- */
   {
@@ -323,10 +371,17 @@ function firewall(rt, label){
       ['hours 07.50', Object.assign({}, R1, { hours: '07.50' })], ['hours number', Object.assign({}, R1, { hours: 7.5 })], ['description newline', Object.assign({}, R1, { workDescription: 'a\nb' })],
       ['description 161', Object.assign({}, R1, { workDescription: 'x'.repeat(161) })], ['notes 2001', Object.assign({}, R1, { notes: 'x'.repeat(2001) })],
       ['notes control', Object.assign({}, R1, { notes: 'a\u0007b' })], ['empty description', Object.assign({}, R1, { workDescription: '' })],
-      ['status Approved', Object.assign({}, R1, { status: 'Approved' })], ['version 0', Object.assign({}, R1, { version: 0 })],
+      // AFI-4b2 authorized revision: Approved is now a known status (BF-4b2 OvertimeStatus::VALUES).
+      // Was: 'status Approved' refused (AFI-4b1 failed closed on it). Now unknown statuses are refused.
+      ['status approved (case)', Object.assign({}, R1, { status: 'approved' })], ['status Closed', Object.assign({}, R1, { status: 'Closed' })],
+      ['version 0', Object.assign({}, R1, { version: 0 })],
       ['version 2^32', Object.assign({}, R1, { version: 4294967296 })], ['version string', Object.assign({}, R1, { version: '1' })], ['version 1.5', Object.assign({}, R1, { version: 1.5 })]
     ];
     bads.forEach(([label, o]) => check(D.record(P(o)) === null, 'A. refused: ' + label));
+    const appr = D.record(P(RA));
+    check(!!appr && appr.status === 'Approved' && Object.isFrozen(appr) && keys(appr) === keys(R1), 'A. AFI-4b2: an Approved record decodes (same nine keys — the record carries no money)');
+    check(D.record(P(Object.assign({}, RA, { amount: '98765.00' }))) === null && D.monthResponse(P({ overtimeRecords: [R1, Object.assign({}, RA, { approvedAmount: '1.00' })] }), MONTH) === null,
+      'A. AFI-4b2: an Approved record with an amount key is refused — money never rides on a record or the month list');
     const list = D.monthResponse(P(CEO_MONTH), MONTH);
     check(!!list && list.length === 4 && Object.isFrozen(list), 'A. a month answer decodes as a frozen list');
     check(D.monthResponse(P({ overtimeRecords: [R1, Object.assign({}, R2, { hours: '2.2' })] }), MONTH) === null, 'A. one malformed item invalidates the whole list');
@@ -447,21 +502,29 @@ function firewall(rt, label){
 
   /* ---------- G. detail + control matrix ---------- */
   {
-    const cases = [[ME_CEO, R1, 'Edit,Delete,Submit'], [ME_CEO, R2, 'Review,Reject'], [ME_CEO, R3, 'Reject'], [ME_CEO, R4, ''],
+    // AFI-4b2 authorized revision: CEO + Reviewed is Approve, Reject (Approve waits for a preview).
+    // Was: CEO + Reviewed exactly [Reject].
+    const cases = [[ME_CEO, R1, 'Edit,Delete,Submit'], [ME_CEO, R2, 'Review,Reject'], [ME_CEO, R3, 'Approve,Reject'], [ME_CEO, R4, ''],
       [ME_EMP, S1, 'Edit,Delete,Submit'], [ME_EMP, S2, ''], [ME_EMP, S3, ''], [ME_EMP, S4, '']];
     for(const [me, r, want] of cases){
       const rt = await detail(me, r.id, r);
       const html = rt.appHTML();
       const who = me.role === 'ceo' ? 'CEO' : 'Employee';
       check(buttons(html) === want, 'G. ' + who + ' + ' + r.status + ': exactly [' + want + ']' + (buttons(html) === want ? '' : ' >> ' + buttons(html)));
+      const asks = me.role === 'ceo' && r.status === 'Reviewed' ? 1 : 0;
+      check(valuationCalls(rt) === asks, 'G. ' + who + ' + ' + r.status + ': ' + (asks ? 'exactly one valuation read (the preview)' : 'no valuation request at all'));
       if(r === R1) check(/<h1[^>]*>Overtime record<\/h1>/.test(html) && html.indexOf('<td>Fabricated &lt;b&gt;task&lt;/b&gt;</td>') !== -1 && html.indexOf('<td>April 2031</td>') !== -1
         && html.indexOf('<td>Fabricated &lt;Alpha&gt; (EMP-001)</td>') !== -1 && /id="swoBackBtn"/.test(html), 'G. the detail is read-only text, escaped, with the owner label and Back');
     }
     const p = { principalType: 'employee', employeeId: 'emp_srv_1' };
     const loadRt = loadRuntime({});
     check(loadRt.sessionOvertimeActions(p, Object.assign({}, S1, { employeeId: 'emp_srv_2' })).length === 0 && loadRt.sessionOvertimeActions(null, S1).length === 0
-      && loadRt.sessionOvertimeActions({ principalType: 'ceo' }, Object.assign({}, R1, { status: 'Approved' })).length === 0,
+      && loadRt.sessionOvertimeActions({ principalType: 'ceo' }, Object.assign({}, R1, { status: 'Closed' })).length === 0,
       'G. the matrix offers nothing on another Employee\'s Draft, without a principal, or for an unknown status');
+    // AFI-4b2: Approved is terminal for everyone; approve is the CEO's, on Reviewed only.
+    check(loadRt.sessionOvertimeActions({ principalType: 'ceo' }, RA).length === 0 && loadRt.sessionOvertimeActions(p, S5).length === 0
+      && loadRt.sessionOvertimeActions(p, S3).length === 0 && loadRt.sessionOvertimeActions({ principalType: 'ceo' }, R5).join() === 'approve,reject',
+      'G. AFI-4b2 matrix: Approved offers nothing (CEO or owner); an Employee\'s Reviewed offers nothing; CEO + Reviewed = approve, reject');
     const rt = await detail(ME_EMP, IDS2, S2);
     const n = rt.net.calls.length;
     rt.SessionOvertime.openEdit(); rt.SessionOvertime.openPanel('delete'); rt.SessionOvertime.openPanel('review'); rt.SessionOvertime.openPanel('reject'); rt.SessionOvertime.openPanel('submit'); await flush();
@@ -838,12 +901,359 @@ function firewall(rt, label){
     firewall(rt, 'R. after a write');
   }
 
+  /* ================= AFI-4b2 — VALUATION + APPROVAL ================= */
+
+  /* ---------- S. strict valuation decoding and the approve request ---------- */
+  {
+    const rt = loadRuntime({});
+    const D = rt.OvertimeDecoders;
+    const Q = rt.OvertimeRequests;
+    const P = (o) => rt.parse(JSON.stringify(o));
+    const hR5 = D.record(P(R5)), hRA = D.record(P(RA));
+    const good = D.valuation(P(PV5), hR5);
+    check(!!good && Object.isFrozen(good) && keys(good) === 'amount,hours,id,kind,method,monthlySalaryBasis,standardMonthlyHours'
+      && good.amount === '12345.00' && good.monthlySalaryBasis === '8000000.00' && good.standardMonthlyHours === '160.00' && typeof good.amount === 'string',
+      'S. a preview of a Reviewed record decodes, frozen, exactly the seven server keys, every value the exact string sent');
+    check(!!D.valuation(P(AVA), hRA) && D.valuation(P(AVA), hRA).kind === 'approved', 'S. the frozen valuation of an Approved record decodes');
+    check(!!D.valuation(P(val(ID5, 'preview', '7.50', { amount: '0.00', monthlySalaryBasis: '0.01' })), hR5)
+      && !!D.valuation(P(val(ID5, 'preview', '7.50', { amount: '99999999999999.00', monthlySalaryBasis: '9999999999999.99' })), hR5),
+      'S. boundaries accepted as the server serializes them: amount 0.00 / 14 digits, salary 0.01 / DECIMAL(15,2)');
+    const vbads = [
+      ['extra key', Object.assign({}, PV5, { hourlyRate: '1.00' })], ['missing key', (() => { const c = Object.assign({}, PV5); delete c.method; return c; })()],
+      ['kind approved for a Reviewed record', Object.assign({}, PV5, { kind: 'approved' })], ['unknown kind', Object.assign({}, PV5, { kind: 'estimate' })],
+      ['another id', Object.assign({}, PV5, { id: ID1 })], ['other hours', Object.assign({}, PV5, { hours: '7.25' })], ['hours 7.5', Object.assign({}, PV5, { hours: '7.5' })],
+      ['unknown method', Object.assign({}, PV5, { method: 'TAM-OT-2' })], ['statutory method', Object.assign({}, PV5, { method: 'statutory' })],
+      ['standard hours 173.00', Object.assign({}, PV5, { standardMonthlyHours: '173.00' })], ['standard hours number', Object.assign({}, PV5, { standardMonthlyHours: 160 })],
+      ['salary 0.00', Object.assign({}, PV5, { monthlySalaryBasis: '0.00' })], ['salary without sen', Object.assign({}, PV5, { monthlySalaryBasis: '8000000' })],
+      ['salary number', Object.assign({}, PV5, { monthlySalaryBasis: 8000000 })], ['salary 14 digits', Object.assign({}, PV5, { monthlySalaryBasis: '10000000000000.00' })],
+      ['amount with sen', Object.assign({}, PV5, { amount: '12345.50' })], ['amount leading zero', Object.assign({}, PV5, { amount: '012345.00' })],
+      ['amount negative', Object.assign({}, PV5, { amount: '-1.00' })], ['amount number', Object.assign({}, PV5, { amount: 12345 })],
+      ['amount grouped', Object.assign({}, PV5, { amount: '12.345.00' })], ['amount 15 digits', Object.assign({}, PV5, { amount: '100000000000000.00' })]
+    ];
+    vbads.forEach(([label, o]) => check(D.valuation(P(o), hR5) === null, 'S. valuation refused: ' + label));
+    check(D.valuation(P(AVA), hR5) === null && D.valuation(P(PV5), D.record(P(R1))) === null && D.valuation(P(PV5), D.record(P(R4))) === null && D.valuation(P(PV5), null) === null,
+      'S. a valuation must belong to the record it was read for, whose status calls for its kind (Draft / Rejected: none)');
+    check(D.valuationResponse(P({ overtimeValuation: PV5 }), hR5) !== null && D.valuationResponse(P({ overtimeValuation: PV5, overtimeRecord: R5 }), hR5) === null
+      && D.valuationResponse(P(PV5), hR5) === null, 'S. { overtimeValuation } is exact');
+    const ar = D.approveResponse(P(approved(R5A, AV5)));
+    check(!!ar && Object.isFrozen(ar) && ar.record.status === 'Approved' && ar.valuation.kind === 'approved' && ar.valuation.amount === '12345.00', 'S. { overtimeRecord, overtimeValuation } decodes an Approved record with its frozen valuation');
+    check(D.approveResponse(P(approved(R5, AV5))) === null && D.approveResponse(P(approved(R5A, PV5))) === null
+      && D.approveResponse(P(approved(R5A, Object.assign({}, AV5, { id: IDA })))) === null && D.approveResponse(P(Object.assign(approved(R5A, AV5), { deleted: 1 }))) === null
+      && D.approveResponse(P({ overtimeRecord: R5A })) === null, 'S. approve answers refused: record not Approved, a preview, another id, an extra or a missing wrapper key');
+    const q = Q.approve(ID5, 3, '12345.00');
+    check(q.ok && keys(q.body) === 'expectedAmount,expectedVersion,id' && q.body.expectedAmount === '12345.00' && q.body.expectedVersion === 3,
+      'S. approve request: exactly { id, expectedVersion, expectedAmount } — never employeeId, salary, hours or method');
+    check(!Q.approve(ID5, 3, '12345.5').ok && !Q.approve(ID5, 3, 12345).ok && !Q.approve(ID5, 0, '1.00').ok && !Q.approve('x', 3, '1.00').ok && !Q.approve(ID5, 3, '').ok,
+      'S. approve refused before transport: amount not "N.00", a number, a bad version or id');
+    check(rt.sessionOvertimeValuationWanted({ principalType: 'employee', employeeId: 'emp_srv_1' }, S3) === false
+      && rt.sessionOvertimeValuationWanted({ principalType: 'employee', employeeId: 'emp_srv_1' }, S5) === true
+      && rt.sessionOvertimeValuationWanted({ principalType: 'employee', employeeId: 'emp_srv_2' }, S5) === false
+      && rt.sessionOvertimeValuationWanted({ principalType: 'ceo' }, R5) === true && rt.sessionOvertimeValuationWanted({ principalType: 'ceo' }, R2) === false,
+      'S. disclosure: an Employee reads only their own Approved valuation (never a preview, never a colleague\'s); the CEO reads Reviewed and Approved');
+  }
+
+  /* ---------- T. CEO: Reviewed preview, approve, Approved frozen ---------- */
+  {
+    const gV = deferred(), gA = deferred();
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [() => gV.promise], [W.approve]: [() => gA.promise] });
+    let html = rt.appHTML();
+    check(valuationCalls(rt) === 1 && rt.ot().valuationStatus === 'loading' && /Valuation preview — not yet approved/.test(html) && /Reading the valuation…/.test(html)
+      && buttons(html) === 'Approve,Reject' && !enabled(html, 'swoApproveBtn') && enabled(html, 'swoRejectBtn'),
+      'T. a Reviewed detail reads its preview; until it is ready Approve is disabled (Reject is not)');
+    rt.SessionOvertime.openPanel('approve'); await flush();
+    check(rt.ot().panel === null, 'T. the controller refuses the approval panel while no matching preview is ready');
+    gV.resolve(ok({ overtimeValuation: PV5 })); await flush();
+    html = rt.appHTML();
+    check(enabled(html, 'swoApproveBtn') && html.indexOf('<th scope="row">Amount (Rp)</th><td>12345.00</td>') !== -1
+      && html.indexOf('<th scope="row">Monthly salary basis (Rp)</th><td>8000000.00</td>') !== -1 && html.indexOf('<th scope="row">Overtime hours</th><td>7.50</td>') !== -1
+      && html.indexOf('<th scope="row">Standard monthly hours</th><td>160.00</td>') !== -1
+      && html.indexOf('<th scope="row">Method</th><td>TAM-OT-1 — internal TAM overtime method (not a statutory calculation)</td>') !== -1,
+      'T. the preview shows amount, salary basis, hours, standard hours and the internal method — exactly the server strings (12345.00 is not TAM-OT-1 of its inputs: nothing is recomputed)');
+    check(!/375000|375\.000|375,000|hourly|per hour|multiplier|statutory entitle/i.test(html) && /It may change until the record is approved\./.test(html),
+      'T. no locally derived amount, hourly rate or multiplier; the preview says it may change until approval');
+    firewall(rt, 'T. CEO preview');
+    rt.app.fire('swoApproveBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(posts(rt).length === 0 && lastFocus(rt) === 'swoPanelTitle' && /Approve this overtime\?/.test(html) && html.indexOf('Amount to approve (Rp): <strong>12345.00</strong>') !== -1,
+      'T. Approve opens an inline confirmation repeating the exact previewed amount; nothing sent');
+    rt.app.fire('swoPanelConfirm', 'click'); rt.app.fire('swoPanelConfirm', 'click'); rt.SessionOvertime.confirmPanel(); await flush();
+    const p = posts(rt, W.approve);
+    check(p.length === 1 && keys(bodyOf(p[0])) === 'expectedAmount,expectedVersion,id' && bodyOf(p[0]).id === ID5 && bodyOf(p[0]).expectedVersion === 3
+      && bodyOf(p[0]).expectedAmount === '12345.00' && p[0].init.headers['X-CSRF-Token'] === CSRF,
+      'T. Confirm (clicked twice + a direct call) sends ONE CSRF POST: { id, expectedVersion: held version, expectedAmount: the held preview\'s exact string }');
+    check(/Approving…/.test(rt.appHTML()) && rt.app.fire('swoPanelConfirm', 'click') === 'disabled' && rt.app.fire('swSectionMain', 'click') === 'disabled',
+      'T. while the approval is pending the controls are disabled');
+    gA.resolve(ok(approved(R5A, AV5))); await flush();
+    html = rt.appHTML();
+    check(rt.ot().detail.status === 'Approved' && rt.ot().valuation.kind === 'approved' && rt.ot().valuationStatus === 'ready' && valuationCalls(rt) === 1
+      && /Approved valuation \(frozen at approval\)/.test(html) && !/Valuation preview/.test(html) && /Overtime record approved\. Its valuation is now frozen\./.test(html)
+      && html.indexOf('<td>12345.00</td>') !== -1 && buttons(html) === '' && lastFocus(rt) === 'swoMutationMessage',
+      'T. a confirmed approval applies the Approved record and its frozen valuation from the same answer; no controls remain');
+    const n = rt.net.calls.length;
+    ['approve', 'reject', 'delete', 'submit', 'review'].forEach((k) => rt.SessionOvertime.openPanel(k)); rt.SessionOvertime.openEdit(); rt.SessionOvertime.confirmPanel(); await flush();
+    check(rt.ot().panel === null && rt.ot().form === null && rt.net.calls.length === n, 'T. Approved is terminal: the controller refuses every action');
+    firewall(rt, 'T. CEO approved');
+    rt.app.fire('swoBackBtn', 'click'); await flush();
+    check(rt.ot().valuation === null && rt.ot().valuationStatus === 'idle' && !/12345\.00/.test(rt.appHTML()), 'T. leaving the detail drops the valuation; the month list carries no money');
+    const dump = JSON.stringify(rt.State) + JSON.stringify(rt.access);
+    check(dump.indexOf('12345.00') === -1 && dump.indexOf('8000000.00') === -1 && rt.access.local.length + rt.access.session.length + rt.access.cookie.length === 0,
+      'T. no valuation value reaches State, storage or cookies');
+    firewall(rt, 'T. back to the list');
+  }
+  {
+    const rt = await detail(ME_CEO, IDA, RA, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(IDA)]: [ok({ overtimeValuation: AVA })] });
+    const html = rt.appHTML();
+    check(valuationCalls(rt) === 1 && /Approved valuation \(frozen at approval\)/.test(html) && html.indexOf('<td>98765.00</td>') !== -1 && html.indexOf('<td>7000000.00</td>') !== -1
+      && /Later salary changes do not alter it\./.test(html) && buttons(html) === '', 'T. CEO opening an Approved record: its frozen valuation, read once; no controls');
+    firewall(rt, 'T. CEO Approved detail');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.reject]: [ok(one(Object.assign({}, R5, { status: 'Rejected', version: 4 })))] });
+    rt.app.fire('swoRejectBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.reject).length === 1 && rt.ot().detail.status === 'Rejected' && rt.ot().valuation === null && valuationCalls(rt) === 1 && !/12345.00/.test(rt.appHTML()) && buttons(rt.appHTML()) === '',
+      'T. Reject stays available on a Reviewed record; once Rejected the preview is gone and no valuation is read');
+    firewall(rt, 'T. reject a previewed record');
+  }
+
+  /* ---------- U. D-AFI4b2-1: ANY approve 409 — re-read, fresh preview, a new deliberate approval ---------- */
+  {
+    // The salary changed after the preview: the amount differs.
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 }), ok({ overtimeValuation: PV5b })],
+      [REC(ID5)]: [ok(one(R5)), ok(one(R5))], [W.approve]: [err(409, 'conflict'), ok(approved(R5A, Object.assign({}, AV5, { monthlySalaryBasis: '8500000.00', amount: '13000.00' })))] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    const html = rt.appHTML();
+    check(posts(rt, W.approve).length === 1 && rt.ot().panel === null && countOf(rt, REC(ID5)) === 2 && valuationCalls(rt) === 2 && rt.ot().valuation.amount === '13000.00',
+      'U. 409: one POST; the panel closed; the record read again; a fresh preview read');
+    check(/The amount changed from Rp 12345\.00 to Rp 13000\.00\. Check it, then approve again\./.test(html) && html.indexOf('<td>13000.00</td>') !== -1 && html.indexOf('<td>8500000.00</td>') !== -1,
+      'U. amount changed (salary changed): "The amount changed from Rp 12345.00 to Rp 13000.00" and the fresh preview shown');
+    await flush(20);
+    check(posts(rt, W.approve).length === 1 && enabled(html, 'swoApproveBtn') && rt.ot().mutation.status === 'error', 'U. nothing is approved automatically: still one POST; Approve offered again');
+    firewall(rt, 'U. amount changed');
+    rt.app.fire('swoApproveBtn', 'click'); await flush();
+    check(rt.appHTML().indexOf('Amount to approve (Rp): <strong>13000.00</strong>') !== -1 && posts(rt, W.approve).length === 1, 'U. the second approval needs a new Approve — its panel shows the NEW amount');
+    rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 2 && bodyOf(posts(rt, W.approve)[1]).expectedAmount === '13000.00' && rt.ot().detail.status === 'Approved',
+      'U. … and a new Confirm, which sends the fresh preview\'s amount');
+  }
+  {
+    // A stale version (the record changed), the same amount.
+    const R5v4 = Object.assign({}, R5, { version: 4, notes: 'changed' });
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [REC(ID5)]: [ok(one(R5)), ok(one(R5v4))],
+      [W.approve]: [err(409, 'conflict'), ok(approved(Object.assign({}, R5A, { version: 5 }), AV5))] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 1 && valuationCalls(rt) === 2 && /The record changed\. Check it, then approve again\./.test(rt.appHTML()) && rt.ot().detail.version === 4,
+      'U. stale version, same amount: "The record changed. Check it, then approve again."');
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 2 && bodyOf(posts(rt, W.approve)[1]).expectedVersion === 4, 'U. the deliberate second approval uses the version read again');
+  }
+  for(const [label, after, want, vcalls] of [['rejected elsewhere', Object.assign({}, R5, { status: 'Rejected', version: 4 }), /it is now Rejected and can no longer be approved\./, 1],
+    ['approved elsewhere', R5A, /it is now Approved and can no longer be approved\./, 2]]){
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 }), ok({ overtimeValuation: AV5 })], [REC(ID5)]: [ok(one(R5)), ok(one(after))],
+      [W.approve]: [err(409, 'conflict')] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 1 && want.test(rt.appHTML()) && valuationCalls(rt) === vcalls && buttons(rt.appHTML()) === '',
+      'U. 409, concurrent status change (' + label + '): explained, no approval control, ' + (vcalls === 2 ? 'the frozen valuation read' : 'no valuation read'));
+    firewall(rt, 'U. ' + label);
+  }
+  {
+    // The owner was archived / lost their salary: the fresh preview itself is a 409.
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 }), err(409, 'conflict')], [REC(ID5)]: [ok(one(R5)), ok(one(R5))],
+      [W.approve]: [err(409, 'conflict')] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    const html = rt.appHTML();
+    check(posts(rt, W.approve).length === 1 && (html.match(/This record cannot be valued now \(the employee may be archived or have no salary\)\./g) || []).length >= 1
+      && !enabled(html, 'swoApproveBtn') && enabled(html, 'swoRejectBtn') && !/id="swoValuationRetryBtn"/.test(html) && !/12345.00/.test(html),
+      'U. 409 then a 409 preview (archived / no salary): "cannot be valued now"; Approve disabled, Reject still offered; the old amount gone');
+    firewall(rt, 'U. unvalued');
+  }
+  {
+    // A Reviewed record of an archived owner never offers Approve (the server refuses its preview).
+    const rt = await detail(ME_CEO, ID3, R3, { [VAL(ID3)]: [err(409, 'conflict')] });
+    check(/This record cannot be valued now/.test(rt.appHTML()) && !enabled(rt.appHTML(), 'swoApproveBtn') && enabled(rt.appHTML(), 'swoRejectBtn'),
+      'U. an archived owner\'s Reviewed record: cannot be valued now, Approve disabled, Reject offered');
+  }
+
+  /* ---------- V. ambiguous approval: never resent, reconciled by reading ---------- */
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 }), ok({ overtimeValuation: PV5 })], [REC(ID5)]: [ok(one(R5)), ok(one(R5))],
+      [W.approve]: [err(503, 'service_unavailable')] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush(20);
+    check(posts(rt, W.approve).length === 1 && rt.ot().mutation.status === 'ambiguous' && countOf(rt, REC(ID5)) === 2 && valuationCalls(rt) === 2
+      && /could not confirm the approval\. The record read again is still Reviewed: it was not approved\. Check the current amount, then approve again\./.test(rt.appHTML())
+      && enabled(rt.appHTML(), 'swoApproveBtn'), 'V. approve 503 + still Reviewed: not resent; a fresh preview; Approve must be chosen again');
+    firewall(rt, 'V. 503 still Reviewed');
+  }
+  for(const [label, answer, timeout] of [['network failure', NETFAIL, false], ['timeout', 'HANG', true], ['non-JSON success', resp(200, '<html>proxy</html>', { 'content-type': 'text/html' }), false],
+    ['a non-confirming amount', ok(approved(R5A, Object.assign({}, AV5, { amount: '99.00' }))), false], ['a Reviewed record in the answer', ok(approved(R5, AV5)), false]]){
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 }), ok({ overtimeValuation: AV5 })], [REC(ID5)]: [ok(one(R5)), ok(one(R5A))],
+      [W.approve]: [answer] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    if(timeout){ rt.net.timers.splice(0).forEach((fn) => fn()); await flush(); }
+    await flush(20);
+    check(posts(rt, W.approve).length === 1 && rt.ot().mutation.status === 'ambiguous' && rt.ot().detail.status === 'Approved' && rt.ot().valuation.kind === 'approved'
+      && /could not confirm the approval, but the record read again is now Approved\. Its frozen amount is Rp 12345\.00\./.test(rt.appHTML()) && !/Overtime record approved\./.test(rt.appHTML()),
+      'V. approve ' + label + ' + now Approved: not resent, never reported as confirmed; the frozen amount read and shown');
+  }
+
+  /* ---------- W. stale valuation answers, section switch, logout, principal change ---------- */
+  {
+    const gV = deferred();
+    const rt = await open(ME_CEO, { [OT(MONTH)]: [ok(CEO_MONTH5)], [REC(ID5)]: [ok(one(R5))], [VAL(ID5)]: [() => gV.promise], [REC(ID2)]: [ok(one(R2))] });
+    rt.app.fire('swoOpen4', 'click'); await flush();
+    rt.app.fire('swoBackBtn', 'click'); await flush();
+    rt.app.fire('swoOpen1', 'click'); await flush();
+    gV.resolve(ok({ overtimeValuation: PV5 })); await flush();
+    check(rt.ot().detailId === ID2 && rt.ot().valuation === null && !/12345.00/.test(rt.appHTML()), 'W. a preview answering after the CEO moved to another record is dropped');
+  }
+  {
+    const rt = loadRuntime({});
+    const S = rt.SessionOvertimeStore;
+    const d = S.begin('detail', ID5); S.applyDetail(d, R5);
+    const v1 = S.begin('valuation', ID5), v2 = S.begin('valuation', ID5);
+    check(S.applyValuation(v1, PV5) === false && S.applyError(v1, { kind: 'UNAVAILABLE' }) === false && S.applyValuation(v2, Object.assign({}, PV5, { id: ID1 })) === false
+      && S.applyValuation(v2, PV5) === true && S.snapshot().valuation.amount === '12345.00', 'W. store: a superseded valuation token is refused; a valuation of another record is refused; the latest applies');
+    const v3 = S.begin('valuation', ID5);
+    S.begin('detail', ID2);
+    check(S.applyValuation(v3, PV5) === false && S.snapshot().valuation === null, 'W. store: a new detail drops the valuation and refuses its pending answer');
+    const v4 = S.begin('valuation', ID2);
+    S.clear();
+    check(S.applyValuation(v4, PV5) === false && S.snapshot().valuationStatus === 'idle', 'W. store: clear() (another generation) refuses a pending valuation');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 }), ok({ overtimeValuation: PV5b })] });
+    rt.app.fire('swSectionMain', 'click'); await flush();
+    check(rt.ot().valuation === null && !/12345.00/.test(rt.appHTML()), 'W. switching to Employees (where a salary may change) drops the preview');
+    rt.app.fire('swSectionOvertime', 'click'); await flush();
+    check(valuationCalls(rt) === 2 && rt.appHTML().indexOf('<td>13000.00</td>') !== -1, 'W. back on Overtime the preview is read again (the current server amount, never a remembered one)');
+  }
+  {
+    const gV = deferred();
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [() => gV.promise], '/api/auth/logout': [ok({})] });
+    await rt.AuthBoot.signOut(); await flush();
+    gV.resolve(ok({ overtimeValuation: PV5 })); await flush();
+    check(rt.state() === 'SIGNED_OUT' && rt.ot().valuation === null && !/12345.00/.test(rt.appHTML()), 'W. logout during the valuation read: the late answer is dropped');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [err(401, 'unauthenticated')] });
+    check(rt.state() === 'SIGNED_OUT' && rt.ot().valuation === null && rt.ot().detail === null, 'W. a valuation read answered 401 ends the session and destroys the Overtime data');
+  }
+  {
+    const gV = deferred();
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [() => gV.promise] });
+    rt.net.routes['/api/auth/me'] = [ok({ userId: 'u_ceo_2', membershipId: 'm_ceo_2', role: 'ceo', employeeId: null, csrfToken: CSRF2 })];
+    await rt.SessionIdentityProvider.refresh(); rt.render(); await flush();
+    gV.resolve(ok({ overtimeValuation: PV5 })); await flush();
+    check(rt.ot().valuation === null && rt.ot().detail === null && !/12345.00/.test(rt.appHTML()), 'W. a principal change during the valuation read: the late answer is dropped');
+  }
+  {
+    const gA = deferred();
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [() => gA.promise], '/api/auth/logout': [ok({})] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    await rt.AuthBoot.signOut(); await flush();
+    gA.resolve(ok(approved(R5A, AV5))); await flush();
+    check(rt.state() === 'SIGNED_OUT' && rt.ot().detail === null && rt.ot().valuation === null && !/approved/i.test(rt.appHTML()), 'W. logout during the approval: the late answer is dropped; nothing of it is shown or kept');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: Object.assign({}, PV5, { rate: '1.00' }) }), ok({ overtimeValuation: PV5 })] });
+    let html = rt.appHTML();
+    check(rt.ot().valuationStatus === 'error' && /TAM OS sent an unexpected response/.test(html) && /id="swoValuationRetryBtn"/.test(html) && !enabled(html, 'swoApproveBtn') && !/1\.00/.test(html.replace('7.50', '')),
+      'W. a malformed preview is refused whole: a message and Retry valuation; Approve stays disabled');
+    rt.app.fire('swoValuationRetryBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(valuationCalls(rt) === 2 && enabled(html, 'swoApproveBtn') && html.indexOf('<td>12345.00</td>') !== -1, 'W. Retry valuation reads it again');
+  }
+
+  /* ---------- X. approval: 401, CSRF recovery, denial, 404 ---------- */
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [err(403, 'forbidden'), ok(approved(R5A, AV5))],
+      '/api/auth/me': [ok(ME_CEO), ok(Object.assign({}, ME_CEO, { csrfToken: CSRF2 }))] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    const p = posts(rt, W.approve);
+    check(p.length === 2 && p[0].init.body === p[1].init.body && p[1].init.headers['X-CSRF-Token'] === CSRF2 && rt.ot().detail.status === 'Approved',
+      'X. a stale CSRF token on approve: one /me refresh, exactly one replay of the same body (a 403 precedes any effect)');
+  }
+  for(const [label, meAnswer, want] of [['signed_out', err(401, 'unauthenticated'), 'SIGNED_OUT'], ['unavailable', err(503, 'service_unavailable'), 'UNAVAILABLE']]){
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [err(403, 'forbidden')], '/api/auth/me': [ok(ME_CEO), meAnswer] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(rt.state() === want && posts(rt, W.approve).length === 1 && rt.ot().valuation === null && rt.ot().detail === null, 'X. approve recovery ' + label + ': no replay, ' + want + ', the valuation destroyed');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [err(403, 'forbidden')],
+      '/api/auth/me': [ok(ME_CEO), ok({ userId: 'u_ceo_9', membershipId: 'm_9', role: 'ceo', employeeId: null, csrfToken: CSRF2 })] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 1 && rt.ot().valuation === null && rt.ot().open === false, 'X. approve recovery principal_changed: no replay, the Overtime data and valuation cleared');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [err(401, 'unauthenticated')] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(rt.state() === 'SIGNED_OUT' && rt.ot().valuation === null, 'X. approve answered 401 ends the session');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [err(403, 'forbidden')], '/api/auth/me': [ok(ME_CEO), ok(ME_CEO)] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 1 && /You do not have permission to make this change\./.test(rt.appHTML()) && rt.state() === 'AUTHENTICATED', 'X. a genuine approve denial: one request, a fixed message');
+  }
+  {
+    const rt = await detail(ME_CEO, ID5, R5, { [OT(MONTH)]: [ok(CEO_MONTH5), ok(CEO_MONTH5)], [VAL(ID5)]: [ok({ overtimeValuation: PV5 })], [W.approve]: [err(404, 'not_found')] });
+    rt.app.fire('swoApproveBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(posts(rt, W.approve).length === 1 && rt.ot().detailId === null && rt.ot().valuation === null && /no longer available/.test(rt.appHTML()), 'X. approve 404 closes the record (and its valuation) and reads the month again');
+  }
+
+  /* ---------- Y. Employee: no preview ever; own frozen valuation only ---------- */
+  for(const r of [S1, S2, S3, S4]){
+    const rt = await detail(ME_EMP, r.id, r, { [OT(MONTH)]: [ok(EMP_MONTH5)] });
+    rt.SessionOvertime.openPanel('approve'); rt.SessionOvertime.retryValuation(); rt.render(); await flush();
+    check(valuationCalls(rt) === 0 && buttons(rt.appHTML()) === (r === S1 ? 'Edit,Delete,Submit' : '') && !/swoValuation|Valuation preview|Approve/.test(rt.appHTML()) && rt.ot().panel === null,
+      'Y. Employee + own ' + r.status + ': ZERO valuation requests (not merely hidden), no Approve, no valuation block');
+    firewall(rt, 'Y. Employee ' + r.status);
+  }
+  {
+    const rt = await detail(ME_EMP, IDS5, S5, { [OT(MONTH)]: [ok(EMP_MONTH5)], [VAL(IDS5)]: [ok({ overtimeValuation: AVS5 })] });
+    const html = rt.appHTML();
+    check(valuationCalls(rt) === 1 && countOf(rt, VAL(IDS5)) === 1 && /Approved valuation \(frozen at approval\)/.test(html) && html.indexOf('<td>54321.00</td>') !== -1
+      && html.indexOf('<th scope="row">Monthly salary basis (Rp)</th><td>900000.00</td>') !== -1 && !/1000000\.00/.test(html) && buttons(html) === '',
+      'Y. Employee + own Approved: their frozen valuation (salary basis 900000.00 at approval — not the current 1000000.00); no controls');
+    firewall(rt, 'Y. Employee own Approved');
+    rt.app.fire('swoBackBtn', 'click'); await flush();
+    check(!/54321|900000/.test(rt.appHTML()) && (rt.appHTML().match(/<td>Approved<\/td>/g) || []).length === 1, 'Y. the Employee month list shows the Approved status and no money');
+    firewall(rt, 'Y. Employee list');
+  }
+  {
+    // A colleague's record: the server answers 404 to the record read; nothing about money is asked or shown.
+    const rt = await open(ME_EMP, { [OT(MONTH)]: [ok(EMP_MONTH5)], [REC(IDX)]: [err(404, 'not_found')] });
+    rt.SessionOvertime.openDetail(IDX); await flush();
+    check(valuationCalls(rt) === 0 && /This overtime record was not found\./.test(rt.appHTML()) && !/Rp|salary|amount/i.test(rt.appHTML()),
+      'Y. a colleague\'s record (server 404): no valuation request, no money disclosed');
+    const p = rt.AuthBoot.snapshot().principal;
+    check(rt.sessionOvertimeValuationWanted(p, Object.assign({}, S5, { employeeId: 'emp_srv_2' })) === false, 'Y. the page would never ask for a colleague\'s valuation either');
+  }
+  {
+    // A server preview answer that reached an Employee would not even be requested — and the view
+    // offers no Approve to an Employee whatever the store holds.
+    const rt = await detail(ME_EMP, IDS3, S3, { [OT(MONTH)]: [ok(EMP_MONTH5)] });
+    const tok = rt.SessionOvertimeStore.begin('valuation', IDS3);
+    rt.SessionOvertimeStore.applyValuation(tok, rt.OvertimeDecoders.valuation(rt.parse(JSON.stringify(val(IDS3, 'preview', '7.50'))), rt.ot().detail)); rt.render(); await flush();
+    check(!/swoApproveBtn|swoValuation|12345.00/.test(rt.appHTML()), 'Y. even a preview forced into the store is never rendered for an Employee, and no Approve exists');
+  }
+
+  /* ---------- Z. regression: AFI-4b1 Reviewed behaviour, no Payroll / Finance call ---------- */
+  {
+    const rt = await detail(ME_CEO, ID2, R2, { [OT(MONTH)]: [ok(CEO_MONTH5)], [W.review]: [ok(one(Object.assign({}, R2, { status: 'Reviewed', version: 3 })))], [VAL(ID2)]: [ok({ overtimeValuation: val(ID2, 'preview', '2.25') })] });
+    rt.app.fire('swoReviewBtn', 'click'); await flush(); rt.app.fire('swoPanelConfirm', 'click'); await flush();
+    check(rt.ot().detail.status === 'Reviewed' && /Overtime record marked as reviewed\./.test(rt.appHTML()) && valuationCalls(rt) === 1 && buttons(rt.appHTML()) === 'Approve,Reject',
+      'Z. reviewing a Submitted record still works; the Reviewed record then reads its preview and offers Approve / Reject');
+    const urls = rt.net.calls.map((c) => c.url);
+    check(urls.every((u) => /^\/api\/(auth\/me|employees|employee\?|overtime-record)/.test(u)) && !urls.some((u) => /payroll|finance|payment|transaction|ledger|journal/i.test(u)),
+      'Z. the only API calls are identity, Employee and Overtime — never Payroll or Finance');
+    firewall(rt, 'Z. review then preview');
+  }
+
   /* ---------- summary ---------- */
   console.log('');
   if(failures.length){
-    console.log('AFI-4b1 SESSION OVERTIME RUNTIME VERIFICATION FAILED -- ' + failures.length + ' failing:');
+    console.log('AFI-4b1 + AFI-4b2 SESSION OVERTIME RUNTIME VERIFICATION FAILED -- ' + failures.length + ' failing:');
     failures.forEach((f) => console.log('  - ' + f));
     process.exit(1);
   }
-  console.log('AFI-4b1 SESSION OVERTIME RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.');
-})().catch(function(e){ console.log('AFI-4b1 SESSION OVERTIME RUNTIME VERIFICATION FAILED -- harness error: ' + (e && e.stack || e)); process.exit(1); });
+  console.log('AFI-4b1 + AFI-4b2 SESSION OVERTIME RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.');
+})().catch(function(e){ console.log('AFI-4b1 + AFI-4b2 SESSION OVERTIME RUNTIME VERIFICATION FAILED -- harness error: ' + (e && e.stack || e)); process.exit(1); });

@@ -153,9 +153,9 @@ reject with `expectedVersion`, unconfirmed writes reconciled by reading (never r
 D-AFI4b1-3 = A: `ApiClient` admits exactly one identity-shaped body key — `employeeId` on `POST
 /api/overtime-records/create` — as a **target selector**, not authority: the server re-scopes and authorizes it, and
 every other route, method and identity key stays refused. Its runtime harness is the **ninth** CI harness. No backend
-change and no migration of its own; ACTIONS stay 21; `AUTH_MODE` stays LOCAL. **BF-4b2** (local candidate on
-`feature/bf-4b2-overtime-approval`; not pushed, not merged, not deployed; owner decisions D-BF4b-3 = A, D-BF4b-4 = A,
-D-BF4b2-1..5 = A) adds backend-only **valuation and approval**: Reviewed → Approved, CEO-only under the existing
+change and no migration of its own; ACTIONS stay 21; `AUTH_MODE` stays LOCAL. **BF-4b2** (merged to `main` as
+source, PR #42, canonical merge `78ec019d5820241d89fc518f0c6bf24a405a4738`; not deployed; owner decisions D-BF4b-3 = A,
+D-BF4b-4 = A, D-BF4b2-1..5 = A) adds backend-only **valuation and approval**: Reviewed → Approved, CEO-only under the existing
 `overtime.manage` (**ACTIONS stay 21**), valued by the fixed, versioned **internal** TAM method `TAM-OT-1` — monthly
 salary × overtime hours ÷ 160.00, multiplier 1, IDR, one final half-up rounding to the whole Rupiah; never a statutory
 formula (no 1/173, no 1.5× / 2× tiers, no schedule, contract or company setting) — computed exactly in integer sen ×
@@ -167,7 +167,20 @@ in one transaction, locks the employee then the record, requires Reviewed, the v
 Approved is terminal; a later salary change rewrites nothing. The owner may read their own Approved valuation; an
 Employee never gets a preview; month lists carry no money. Migrations `0022`–`0023` (head `0023`). No payroll, no
 finance, no frontend change and an unchanged package: the AFI-4b1 decoder fails closed on an Approved record, so
-**BF-4b2 and AFI-4b2 must be deployed together** (owner decision D-BF4b2-5 = A).
+**BF-4b2 and AFI-4b2 must be deployed together** (owner decision D-BF4b2-5 = A). **AFI-4b2** (local candidate on
+`feature/afi-4b2-session-overtime-valuation`; not pushed, not merged, not deployed; owner decisions D-AFI4b2-1 = A,
+D-AFI4b2-2 = A) is the SESSION counterpart, inside the existing Overtime section (no new module, page or
+navigation): the strict decoder now knows `Approved` and the exact seven-key valuation projection; the CEO sees the
+**preview** of a Reviewed record ("Valuation preview — not yet approved") and approves exactly that preview —
+`expectedAmount` is the held, decoded preview's exact string, never DOM text, input or a browser computation;
+an Approved record shows its **frozen** valuation ("Approved valuation (frozen at approval)") to the CEO and to its
+owner; an Employee never requests a preview. D-AFI4b2-1 = A: **any** approve 409 (the server names no cause) drops
+the preview and the panel, reads the record and — if still Reviewed — a fresh preview, compares the amounts as exact
+strings and requires a new Approve → Confirm; an unconfirmed approval is reconciled by reading; the approval is
+never resent. Money stays a string end to end (no float, no `fmtIDR`, no TAM-OT-1 in JavaScript). D-AFI4b2-2 = A:
+the existing SESSION Overtime harness is extended (289 → 624 checks) and CI stays at **nine** harnesses. The package
+keeps 97 files (digest `2d826d4d…`); no backend change, no migration, ACTIONS stay 21, D-AFI4b1-3 unchanged,
+`AUTH_MODE` stays LOCAL. With AFI-4b2 both halves exist, and they must still be deployed together.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

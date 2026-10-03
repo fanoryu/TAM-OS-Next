@@ -374,8 +374,10 @@ D-AFI4b1-3 being the one route-scoped `employeeId` target selector on Overtime c
 as source (PR #41, canonical `77332ca2`), frontend only. **BF-4b2** (server-authoritative valuation and approval —
 Reviewed → Approved under the existing `overtime.manage`, the fixed internal method `TAM-OT-1`, exact integer
 arithmetic, a CEO preview plus an `expectedAmount` guard, an immutable snapshot, migrations `0022`–`0023`;
-*D-BF4b-3/4 = A, D-BF4b2-1..5 = A*) is a local candidate on a feature branch, backend only, with no payroll or
-finance effect; BF-4b2 and AFI-4b2 must be deployed together. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+*D-BF4b-3/4 = A, D-BF4b2-1..5 = A*) is merged as source (PR #42, canonical `78ec019d`), backend only, with no payroll
+or finance effect. **AFI-4b2** (its SESSION frontend — the CEO's preview and approval of exactly that preview, the
+frozen valuation for the CEO and the owner, never a preview for an Employee; *D-AFI4b2-1 = A, D-AFI4b2-2 = A*) is a
+local candidate on a feature branch, frontend only. BF-4b2 and AFI-4b2 must be deployed together. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

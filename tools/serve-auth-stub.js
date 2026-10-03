@@ -91,7 +91,18 @@
  * compare-and-swap (409), hard delete of a Draft. The employeeId of a create is resolved in scope:
  * the browser never decides. Fixtures are in the current month (from this process's clock) and the
  * month before. The write-* scenarios apply to these routes too (write-validation names hours).
- * No money, rate, approval or payroll exists here (BF-4b2).
+ *
+ * AFI-4b2 valuation and approval (GET /api/overtime-record/valuation?id=, POST
+ * /api/overtime-records/approve { id, expectedVersion, expectedAmount }): a test-only model of
+ * BF-4b2 — the frozen valuation of an Approved record for the CEO and its owner; otherwise the CEO's
+ * preview (an Employee is 403) of a Reviewed record only (else 409), refused (409) for an archived
+ * owner or one without a salary; approve is CEO only, Reviewed at the expected version, eligible, and
+ * the stub's own TAM-OT-1 (salary × hours ÷ 160, integer sen × quarter-hours, one half-up rounding to
+ * the Rupiah) must equal expectedAmount exactly (409), then the snapshot is frozen. Fixtures add a
+ * Reviewed and an Approved record of EMP-001 (whose frozen salary basis differs from the current one).
+ *   /__stub/bump-salary   raises EMP-001's salary by 500000.00 WITHOUT a scenario switch, so a
+ *                         preview already shown is stale and its approval answers 409
+ * No payroll, payment or finance effect exists here.
  */
 'use strict';
 const http = require('http');
@@ -155,8 +166,23 @@ function stubOvertime(){
     overtimeDate: day ? month + '-' + day : null, hours: hours, workDescription: text, notes: null, status: status, version: version });
   return [r(1, 'emp_stub_1', m, '03', '7.50', 'Draft', 1, 'Fabricated <b>release</b> support'), r(2, 'emp_stub_1', m, '05', '2.25', 'Submitted', 2, 'Fabricated audit prep'),
     r(3, 'emp_stub_2', m, null, '1.00', 'Reviewed', 3, null), r(4, 'emp_stub_3', m, '09', '0.25', 'Rejected', 4, 'Fabricated duplicate entry'),
-    r(5, 'emp_stub_5', m, '11', '4.00', 'Draft', 1, null), r(6, 'emp_stub_1', prev, '20', '3.00', 'Reviewed', 2, 'Fabricated month-end close')];
+    r(5, 'emp_stub_5', m, '11', '4.00', 'Draft', 1, null), r(6, 'emp_stub_1', prev, '20', '3.00', 'Reviewed', 2, 'Fabricated month-end close'),
+    // AFI-4b2: a Reviewed record of a live, salaried owner, and an Approved one with its frozen snapshot.
+    r(7, 'emp_stub_1', m, '14', '6.00', 'Reviewed', 3, 'Fabricated quarter close'),
+    Object.assign(r(8, 'emp_stub_1', m, '18', '2.50', 'Approved', 4, 'Fabricated vendor visit'), { frozenSalary: '7000000.00' })];
 }
+// AFI-4b2 TAM-OT-1 (test-only mirror of server/src/Overtime/OvertimeValuation.php): salary × hours ÷ 160
+// in integer sen × quarter-hours, one half-up rounding to the whole Rupiah.
+function otAmount(salary, hours){
+  const sen = BigInt(salary.replace('.', '')), q = BigInt(hours.replace('.', '')) / 25n, den = 640n * 100n;
+  let rupiah = sen * q / den;
+  if(2n * (sen * q % den) >= den) rupiah++;
+  return rupiah.toString() + '.00';
+}
+const otValuation = (r, kind, salary) => ({ id: r.id, kind: kind, method: 'TAM-OT-1', hours: r.hours, monthlySalaryBasis: salary,
+  standardMonthlyHours: '160.00', amount: otAmount(salary, r.hours) });
+// The owner's current salary when it can be valued (live, salary > 0), else null.
+const otSalary = (r) => { const e = employees.find((x) => x.id === r.employeeId); return (e && !e.archived && e.monthlyBaseSalary && e.monthlyBaseSalary !== '0.00') ? e.monthlyBaseSalary : null; };
 const otHours = (v) => { const m = typeof v === 'string' ? /^(0|[1-9]\d{0,2})\.(\d{2})$/.exec(v) : null; if(!m) return false; const h = +m[1] * 100 + +m[2]; return h > 0 && h <= 74400 && h % 25 === 0; };
 const otMonth = (v) => typeof v === 'string' && /^(\d{4})-(0[1-9]|1[0-2])$/.test(v) && +v.slice(0, 4) >= 1900;
 const otDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && +v.slice(0, 4) >= 1900 && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v;
@@ -282,8 +308,22 @@ async function handleApi(req, res, p, query){
     const r = overtime.find((x) => x.id === query.get('id'));
     return (r && visible(r)) ? api(res, 200, { overtimeRecord: pick(r, OT_VIEW) }) : api(res, 404, 'not_found');
   }
+  // AFI-4b2: the valuation read — frozen for an Approved record (CEO, owner); else the CEO's preview.
+  if(p === '/api/overtime-record/valuation' && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    if([...query.keys()].join() !== 'id' || !/^[0-9a-f]{32}$/.test(query.get('id') || '')) return api(res, 400, 'validation_failed', null, ['id']);
+    const r = overtime.find((x) => x.id === query.get('id'));
+    if(!r || !(session.user.role === 'ceo' || r.employeeId === session.user.employeeId)) return api(res, 404, 'not_found');
+    if(r.status === 'Approved') return api(res, 200, { overtimeValuation: otValuation(r, 'approved', r.frozenSalary) });
+    if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+    if(r.status !== 'Reviewed' || !otSalary(r)) return api(res, 409, 'conflict');
+    return api(res, 200, { overtimeValuation: otValuation(r, 'preview', otSalary(r)) });
+  }
   const otWrite = { '/api/overtime-records/create': 'create', '/api/overtime-records/update': 'update', '/api/overtime-records/delete': 'delete',
-    '/api/overtime-records/submit': 'submit', '/api/overtime-records/review': 'review', '/api/overtime-records/reject': 'reject' }[p];
+    '/api/overtime-records/submit': 'submit', '/api/overtime-records/review': 'review', '/api/overtime-records/reject': 'reject',
+    '/api/overtime-records/approve': 'approve' }[p];
   if(otWrite && req.method === 'POST') return handleOvertimeWrite(req, res, otWrite);
   // AFI-4a2 Employee writes (test-only model of BF-4a1; see the header).
   const write = { '/api/employees/create': 'create', '/api/employees/update': 'update', '/api/employees/archive': 'archive',
@@ -413,7 +453,8 @@ async function handleOvertimeWrite(req, res, kind){
   if(scenario === 'write-stale-csrf' && !session.rotated){ session.rotated = true; session.csrf = token(); return api(res, 403, 'forbidden'); }
   if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
   if(!b) return api(res, 400, 'validation_failed');
-  const allowed = kind === 'create' ? ['employeeId'].concat(OT_FIELDS) : kind === 'update' ? ['id', 'expectedVersion'].concat(OT_FIELDS) : ['id', 'expectedVersion'];
+  const allowed = kind === 'create' ? ['employeeId'].concat(OT_FIELDS) : kind === 'update' ? ['id', 'expectedVersion'].concat(OT_FIELDS)
+    : kind === 'approve' ? ['id', 'expectedVersion', 'expectedAmount'] : ['id', 'expectedVersion'];
   const unknown = Object.keys(b).filter((k) => allowed.indexOf(k) === -1);
   if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
   if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [kind === 'create' || kind === 'update' ? 'hours' : 'id']);
@@ -442,9 +483,9 @@ async function handleOvertimeWrite(req, res, kind){
   }
   const target = [];
   if(typeof b.id !== 'string' || !/^[0-9a-f]{32}$/.test(b.id)) target.push('id');
-  if(!Number.isInteger(b.expectedVersion) || b.expectedVersion < 1 || b.expectedVersion > 4294967295) target.push('expectedVersion');
   if(target.length) return api(res, 400, 'validation_failed', null, target);
   const patch = Object.keys(b).filter((k) => k !== 'id' && k !== 'expectedVersion');
+  if(kind === 'approve' && !(typeof b.expectedAmount === 'string' && /^(0|[1-9][0-9]{0,13})\.00$/.test(b.expectedAmount))) return api(res, 400, 'validation_failed', null, ['expectedAmount']);
   if(kind === 'update'){
     if(!patch.length) return api(res, 400, 'validation_failed', null, OT_FIELDS);
     const bad = patch.filter((k) => otValue(k, b[k]) === undefined);
@@ -452,9 +493,16 @@ async function handleOvertimeWrite(req, res, kind){
   }
   const r = overtime.find((x) => x.id === b.id);
   if(!r || !visible(r)) return api(res, 404, 'not_found');
-  if(!ceo && (kind === 'review' || kind === 'reject')) return api(res, 403, 'forbidden');
-  const from = kind === 'update' || kind === 'delete' ? ['Draft'] : OT_TRANSITIONS[kind][0];
+  if(!ceo && (kind === 'review' || kind === 'reject' || kind === 'approve')) return api(res, 403, 'forbidden');
+  const from = kind === 'update' || kind === 'delete' ? ['Draft'] : kind === 'approve' ? ['Reviewed'] : OT_TRANSITIONS[kind][0];
   if(from.indexOf(r.status) === -1 || r.version !== b.expectedVersion) return api(res, 409, 'conflict');
+  if(kind === 'approve'){
+    // AFI-4b2: eligibility, then the server's own amount must equal the one the CEO was shown.
+    const salary = otSalary(r);
+    if(!salary || otAmount(salary, r.hours) !== b.expectedAmount) return api(res, 409, 'conflict');
+    r.frozenSalary = salary; r.status = 'Approved'; r.version++;
+    return done({ overtimeRecord: pick(r, OT_VIEW), overtimeValuation: otValuation(r, 'approved', r.frozenSalary) });
+  }
   if(kind === 'delete'){ overtime = overtime.filter((x) => x !== r); return done({ deleted: { id: r.id } }); }
   if(kind === 'update'){
     const next = { ...r };
@@ -512,6 +560,13 @@ http.createServer((req, res) => {
     reset(sw[1]);
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('scenario: ' + scenario);
+  }
+  if(urlPath === '/__stub/bump-salary' && req.method === 'GET'){
+    // AFI-4b2: a salary change after a preview (no scenario switch, the session stays).
+    const e = employees.find((x) => x.id === 'emp_stub_1');
+    e.monthlyBaseSalary = (BigInt(e.monthlyBaseSalary.replace('.', '')) + 50000000n).toString().replace(/(..)$/, '.$1');
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('EMP-001 salary: ' + e.monthlyBaseSalary);
   }
   if(urlPath === '/api' || urlPath.startsWith('/api/')) return handleApi(req, res, urlPath, url.searchParams);
   if(req.method !== 'GET' && req.method !== 'HEAD'){ res.writeHead(405, { ...STATIC_HEADERS, 'Allow': 'GET, HEAD' }); return res.end(); }

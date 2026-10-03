@@ -1,14 +1,17 @@
 /* ============================================================
-   OVERTIME API (AFI-4b1) — js/core/overtime-api.js
+   OVERTIME API (AFI-4b1, AFI-4b2) — js/core/overtime-api.js
    ------------------------------------------------------------
-   The SESSION-mode client for the server overtime record (BF-4b1, merged as PR #40): two reads
-   over ApiClient and six writes over authSessionMutation (js/core/auth-boot.js), each answer
-   strictly decoded before anything else sees it. The non-money workflow only: no rate, salary,
-   schedule, amount, approval, contract or payroll value exists here (valuation is BF-4b2).
+   The SESSION-mode client for the server overtime record (BF-4b1, merged as PR #40) and its
+   valuation and approval (BF-4b2, merged as PR #42): three reads over ApiClient and seven writes
+   over authSessionMutation (js/core/auth-boot.js), each answer strictly decoded before anything
+   else sees it. No rate, schedule, contract or payroll value exists here.
 
      month(monthKey)   GET /api/overtime-records?month=YYYY-MM   the scope's records of one month
                                                                  (CEO: the company; Employee: own)
      get(id)           GET /api/overtime-record?id=<id>
+     valuation(record) GET /api/overtime-record/valuation?id=<id>   the CEO's preview of a Reviewed
+                                                                 record, or the frozen valuation of
+                                                                 an Approved one (CEO and owner)
 
      create(fields)                        POST /api/overtime-records/create   a new Draft
      update(id, expectedVersion, changed)  POST /api/overtime-records/update   a Draft only
@@ -16,6 +19,15 @@
      submit / review / reject(id, expectedVersion)
                                            POST /api/overtime-records/<op>     Draft → Submitted;
                                            Submitted → Reviewed; Submitted / Reviewed → Rejected
+     approve(id, expectedVersion, expectedAmount)
+                                           POST /api/overtime-records/approve  Reviewed → Approved
+
+   VALUATION IS THE SERVER'S (BF-4b2, owner decisions D-BF4b-3/4 = A): the method TAM-OT-1 is an
+   internal TAM method, never a statutory one, and the browser never computes it. A valuation is
+   decoded as exact strings (server/src/Overtime/OvertimeValuationView.php) and shown as sent;
+   approve's expectedAmount is the amount of the decoded preview the CEO was shown, compared by
+   the server for exact equality — an optimistic guard, never authority. No arithmetic, rounding
+   or number conversion of money exists here.
 
    STRICT DECODING (server/src/Overtime/OvertimeView.php): each wrapper and each record has
    exactly its keys, with the server's types and formats; anything else is INVALID_RESPONSE and
@@ -26,12 +38,13 @@
    WRITES: OvertimeRequests is the allowlisted mirror of the server's OvertimeInput — UX only;
    the server stays the authority. Bodies are exact: create { employeeId, monthKey, hours,
    overtimeDate, workDescription, notes }; update { id, expectedVersion, changed fields };
-   delete / submit / review / reject { id, expectedVersion }. Never a company, actor, status,
-   version, money, contract, payroll id or reason. A success counts only when the decoded answer
-   confirms the write (create: a version 1 Draft of the requested owner; update: the same Draft;
-   submit / review / reject: the same record in the target status; delete: the same id) —
-   otherwise it is INVALID_RESPONSE, never a success. Nothing is persisted, cached, logged or
-   resent here.
+   delete / submit / review / reject { id, expectedVersion }; approve { id, expectedVersion,
+   expectedAmount }. Never a company, actor, status, version, salary, hours of a valuation,
+   contract, payroll id or reason. A success counts only when the decoded answer confirms the
+   write (create: a version 1 Draft of the requested owner; update: the same Draft; submit /
+   review / reject: the same record in the target status; delete: the same id; approve: the same
+   record Approved, with its frozen valuation of exactly the amount sent) — otherwise it is
+   INVALID_RESPONSE, never a success. Nothing is persisted, cached, logged or resent here.
 
    TARGET SELECTOR, NOT AUTHORITY (D-AFI4b1-3): the create body's employeeId names the owner of
    the new record — an Employee sends their own principal.employeeId, a CEO the selected record's
@@ -44,8 +57,9 @@
 
 // The decoders' failure kind, beside ApiClient's API_RESULT_KINDS.
 const OVERTIME_API_INVALID = 'INVALID_RESPONSE';
-// server/src/Overtime/OvertimeStatus.php VALUES; OvertimeInput ID_PATTERN; EmployeeInput ID_PATTERN.
-const OVERTIME_RECORD_STATUSES = Object.freeze(['Draft', 'Submitted', 'Reviewed', 'Rejected']);
+// server/src/Overtime/OvertimeStatus.php VALUES (order included); OvertimeInput ID_PATTERN;
+// EmployeeInput ID_PATTERN. AFI-4b2: Approved is a known, terminal status.
+const OVERTIME_RECORD_STATUSES = Object.freeze(['Draft', 'Submitted', 'Reviewed', 'Approved', 'Rejected']);
 const OVERTIME_ID_PATTERN = /^[0-9a-f]{32}$/;
 const OVERTIME_EMPLOYEE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const OVERTIME_MAX_VERSION = 4294967295;
@@ -56,6 +70,16 @@ const OVERTIME_WRITABLE_FIELDS = Object.freeze(['monthKey', 'overtimeDate', 'hou
 // D-BF4b1-2 in hundredths of an hour: 0 < hours <= 744, in steps of 0.25.
 const OVERTIME_MAX_HUNDREDTHS = 74400;
 const OVERTIME_STEP_HUNDREDTHS = 25;
+// AFI-4b2: OvertimeValuationView::FIELDS, sorted for the exact-key comparison; its kinds; the one
+// method (OvertimeValuation::METHOD, STANDARD_MONTHLY_HOURS); the exact salary and whole-Rupiah
+// amount shapes (OvertimeValuation::isSalary, isAmount). A valuation's kind follows its record:
+// a Reviewed record has a preview, an Approved one its frozen valuation, any other none.
+const OVERTIME_VALUATION_KEYS = Object.freeze(['amount', 'hours', 'id', 'kind', 'method', 'monthlySalaryBasis', 'standardMonthlyHours']);
+const OVERTIME_VALUATION_KIND_OF = Object.freeze({ Reviewed: 'preview', Approved: 'approved' });
+const OVERTIME_VALUATION_METHOD = 'TAM-OT-1';
+const OVERTIME_STANDARD_MONTHLY_HOURS = '160.00';
+const OVERTIME_SALARY_PATTERN = /^(0|[1-9][0-9]{0,12})\.([0-9]{2})$/;
+const OVERTIME_AMOUNT_PATTERN = /^(0|[1-9][0-9]{0,13})\.00$/;
 
 // Pure calendar helpers shared by the decoder, the request mirror and the view. Strings only.
 const OvertimeCalendar = Object.freeze({
@@ -94,6 +118,10 @@ function overtimeIsHours(v){
   const hundredths = +m[1] * 100 + +m[2];
   return hundredths > 0 && hundredths <= OVERTIME_MAX_HUNDREDTHS && hundredths % OVERTIME_STEP_HUNDREDTHS === 0;
 }
+// AFI-4b2: an exact monthly salary "N.NN" greater than 0, and a whole-Rupiah amount "N.00" —
+// shapes only, as strings: nothing here is a number.
+function overtimeIsSalary(v){ return typeof v === 'string' && OVERTIME_SALARY_PATTERN.test(v) && v !== '0.00'; }
+function overtimeIsAmount(v){ return typeof v === 'string' && OVERTIME_AMOUNT_PATTERN.test(v); }
 
 const OvertimeDecoders = (function(){
   function isPlain(v){
@@ -131,8 +159,36 @@ const OvertimeDecoders = (function(){
     if(o.overtimeDate !== null && !OvertimeCalendar.isDateIn(o.overtimeDate, o.monthKey)) return null;
     return Object.freeze(out);
   }
+  // AFI-4b2: a frozen copy of the valuation of `held` (the decoded record it was read for), or
+  // null. Exactly the server's keys; the kind its record's status calls for; the same id and the
+  // same hours; the one method at 160.00 standard hours; exact salary and amount strings. Nothing
+  // is computed: a value is only checked for its shape and kept as sent.
+  function valuation(o, held){
+    if(!isPlain(o) || !exactKeys(o, OVERTIME_VALUATION_KEYS) || !held) return null;
+    const kind = Object.prototype.hasOwnProperty.call(OVERTIME_VALUATION_KIND_OF, held.status) ? OVERTIME_VALUATION_KIND_OF[held.status] : null;
+    if(kind === null || o.kind !== kind || o.id !== held.id || !checks.id(o.id)) return null;
+    if(!overtimeIsHours(o.hours) || o.hours !== held.hours) return null;
+    if(o.method !== OVERTIME_VALUATION_METHOD || o.standardMonthlyHours !== OVERTIME_STANDARD_MONTHLY_HOURS) return null;
+    if(!overtimeIsSalary(o.monthlySalaryBasis) || !overtimeIsAmount(o.amount)) return null;
+    const out = {};
+    for(let i = 0; i < OVERTIME_VALUATION_KEYS.length; i++) out[OVERTIME_VALUATION_KEYS[i]] = o[OVERTIME_VALUATION_KEYS[i]];
+    return Object.freeze(out);
+  }
   return Object.freeze({
     record: record,
+    valuation: valuation,
+    // { overtimeValuation } of `held` -> the frozen valuation, or null.
+    valuationResponse(data, held){
+      return (isPlain(data) && exactKeys(data, ['overtimeValuation'])) ? valuation(data.overtimeValuation, held) : null;
+    },
+    // { overtimeRecord, overtimeValuation } -> { record, valuation } (the valuation of that very
+    // record), or null.
+    approveResponse(data){
+      if(!isPlain(data) || !exactKeys(data, ['overtimeRecord', 'overtimeValuation'])) return null;
+      const r = record(data.overtimeRecord);
+      const v = r ? valuation(data.overtimeValuation, r) : null;
+      return v ? Object.freeze({ record: r, valuation: v }) : null;
+    },
     // { overtimeRecords: [record…] } of exactly `monthKey` -> frozen array, or null.
     monthResponse(data, monthKey){
       if(!isPlain(data) || !exactKeys(data, ['overtimeRecords']) || !Array.isArray(data.overtimeRecords)) return null;
@@ -250,6 +306,13 @@ const OvertimeRequests = (function(){
       const bad = [];
       target(id, expectedVersion, bad);
       return result(bad, { id: id, expectedVersion: expectedVersion });
+    },
+    // AFI-4b2 approve: exactly id, expectedVersion and expectedAmount (the preview's "N.00").
+    approve(id, expectedVersion, expectedAmount){
+      const bad = [];
+      target(id, expectedVersion, bad);
+      if(!overtimeIsAmount(expectedAmount)) bad.push('expectedAmount');
+      return result(bad, { id: id, expectedVersion: expectedVersion, expectedAmount: expectedAmount });
     }
   });
 })();
@@ -300,6 +363,13 @@ const OvertimeApi = (function(){
       const out = outcome(res, record);
       return out.ok && out.data.id !== id ? refused : out;
     },
+    // AFI-4b2: the valuation of `held`, a decoded record (its id, status and hours decide what a
+    // valid answer is). Only a Reviewed or Approved record has one; anything else is never asked.
+    async valuation(held){
+      if(!held || typeof held.id !== 'string' || !OVERTIME_ID_PATTERN.test(held.id) || !Object.prototype.hasOwnProperty.call(OVERTIME_VALUATION_KIND_OF, held.status)) return refused;
+      const res = await ApiClient.request('/api/overtime-record/valuation', { method: 'GET', query: { id: held.id } });
+      return outcome(res, (d) => OvertimeDecoders.valuationResponse(d, held));
+    },
     // A new record: a server id, a version 1 Draft of the requested owner.
     create(employeeId, fields){
       return write('/api/overtime-records/create', OvertimeRequests.create(employeeId, fields), record, (r) => r.status === 'Draft' && r.version === 1 && r.employeeId === employeeId);
@@ -313,6 +383,12 @@ const OvertimeApi = (function(){
     },
     submit: transition('/api/overtime-records/submit', 'Submitted'),
     review: transition('/api/overtime-records/review', 'Reviewed'),
-    reject: transition('/api/overtime-records/reject', 'Rejected')
+    reject: transition('/api/overtime-records/reject', 'Rejected'),
+    // AFI-4b2 Reviewed → Approved: confirmed only by the same record, Approved, with its frozen
+    // valuation of exactly the amount sent.
+    approve(id, expectedVersion, expectedAmount){
+      return write('/api/overtime-records/approve', OvertimeRequests.approve(id, expectedVersion, expectedAmount), (d) => OvertimeDecoders.approveResponse(d),
+        (a) => a.record.id === id && a.record.status === 'Approved' && a.valuation.kind === 'approved' && a.valuation.amount === expectedAmount);
+    }
   });
 })();

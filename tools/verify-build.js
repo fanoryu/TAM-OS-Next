@@ -5551,7 +5551,8 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4b1: only session-identity.js, auth-boot.js, auth-flow.js, employee-api.js and overtime-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
   check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
     // AFI-4b1 authorized revision: overtime-api.js names exactly the eight BF-4b1 Overtime paths.
-    && ((prodCode['core/overtime-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/overtime-record','/api/overtime-records','/api/overtime-records/create','/api/overtime-records/delete','/api/overtime-records/reject','/api/overtime-records/review','/api/overtime-records/submit','/api/overtime-records/update'"
+    // AFI-4b2 authorized revision: plus the two BF-4b2 paths (valuation read, approve). Was: eight.
+    && ((prodCode['core/overtime-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/overtime-record','/api/overtime-record/valuation','/api/overtime-records','/api/overtime-records/approve','/api/overtime-records/create','/api/overtime-records/delete','/api/overtime-records/reject','/api/overtime-records/review','/api/overtime-records/submit','/api/overtime-records/update'"
     // AFI-4a2 authorized revision: employee-api.js also names the three Employee write routes
     // (create / update / archive). Was: the two Employee read paths only. The property is
     // unchanged — every /api/ path is an exact, allowlisted literal; no account route.
@@ -5559,7 +5560,7 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/disable-account','/api/employees/enable-account','/api/employees/provision-account','/api/employees/reissue-activation','/api/employees/update'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the eight Overtime routes');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve)');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -6072,16 +6073,25 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
     check(!hit, 'AFI-4b1: ' + name + ' reaches no State, storage, legacy repository, shell, "Acting as", local data tool, LOCAL Overtime or other domain' + (hit ? ' >> ' + hit[0] : ''));
     check(!/\bconsole\s*\.|setInterval|setTimeout|\bwindow\.[A-Za-z]+\s*=|\blocation\b|\bhistory\b|URLSearchParams|hashchange|document\s*\.\s*cookie|indexedDB|caches\./.test(c),
       'AFI-4b1: ' + name + ' does not log, schedule, publish on window or touch the URL, history, cookies or any store (memory only)');
-    // BF-4b2 money firewall: no rate, salary, schedule, amount, approval, contract, payroll or estimate.
-    const money = c.match(/\b(rate|rates|hourlyRate|overtimeRate|salary|monthlyBaseSalary|salarySnapshot|schedule|scheduleSnapshot|standardHours|monthlyStandardHours|amount|rawAmount|calculatedAmount|approvedAmount|approval|approve|approved|contract|contractId|payroll|payrollPlan|payrollId|transaction|estimate|estimated|pay|wage|Rp|currency|money|rounding)\b/i);
-    check(!money, 'AFI-4b1: ' + name + ' carries no money, rate, salary, schedule, approval, contract, payroll or pay estimate (BF-4b2 firewall)' + (money ? ' >> ' + money[0] : ''));
+    // AFI-4b2 authorized revision (BF-4b2 reached the frontend). Was: no rate, salary, schedule,
+    // amount, approval, contract, payroll or estimate at all (the BF-4b2 firewall). Now an
+    // allowlist: the server valuation vocabulary (amount, monthlySalaryBasis, standardMonthlyHours,
+    // valuation, approve / Approved) exists; a rate, multiplier, schedule, contract, Payroll /
+    // payslip, Finance (transaction, ledger, journal, payment, cash, tax), estimate, wage, currency,
+    // rounding, commit or post stays forbidden in all three modules — and "salary" / "Rp" occur
+    // only as the view's fixed labels.
+    const money = c.match(/\b(rate|rates|hourlyRate|overtimeRate|hourly|multiplier|monthlyBaseSalary|salarySnapshot|schedule|scheduleSnapshot|standardHours|monthlyStandardHours|rawAmount|calculatedAmount|approvedAmount|contract|contractId|payroll|payrollPlan|payrollId|payslip|transaction|ledger|journal|payment|cash|tax|estimate|estimated|pay|wage|currency|money|rounding|commit|committed|posted|finance)\b/i);
+    check(!money, 'AFI-4b2: ' + name + ' carries no rate, multiplier, schedule, contract, Payroll / payslip, Finance (transaction, ledger, journal, payment, cash, tax), estimate, wage, currency, rounding, commit or post' + (money ? ' >> ' + money[0] : ''));
+    check(name === 'ui/session-overtime-view.js' || !/\b(salary|Rp)\b/i.test(c), 'AFI-4b2: ' + name + ' names no salary and no Rupiah (only the view\'s fixed labels do)');
   });
-  // The client: two GET reads over ApiClient (structured queries), six writes over authSessionMutation.
+  // The client: GET reads over ApiClient (structured queries), writes over authSessionMutation.
+  // AFI-4b2 authorized revision: a third read, GET /api/overtime-record/valuation?id=. Was: two.
   const apiCalls = apiC.match(/ApiClient\.request\([^;]*;/g) || [];
-  check(apiCalls.length === 2 && (apiC.match(/method: 'GET'/g) || []).length === 2 && !/'POST'|'PUT'|'PATCH'|'DELETE'|csrf/.test(apiC) && !apiCalls.some((c) => /body\s*:/.test(c))
+  check(apiCalls.length === 3 && (apiC.match(/method: 'GET'/g) || []).length === 3 && !/'POST'|'PUT'|'PATCH'|'DELETE'|csrf/.test(apiC) && !apiCalls.some((c) => /body\s*:/.test(c))
     && /ApiClient\.request\('\/api\/overtime-records', \{ method: 'GET', query: \{ month: monthKey \} \}\)/.test(apiC)
-    && /ApiClient\.request\('\/api\/overtime-record', \{ method: 'GET', query: \{ id: id \} \}\)/.test(apiC),
-    'AFI-4b1: OvertimeApi reads exactly GET /api/overtime-records?month= and GET /api/overtime-record?id= through ApiClient, structured queries only');
+    && /ApiClient\.request\('\/api\/overtime-record', \{ method: 'GET', query: \{ id: id \} \}\)/.test(apiC)
+    && /ApiClient\.request\('\/api\/overtime-record\/valuation', \{ method: 'GET', query: \{ id: held\.id \} \}\)/.test(apiC),
+    'AFI-4b1/AFI-4b2: OvertimeApi reads exactly GET /api/overtime-records?month=, GET /api/overtime-record?id= and GET /api/overtime-record/valuation?id= through ApiClient, structured queries only');
   check((apiC.match(/authSessionMutation\(/g) || []).length === 1 && /const sent = await authSessionMutation\(route, prepared\.body\);/.test(apiC)
     && (apiC.match(/write\('\/api\/overtime-records\/(create|update|delete)'/g) || []).join() === "write('/api/overtime-records/create',write('/api/overtime-records/update',write('/api/overtime-records/delete'"
     && /submit: transition\('\/api\/overtime-records\/submit', 'Submitted'\)/.test(apiC) && /review: transition\('\/api\/overtime-records\/review', 'Reviewed'\)/.test(apiC)
@@ -6105,18 +6115,21 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // BF-4b2 authorized revision (owner decision D-BF4b2-5 = A): the server vocabulary gains Approved
   // while the AFI-4b1 decoder deliberately keeps the four BF-4b1 statuses — it fails closed on an
   // Approved record until AFI-4b2, and BF-4b2 and AFI-4b2 deploy together. Was: equal four-status lists.
+  // AFI-4b2 authorized revision: the client list equals the server's five statuses again, order
+  // included — Approved is understood deliberately. Was: the four BF-4b1 statuses (fail closed).
   check(/public const VALUES = \[self::DRAFT, self::SUBMITTED, self::REVIEWED, self::APPROVED, self::REJECTED\];/.test(statusPhp)
-    && /const OVERTIME_RECORD_STATUSES = Object\.freeze\(\['Draft', 'Submitted', 'Reviewed', 'Rejected'\]\);/.test(apiC)
+    && /const OVERTIME_RECORD_STATUSES = Object\.freeze\(\['Draft', 'Submitted', 'Reviewed', 'Approved', 'Rejected'\]\);/.test(apiC)
     && /const OVERTIME_ID_PATTERN = \/\^\[0-9a-f\]\{32\}\$\/;/.test(apiC) && /public const ID_PATTERN = '\/\^\[0-9a-f\]\{32\}\$\/';/.test(inputPhp)
     && /const OVERTIME_MAX_VERSION = 4294967295;/.test(apiC) && /const OVERTIME_MAX_HUNDREDTHS = 74400;/.test(apiC) && /const OVERTIME_STEP_HUNDREDTHS = 25;/.test(apiC)
     && /public const MAX_HUNDREDTHS = 74400;/.test(inputPhp) && /public const STEP_HUNDREDTHS = 25;/.test(inputPhp),
-    'AFI-4b1: id pattern, version range and the hours rule (0 < h <= 744, quarter steps) equal the server; the decoder keeps the four BF-4b1 statuses, the server adds Approved (D-BF4b2-5)');
+    'AFI-4b1/AFI-4b2: id pattern, version range and the hours rule (0 < h <= 744, quarter steps) equal the server; the decoder\'s five statuses equal OvertimeStatus::VALUES (Approved included)');
   check(/if\(!isPlain\(o\) \|\| !exactKeys\(o, OVERTIME_RECORD_KEYS\)\) return null;/.test(apiC) && /if\(!item \|\| item\.monthKey !== monthKey\) return null;/.test(apiC)
     && /if\(o\.overtimeDate !== null && !OvertimeCalendar\.isDateIn\(o\.overtimeDate, o\.monthKey\)\) return null;/.test(apiC)
     && /exactKeys\(data, \['overtimeRecords'\]\)/.test(apiC) && /exactKeys\(data, \['overtimeRecord'\]\)/.test(apiC) && /exactKeys\(data\.deleted, \['id'\]\)/.test(apiC),
     'AFI-4b1: exact keys on every record and wrapper; one bad item (or another month) fails the whole list; a date always lies inside its month');
-  check(!/parseFloat|Number\s*\(|toFixed|Math\./.test((apiC + storeC + viewC).replace('eligible[Number(el.value)]', '')) && /hundredths % OVERTIME_STEP_HUNDREDTHS === 0/.test(apiC),
-    'AFI-4b1: hours stay the exact decimal string — checked in integer hundredths, never parseFloat / Number / toFixed');
+  // AFI-4b2 authorized revision: also no parseInt and no BigInt (money stays a string). Was: parseFloat / Number / toFixed / Math.
+  check(!/parseFloat|parseInt|BigInt|Number\s*\(|toFixed|Math\./.test((apiC + storeC + viewC).replace('eligible[Number(el.value)]', '')) && /hundredths % OVERTIME_STEP_HUNDREDTHS === 0/.test(apiC),
+    'AFI-4b1/AFI-4b2: hours and money stay exact decimal strings — never parseFloat / parseInt / Number / BigInt / toFixed / Math');
   // Requests: exact bodies; employeeId only on create (the D-AFI4b1-3 selector).
   const createFn = (apiC.match(/create\(employeeId, fields\)\{\s*const body = \{ employeeId: employeeId \};[\s\S]*?\n    \},/) || [''])[0];
   check(!!createFn && (apiC.match(/employeeId: employeeId/g) || []).length === 1 && /const body = \{ id: id, expectedVersion: expectedVersion \};/.test(apiC)
@@ -6127,9 +6140,11 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // Store / controller.
   check(/function sessionOvertimeActions\(principal, record\)\{/.test(storeC)
     && /const SESSION_OVERTIME_EMPLOYEE_ACTIONS = Object\.freeze\(\{ Draft: Object\.freeze\(\['edit', 'delete', 'submit'\]\) \}\);/.test(storeC)
-    && /const SESSION_OVERTIME_CEO_ACTIONS = Object\.freeze\(\{\s*Draft: Object\.freeze\(\['edit', 'delete', 'submit'\]\),\s*Submitted: Object\.freeze\(\['review', 'reject'\]\),\s*Reviewed: Object\.freeze\(\['reject'\]\)\s*\}\);/.test(storeC)
+    // AFI-4b2 authorized revision: CEO + Reviewed = approve, reject; Approved (like Rejected) has no
+    // entry — terminal. Was: CEO + Reviewed = reject.
+    && /const SESSION_OVERTIME_CEO_ACTIONS = Object\.freeze\(\{\s*Draft: Object\.freeze\(\['edit', 'delete', 'submit'\]\),\s*Submitted: Object\.freeze\(\['review', 'reject'\]\),\s*Reviewed: Object\.freeze\(\['approve', 'reject'\]\)\s*\}\);/.test(storeC)
     && /record\.employeeId === principal\.employeeId\) return own\(SESSION_OVERTIME_EMPLOYEE_ACTIONS\);/.test(storeC),
-    'AFI-4b1: the control matrix is exactly D-BF4b-5 (Employee: own Draft edit/delete/submit; CEO: Draft edit/delete/submit, Submitted review/reject, Reviewed reject, Rejected nothing)');
+    'AFI-4b1/AFI-4b2: the control matrix is exactly D-BF4b-5 + BF-4b2 (Employee: own Draft edit/delete/submit, nothing else, never approve; CEO: Draft edit/delete/submit, Submitted review/reject, Reviewed approve/reject, Approved and Rejected nothing)');
   check(/openEdit\(\)\{\s*if\(!canAct\(\)\) return;[\s\S]*?indexOf\('edit'\) === -1\) return;/.test(storeC)
     && /openPanel\(kind\)\{\s*if\(!canAct\(\)[\s\S]*?sessionOvertimeActions\(principalNow\(\), d\)\.indexOf\(kind\) === -1\) return;/.test(storeC)
     && /async confirmPanel\(\)\{\s*if\(!canAct\(\)\) return;[\s\S]*?sessionOvertimeActions\(principalNow\(\), d\)\.indexOf\(a\.kind\) === -1\)\{/.test(storeC)
@@ -6143,7 +6158,7 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   check(/const AMBIGUOUS = Object\.freeze\(\[API_RESULT_KINDS\.UNAVAILABLE, OVERTIME_API_INVALID\]\);/.test(storeC)
     && /SessionOvertimeStore\.failMutation\(token, SESSION_OVERTIME_MUTATION_STATUS\.AMBIGUOUS, out\);/.test(otSettle)
     && /if\(kind === 'create'\) loadMonth\(s\.month\);\s*else if\(s\.detailId\) loadDetail\(s\.detailId\);/.test(otSettle)
-    && !/OvertimeApi\.(create|update|remove|submit|review|reject)|PANEL_CALLS/.test(otSettle)
+    && !/OvertimeApi\.(create|update|remove|submit|review|reject|approve)|PANEL_CALLS/.test(otSettle)
     && (storeC.match(/OvertimeApi\.create\(/g) || []).length === 1 && (storeC.match(/OvertimeApi\.update\(/g) || []).length === 1
     && !/while\s*\(|for\s*\(\s*;|AbortController|\.abort\(/.test(storeC),
     'AFI-4b1: an unknowable outcome is AMBIGUOUS and reconciled by reading (month for create, record otherwise) — never resent, no retry loop');
@@ -6152,13 +6167,15 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
     && (storeC.match(/AuthBoot\.sessionLost\(\)/g) || []).length === 2 && (storeC.match(/AuthBoot\.sessionUncertain\(\)/g) || []).length === 1,
     'AFI-4b1: CSRF recovery outcomes — unavailable fails closed (sessionUncertain), principal_changed clears, signed_out / 401 ends the session; stale answers are dropped first');
   check(/function isCurrent\(token\)\{\s*return isLive\(token\) && token\.seq === seqOf\(token\.kind\);\s*\}/.test(storeC)
-    && /return kind === 'list' \? listSeq : kind === 'detail' \? detailSeq : kind === 'labels' \? labelsSeq : kind === 'mutation' \? mutationSeq : -1;/.test(storeC)
+    // AFI-4b2 authorized revision: plus the valuation sequence. Was: list, detail, labels, mutation.
+    && /return kind === 'list' \? listSeq : kind === 'detail' \? detailSeq : kind === 'labels' \? labelsSeq : kind === 'valuation' \? valuationSeq : kind === 'mutation' \? mutationSeq : -1;/.test(storeC)
+    && /applyValuation\(token, item\)\{\s*if\(!isCurrent\(token\) \|\| token\.kind !== 'valuation' \|\| !item \|\| item\.id !== valuationId \|\| !detail \|\| detail\.id !== item\.id\) return false;/.test(storeC)
     && /function clear\(\)\{[\s\S]*?principalKey = null;\s*generation\+\+;\s*\}/.test(storeC)
     && ['list', 'detail', 'labels'].every((k) => new RegExp('apply' + k[0].toUpperCase() + k.slice(1) + '\\(token, (items|item)\\)\\{\\s*if\\(!isCurrent\\(token\\) \\|\\| token\\.kind !== \'' + k + '\'\\) return false;').test(storeC))
     && /applyError\(token, failed\)\{\s*if\(!isCurrent\(token\)\) return false;/.test(storeC)
     && /if\(next !== AUTH_STATES\.AUTHENTICATED\)\{\s*SessionIdentityProvider\.clear\(\);\s*SessionEmployeeStore\.clear\(\);\s*SessionOvertimeStore\.clear\(\);/.test(abC)
     && /SessionOvertime\.ensureLoaded\(auth\.principal\);/.test(wsC),
-    'AFI-4b1: generation + per-kind sequence guards (list, detail, labels, mutation); leaving AUTHENTICATED and a principal change destroy the Overtime data');
+    'AFI-4b1/AFI-4b2: generation + per-kind sequence guards (list, detail, labels, valuation, mutation); a valuation applies only to the detail it was read for; leaving AUTHENTICATED and a principal change destroy the Overtime data');
   check(/function sessionOvertimeCurrentMonth\(now\)\{\s*return OvertimeCalendar\.monthOf\(now \|\| new Date\(\)\);\s*\}/.test(storeC)
     && /monthOf\(now\)\{\s*return String\(now\.getFullYear\(\)\)\.padStart\(4, '0'\) \+ '-' \+ String\(now\.getMonth\(\) \+ 1\)\.padStart\(2, '0'\);\s*\}/.test(apiC)
     && !/Date\.now|getUTC|toISOString|Intl\.|toLocale/.test(apiC + storeC + viewC),
@@ -6242,17 +6259,126 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && !/overtime\.approve/.test(read(path.join(root, 'js', 'core', 'authz.js')) + read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
     && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4b2: ACTIONS stay 21 (no overtime.approve), AUTH_MODE stays LOCAL');
+  // AFI-4b2 authorized revision: the frontend counterpart now exists. Was: "backend only — the
+  // frontend overtime client knows no Approved, approve, valuation or amount (AFI-4b2 not started)"
+  // and "the production package is unchanged (97 files, digest c5d69dc1…)". BF-4b2 itself still
+  // changes no frontend file; AFI-4b2 adds no module, so the package keeps 97 files (its digest
+  // moves with the three changed modules and is checked by the package-fidelity pins).
   const otApi = read(path.join(root, 'js', 'core', 'overtime-api.js'));
-  check(!/Approved|\/approve|valuation|amount/i.test(stripComments(otApi)) && /const OVERTIME_RECORD_STATUSES = Object\.freeze\(\['Draft', 'Submitted', 'Reviewed', 'Rejected'\]\);/.test(otApi),
-    'BF-4b2: backend only — the frontend overtime client knows no Approved, approve, valuation or amount (AFI-4b2 not started)');
+  check(/'\/api\/overtime-records\/approve'/.test(otApi) && /'\/api\/overtime-record\/valuation'/.test(otApi),
+    'BF-4b2 + AFI-4b2: the frontend overtime client consumes the BF-4b2 valuation and approve routes (AFI-4b2)');
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(manifest.packageDigest === 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3' && Array.isArray(manifest.files) && manifest.files.length === 97,
-    'BF-4b2: the production package is unchanged (97 files, digest c5d69dc1…)');
+  check(Array.isArray(manifest.files) && manifest.files.length === 97 && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
+    'BF-4b2 + AFI-4b2: no production module added — the package keeps 97 files; its digest is no longer the AFI-4b1 c5d69dc1… (three modules changed)');
   const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
   check(deployRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && deployRule.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && deployRule.test(read(path.join(root, 'ARCHITECTURE.md'))),
     'BF-4b2: the deployment dependency is documented — BF-4b2 and AFI-4b2 must be deployed together (AI_CONTEXT, ARCHITECTURE, DEPLOYMENT)');
   check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'OvertimeValuationTest.php')) && fs.existsSync(path.join(root, 'server', 'tests', 'Db', 'OvertimeApprovalTest.php')),
     'BF-4b2: the valuation unit test and the approval DB test exist');
+}
+
+// ===== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL =====
+// The SESSION counterpart of BF-4b2 inside the existing Overtime section (no new module, page or
+// navigation): the CEO's preview of a Reviewed record and its approval against exactly that
+// preview; the frozen valuation of an Approved record for the CEO and its owner; never a preview
+// for an Employee. The browser is not a valuation authority — it decodes exact strings and shows
+// them. Owner decisions: D-AFI4b2-1 = A (ANY approve 409 drops the preview and the panel, reads
+// the record and a fresh preview again; the approval is never resent), D-AFI4b2-2 = A (the
+// existing Overtime harness is extended; CI stays at nine). Behaviour:
+// tools/verify-session-overtime-runtime.js (sections S–Z).
+console.log('== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => fs.existsSync(path.join(root, 'js', f)) ? read(path.join(root, 'js', f)) : '';
+  const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
+  const apiC = code(rd('core/overtime-api.js')), storeC = code(rd('core/session-overtime.js')), viewC = code(rd('ui/session-overtime-view.js'));
+  const valView = srv('Overtime/OvertimeValuationView.php'), valPhp = srv('Overtime/OvertimeValuation.php'), inputPhp = srv('Overtime/OvertimeInput.php');
+  // Contract compatibility with BF-4b2: every client constant equals the server source.
+  const serverFields = ((valView.match(/public const FIELDS = \[([^\]]*)\];/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
+  const clientFields = ((apiC.match(/const OVERTIME_VALUATION_KEYS = Object\.freeze\(\[([^\]]*)\]\);/) || ['', ''])[1].match(/'([A-Za-z]+)'/g) || []).map((m) => m.slice(1, -1));
+  const phpRegex = (fn) => ((valPhp.match(new RegExp('public static function ' + fn + '\\(mixed \\$v\\): bool\\s*\\{\\s*return is_string\\(\\$v\\) && preg_match\\(\'([^\']+)\', \\$v\\) === 1')) || ['', ''])[1]);
+  const jsRegex = (name) => ((apiC.match(new RegExp('const ' + name + ' = (\\/[^\\n]+\\/);')) || ['', ''])[1]);
+  check(serverFields.length === 7 && clientFields.join() === serverFields.slice().sort().join()
+    && /public const METHOD = 'TAM-OT-1';/.test(valPhp) && /const OVERTIME_VALUATION_METHOD = 'TAM-OT-1';/.test(apiC)
+    && /public const STANDARD_MONTHLY_HOURS = '160\.00';/.test(valPhp) && /const OVERTIME_STANDARD_MONTHLY_HOURS = '160\.00';/.test(apiC)
+    && phpRegex('isSalary') !== '' && phpRegex('isSalary') === jsRegex('OVERTIME_SALARY_PATTERN') && /&& \$v !== '0\.00';/.test(valPhp) && /OVERTIME_SALARY_PATTERN\.test\(v\) && v !== '0\.00'/.test(apiC)
+    && phpRegex('isAmount') !== '' && phpRegex('isAmount') === jsRegex('OVERTIME_AMOUNT_PATTERN')
+    && /public const PREVIEW = 'preview';/.test(valView) && /public const APPROVED = 'approved';/.test(valView)
+    && /const OVERTIME_VALUATION_KIND_OF = Object\.freeze\(\{ Reviewed: 'preview', Approved: 'approved' \}\);/.test(apiC)
+    && /self::onlyKeys\(\$json, \['id', 'expectedVersion', 'expectedAmount'\]\);/.test(inputPhp),
+    'AFI-4b2: contract = BF-4b2 — valuation keys (OvertimeValuationView::FIELDS), method TAM-OT-1, standard hours 160.00, the salary and amount shapes (isSalary / isAmount), the two kinds and the approve keys all equal the server source');
+  // Strict decoding: exact keys, the kind the record calls for, the same id and hours.
+  const valFn = (apiC.match(/function valuation\(o, held\)\{[\s\S]*?\n  \}/) || [''])[0];
+  check(/if\(!isPlain\(o\) \|\| !exactKeys\(o, OVERTIME_VALUATION_KEYS\) \|\| !held\) return null;/.test(valFn)
+    && /if\(kind === null \|\| o\.kind !== kind \|\| o\.id !== held\.id \|\| !checks\.id\(o\.id\)\) return null;/.test(valFn)
+    && /if\(!overtimeIsHours\(o\.hours\) \|\| o\.hours !== held\.hours\) return null;/.test(valFn)
+    && /if\(o\.method !== OVERTIME_VALUATION_METHOD \|\| o\.standardMonthlyHours !== OVERTIME_STANDARD_MONTHLY_HOURS\) return null;/.test(valFn)
+    && /if\(!overtimeIsSalary\(o\.monthlySalaryBasis\) \|\| !overtimeIsAmount\(o\.amount\)\) return null;/.test(valFn) && /return Object\.freeze\(out\);/.test(valFn)
+    && /exactKeys\(data, \['overtimeValuation'\]\)\) \? valuation\(data\.overtimeValuation, held\) : null;/.test(apiC)
+    && /exactKeys\(data, \['overtimeRecord', 'overtimeValuation'\]\)\) return null;\s*const r = record\(data\.overtimeRecord\);\s*const v = r \? valuation\(data\.overtimeValuation, r\) : null;/.test(apiC),
+    'AFI-4b2: the valuation decoder is strict — exact seven keys; kind = the record\'s status (Reviewed: preview, Approved: approved, else none); same id and hours; method and standard hours fixed; exact salary and amount; frozen; exact wrappers');
+  // Requests: approve is exactly { id, expectedVersion, expectedAmount } through the one write path.
+  check(/approve\(id, expectedVersion, expectedAmount\)\{\s*const bad = \[\];\s*target\(id, expectedVersion, bad\);\s*if\(!overtimeIsAmount\(expectedAmount\)\) bad\.push\('expectedAmount'\);\s*return result\(bad, \{ id: id, expectedVersion: expectedVersion, expectedAmount: expectedAmount \}\);/.test(apiC)
+    && /return write\('\/api\/overtime-records\/approve', OvertimeRequests\.approve\(id, expectedVersion, expectedAmount\), \(d\) => OvertimeDecoders\.approveResponse\(d\),\s*\(a\) => a\.record\.id === id && a\.record\.status === 'Approved' && a\.valuation\.kind === 'approved' && a\.valuation\.amount === expectedAmount\);/.test(apiC)
+    && (apiC.match(/authSessionMutation\(/g) || []).length === 1 && !/employeeId/.test((apiC.match(/approve\(id, expectedVersion, expectedAmount\)\{[\s\S]*?\n    \}/g) || []).join('')),
+    'AFI-4b2: approve sends exactly { id, expectedVersion, expectedAmount } (no employeeId, salary, hours or method) through the one authSessionMutation path; success = the same record Approved with a frozen valuation of exactly the amount sent');
+  // expectedAmount comes only from the held, decoded, matching preview — and approve is sent once.
+  const confirmFn = (storeC.match(/async confirmPanel\(\)\{[\s\S]*?\n    \}/) || [''])[0];
+  check(/if\(a\.kind === 'approve'\)\{\s*if\(!sessionOvertimePreviewMatches\(d, s\.valuationStatus, s\.valuation\)\)\{ SessionOvertimeStore\.closePanel\(\); paint\(\); return; \}\s*const shown = s\.valuation\.amount;\s*const sent = SessionOvertimeStore\.beginMutation\('approve', \{ id: d\.id, version: d\.version, amount: shown \}\);\s*paint\(\);\s*return settle\(sent, await OvertimeApi\.approve\(d\.id, d\.version, shown\)\);/.test(confirmFn)
+    && (storeC.match(/OvertimeApi\.approve\(/g) || []).length === 1 && !/expectedAmount/.test(storeC + viewC)
+    && /function sessionOvertimePreviewMatches\(record, valuationStatus, valuation\)\{\s*return !!record && !!valuation && valuationStatus === SESSION_OVERTIME_STATUS\.READY && record\.status === 'Reviewed'\s*&& valuation\.kind === 'preview' && valuation\.id === record\.id && valuation\.hours === record\.hours;\s*\}/.test(storeC)
+    && /if\(kind === 'approve' && !sessionOvertimePreviewMatches\(d, s\.valuationStatus, s\.valuation\)\) return;/.test(storeC)
+    && /const off = busy \|\| \(k === 'approve' && !sessionOvertimePreviewMatches\(d, w\.valuationStatus, w\.valuation\)\);/.test(viewC),
+    'AFI-4b2: expectedAmount is the amount of the held preview — ready, a preview, of this record and its hours — never DOM text, input or a computed value; Approve (button, panel, confirm) requires that preview; OvertimeApi.approve is called from exactly one place');
+  // D-AFI4b2-1 = A: ANY approve 409 / an unconfirmed approval — drop, re-read, never resend.
+  const otSettle = (storeC.match(/function settle\([\s\S]*?\n  \}/) || [''])[0];
+  check(/if\(kind === 'approve' && out\.kind === API_RESULT_KINDS\.CONFLICT\)\{\s*SessionOvertimeStore\.dropApproval\(\);\s*SessionOvertimeStore\.markListStale\(\);\s*SessionOvertimeStore\.setFocus\('message'\);\s*if\(s\.detailId\) loadDetail\(s\.detailId\);\s*\}/.test(otSettle)
+    && /SessionOvertimeStore\.failMutation\(token, SESSION_OVERTIME_MUTATION_STATUS\.AMBIGUOUS, out\);\s*if\(kind === 'approve'\) SessionOvertimeStore\.dropApproval\(\);/.test(otSettle)
+    && !/OvertimeApi\.|PANEL_CALLS|confirmPanel/.test(otSettle) && /dropApproval\(\)\{ panel = null; dropValuation\(\); \}/.test(storeC),
+    'D-AFI4b2-1: ANY approve 409 (and an unconfirmed approval) drops the preview and the panel at once and reads the record again — reconciliation only reads; settle() never sends an approval');
+  check(/w\.valuation\.amount !== sent\) return 'The amount changed from Rp ' \+ sent \+ ' to Rp ' \+ w\.valuation\.amount \+ '\. Check it, then approve again\.';/.test(viewC)
+    && /return 'The record changed\. Check it, then approve again\.';/.test(viewC) && /const sent = w\.mutation\.target \? w\.mutation\.target\.amount : null;/.test(viewC)
+    && /unvalued: 'This record cannot be valued now \(the employee may be archived or have no salary\)\.'/.test(viewC),
+    'D-AFI4b2-1: after a 409 the fresh preview\'s amount is compared with the amount sent as exact strings — "The amount changed from X to Y" / "The record changed" / "cannot be valued now"');
+  // Disclosure: an Employee never asks for a preview; the CEO reads Reviewed and Approved.
+  check(/function sessionOvertimeValuationWanted\(principal, record\)\{\s*if\(!principal \|\| !record\) return false;\s*if\(principal\.principalType === PRINCIPAL_TYPES\.CEO\) return record\.status === 'Reviewed' \|\| record\.status === 'Approved';\s*return principal\.principalType === PRINCIPAL_TYPES\.EMPLOYEE && typeof principal\.employeeId === 'string'\s*&& record\.employeeId === principal\.employeeId && record\.status === 'Approved';\s*\}/.test(storeC)
+    && (storeC.match(/loadValuation\(/g) || []).length === 3 && /&& s\.valuationStatus === SESSION_OVERTIME_STATUS\.IDLE && sessionOvertimeValuationWanted\(principal, s\.detail\)\) loadValuation\(s\.detail\);/.test(storeC)
+    && /if\(s\.detailStatus !== SESSION_OVERTIME_STATUS\.READY \|\| !s\.detail \|\| !sessionOvertimeValuationWanted\(p, s\.detail\)\) return;\s*const loading = loadValuation\(s\.detail\);/.test(storeC)
+    && /if\(!sessionOvertimeValuationWanted\(principal, d\)\) return '';/.test(viewC)
+    && /if\(!held \|\| typeof held\.id !== 'string' \|\| !OVERTIME_ID_PATTERN\.test\(held\.id\) \|\| !Object\.prototype\.hasOwnProperty\.call\(OVERTIME_VALUATION_KIND_OF, held\.status\)\) return refused;/.test(apiC),
+    'AFI-4b2: disclosure — a valuation is read (and rendered) only where sessionOvertimeValuationWanted says: the CEO on Reviewed / Approved, an Employee on their OWN Approved record; an Employee never requests a preview');
+  // Invalidation and memory-only state.
+  check(/function clear\(\)\{[\s\S]*?dropValuation\(\);[\s\S]*?generation\+\+;/.test(storeC)
+    && /if\(kind === 'detail'\)\{[^}]*?\}?[\s\S]*?dropValuation\(\);\s*return Object\.freeze\(\{ gen: generation, kind: kind, seq: detailSeq \}\);/.test(storeC)
+    && /closeDetail\(\)\{[\s\S]*?dropValuation\(\);/.test(storeC) && /function applySaved\([\s\S]*?dropValuation\(\);/.test(storeC)
+    && /applyDeleted\(token\)\{[\s\S]*?dropValuation\(\);/.test(storeC) && /setOpen\(value, initialMonth\)\{\s*if\(open !== \(value === true\)\) dropValuation\(\);/.test(storeC)
+    && /function dropValuation\(\)\{\s*valuationSeq\+\+; valuation = null; valuationId = null; valuationStatus = SESSION_OVERTIME_STATUS\.IDLE; valuationError = null;\s*\}/.test(storeC),
+    'AFI-4b2: the valuation is dropped (its pending answer refused) on clear, a new detail, leaving the detail, a saved or deleted record, a section switch and a refused / unconfirmed approval');
+  check(/applyApproved\(token, item, frozen\)\{\s*if\(!isCurrent\(token\) \|\| token\.kind !== 'mutation' \|\| !item \|\| !frozen \|\| frozen\.id !== item\.id \|\| frozen\.kind !== 'approved'\) return false;\s*if\(!applySaved\(token, item, 'approved'\)\) return false;/.test(storeC)
+    && /SessionOvertimeStore\.applyApproved\(token, out\.data\.record, out\.data\.valuation\);/.test(otSettle),
+    'AFI-4b2: a confirmed approval applies the Approved record and its frozen valuation from the same answer, under the write\'s token');
+  // Exact money: no arithmetic on a valuation value, no float formatter, no money input.
+  const all = apiC + storeC + viewC;
+  check(!/\b(amount|monthlySalaryBasis|standardMonthlyHours)\b\s*[-*\/%]|[-*\/%]\s*[A-Za-z_.]*\b(amount|monthlySalaryBasis|standardMonthlyHours)\b/.test(all)
+    && !/(^|[=(,!&|?:]\s*)\+\s*[A-Za-z_.]*\.(amount|monthlySalaryBasis|standardMonthlyHours)\b/m.test(all)
+    && !/fmtIDR|fmtIDRShort|toLocale|Intl\.|overtimeCalc|roundOvertime|overtimeSalaryBasis/.test(all)
+    && !/id="swo-(amount|salary|monthlySalaryBasis|expectedAmount)|name: '(amount|salary|monthlySalaryBasis)'/.test(viewC)
+    && /const SESSION_OVERTIME_FORM_FIELDS = Object\.freeze\(\['employeeId', 'monthKey', 'overtimeDate', 'hours', 'workDescription', 'notes'\]\);/.test(storeC),
+    'AFI-4b2: no browser valuation — no arithmetic or conversion on an amount, salary or standard hours, no float formatter (fmtIDR), no LOCAL TAM-OT helper, no salary or amount input');
+  // The view: one valuation block, fixed wording, exact strings, terminal Approved.
+  check(/preview: 'Valuation preview — not yet approved',/.test(viewC) && /approved: 'Approved valuation \(frozen at approval\)',/.test(viewC)
+    && /method: 'TAM-OT-1 — internal TAM overtime method \(not a statutory calculation\)',/.test(viewC)
+    && /\[\['Amount \(Rp\)', v\.amount\], \['Monthly salary basis \(Rp\)', v\.monthlySalaryBasis\], \['Overtime hours', v\.hours\],\s*\['Standard monthly hours', v\.standardMonthlyHours\], \['Method', v\.method === OVERTIME_VALUATION_METHOD \? T\.method : null\]\];/.test(viewC)
+    && /'<tr><th scope="row">' \+ escapeHtml\(r\[0\]\) \+ '<\/th><td>' \+ sessionOvertimeValue\(r\[1\]\) \+ '<\/td><\/tr>'/.test(viewC)
+    && /Amount to approve \(Rp\): <strong>' \+ escapeHtml\(w\.valuation\.amount\) \+ '<\/strong>/.test(viewC)
+    && !/statutory entitle|legal entitle|hourly rate|per hour/i.test(viewC),
+    'AFI-4b2: the valuation block says preview or frozen, shows amount, salary basis, hours, standard hours and the internal method as the exact escaped strings; no hourly rate, multiplier or statutory claim');
+  // Invariants of this slice.
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(migrations[migrations.length - 1].startsWith('0023_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+    && (code(rd('transport/api-client.js')).match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4,
+    'AFI-4b2: frontend only — migration head 0023, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
