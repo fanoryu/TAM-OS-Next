@@ -6,10 +6,11 @@ namespace TamOs\Data;
 use TamOs\Data\Audit\AuditLog;
 use TamOs\Data\Employee\EmployeeStore;
 use TamOs\Data\Overtime\OvertimeStore;
+use TamOs\Data\Payroll\PayrollStore;
 use TamOs\Data\Scope\ScopedDatabase;
 
 /**
- * The business data access point (BF-4a1; overtime BF-4b1): the scoped business stores over one lazily opened,
+ * The business data access point (BF-4a1; overtime BF-4b1; payroll BF-4c1): the scoped business stores over one lazily opened,
  * request-scoped connection — shared with TamOs\Data\Auth\AuthData in production, so the
  * session lookup and the business statements of a request use the same connection — and
  * atomically() for the transaction boundaries the business services own. The stores receive
@@ -21,6 +22,7 @@ final class BusinessData
     private ?ScopedDatabase $scoped = null;
     private ?EmployeeStore $employees = null;
     private ?OvertimeStore $overtime = null;
+    private ?PayrollStore $payroll = null;
     private ?AuditLog $audit = null;
 
     /** @param \Closure(): Database $connect */
@@ -50,6 +52,11 @@ final class BusinessData
         return $this->overtime ??= new OvertimeStore($this->scoped());
     }
 
+    public function payroll(): PayrollStore
+    {
+        return $this->payroll ??= new PayrollStore($this->scoped());
+    }
+
     public function audit(): AuditLog
     {
         return $this->audit ??= new AuditLog($this->scoped());
@@ -57,15 +64,16 @@ final class BusinessData
 
     /**
      * Runs $fn in one database transaction: a business write and its audit row commit together
-     * or not at all. Nested calls are refused (Database::transaction).
+     * or not at all. Nested calls are refused (Database::transaction). $readCommitted runs that
+     * one transaction at READ COMMITTED (BF-4c1 payroll generate only).
      *
      * @template T
      * @param \Closure(): T $fn
      * @return T
      */
-    public function atomically(\Closure $fn): mixed
+    public function atomically(\Closure $fn, bool $readCommitted = false): mixed
     {
-        return $this->db()->transaction(static fn (): mixed => $fn());
+        return $this->db()->transaction(static fn (): mixed => $fn(), $readCommitted);
     }
 
     private function scoped(): ScopedDatabase

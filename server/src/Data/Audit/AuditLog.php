@@ -33,6 +33,11 @@ use TamOs\Policy\Scope;
  * BF-4b2 (migration 0023): the approval is overtime.manage with operation 'approve'. Like every
  * transition it names no field and carries no value — never the salary or the amount; the
  * Approved row's immutable snapshot is the valuation evidence.
+ *
+ * BF-4c1 (migration 0026): a payroll plan row is payroll.manage against entity payrollPlan and
+ * always names its operation — create or recalculate (generate), review, approve, return or
+ * cancel. It names no field and carries no value — never the salary, an overtime amount or the
+ * total; the plan row's own snapshot is the evidence. CEO company scope only.
  */
 final class AuditLog
 {
@@ -44,12 +49,15 @@ final class AuditLog
     /** BF-4b1: the overtime Actions appendOvertime() audits, and the operation each transition names (0021). */
     public const OVERTIME_ACTIONS = [Action::OvertimeCreateSelfDraft, Action::OvertimeUpdateSelfDraft, Action::OvertimeDeleteSelfDraft, Action::OvertimeSubmitSelf, Action::OvertimeManage];
     public const OVERTIME_OPERATIONS = ['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage, 'approve' => Action::OvertimeManage];
+    /** BF-4c1: the payroll.manage operations appendPayroll() audits (migration 0026's CHECK). */
+    public const PAYROLL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel'];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
     public const APPEND_OVERTIME_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields)';
     /** BF-4b1: the first audited Employee-principal writes. Under a self scope the row is written only for the actor's own record. */
     public const APPEND_OVERTIME_SELF_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) SELECT :company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields FROM DUAL WHERE :owner_employee_id = :self_employee_id';
+    public const APPEND_PAYROLL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_ACCOUNT_SQL ='INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
 
     public function __construct(private readonly ScopedDatabase $db)
@@ -147,6 +155,32 @@ final class AuditLog
         if ($this->db->execute($auth, self::APPEND_OVERTIME_SELF_SQL, $params + ['owner_employee_id' => (string) $auth->record->ownerEmployeeId]) !== 1) {
             throw new \LogicException('an Employee overtime audit row is written only for their own record');
         }
+    }
+
+    /**
+     * BF-4c1: appends one payroll.manage row for the plan the Authorization was decided on — the
+     * create candidate included — naming the operation and no field. Must run inside the
+     * transaction of the change.
+     */
+    public function appendPayroll(Authorization $auth, Principal $actor, string $operation, string $requestId): void
+    {
+        if ($auth->action !== Action::PayrollManage || $auth->record === null || $auth->record->entity !== 'payrollPlan'
+            || $auth->scope->isSelf() || preg_match('/^[0-9a-f]{32}$/', $auth->record->id) !== 1) {
+            throw new \LogicException('a payroll audit row is written only under payroll.manage, against its plan, in company scope');
+        }
+        if (!in_array($operation, self::PAYROLL_OPERATIONS, true)) {
+            throw new \LogicException('unknown payroll operation');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $this->db->execute($auth, self::APPEND_PAYROLL_SQL, [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => $auth->record->entity,
+            'id' => $auth->record->id,
+            'operation' => $operation,
+            'request_id' => $requestId,
+        ]);
     }
 
     /**

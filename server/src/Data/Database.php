@@ -15,10 +15,15 @@ namespace TamOs\Data;
  * in a statement.
  *
  * transaction() runs its callback exactly once: nested transactions are refused, any
- * throwable rolls back, and nothing is retried.
+ * throwable rolls back, and nothing is retried. By default it runs at the server's isolation level
+ * (REPEATABLE READ); BF-4c1's payroll generate asks for READ COMMITTED for that one transaction,
+ * so each of its plain reads sees what committed before it — after the row locks it has taken —
+ * without locking secondary-index ranges.
  */
 final class Database
 {
+    public const READ_COMMITTED_SQL = 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED';
+
     private ?\PDO $pdo = null;
     private bool $inTransaction = false;
 
@@ -57,12 +62,15 @@ final class Database
      * @return T
      * @throws DatabaseError|\Throwable the callback's own throwable is rethrown unchanged
      */
-    public function transaction(callable $fn): mixed
+    public function transaction(callable $fn, bool $readCommitted = false): mixed
     {
         if ($this->inTransaction) {
             throw new \LogicException('nested database transaction');
         }
         $pdo = $this->pdo();
+        if ($readCommitted) {
+            $this->run(self::READ_COMMITTED_SQL, [], 'begin');    // applies to the next transaction only
+        }
         try {
             $pdo->beginTransaction();
         } catch (\PDOException $e) {

@@ -145,7 +145,8 @@ return [
         // 0014–0017 (BF-4a1 employee profile — transitional columns, legacy backfill, final constraints —
         // and business audit), 0018–0019 (BF-4a2 activation mail kind, account audit operation),
         // 0020–0021 (BF-4b1 overtime records, overtime audit vocabulary), 0022–0023 (BF-4b2 overtime
-        // valuation snapshot, approve audit operation).
+        // valuation snapshot, approve audit operation), 0024–0026 (BF-4c1 payroll plans, payroll overtime
+        // links, payroll audit vocabulary).
         $apply = runMigrateCli(['apply'], $file);
         assertSame([0, "applied: 0001_create_companies\napplied: 0002_create_users\napplied: 0003_create_memberships\n"
             . "applied: 0004_create_sessions\napplied: 0005_create_auth_rate_limits\napplied: 0006_create_auth_events\n"
@@ -157,9 +158,10 @@ return [
             . "applied: 0018_replace_mail_outbox_kind_check\napplied: 0019_add_audit_events_account_operation\n"
             . "applied: 0020_create_overtime_records\napplied: 0021_replace_audit_events_overtime_checks\n"
             . "applied: 0022_add_overtime_records_valuation\napplied: 0023_replace_audit_events_overtime_approve\n"
+            . "applied: 0024_create_payroll_plans\napplied: 0025_create_payroll_plan_overtime\napplied: 0026_replace_audit_events_payroll_checks\n"
             . "migrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
-        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'overtime_records', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'users'], $tables($db));
         $again = runMigrateCli(['status'], $file);
         assertSame([0, "migrations: current\n"], [$again['exit'], $again['stdout']]);
         $noop = runMigrateCli(['apply'], $file);

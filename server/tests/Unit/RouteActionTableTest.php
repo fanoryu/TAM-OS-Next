@@ -35,7 +35,7 @@ return [
             'POST /api/auth/reset-password',
         ], Routes::ACCOUNT_SELF_SERVICE);
     },
-    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) and approve under overtime.manage (BF-4b2)' => static function (): void {
+    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) approve under overtime.manage (BF-4b2) and the five payroll writes under payroll.manage (BF-4c1)' => static function (): void {
         $routes = productionRoutes(testConfig());
         $selfService = [];
         $business = [];
@@ -70,6 +70,11 @@ return [
             'POST /api/overtime-records/review' => Action::OvertimeManage,
             'POST /api/overtime-records/reject' => Action::OvertimeManage,
             'POST /api/overtime-records/approve' => Action::OvertimeManage,
+            'POST /api/payroll-plans/generate' => Action::PayrollManage,
+            'POST /api/payroll-plans/review' => Action::PayrollManage,
+            'POST /api/payroll-plans/approve' => Action::PayrollManage,
+            'POST /api/payroll-plans/return' => Action::PayrollManage,
+            'POST /api/payroll-plans/cancel' => Action::PayrollManage,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

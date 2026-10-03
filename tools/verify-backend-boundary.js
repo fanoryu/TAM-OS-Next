@@ -141,6 +141,17 @@ const OVERTIME_ROUTES = {
 const OVERTIME_VALUATION = 'server/src/Overtime/OvertimeValuation.php';
 const OVERTIME_DIR = 'server/src/Overtime/';
 const OVERTIME_CONTROLLER = 'server/src/Controller/OvertimeController.php';
+// BF-4c1 (owner decisions D-PAY-1..6 = A): the payroll plan and its overtime links have one
+// writer; Payroll reads Approved overtime and never values it; its calculation is integer-only;
+// it has no Commit (BF-4c2), no finance and no statutory side effect; each payroll write route
+// declares the existing payroll.manage (ACTIONS stay 21); its inputs take no identity key.
+const PAYROLL_STORE = 'server/src/Data/Payroll/PayrollStore.php';
+const PAYROLL_DIR = 'server/src/Payroll/';
+const PAYROLL_CONTROLLER = 'server/src/Controller/PayrollController.php';
+const PAYROLL_CALCULATION = 'server/src/Payroll/PayrollCalculation.php';
+const PAYROLL_INPUT = 'server/src/Payroll/PayrollInput.php';
+const PAYROLL_ROUTES = ['/api/payroll-plans/generate', '/api/payroll-plans/review', '/api/payroll-plans/approve', '/api/payroll-plans/return', '/api/payroll-plans/cancel'];
+const ACTION_COUNT = 21;
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -260,6 +271,12 @@ const STRING_RULES = [
   { id: 'employee-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?employees\b/i, msg: 'an employee is never hard-deleted (employee.delete is a soft archive)' },
   { id: 'overtime-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?overtime_records\b/i, msg: 'overtime_records is written only by ' + OVERTIME_STORE, allow: (f) => f === OVERTIME_STORE },
   { id: 'overtime-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?overtime_records\b/i, msg: 'overtime_records is never truncated' },
+  // BF-4c1: payroll_plans and payroll_plan_overtime have one writer; a plan is never deleted and
+  // neither table is ever truncated.
+  { id: 'payroll-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plans\b/i, msg: 'payroll_plans is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE },
+  { id: 'payroll-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?payroll_plans\b/i, msg: 'a payroll plan is never deleted (cancel is a status) and payroll_plans is never truncated' },
+  { id: 'payroll-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE },
+  { id: 'payroll-link-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is never truncated' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -304,7 +321,7 @@ function checkMigrationSql(src, file) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -355,7 +372,18 @@ function checkRouteActions(src) {
     const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
     if (!line) out.push('Routes.php: overtime route POST ' + path + ' is missing');
     else if (!new RegExp('\\bAction::' + action + '\\)').test(line)) out.push('Routes.php: overtime route POST ' + path + ' must declare Action::' + action);
-  }  return out;
+  }
+  // BF-4c1: exactly the five payroll writes declare payroll.manage; no commit or status route.
+  for (const path of PAYROLL_ROUTES) {
+    const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
+    if (!line) out.push('Routes.php: payroll route POST ' + path + ' is missing');
+    else if (!/\bAction::PayrollManage\)/.test(line)) out.push('Routes.php: payroll route POST ' + path + ' must declare Action::PayrollManage');
+  }
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    if (/\bAction::PayrollManage\b/.test(m[3]) && !PAYROLL_ROUTES.includes(m[2])) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a BF-4c1 payroll write and must not declare Action::PayrollManage');
+    if (/payroll/i.test(m[2]) && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[2] + ' — no payroll commit, status, payment or payslip route in BF-4c1');
+  }
+  return out;
 }
 
 // BF-4a1, SDR-0002 §9.2: a business mutation and its audit row commit in one transaction. Every
@@ -376,7 +404,7 @@ function checkAuditInTransaction(lex) {
     ranges.push([m.index, i]);
   }
   const out = [];
-  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime)?\s*\(/g;
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll)?\s*\(/g;
   while ((m = append.exec(code))) {
     const at = m.index;
     if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
@@ -480,6 +508,83 @@ function checkPhp(file, src) {
   for (const v of checkOvertimeApproval(file, lex)) out.push(v);
   if (file === OVERTIME_VALUATION) for (const v of checkIntegerValuation(lex)) out.push(v);
   if (file.startsWith(OVERTIME_DIR) || file === OVERTIME_STORE || file === OVERTIME_CONTROLLER) for (const v of checkOvertimeFirewall(lex)) out.push(v);
+  for (const v of checkPayrollStatements(file, lex)) out.push(v);
+  if (file === PAYROLL_CALCULATION) for (const v of checkIntegerPayroll(lex)) out.push(v);
+  if (file.startsWith(PAYROLL_DIR) || file === PAYROLL_STORE || file === PAYROLL_CONTROLLER) for (const v of checkPayrollFirewall(lex)) out.push(v);
+  if (file === PAYROLL_INPUT) for (const v of checkPayrollInput(lex)) out.push(v);
+  return out;
+}
+
+// BF-4c1: every statement that writes a payroll plan is a pre-commit compare-and-swap, and none
+// writes 'Committed' or committed_at (Commit is BF-4c2): an UPDATE names the company, the expected
+// version and a pre-commit status (status = 'Draft', or status IN ('Draft', 'Reviewed', 'Ready'))
+// and no OR; the INSERT writes a 'Draft'. The only link DELETE names the company and its plan
+// (:id) and requires that plan to be pre-commit, so a Committed plan's links are frozen. Any payroll
+// statement reading overtime_records reads Approved records only, and never a valuation column.
+const PRE_COMMIT_STATUS = /\bstatus = 'Draft'|\bstatus IN \('Draft', 'Reviewed', 'Ready'\)/;
+function checkPayrollStatements(file, lex) {
+  const out = [];
+  for (const s of lex.strings) {
+    const writesPlan = /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?payroll_plans\b/i.test(s);
+    if (writesPlan && /'Committed'|\bcommitted_at\s*=/.test(s)) out.push("no BF-4c1 statement writes 'Committed' or committed_at (Commit is BF-4c2)");
+    if (/^\s*UPDATE\s+`?payroll_plans\b/i.test(s)) {
+      const where = s.split(/\bWHERE\b/i)[1] || '';
+      if (!/\bcompany_id = :company_id\b/.test(where) || !/\bversion = :expected_version\b/.test(where) || !PRE_COMMIT_STATUS.test(where) || /\bOR\b/i.test(where)) {
+        out.push("a payroll plan UPDATE is a pre-commit compare-and-swap: its WHERE names company_id = :company_id, version = :expected_version and a pre-commit status (and no OR), so a Committed or Cancelled plan never changes");
+      }
+    }
+    if (/^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO)\s+`?payroll_plans\b/i.test(s) && !/, 'Draft', /.test(s)) out.push("a payroll plan is inserted only as a 'Draft'");
+    if (/^\s*DELETE\s+FROM\s+`?payroll_plan_overtime\b/i.test(s)) {
+      const where = s.split(/\bWHERE\b/i).slice(1).join(' WHERE ');
+      if (!/\bcompany_id = :company_id\b/.test(where) || !/\bpayroll_plan_id = :id\b/.test(where) || !/\bp\.status IN \('Draft', 'Reviewed', 'Ready'\)/.test(where) || /\bOR\b/i.test(where)) {
+        out.push("a payroll link DELETE releases only the links of one pre-commit plan: company_id = :company_id, payroll_plan_id = :id and p.status IN ('Draft', 'Reviewed', 'Ready') (and no OR)");
+      }
+    }
+    if (file === PAYROLL_STORE && /\bovertime_records\b/.test(s) && (!/status = 'Approved'/.test(s) || /\bvaluation_|monthly_base_salary\s*,\s*archived_at\s+FROM\s+overtime/.test(s))) {
+      out.push("payroll reads only Approved overtime and only its frozen approved_amount (never a valuation column)");
+    }
+    // No deadlock: payroll locks one row by primary key, never a secondary-index range (which cycles
+    // with an overtime create's foreign-key check or a cancel's live-key update), and never overtime.
+    if (file === PAYROLL_STORE && /\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s)
+      && (!/^SELECT [^;]* FROM (employees|payroll_plans) WHERE id = :\w+ AND company_id = :company_id FOR UPDATE$/.test(s) || /\bJOIN\b|\bOR\b|overtime_records/i.test(s))) {
+      out.push('payroll locks rows only by primary key (WHERE id = :x AND company_id = :company_id FOR UPDATE on employees or payroll_plans) — never a range, a join or an overtime record');
+    }
+  }
+  return out;
+}
+
+// BF-4c1: the payroll calculation is integer arithmetic only, as the BF-4b2 valuation.
+function checkIntegerPayroll(lex) {
+  return FLOAT_AUTHORITY.test(lex.code) ? ['the payroll calculation is integer arithmetic only (no float, BCMath, GMP, rounding helper or division operator: intdiv())'] : [];
+}
+
+// BF-4c1: the Payroll code (domain, store, controller) never values overtime (no OvertimeValuation,
+// OvertimeService, OvertimeStore, TAM-OT-1 or valuation identifier), has no finance or payment
+// side effect, and no statutory payroll vocabulary (D-PAY-3 = A: Base Salary + Approved Overtime
+// only — no tax, BPJS, THR, allowance, deduction, bonus, benefit or loan).
+const PAYROLL_OVERTIME_AUTHORITY = /\bOvertimeValuation\b|\bOvertimeService\b|\bOvertimeStore\b|TAM-OT-1|valuation|STANDARD_MONTHLY_HOURS/i;
+const PAYROLL_FINANCE_SIDE_EFFECT = /payment|ledger|journal|finance|transaction_|disburse|\bpaid\b|\bbank|\bcash|\btxn/i;
+const PAYROLL_STATUTORY = /\bpph|bpjs|\bthr\b|\btax|allowance|deduction|bonus|benefit|\bloan|statutory|tunjangan|potongan/i;
+function checkPayrollFirewall(lex) {
+  const out = [];
+  const code = lex.code.replace(/->\s*atomically\s*\(/g, '');
+  const any = (re) => re.test(code) || lex.strings.some((s) => re.test(s));
+  if (any(PAYROLL_OVERTIME_AUTHORITY)) out.push('Payroll never values overtime: it consumes the frozen approved_amount (no OvertimeValuation, OvertimeService, OvertimeStore, TAM-OT-1 or valuation identifier)');
+  if (any(PAYROLL_FINANCE_SIDE_EFFECT)) out.push('the Payroll code has no finance side effect (no payment, ledger, journal, finance, bank, cash or paid identifier or statement)');
+  if (any(PAYROLL_STATUTORY)) out.push('the Payroll code has no statutory payroll (no tax, PPh, BPJS, THR, allowance, deduction, bonus, benefit or loan identifier)');
+  return out;
+}
+
+// BF-4c1: the payroll inputs take exactly { month } (generate) and { id, expectedVersion } (the
+// transitions) — no employee, company, role, salary, amount, total or status key, and no new
+// identity exception (D-AFI4b1-3 stays the one overtime create selector).
+function checkPayrollInput(lex) {
+  // The allowlists, recovered from the lexed code and the string spans inside each call.
+  const lists = [...lex.code.matchAll(/self::onlyKeys\(\$json, \[[^\]]*\]\)/g)]
+    .map((m) => lex.spans.filter((sp) => sp.start >= m.index && sp.end <= m.index + m[0].length).map((sp) => sp.value).join(','));
+  const out = [];
+  if (lists.length !== 2 || lists[0] !== 'month' || lists[1] !== 'id,expectedVersion') out.push('the payroll inputs allow exactly { month } and { id, expectedVersion }');
+  if (lex.strings.some((s) => /^(employeeId|companyId|role|salary|baseSalary|amount|totalAmount|total|status|overtimeAmount)$/.test(s))) out.push('a payroll input never names an identity, money or status key');
   return out;
 }
 
@@ -829,6 +934,8 @@ function run() {
   const actionFile = path.join(root, ACTION_FILE);
   if (!fs.existsSync(actionFile)) failures.push(ACTION_FILE + ': missing — ACTION parity cannot be established');
   else for (const v of checkActionParity(fs.readFileSync(actionFile, 'utf8'), fs.readFileSync(path.join(root, FRONTEND_AUTHZ), 'utf8'))) failures.push(v);
+  // BF-4c1: payroll adds no Action — the vocabulary stays exactly ACTION_COUNT.
+  if (fs.existsSync(actionFile) && (fs.readFileSync(actionFile, 'utf8').match(/^\s*case \w+ = '/gm) || []).length !== ACTION_COUNT) failures.push(ACTION_FILE + ': the server ACTIONS must stay ' + ACTION_COUNT);
   const ignored = gitIgnored(onDisk);
   const untracked = git(['ls-files', '--others', '--exclude-standard', '--', SERVER]).split('\n').filter(Boolean);
   for (const v of checkGitHygiene(onDisk, ignored, untracked)) failures.push(v);
@@ -990,6 +1097,14 @@ function selftest() {
   const realEmployees = fs.readFileSync(path.join(root, 'server/migrations/0009_create_employees.sql'), 'utf8');
   const realBinding = fs.readFileSync(path.join(root, 'server/migrations/0010_add_memberships_employee_fk.sql'), 'utf8');
   const tenant = (name, src, needle) => cases.push({ name: 'tenant key: ' + name, run: () => [...checkMigrationTenantKey(src), ...checkMigrationNoCascade(src)], expect: needle });
+  // BF-4c1: the two payroll tables are registered company tables with the tenant key.
+  const m24 = fs.readFileSync(path.join(root, 'server/migrations/0024_create_payroll_plans.sql'), 'utf8');
+  const m25 = fs.readFileSync(path.join(root, 'server/migrations/0025_create_payroll_plan_overtime.sql'), 'utf8');
+  tenant('the real payroll_plans migration passes', m24, 0);
+  tenant('the real payroll_plan_overtime migration passes', m25, 0);
+  tenant('payroll_plans without its tenant UNIQUE is caught', m24.replace('  UNIQUE KEY payroll_plans_company_id (company_id, id),\n', ''), 'UNIQUE KEY (company_id, id)');
+  tenant('payroll_plan_overtime without its company FK is caught', m25.replace('  CONSTRAINT payroll_plan_overtime_company_fk FOREIGN KEY (company_id) REFERENCES companies (id),\n', ''), 'REFERENCES companies (id)');
+  tenant('a cascading payroll link FK is caught', m25.replace('REFERENCES payroll_plans (company_id, id)', 'REFERENCES payroll_plans (company_id, id) ON DELETE CASCADE'), 'CASCADE');
   tenant('the real employees migration passes', realEmployees, 0);
   tenant('the real binding FK migration passes', realBinding, 0);
   tenant('an auth/system table is exempt', 'CREATE TABLE sessions (\n  token_hash CHAR(64) NOT NULL\n) ENGINE=InnoDB;\n', 0);
@@ -1190,6 +1305,57 @@ function selftest() {
   dirty('a finance statement in the overtime store is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const T_SQL = 'INSERT INTO finance_transactions (company_id) VALUES (:company_id)';\n    public const ENTITY"), 'no payroll or finance side effect');
   dirty('a paid flag in the overtime controller is caught', OVERTIME_CONTROLLER, S + "$out = ['paid' => true];\n", 'no payroll or finance side effect');
   dirty('overtime SQL in an auth store is caught', 'server/src/Data/Auth/AccountStore.php', S + "$this->db->select('SELECT id FROM overtime_records WHERE id = ?', [$e]);\n", 'read and written only by business stores');
+  // BF-4c1: payroll has one writer, pre-commit compare-and-swaps only, no 'Committed', frozen links,
+  // Approved overtime only, integer-only calculation, no valuation, finance or statutory code.
+  const realPayroll = fs.readFileSync(path.join(root, PAYROLL_STORE), 'utf8');
+  const inPayroll = (extra) => realPayroll.replace('    public const ENTITY', '    ' + extra + '\n    public const ENTITY');
+  clean('the real PayrollStore passes', PAYROLL_STORE, realPayroll);
+  dirty('a payroll plan write outside PayrollStore is caught', OVERTIME_STORE, realOvertime.replace('    public const ENTITY', "    public const P_SQL = \"UPDATE payroll_plans SET status = 'Draft' WHERE company_id = :company_id AND version = :expected_version AND status = 'Draft'\";\n    public const ENTITY"), 'written only by ' + PAYROLL_STORE);
+  dirty('a payroll link write outside PayrollStore is caught', STORE, inStore(realStore, "public const L_SQL = 'INSERT INTO payroll_plan_overtime (id, company_id) VALUES (:id, :company_id)';"), 'payroll_plan_overtime is written only by');
+  dirty('a payroll plan DELETE is caught', PAYROLL_STORE, inPayroll("public const D_SQL = \"DELETE FROM payroll_plans WHERE id = :id AND company_id = :company_id AND status = 'Draft'\";"), 'never deleted');
+  dirty('a payroll TRUNCATE is caught', PAYROLL_STORE, inPayroll("public const T_SQL = 'TRUNCATE TABLE payroll_plans';"), 'never deleted');
+  dirty('a payroll link TRUNCATE is caught', PAYROLL_STORE, inPayroll("public const T_SQL = 'TRUNCATE TABLE payroll_plan_overtime';"), 'never truncated');
+  dirty('a write of Committed is caught (M8)', PAYROLL_STORE, inPayroll("public const C_SQL = \"UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), "writes 'Committed'");
+  dirty('a transition without its pre-commit predicate is caught (M8/M9)', PAYROLL_STORE, realPayroll.replace(" AND status = :from_status AND status IN ('Draft', 'Reviewed', 'Ready')\";", " AND status = :from_status\";"), 'pre-commit compare-and-swap');
+  dirty('a transition without its version predicate is caught (M7)', PAYROLL_STORE, realPayroll.replace("WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status", "WHERE id = :id AND company_id = :company_id AND status = :from_status"), 'pre-commit compare-and-swap');
+  dirty('a recalculation of a non-Draft plan is caught', PAYROLL_STORE, realPayroll.replace("AND version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL", "AND version = :expected_version AND status <> 'Cancelled'\";\n    public const TRANSITION_SQL"), 'pre-commit compare-and-swap');
+  dirty('a transition widened with OR is caught', PAYROLL_STORE, realPayroll.replace("AND status = :from_status AND status IN ('Draft', 'Reviewed', 'Ready')", "AND (status = :from_status OR status = 'Committed') AND status IN ('Draft', 'Reviewed', 'Ready')"), 'pre-commit compare-and-swap');
+  dirty('a link release of a committed plan is caught', PAYROLL_STORE, realPayroll.replace("AND p.status IN ('Draft', 'Reviewed', 'Ready'))\";", "AND p.status IN ('Draft', 'Reviewed', 'Ready', 'Committed'))\";"), 'releases only the links of one pre-commit plan');
+  dirty('a link release of every plan is caught', PAYROLL_STORE, realPayroll.replace("WHERE company_id = :company_id AND payroll_plan_id = :id AND EXISTS", "WHERE company_id = :company_id AND EXISTS"), 'releases only the links of one pre-commit plan');
+  dirty('a payroll read of non-Approved overtime is caught (M4)', PAYROLL_STORE, realPayroll.replace("AND month_key = :month_key AND status = 'Approved' ORDER BY employee_id, id", "AND month_key = :month_key AND status IN ('Approved', 'Reviewed') ORDER BY employee_id, id"), 'reads only Approved overtime');
+  dirty('a payroll range lock of employees is caught (deadlock)', PAYROLL_STORE, realPayroll.replace("FROM employees WHERE company_id = :company_id ORDER BY id LIMIT 2001';", "FROM employees WHERE company_id = :company_id ORDER BY id LIMIT 2001 FOR UPDATE';"), 'only by primary key');
+  dirty('a payroll lock of overtime rows is caught (deadlock)', PAYROLL_STORE, realPayroll.replace("AND status = 'Approved' ORDER BY employee_id, id LIMIT 2001\";", "AND status = 'Approved' ORDER BY employee_id, id LIMIT 2001 FOR UPDATE\";"), 'only by primary key');
+  dirty('a payroll share-lock of the month plans is caught (deadlock)', PAYROLL_STORE, realPayroll.replace("AND status <> 'Cancelled' ORDER BY id LIMIT 2001\";", "AND status <> 'Cancelled' ORDER BY id LIMIT 2001 LOCK IN SHARE MODE\";"), 'only by primary key');
+  dirty('a payroll read of a valuation column is caught (M3)', PAYROLL_STORE, realPayroll.replace('employee_id, hours, approved_amount FROM overtime_records', 'employee_id, hours, valuation_salary, approved_amount FROM overtime_records'), 'never values overtime');
+  const realCalc = fs.readFileSync(path.join(root, PAYROLL_CALCULATION), 'utf8');
+  clean('the real PayrollCalculation is integer arithmetic only', PAYROLL_CALCULATION, realCalc);
+  for (const [label, from, to] of [
+    ['a float cast (M14)', '$totalSen = $baseSen + $overtimeRupiah * self::SEN_PER_RUPIAH;', '$totalSen = (float) $baseSen + $overtimeRupiah * self::SEN_PER_RUPIAH;'],
+    ['a division operator', '$totalRupiah = intdiv($totalSen, self::SEN_PER_RUPIAH);', '$totalRupiah = (int) ($totalSen / self::SEN_PER_RUPIAH);'],
+    ['round()', '$totalRupiah = intdiv($totalSen, self::SEN_PER_RUPIAH);', '$totalRupiah = (int) round($totalSen / self::SEN_PER_RUPIAH);'],
+    ['a BCMath call', '$totalSen = $baseSen + $overtimeRupiah * self::SEN_PER_RUPIAH;', '$totalSen = (int) bcadd((string) $baseSen, (string) $overtimeRupiah);'],
+    ['a float literal', '$totalRupiah++;', '$totalRupiah += 0.5;'],
+  ]) {
+    if (!realCalc.includes(from)) throw new Error('selftest fixture drift: ' + from);
+    dirty('float authority in the payroll calculation is caught: ' + label, PAYROLL_CALCULATION, realCalc.replace(from, to), 'integer arithmetic only');
+  }
+  const PAYROLL_SERVICE = 'server/src/Payroll/PayrollService.php';
+  const realPayrollService = fs.readFileSync(path.join(root, PAYROLL_SERVICE), 'utf8');
+  clean('the real PayrollService passes the payroll firewalls', PAYROLL_SERVICE, realPayrollService);
+  clean('the real PayrollController passes the payroll firewalls', PAYROLL_CONTROLLER, fs.readFileSync(path.join(root, PAYROLL_CONTROLLER), 'utf8'));
+  dirty('a TAM-OT-1 call from Payroll is caught (M3)', PAYROLL_SERVICE, S + "$a = \\TamOs\\Overtime\\OvertimeValuation::value($salary, $hours);\n", 'never values overtime');
+  dirty('a finance side effect in Payroll is caught (M13)', PAYROLL_SERVICE, S + "$this->data->finance()->post($auth);\n", 'no finance side effect');
+  dirty('a paid flag in the payroll controller is caught (M13)', PAYROLL_CONTROLLER, S + "$out = ['paid' => true];\n", 'no finance side effect');
+  dirty('a finance statement in the payroll store is caught (M13)', PAYROLL_STORE, inPayroll("public const F_SQL = 'INSERT INTO finance_transactions (company_id) VALUES (:company_id)';"), 'no finance side effect');
+  dirty('a statutory deduction in Payroll is caught (M15)', PAYROLL_SERVICE, S + "$bpjs = 1;\n", 'no statutory payroll');
+  dirty('a tax term in the payroll calculation is caught (M15)', PAYROLL_CALCULATION, realCalc.replace('$totalSen = $baseSen', '$taxSen = 0;\n        $totalSen = $baseSen'), 'no statutory payroll');
+  dirty('an allowance key in a payroll view is caught (M15)', 'server/src/Payroll/PayrollView.php', S + "$k = 'allowance';\n", 'no statutory payroll');
+  dirty('a payroll audit append outside the transaction is caught (M10)', PAYROLL_SERVICE, realPayrollService.replace("            $this->data->audit()->appendPayroll($auth, $actor, $operation, $requestId);\n        });", "        });\n        $this->data->audit()->appendPayroll($auth, $actor, $operation, $requestId);"), 'inside the transaction');
+  const realPayrollInput = fs.readFileSync(path.join(root, PAYROLL_INPUT), 'utf8');
+  clean('the real PayrollInput passes', PAYROLL_INPUT, realPayrollInput);
+  dirty('a browser salary key on generate is caught (M1)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['month']);", "self::onlyKeys($json, ['month', 'salary']);"), 'exactly { month }');
+  dirty('a browser total key on a transition is caught (M2)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['id', 'expectedVersion']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'totalAmount']);"), 'exactly { month }');
+  dirty('an employeeId key on generate is caught (identity)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['month']);", "self::onlyKeys($json, ['employeeId']);"), 'never names an identity');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
   clean('the real EmployeeService appends audit rows inside its transactions', SERVICE, realService);
@@ -1220,6 +1386,10 @@ function selftest() {
   cases.push({ name: 'an overtime approve route under a weaker Action is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->approve(...), [], RouteAuth::Required, Action::OvertimeSubmitSelf)")), expect: 'must declare Action::OvertimeManage' });
   cases.push({ name: 'a missing overtime approve route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/overtime-records/approve', $overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage),\n", '')), expect: 'overtime route POST /api/overtime-records/approve is missing' });
   cases.push({ name: 'a missing account route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),\n", '')), expect: 'is missing' });
+  cases.push({ name: 'a payroll write under a weaker Action is caught', run: () => checkRouteActions(realRoutes.replace("$payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage)", "$payroll->cancel(...), [], RouteAuth::Required, Action::OvertimeManage)")), expect: 'must declare Action::PayrollManage' });
+  cases.push({ name: 'a missing payroll route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/return', $payroll->returnToDraft(...), [], RouteAuth::Required, Action::PayrollManage),\n", '')), expect: 'payroll route POST /api/payroll-plans/return is missing' });
+  cases.push({ name: 'a payroll commit route is caught (BF-4c2 scope)', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/cancel',", "            new Route('POST', '/api/payroll-plans/commit', $payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage),\n            new Route('POST', '/api/payroll-plans/cancel',")), expect: 'not a BF-4c1 payroll write' });
+  cases.push({ name: 'payroll.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->reject(...), [], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 
   // BF-3C: ACTION parity against the real js/core/authz.js and the real Action.php, then each drift.

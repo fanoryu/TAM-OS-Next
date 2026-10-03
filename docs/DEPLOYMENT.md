@@ -124,6 +124,10 @@ never be a production interval in which the backend can create Approved records 
 frontend is AFI-4b1 only. AFI-4b2 is that frontend counterpart (it understands Approved and the
 valuation projection); both halves now exist as source, neither is deployed, and they ship together.
 
+**Deployment note — Payroll plans (BF-4c1).** BF-4c1 adds the payroll routes, migrations `0024`–`0026` and
+no change to any existing response, so it carries no frontend pairing constraint of its own: it may be deployed
+before a Payroll frontend exists. Its migrations must run before its routes are reachable. It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

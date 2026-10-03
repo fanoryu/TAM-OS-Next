@@ -7,6 +7,7 @@ use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\HealthController;
 use TamOs\Controller\OvertimeController;
+use TamOs\Controller\PayrollController;
 use TamOs\Controller\ReadyController;
 use TamOs\Data\Readiness;
 use TamOs\Policy\Action;
@@ -33,6 +34,12 @@ use TamOs\Policy\Action;
  * read by scope; a preview is decided by the handler under overtime.manage), and approve declares
  * the existing overtime.manage — record-bearing, 404 before 403. ACTIONS stay 21.
  *
+ * BF-4c1: the payroll reads need a session and add no Action (CEO only in this slice; the month
+ * list requires ?month=). generate, review, approve, return and cancel each declare the existing
+ * payroll.manage — record-bearing, decided by the handler (generate against the period, the others
+ * after their scoped load: 404 before 403). There is no commit route and no generic status route.
+ * ACTIONS stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -52,7 +59,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -91,6 +98,14 @@ final class Routes
             // BF-4b2: valuation and approval (TAM-OT-1); no payroll, no finance.
             new Route('GET', '/api/overtime-record/valuation', $overtime->valuation(...), ['id'], RouteAuth::Required),
             new Route('POST', '/api/overtime-records/approve', $overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage),
+            // BF-4c1: payroll plans — CEO only, payroll.manage, no commit (BF-4c2).
+            new Route('GET', '/api/payroll-plans', $payroll->month(...), ['month'], RouteAuth::Required),
+            new Route('GET', '/api/payroll-plan', $payroll->find(...), ['id'], RouteAuth::Required),
+            new Route('POST', '/api/payroll-plans/generate', $payroll->generate(...), [], RouteAuth::Required, Action::PayrollManage),
+            new Route('POST', '/api/payroll-plans/review', $payroll->review(...), [], RouteAuth::Required, Action::PayrollManage),
+            new Route('POST', '/api/payroll-plans/approve', $payroll->approve(...), [], RouteAuth::Required, Action::PayrollManage),
+            new Route('POST', '/api/payroll-plans/return', $payroll->returnToDraft(...), [], RouteAuth::Required, Action::PayrollManage),
+            new Route('POST', '/api/payroll-plans/cancel', $payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage),
         ]);
     }
 

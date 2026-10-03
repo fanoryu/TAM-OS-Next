@@ -96,6 +96,21 @@ final class ScopedDatabase
     }
 
     /**
+     * BF-4c1: a period candidate — the record a company-and-month operation (payroll generate) is
+     * authorized against before any plan of it is read or written. It is the principal's own scope
+     * and a canonical "YYYY-MM" month only: no owner (so no Employee rule can admit it) and no
+     * status. It never authorizes a write — a write needs the Authorization of the one record it
+     * targets (execute()) — only the company-scope reads and row locks of that operation.
+     */
+    public function periodCandidate(Scope $scope, string $entity, string $monthKey): ScopedRecord
+    {
+        if ($entity === 'employee' || preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/', $monthKey) !== 1) {
+            throw new \LogicException('a period candidate is a non-employee entity and a canonical month');
+        }
+        return new ScopedRecord($scope, $entity, $monthKey, null, null);
+    }
+
+    /**
      * @param array<string, int|string|bool|null> $params
      * @return int the affected row count (0 = nothing in scope matched → the caller's 404)
      */

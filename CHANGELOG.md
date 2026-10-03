@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **BF-4c1 Payroll plans (backend only, not shipped).** The server can now prepare a month's payroll: for each active
+  employee with a salary it calculates a plan of the monthly base salary plus the overtime already approved for that
+  month, using exactly the approved amounts (it never re-values overtime), rounded once to the whole Rupiah. Employees
+  who are archived, not active or without a salary are listed with the reason instead. The CEO can review a plan,
+  approve it, send it back to Draft or cancel it; preparing the month again updates Drafts only. There is no tax, BPJS,
+  THR, allowance or deduction — TAM's payroll is base salary plus approved overtime. An approved plan is not a payment:
+  committing payroll, an employee's view of their own payroll and anything in Finance come later. No screens yet; the
+  shipped `AUTH_MODE` stays **LOCAL**.
 - **AFI-4b2 SESSION Overtime valuation and approval (frontend; SESSION mode only, not shipped).** In the Overtime
   section, the CEO now sees what a reviewed record is worth — marked "Valuation preview — not yet approved", with
   the amount, the monthly salary it is based on, the hours, the 160 standard monthly hours and TAM's internal method

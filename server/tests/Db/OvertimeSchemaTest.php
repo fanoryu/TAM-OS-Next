@@ -134,8 +134,9 @@ return [
         $audit = static fn (): array => $db->select('SELECT id, action, entity, entity_id, operation, fields FROM audit_events ORDER BY id');
         [$beforeRecords, $beforeAudit] = [$records(), $audit()];
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4b2 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0023, current');
+        assertSame(['0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve', '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks'],
+            array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4b2 migrations run, then BF-4c1 (which changes no overtime row)');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0026, current');
         assertSame($beforeRecords, $records(), 'every BF-4b1 record is unchanged');
         assertSame($beforeAudit, $audit(), 'every overtime audit row is unchanged');
         assertSame(4, (int) $db->select('SELECT COUNT(*) AS n FROM overtime_records WHERE valuation_method IS NULL AND valuation_salary IS NULL AND valuation_standard_hours IS NULL AND approved_amount IS NULL AND approved_at IS NULL')[0]['n'], 'no snapshot on a pre-0022 row');
