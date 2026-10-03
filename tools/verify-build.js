@@ -5965,10 +5965,11 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
     'BF-4a3: EmployeeView projects it right after accountState for the CEO only, as a strict boolean from SQL 1 / 0');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  // BF-4b2 authorized revision: the head moved to 0023 (BF-4b2 valuation + approval). Was: 0021 after BF-4b1.
-  check(migrations[migrations.length - 1].startsWith('0023_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4c1 authorized revision: the head moved to 0026 (BF-4c1 payroll plans). Was: 0023 after BF-4b2
+  // (and 0021 after BF-4b1 before that).
+  check(migrations[migrations.length - 1].startsWith('0026_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'BF-4a3: no migration of its own (head 0023 after BF-4b2), ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'BF-4a3: no migration of its own (head 0026 after BF-4c1), ACTIONS stay 21, AUTH_MODE stays LOCAL');
 }
 
 // ===== AFI-4a3 — CEO SESSION ACCOUNT ADMINISTRATION =====
@@ -6209,10 +6210,10 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
     'AFI-4b1: the workspace has exactly two SESSION sections — Employees | Overtime (CEO), My profile | My overtime (Employee); the existing one stays the default');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  // BF-4b2 authorized revision: the head moved to 0023 (BF-4b2). Was: stays 0021.
-  check(migrations[migrations.length - 1].startsWith('0023_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4c1 authorized revision: the head moved to 0026 (BF-4c1). Was: 0023 after BF-4b2 (stays 0021 before).
+  check(migrations[migrations.length - 1].startsWith('0026_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4b1: frontend only — migration head 0023 after BF-4b2, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'AFI-4b1: frontend only — migration head 0026 after BF-4c1, ACTIONS stay 21, AUTH_MODE stays LOCAL');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-overtime-runtime.js')), 'AFI-4b1: runtime harness present — tools/verify-session-overtime-runtime.js');
 }
 
@@ -6229,9 +6230,11 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   const m22 = srv('migrations/0022_add_overtime_records_valuation.sql');
   const m23 = srv('migrations/0023_replace_audit_events_overtime_approve.sql');
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  check(/^ALTER TABLE overtime_records\b/.test(m22) && /^ALTER TABLE audit_events\b/.test(m23) && migrations[migrations.length - 1] === '0023_replace_audit_events_overtime_approve.sql'
+  // BF-4c1 authorized revision: 0023 is no longer the head (0026, BF-4c1). Was: head === 0023.
+  check(/^ALTER TABLE overtime_records\b/.test(m22) && /^ALTER TABLE audit_events\b/.test(m23) && migrations.includes('0023_replace_audit_events_overtime_approve.sql')
+    && migrations[migrations.length - 1] === '0026_replace_audit_events_payroll_checks.sql'
     && (m22.match(/;/g) || []).length === 1 && (m23.match(/;/g) || []).length === 1,
-    'BF-4b2: migrations 0022 (valuation snapshot) and 0023 (approve audit operation) exist, one statement each; head 0023');
+    'BF-4b2: migrations 0022 (valuation snapshot) and 0023 (approve audit operation) exist, one statement each; head 0026 after BF-4c1');
   check(/ADD COLUMN valuation_method\b[\s\S]*ADD COLUMN valuation_salary DECIMAL\(15,2\)[\s\S]*ADD COLUMN valuation_standard_hours DECIMAL\(5,2\)[\s\S]*ADD COLUMN approved_amount DECIMAL\(16,2\)[\s\S]*ADD COLUMN approved_at DATETIME\(6\)/.test(m22)
     && /overtime_records_status_v2 CHECK \(status IN \('Draft', 'Submitted', 'Reviewed', 'Approved', 'Rejected'\)\)/.test(m22)
     && /overtime_records_valuation CHECK \(\(status = 'Approved'\) = \(valuation_method IS NOT NULL\)/.test(m22) && /valuation_method IN \('TAM-OT-1'\)/.test(m22)
@@ -6375,10 +6378,11 @@ console.log('== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL ==');
     'AFI-4b2: the valuation block says preview or frozen, shows amount, salary basis, hours, standard hours and the internal method as the exact escaped strings; no hourly rate, multiplier or statutory claim');
   // Invariants of this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  check(migrations[migrations.length - 1].startsWith('0023_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4c1 authorized revision: the head moved to 0026 (BF-4c1). Was: 0023.
+  check(migrations[migrations.length - 1].startsWith('0026_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
     && (code(rd('transport/api-client.js')).match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4,
-    'AFI-4b2: frontend only — migration head 0023, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
+    'AFI-4b2: frontend only — migration head 0026 after BF-4c1, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

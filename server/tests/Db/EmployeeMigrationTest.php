@@ -75,9 +75,10 @@ return [
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0014_extend_employees_profile', '0015_backfill_legacy_employees', '0016_enforce_employees_profile', '0017_create_audit_events',
             '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation', '0020_create_overtime_records', '0021_replace_audit_events_overtime_checks',
-            '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve'],
-            array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2, BF-4b1 and BF-4b2');
-        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 23)), $history($db), 'every marker complete — none stranded');
+            '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve',
+            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks'],
+            array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2, BF-4b1, BF-4b2 and BF-4c1');
+        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 26)), $history($db), 'every marker complete — none stranded');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'status: current');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->apply(), 'a second apply is a no-op');
 

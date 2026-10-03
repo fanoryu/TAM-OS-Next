@@ -245,8 +245,11 @@ return [
         assertSame(array_keys($before), array_keys($after), 'no table created');
         $before['audit_events']++;
         assertSame($before, $after, 'only audit_events grew; every other table, payroll or finance included, is untouched');
+        // BF-4c1 authorized revision: the payroll tables now exist (payroll_plans, payroll_plan_overtime);
+        // an approval still writes none of them (their counts are compared above). Was: no payroll table at all.
         foreach (array_keys($after) as $t) {
-            assertTrue(preg_match('/payroll|payslip|payment|finance|transaction|ledger|journal/i', $t) !== 1, 'no payroll or finance table: ' . $t);
+            assertTrue(preg_match('/payslip|payment|finance|transaction|ledger|journal/i', $t) !== 1, 'no finance table: ' . $t);
+            assertTrue(preg_match('/payroll/', $t) !== 1 || in_array($t, ['payroll_plans', 'payroll_plan_overtime'], true), 'only the BF-4c1 payroll tables: ' . $t);
         }
     },
     'a failing audit append rolls the approval back: the record stays Reviewed with no snapshot' => static function () use ($world, $reviewed, $approve, $code, $snap): void {

@@ -17,7 +17,7 @@ $router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly twenty-nine routes; activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account and overtime routes require one' => static function () use ($production): void {
+    'production has exactly thirty-six routes; activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime and payroll routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -50,6 +50,13 @@ return [
             ['POST', '/api/overtime-records/reject', [], RouteAuth::Required],
             ['GET', '/api/overtime-record/valuation', ['id'], RouteAuth::Required],
             ['POST', '/api/overtime-records/approve', [], RouteAuth::Required],
+            ['GET', '/api/payroll-plans', ['month'], RouteAuth::Required],
+            ['GET', '/api/payroll-plan', ['id'], RouteAuth::Required],
+            ['POST', '/api/payroll-plans/generate', [], RouteAuth::Required],
+            ['POST', '/api/payroll-plans/review', [], RouteAuth::Required],
+            ['POST', '/api/payroll-plans/approve', [], RouteAuth::Required],
+            ['POST', '/api/payroll-plans/return', [], RouteAuth::Required],
+            ['POST', '/api/payroll-plans/cancel', [], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {
