@@ -7,6 +7,10 @@ declare(strict_types=1);
  * month, query and id 400s, mass-assignment and money-key 400s — happens before any statement
  * runs. (Any route that reached the database would answer 500 here: none is configured.) The
  * data paths, Policy and the state machine are proven in tests/Db.
+ *
+ * BF-4b2: the valuation read and approve join the same gates — 401, CSRF and origin on approve,
+ * the id and the approve allowlist (no salary, hours, rate, method, status or employee from a
+ * browser; expectedAmount a whole-Rupiah string) — all before any statement runs.
  */
 
 use TamOs\Http\Request;
@@ -62,12 +66,14 @@ $writes = [
     '/api/overtime-records/submit' => $target,
     '/api/overtime-records/review' => $target,
     '/api/overtime-records/reject' => $target,
+    '/api/overtime-records/approve' => '{"id":"' . $id . '","expectedVersion":1,"expectedAmount":"218750.00"}',
 ];
 
 return [
     'no session: every overtime route is 401' => static function () use ($get, $post, $is, $writes, $id): void {
         $is($get(null, '/api/overtime-records', 'month=2026-10'), 401, 'unauthenticated', null, 'month list');
         $is($get(null, '/api/overtime-record', 'id=' . $id), 401, 'unauthenticated', null, 'detail');
+        $is($get(null, '/api/overtime-record/valuation', 'id=' . $id), 401, 'unauthenticated', null, 'valuation');
         foreach ($writes as $path => $body) {
             $is($post(null, $path, $body), 401, 'unauthenticated', null, $path);
         }
@@ -96,6 +102,27 @@ return [
         $is($get($ceoToken, '/api/overtime-record'), 400, 'validation_failed', ['id'], 'no id');
         $is($get($ceoToken, '/api/overtime-record', 'id=emp_1'), 400, 'validation_failed', ['id'], 'an employee id is not an overtime id');
         $is($get($ceoToken, '/api/overtime-record', 'id=x&extra=1'), 400, 'invalid_query', null, 'unknown key');
+    },
+    'the valuation read needs a server id and no other key' => static function () use ($get, $is, $ceoToken, $empToken): void {
+        foreach ([$ceoToken, $empToken] as $who) {
+            $is($get($who, '/api/overtime-record/valuation'), 400, 'validation_failed', ['id'], 'no id');
+            $is($get($who, '/api/overtime-record/valuation', 'id=emp_1'), 400, 'validation_failed', ['id'], 'not an overtime id');
+            foreach (['id=x&salary=1', 'id=x&employeeId=emp_1', 'id=x&month=2026-10', 'id=x&id=y'] as $q) {
+                $is($get($who, '/api/overtime-record/valuation', $q), 400, 'invalid_query', null, $q);
+            }
+        }
+    },
+    'approve: every valuation input from a browser is a 400 naming the key; expectedAmount is a required whole-Rupiah string' => static function () use ($post, $is, $ceoToken, $empToken, $id): void {
+        $base = '"id":"' . $id . '","expectedVersion":1,"expectedAmount":"218750.00"';
+        foreach ([$ceoToken, $empToken] as $who) {
+            foreach (['salary', 'monthlySalaryBasis', 'hours', 'standardMonthlyHours', 'multiplier', 'method', 'valuationMethod', 'amount', 'approvedAmount', 'status', 'employeeId', 'company_id', 'currency'] as $key) {
+                $is($post($who, '/api/overtime-records/approve', '{' . $base . ',"' . $key . '":"1"}'), 400, 'validation_failed', [$key], 'approve ' . $key);
+            }
+            $is($post($who, '/api/overtime-records/approve', '{"id":"' . $id . '","expectedVersion":1}'), 400, 'validation_failed', ['expectedAmount'], 'expectedAmount required');
+            foreach (['218750', '218750.5', '"218750"', '"218750.50"', '"-1.00"', 'null'] as $bad) {
+                $is($post($who, '/api/overtime-records/approve', '{"id":"' . $id . '","expectedVersion":1,"expectedAmount":' . $bad . '}'), 400, 'validation_failed', ['expectedAmount'], 'expectedAmount ' . $bad);
+            }
+        }
     },
     'mass assignment and money keys are 400 for the CEO and the Employee, before any lookup' => static function () use ($post, $is, $ceoToken, $empToken, $id): void {
         foreach ([$ceoToken, $empToken] as $who) {

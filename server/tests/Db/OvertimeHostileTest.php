@@ -6,6 +6,10 @@ declare(strict_types=1);
  * suite to the overtime domain, as each domain migration must): an Employee reaching for CEO-only
  * transitions, a colleague's records or a non-Draft of their own; a CEO of another company; and
  * forged authority in the body. Every refusal writes nothing and audits nothing. Fabricated data.
+ *
+ * BF-4b2: approve joins every write matrix below (an Employee is 403 on their own record, 404 on
+ * a colleague's; another company is 404), and the valuation read never discloses a preview to an
+ * Employee nor any valuation across colleagues or companies.
  */
 
 use TamOs\Data\Auth\AuthData;
@@ -58,7 +62,7 @@ $to = static function (array $w, string $op, array $rec) use ($post): array {
     return envelope($r)['data']['overtimeRecord'];
 };
 $snapshot = static fn (Database $db): array => [
-    $db->select('SELECT id, status, version, hours, month_key, employee_id, company_id FROM overtime_records ORDER BY id'),
+    $db->select('SELECT id, status, version, hours, month_key, employee_id, company_id, valuation_method, valuation_salary, approved_amount, approved_at FROM overtime_records ORDER BY id'),
     (int) $db->select('SELECT COUNT(*) AS n FROM audit_events')[0]['n'],
 ];
 $ops = static fn (array $rec): array => [
@@ -67,18 +71,25 @@ $ops = static fn (array $rec): array => [
     'submit' => ['id' => $rec['id'], 'expectedVersion' => $rec['version']],
     'review' => ['id' => $rec['id'], 'expectedVersion' => $rec['version']],
     'reject' => ['id' => $rec['id'], 'expectedVersion' => $rec['version']],
+    'approve' => ['id' => $rec['id'], 'expectedVersion' => $rec['version'], 'expectedAmount' => '0.00'],
 ];
 
 return [
-    'an Employee can never review or reject, not even their own record (403), and nothing changes' => static function () use ($world, $new, $to, $post, $code, $snapshot): void {
+    'an Employee can never review, reject or approve, not even their own record (403), and nothing changes' => static function () use ($world, $new, $to, $post, $code, $snapshot): void {
+        $w0 = $world();
+        $w0['db']->execute("UPDATE employees SET monthly_base_salary = '3500000.00' WHERE id = 'e_a1'");
+        $own = $to($w0, 'review', $to($w0, 'submit', $new($w0, 'empA1', 'e_a1')));
+        $before0 = $snapshot($w0['db']);
+        assertSame([403, 'forbidden'], $code($post($w0, 'empA1', '/api/overtime-records/approve', ['id' => $own['id'], 'expectedVersion' => $own['version'], 'expectedAmount' => '21875.00'])), 'approve own Reviewed with the right amount');
+        assertSame($before0, $snapshot($w0['db']), 'nothing approved by an Employee');
         $w = $world();
         $draft = $new($w, 'empA1', 'e_a1');
         $sub = $to($w, 'submit', $new($w, 'empA1', 'e_a1'));
         $rev = $to($w, 'review', $to($w, 'submit', $new($w, 'empA1', 'e_a1')));
         $before = $snapshot($w['db']);
         foreach ([$draft, $sub, $rev] as $rec) {
-            foreach (['review', 'reject'] as $op) {
-                assertSame([403, 'forbidden'], $code($post($w, 'empA1', '/api/overtime-records/' . $op, ['id' => $rec['id'], 'expectedVersion' => $rec['version']])), $op . ' own ' . $rec['status']);
+            foreach (['review', 'reject', 'approve'] as $op) {
+                assertSame([403, 'forbidden'], $code($post($w, 'empA1', '/api/overtime-records/' . $op, ['id' => $rec['id'], 'expectedVersion' => $rec['version']] + ($op === 'approve' ? ['expectedAmount' => '6250.00'] : []))), $op . ' own ' . $rec['status']);
             }
         }
         assertSame($before, $snapshot($w['db']), 'nothing written, nothing audited');
@@ -97,6 +108,7 @@ return [
         $theirs = $new($w, 'empA2', 'e_a2');
         $before = $snapshot($w['db']);
         assertSame([404, 'not_found'], $code($get($w, 'empA1', '/api/overtime-record', 'id=' . $theirs['id'])), 'read');
+        assertSame([404, 'not_found'], $code($get($w, 'empA1', '/api/overtime-record/valuation', 'id=' . $theirs['id'])), 'valuation');
         foreach ($ops($theirs) as $op => $body) {
             assertSame([404, 'not_found'], $code($post($w, 'empA1', '/api/overtime-records/' . $op, $body)), $op);
         }
@@ -109,6 +121,7 @@ return [
         $before = $snapshot($w['db']);
         foreach (['ceoB', 'empB1'] as $who) {
             assertSame([404, 'not_found'], $code($get($w, $who, '/api/overtime-record', 'id=' . $rec['id'])), $who . ' read');
+            assertSame([404, 'not_found'], $code($get($w, $who, '/api/overtime-record/valuation', 'id=' . $rec['id'])), $who . ' valuation');
             foreach ($ops($rec) as $op => $body) {
                 assertSame([404, 'not_found'], $code($post($w, $who, '/api/overtime-records/' . $op, $body)), $who . ' ' . $op);
             }
@@ -122,7 +135,8 @@ return [
         $rec = $new($w, 'empA1', 'e_a1');
         $before = $snapshot($w['db']);
         $forged = ['company_id' => str_repeat('f', 32), 'companyId' => str_repeat('f', 32), 'status' => 'Reviewed', 'version' => 9, 'actorUserId' => str_repeat('1', 32),
-            'reviewedBy' => 'x', 'approvedAmount' => '1000000.00', 'hourlyRate' => '1.00', 'employeeName' => 'x', 'payrollPlanId' => 'x', 'createdAt' => '2020-01-01'];
+            'reviewedBy' => 'x', 'approvedAmount' => '1000000.00', 'hourlyRate' => '1.00', 'employeeName' => 'x', 'payrollPlanId' => 'x', 'createdAt' => '2020-01-01',
+            'valuationSalary' => '1.00', 'monthlySalaryBasis' => '1.00', 'standardMonthlyHours' => '1.00', 'multiplier' => '2', 'method' => 'TAM-OT-1'];
         foreach (['ceoA', 'empA1'] as $who) {
             foreach ($forged as $key => $value) {
                 assertSame([400, 'validation_failed'], $code($post($w, $who, '/api/overtime-records/create', ['employeeId' => 'e_a1', 'monthKey' => '2026-10', 'hours' => '1.00', $key => $value])), $who . ' create ' . $key);

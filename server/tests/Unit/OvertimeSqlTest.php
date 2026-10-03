@@ -6,6 +6,11 @@ declare(strict_types=1);
  * the store's statements (scope, self binding, compare-and-swap, the Draft-only delete), the
  * overtime audit vocabulary and the create candidate. Behaviour is proven against MariaDB in
  * tests/Db/Overtime*Test.php.
+ *
+ * BF-4b2 revisions (D-BF4b2-1 = A): the status vocabulary gains Approved, reached ONLY by the
+ * separate approve transition (never a generic one) and never left; the record view keeps its
+ * nine fields; only APPROVE_SQL and the valuation reads name the valuation columns; the audit
+ * vocabulary gains 'approve' under overtime.manage.
  */
 
 use TamOs\Data\Audit\AuditLog;
@@ -44,8 +49,11 @@ $sqlOf = static function (): array {
 };
 
 return [
-    'the state machine is exactly D-BF4b-5: submit, review, reject; Rejected terminal; no approval' => static function (): void {
-        assertSame(['Draft', 'Submitted', 'Reviewed', 'Rejected'], OvertimeStatus::VALUES, 'the frontend status spellings, without Approved or Committed to Payroll');
+    'the state machine is exactly D-BF4b-5 plus D-BF4b2-1: submit, review, reject generic; approve separate; Rejected and Approved terminal' => static function (): void {
+        assertSame(['Draft', 'Submitted', 'Reviewed', 'Approved', 'Rejected'], OvertimeStatus::VALUES, 'the frontend status spellings, with Approved and without Committed to Payroll');
+        assertSame(['Approved', 'Rejected'], OvertimeStatus::TERMINAL);
+        assertSame(['approve', Action::OvertimeManage, 'Reviewed', 'Approved'], OvertimeStatus::APPROVE, 'approve: CEO, from Reviewed only');
+        assertSame(['submit', 'review', 'reject'], array_keys(OvertimeStatus::TRANSITIONS), 'approve is not a generic transition');
         $table = [];
         foreach (array_keys(OvertimeStatus::TRANSITIONS) as $op) {
             foreach (OvertimeStatus::VALUES as $from) {
@@ -53,19 +61,23 @@ return [
             }
         }
         assertSame([
-            'submit:Draft' => 'Submitted', 'submit:Submitted' => null, 'submit:Reviewed' => null, 'submit:Rejected' => null,
-            'review:Draft' => null, 'review:Submitted' => 'Reviewed', 'review:Reviewed' => null, 'review:Rejected' => null,
-            'reject:Draft' => null, 'reject:Submitted' => 'Rejected', 'reject:Reviewed' => 'Rejected', 'reject:Rejected' => null,
+            'submit:Draft' => 'Submitted', 'submit:Submitted' => null, 'submit:Reviewed' => null, 'submit:Approved' => null, 'submit:Rejected' => null,
+            'review:Draft' => null, 'review:Submitted' => 'Reviewed', 'review:Reviewed' => null, 'review:Approved' => null, 'review:Rejected' => null,
+            'reject:Draft' => null, 'reject:Submitted' => 'Rejected', 'reject:Reviewed' => 'Rejected', 'reject:Approved' => null, 'reject:Rejected' => null,
         ], $table);
         assertSame([Action::OvertimeSubmitSelf, Action::OvertimeManage, Action::OvertimeManage], array_map(OvertimeStatus::action(...), ['submit', 'review', 'reject']));
-        assertThrows(\LogicException::class, static fn () => OvertimeStatus::action('approve'), 'no approve');
+        assertThrows(\LogicException::class, static fn () => OvertimeStatus::action('approve'), 'no generic approve');
         foreach (OvertimeStatus::VALUES as $from) {
             foreach (array_keys(OvertimeStatus::TRANSITIONS) as $op) {
                 assertTrue(OvertimeStatus::target($op, $from) !== OvertimeStatus::DRAFT, 'nothing returns to Draft');
+                assertTrue(OvertimeStatus::target($op, $from) !== OvertimeStatus::APPROVED, 'no generic transition reaches Approved');
+                if (in_array($from, OvertimeStatus::TERMINAL, true)) {
+                    assertSame(null, OvertimeStatus::target($op, $from), $from . ' is terminal: ' . $op);
+                }
             }
         }
     },
-    'the view is exactly nine fields, one shape for CEO and Employee, with no money, names, company or timestamps' => static function () use ($row): void {
+    'the view is exactly nine fields, one shape for CEO and Employee, with no money, names, company or timestamps (an Approved record too)' => static function () use ($row): void {
         $v = OvertimeView::record($row);
         assertSame(OvertimeView::FIELDS, array_keys($v));
         assertSame([str_repeat('b', 32), 'emp_1', '2026-10', '2026-10-05', '7.50', 'Fabricated', null, 'Draft', 3], array_values($v));
@@ -74,12 +86,16 @@ return [
                 assertTrue(stripos($f, $needle) === false, $f . ' carries no ' . $needle);
             }
         }
-        foreach ([['hours' => '7.5'], ['hours' => '0.00'], ['hours' => '7.33'], ['status' => 'Approved'], ['status' => 'Committed to Payroll']] as $bad) {
+        $approved = OvertimeView::record(['status' => 'Approved', 'valuation_method' => 'TAM-OT-1', 'approved_amount' => '1.00'] + $row);
+        assertSame(OvertimeView::FIELDS, array_keys($approved), 'an Approved record keeps the nine fields: no valuation in the record DTO');
+        assertSame('Approved', $approved['status']);
+        foreach ([['hours' => '7.5'], ['hours' => '0.00'], ['hours' => '7.33'], ['status' => 'Committed to Payroll'], ['status' => 'Paid']] as $bad) {
             assertThrows(\LogicException::class, static fn () => OvertimeView::record($bad + $row), json_encode($bad));
         }
         assertSame(['month_key' => '2026-10', 'overtime_date' => '2026-10-05', 'hours' => '7.50', 'work_description' => 'Fabricated', 'notes' => null], OvertimeView::columns($row));
     },
-    'every statement names the company; every *_SELF_SQL binds the owner; reads project company and owner' => static function () use ($sqlOf): void {
+    'every statement names the company; every *_SELF_SQL binds the owner; reads project company and owner; only the valuation statements name money' => static function () use ($sqlOf): void {
+        $valuation = ['APPROVE_SQL', 'VALUATION_SQL', 'VALUATION_SELF_SQL', 'VALUATION_EMPLOYEE_SQL', 'LOCK_VALUATION_EMPLOYEE_SQL'];
         foreach ($sqlOf() as $name => $sql) {
             assertTrue(str_contains($sql, ':company_id'), $name . ' names :company_id');
             if (str_ends_with($name, '_SELF_SQL')) {
@@ -90,8 +106,19 @@ return [
             if (str_starts_with($sql, 'SELECT')) {
                 assertTrue(str_contains($sql, 'company_id') && str_contains($sql, 'AS owner_employee_id'), $name . ' projects the scope columns');
             }
-            assertTrue(!preg_match('/\b(amount|rate|salary|contract|payroll|approved)\b/i', $sql), $name . ' touches no money or payroll');
+            if (!in_array($name, $valuation, true)) {
+                assertTrue(!preg_match('/\b(amount|rate|salary|contract|payroll|approved)\b|valuation_|approved_|monthly_base_salary/i', $sql), $name . ' touches no money or payroll');
+            }
+            assertTrue(!preg_match('/payroll|payment|paid|finance|transaction|ledger|journal|Committed/i', $sql), $name . ' touches no payroll or finance');
         }
+        foreach ($valuation as $name) {
+            assertTrue(!str_contains(constant(OvertimeStore::class . '::' . $name), ':self_employee_id') || $name === 'VALUATION_SELF_SQL', $name . ': the salary and the approval are company scope only');
+        }
+        $writers = array_keys(array_filter($sqlOf(), static fn (string $s): bool => preg_match('/^(UPDATE|INSERT)\b/', $s) === 1 && preg_match('/valuation_|approved_|\'Approved\'/', $s) === 1));
+        assertSame(['APPROVE_SQL'], $writers, 'APPROVE_SQL is the only writer of the valuation columns and of Approved');
+        assertSame("UPDATE overtime_records SET status = 'Approved', valuation_method = :valuation_method, valuation_salary = :valuation_salary, valuation_standard_hours = :valuation_standard_hours, approved_amount = :approved_amount, approved_at = UTC_TIMESTAMP(6), version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Reviewed'",
+            OvertimeStore::APPROVE_SQL, 'Reviewed → Approved, compare-and-swap, the database clock');
+        assertTrue(str_ends_with(OvertimeStore::LOCK_VALUATION_EMPLOYEE_SQL, 'FOR UPDATE') && !str_contains(OvertimeStore::VALUATION_EMPLOYEE_SQL, 'FOR UPDATE'), 'approval locks the owner; the preview does not');
         assertTrue(str_contains(OvertimeStore::LOCK_SQL, 'FOR UPDATE') && str_contains(OvertimeStore::LOCK_SELF_SQL, 'FOR UPDATE') && str_contains(OvertimeStore::LOCK_EMPLOYEE_SQL, 'FOR UPDATE'), 'the locks');
         assertTrue(str_contains(OvertimeStore::MONTH_SQL, 'month_key = :month_key') && str_ends_with(OvertimeStore::MONTH_SQL, 'ORDER BY overtime_date DESC, id LIMIT 2001'), 'one month, deterministic, cap + 1');
     },
@@ -109,9 +136,9 @@ return [
         }
         assertSame(2, count(array_filter([OvertimeStore::DELETE_DRAFT_SQL, OvertimeStore::DELETE_DRAFT_SELF_SQL], static fn (string $s): bool => str_starts_with($s, 'DELETE FROM overtime_records WHERE'))), 'two delete statements, both Draft-only');
     },
-    'the overtime audit vocabulary: five existing Actions; submit, review and reject name their Action' => static function (): void {
+    'the overtime audit vocabulary: five existing Actions; submit, review, reject and approve name their Action' => static function (): void {
         assertSame([Action::OvertimeCreateSelfDraft, Action::OvertimeUpdateSelfDraft, Action::OvertimeDeleteSelfDraft, Action::OvertimeSubmitSelf, Action::OvertimeManage], AuditLog::OVERTIME_ACTIONS);
-        assertSame(['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage], AuditLog::OVERTIME_OPERATIONS);
+        assertSame(['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage, 'approve' => Action::OvertimeManage], AuditLog::OVERTIME_OPERATIONS);
         assertSame([Action::EmployeeCreate, Action::EmployeeUpdate, Action::EmployeeDelete], AuditLog::ACTIONS, 'the employee rows are unchanged');
         assertTrue(str_contains(AuditLog::APPEND_OVERTIME_SQL, ':operation, NULL, :request_id, :fields'), 'no target user on an overtime row');
         assertTrue(str_ends_with(AuditLog::APPEND_OVERTIME_SELF_SQL, ':operation, NULL, :request_id, :fields FROM DUAL WHERE :owner_employee_id = :self_employee_id'),
@@ -129,7 +156,9 @@ return [
             'submit named review' => [Action::OvertimeSubmitSelf, 'review', []],
             'manage named submit' => [Action::OvertimeManage, 'submit', []],
             'manage without an operation' => [Action::OvertimeManage, null, []],
-            'an unknown operation' => [Action::OvertimeManage, 'approve', []],
+            'an unknown operation' => [Action::OvertimeManage, 'void', []],
+            'submitSelf named approve' => [Action::OvertimeSubmitSelf, 'approve', []],
+            'an approval naming fields' => [Action::OvertimeManage, 'approve', ['approvedAmount']],
             'a transition naming fields' => [Action::OvertimeManage, 'review', ['status']],
             'a delete naming fields' => [Action::OvertimeDeleteSelfDraft, null, ['hours']],
         ] as $label => [$a, $op, $fields]) {
@@ -166,5 +195,22 @@ return [
         assertThrows(\LogicException::class, static fn () => $store->transition(Policy::authorize($ceo, Action::OvertimeDeleteSelfDraft, $rec), 1, 'Draft', 'Submitted'), 'transition under delete');
         assertThrows(\LogicException::class, static fn () => $store->create(Policy::authorize($ceo, Action::OvertimeManage, $rec), $record), 'create under manage');
         assertThrows(\LogicException::class, static fn () => $store->update(Policy::authorize($ceo, Action::OvertimeUpdateSelfDraft, $rec), 1, ['hours' => '1.00'] + $record), 'record columns out of order');
+        $valuation = ['method' => 'TAM-OT-1', 'salary' => '1.00', 'standardHours' => '160.00', 'hours' => '1.00', 'amount' => '0.00'];
+        $reviewed = new ScopedRecord(Scope::of($ceo), 'overtime', str_repeat('c', 32), 'emp_1', 'Reviewed');
+        assertThrows(\LogicException::class, static fn () => $store->approve(Policy::authorize($ceo, Action::OvertimeSubmitSelf, $reviewed), 1, $valuation), 'approve under submitSelf');
+        assertThrows(\LogicException::class, static fn () => $store->lockValuationInputs(Policy::authorize($ceo, Action::OvertimeSubmitSelf, $reviewed)), 'owner lock under submitSelf');
+        foreach ([['Reviewed', 'Approved'], ['Approved', 'Rejected'], ['Approved', 'Reviewed'], ['Approved', 'Draft']] as [$from, $to]) {
+            assertThrows(\LogicException::class, static fn () => $store->transition(Policy::authorize($ceo, Action::OvertimeManage, $reviewed), 1, $from, $to), 'generic ' . $from . ' → ' . $to);
+        }
+    },
+    'an Employee scope can never reach the approval or the salary statements, even with a forged Authorization path' => static function () use ($db, $principal): void {
+        $emp = $principal('employee', 'emp_1');
+        $store = new OvertimeStore($db());
+        assertThrows(\LogicException::class, static fn () => $store->valuationInputs(Scope::of($emp), 'emp_1'), 'no salary read in self scope');
+        $own = new ScopedRecord(Scope::of($emp), 'overtime', str_repeat('c', 32), 'emp_1', 'Draft');
+        $auth = Policy::authorize($emp, Action::OvertimeUpdateSelfDraft, $own);
+        assertThrows(\LogicException::class, static fn () => $store->approve($auth, 1, ['method' => 'TAM-OT-1', 'salary' => '1.00', 'standardHours' => '160.00', 'hours' => '1.00', 'amount' => '0.00']), 'no approval in self scope');
+        assertThrows(\LogicException::class, static fn () => $store->lockValuationInputs($auth), 'no owner lock in self scope');
+        assertTrue(!Policy::allows($emp, Action::OvertimeManage, new ScopedRecord(Scope::of($emp), 'overtime', str_repeat('c', 32), 'emp_1', 'Reviewed')), 'overtime.manage is CEO-only, own record or not');
     },
 ];

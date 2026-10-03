@@ -144,7 +144,8 @@ return [
         // 0009–0010 (BF-3C employee anchor and binding FK), 0011–0013 (BF-3D token purpose, events, mail outbox),
         // 0014–0017 (BF-4a1 employee profile — transitional columns, legacy backfill, final constraints —
         // and business audit), 0018–0019 (BF-4a2 activation mail kind, account audit operation),
-        // 0020–0021 (BF-4b1 overtime records, overtime audit vocabulary).
+        // 0020–0021 (BF-4b1 overtime records, overtime audit vocabulary), 0022–0023 (BF-4b2 overtime
+        // valuation snapshot, approve audit operation).
         $apply = runMigrateCli(['apply'], $file);
         assertSame([0, "applied: 0001_create_companies\napplied: 0002_create_users\napplied: 0003_create_memberships\n"
             . "applied: 0004_create_sessions\napplied: 0005_create_auth_rate_limits\napplied: 0006_create_auth_events\n"
@@ -155,6 +156,7 @@ return [
             . "applied: 0015_backfill_legacy_employees\napplied: 0016_enforce_employees_profile\napplied: 0017_create_audit_events\n"
             . "applied: 0018_replace_mail_outbox_kind_check\napplied: 0019_add_audit_events_account_operation\n"
             . "applied: 0020_create_overtime_records\napplied: 0021_replace_audit_events_overtime_checks\n"
+            . "applied: 0022_add_overtime_records_valuation\napplied: 0023_replace_audit_events_overtime_approve\n"
             . "migrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
         assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'overtime_records', 'schema_migrations', 'sessions', 'users'], $tables($db));
