@@ -102,7 +102,20 @@
  * Reviewed and an Approved record of EMP-001 (whose frozen salary basis differs from the current one).
  *   /__stub/bump-salary   raises EMP-001's salary by 500000.00 WITHOUT a scenario switch, so a
  *                         preview already shown is stale and its approval answers 409
- * No payroll, payment or finance effect exists here.
+ * No payment or finance effect exists here.
+ *
+ * AFI-4c1 Payroll (GET /api/payroll-plans?month=, GET /api/payroll-plan?id=, POST
+ * /api/payroll-plans/generate { month } | review | approve | return | cancel { id, expectedVersion }):
+ * a test-only model of BF-4c1 — CEO only (an Employee is 403 on every route), CSRF, exact body keys;
+ * generate makes a Draft for each live, Active employee with a salary (the others are `excluded`
+ * with archived / not_active / salary_missing), recalculates Drafts from the salary plus the frozen
+ * amounts of the month's Approved overtime (one half-up rounding to the Rupiah), and leaves Reviewed,
+ * Ready and Committed plans alone; the transitions follow the BF-4c1 graph with a version
+ * compare-and-swap (409); cancel releases the plan's overtime. Fixtures add a Committed plan (stub
+ * only — nothing here commits) and a Cancelled one. The write-* scenarios apply here too.
+ *   /__stub/bump-payroll  bumps every live plan's version WITHOUT a scenario switch, so a plan
+ *                         already shown is stale and its next action answers 409
+ * Nothing here pays, posts or touches Finance.
  */
 'use strict';
 const http = require('http');
@@ -206,6 +219,32 @@ function otValue(k, v){
   }
 }
 
+
+// AFI-4c1 fabricated payroll plans (test-only model of BF-4c1): a Committed plan (stub fixture only)
+// and a Cancelled one, in this process's current month.
+const PR_VIEW = ['id', 'employeeId', 'monthKey', 'status', 'employeeCode', 'employeeName', 'department', 'baseSalary', 'overtimeAmount', 'overtimeHours', 'overtimeCount', 'totalAmount', 'version'];
+const PR_GRAPH = { review: [['Draft'], 'Reviewed'], approve: [['Draft', 'Reviewed'], 'Ready'], return: [['Reviewed', 'Ready'], 'Draft'], cancel: [['Draft', 'Reviewed', 'Ready'], 'Cancelled'] };
+function stubPayroll(){
+  const m = stubMonth(0);
+  const p = (n, emp, code, name, status, version) => ({ id: ('c' + n).repeat(16).slice(0, 32), employeeId: emp, monthKey: m, status: status, employeeCode: code,
+    employeeName: name, department: 'Operations', baseSalary: '6000000.00', overtimeAmount: '0.00', overtimeHours: '0.00', overtimeCount: 0,
+    totalAmount: '6000000.00', version: version, links: [] });
+  return [p(1, 'emp_stub_6', 'EMP-006', 'Fabricated Disabled Person', 'Committed', 5), p(2, 'emp_stub_5', 'EMP-005', 'Fabricated Pending Person', 'Cancelled', 2)];
+}
+// The stub's calculation of one plan (test-only mirror of PayrollCalculation): sen sums in BigInt,
+// one half-up rounding to the whole Rupiah.
+function prCalc(e, month){
+  const ot = overtime.filter((r) => r.employeeId === e.id && r.monthKey === month && r.status === 'Approved');
+  let sen = BigInt(e.monthlyBaseSalary.replace('.', ''));
+  let quarters = 0n, otRupiah = 0n;
+  ot.forEach((r) => { const a = BigInt(otAmount(r.frozenSalary, r.hours).replace('.00', '')); otRupiah += a; sen += a * 100n; quarters += BigInt(r.hours.replace('.', '')) / 25n; });
+  let rupiah = sen / 100n; if(2n * (sen % 100n) >= 100n) rupiah++;
+  const h = quarters * 25n;
+  return { baseSalary: e.monthlyBaseSalary, overtimeAmount: otRupiah + '.00', overtimeHours: (h / 100n) + '.' + String(h % 100n).padStart(2, '0'),
+    overtimeCount: ot.length, totalAmount: rupiah + '.00', links: ot.map((r) => r.id) };
+}
+const prOrder = (a, b) => (a.employeeCode < b.employeeCode ? -1 : a.employeeCode > b.employeeCode ? 1 : (a.id < b.id ? -1 : 1));
+
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '': 'text/plain; charset=utf-8' };
 
 let scenario = 'signed-out';
@@ -213,6 +252,7 @@ let session = null;            // { user, csrf, staleOnce }
 let usedTokens = [];           // AFI-3: tokens consumed since the last scenario switch
 let employees = [];            // AFI-4a2: this scenario's copy of STUB_EMPLOYEES
 let overtime = [];             // AFI-4b1: this scenario's Overtime records
+let payroll = [];              // AFI-4c1: this scenario's payroll plans (each with its overtime links)
 
 const token = () => crypto.randomBytes(32).toString('base64url');        // 43 characters, the server shape
 const rid = () => crypto.randomBytes(16).toString('hex');
@@ -221,6 +261,7 @@ function reset(name){
   usedTokens = [];
   employees = STUB_EMPLOYEES.map((e) => ({ ...e }));
   overtime = stubOvertime();
+  payroll = stubPayroll();
   session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
@@ -321,6 +362,23 @@ async function handleApi(req, res, p, query){
     if(r.status !== 'Reviewed' || !otSalary(r)) return api(res, 409, 'conflict');
     return api(res, 200, { overtimeValuation: otValuation(r, 'preview', otSalary(r)) });
   }
+  // AFI-4c1 Payroll reads: CEO only.
+  if((p === '/api/payroll-plans' || p === '/api/payroll-plan') && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+    if(p === '/api/payroll-plans'){
+      if(!otMonth(query.get('month') || '')) return api(res, 400, 'invalid_query');
+      return api(res, 200, { payrollPlans: payroll.filter((x) => x.monthKey === query.get('month')).sort(prOrder).map((x) => pick(x, PR_VIEW)) });
+    }
+    const x = payroll.find((y) => y.id === query.get('id'));
+    if(!x) return api(res, 404, 'not_found');
+    return api(res, 200, { payrollPlan: pick(x, PR_VIEW), payrollPlanOvertime: x.links.map((id) => { const r = overtime.find((o) => o.id === id); return { id: r.id, hours: r.hours, amount: otAmount(r.frozenSalary, r.hours) }; }) });
+  }
+  const prWrite = { '/api/payroll-plans/generate': 'generate', '/api/payroll-plans/review': 'review', '/api/payroll-plans/approve': 'approve',
+    '/api/payroll-plans/return': 'return', '/api/payroll-plans/cancel': 'cancel' }[p];
+  if(prWrite && req.method === 'POST') return handlePayrollWrite(req, res, prWrite);
   const otWrite = { '/api/overtime-records/create': 'create', '/api/overtime-records/update': 'update', '/api/overtime-records/delete': 'delete',
     '/api/overtime-records/submit': 'submit', '/api/overtime-records/review': 'review', '/api/overtime-records/reject': 'reject',
     '/api/overtime-records/approve': 'approve' }[p];
@@ -515,6 +573,56 @@ async function handleOvertimeWrite(req, res, kind){
   return done({ overtimeRecord: pick(r, OT_VIEW) });
 }
 
+/* ---------- AFI-4c1: the Payroll writes (test-only model of BF-4c1) ---------- */
+async function handlePayrollWrite(req, res, kind){
+  const b = await readJson(req);
+  if(!session) return api(res, 401, 'unauthenticated');
+  if(scenario === 'write-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+  if(scenario === 'write-stale-csrf' && !session.rotated){ session.rotated = true; session.csrf = token(); return api(res, 403, 'forbidden'); }
+  if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
+  if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+  if(!b) return api(res, 400, 'validation_failed');
+  const allowed = kind === 'generate' ? ['month'] : ['id', 'expectedVersion'];
+  const unknown = Object.keys(b).filter((k) => allowed.indexOf(k) === -1);
+  if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
+  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [kind === 'generate' ? 'month' : 'id']);
+  if(scenario === 'write-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '45' });
+  if(scenario === 'write-error') return api(res, 500, 'internal_error');
+  if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
+  if(scenario === 'write-conflict') return api(res, 409, 'conflict');
+  if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
+  const done = (payload) => (scenario === 'write-malformed' ? api(res, 200, Object.assign({ internalNote: 'x' }, payload)) : api(res, 200, payload));
+  if(kind === 'generate'){
+    if(!otMonth(b.month)) return api(res, 400, 'validation_failed', null, ['month']);
+    const excluded = [];
+    employees.slice().sort((a, c) => (a.id < c.id ? -1 : 1)).forEach((e) => {
+      const reason = e.archived ? 'archived' : e.employmentStatus !== 'Active' ? 'not_active' : (!e.monthlyBaseSalary || e.monthlyBaseSalary === '0.00') ? 'salary_missing' : null;
+      if(reason){ excluded.push({ employeeId: e.id, reason: reason }); return; }
+      const live = payroll.find((x) => x.employeeId === e.id && x.monthKey === b.month && x.status !== 'Cancelled');
+      const calc = prCalc(e, b.month);
+      if(!live){
+        payroll.push(Object.assign({ id: crypto.randomBytes(16).toString('hex'), employeeId: e.id, monthKey: b.month, status: 'Draft', employeeCode: e.employeeCode,
+          employeeName: e.fullName, department: e.department, version: 1 }, calc));
+      } else if(live.status === 'Draft'){
+        const before = JSON.stringify(pick(live, PR_VIEW));
+        Object.assign(live, calc, { employeeCode: e.employeeCode, employeeName: e.fullName, department: e.department });
+        if(JSON.stringify(pick(live, PR_VIEW)) !== before) live.version++;
+      }
+    });
+    return done({ payrollPlans: payroll.filter((x) => x.monthKey === b.month && x.status !== 'Cancelled').sort(prOrder).map((x) => pick(x, PR_VIEW)), excluded: excluded });
+  }
+  const target = [];
+  if(typeof b.id !== 'string' || !/^[0-9a-f]{32}$/.test(b.id)) target.push('id');
+  if(!Number.isInteger(b.expectedVersion) || b.expectedVersion < 1 || b.expectedVersion > 4294967295) target.push('expectedVersion');
+  if(target.length) return api(res, 400, 'validation_failed', null, target);
+  const x = payroll.find((y) => y.id === b.id);
+  if(!x) return api(res, 404, 'not_found');
+  if(PR_GRAPH[kind][0].indexOf(x.status) === -1 || x.version !== b.expectedVersion) return api(res, 409, 'conflict');
+  x.status = PR_GRAPH[kind][1]; x.version++;
+  if(kind === 'cancel') x.links = [];
+  return done({ payrollPlan: pick(x, PR_VIEW) });
+}
+
 // AFI-4a3: the account operations (test-only model of AccountService's guards).
 function accountWrite(res, kind, b, done){
   if(typeof b.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(b.id)) return api(res, 400, 'validation_failed', null, ['id']);
@@ -567,6 +675,12 @@ http.createServer((req, res) => {
     e.monthlyBaseSalary = (BigInt(e.monthlyBaseSalary.replace('.', '')) + 50000000n).toString().replace(/(..)$/, '.$1');
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('EMP-001 salary: ' + e.monthlyBaseSalary);
+  }
+  if(urlPath === '/__stub/bump-payroll' && req.method === 'GET'){
+    // AFI-4c1: another change to the live plans (no scenario switch, the session stays).
+    payroll.forEach((x) => { if(x.status !== 'Cancelled' && x.status !== 'Committed') x.version++; });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('payroll plans bumped');
   }
   if(urlPath === '/api' || urlPath.startsWith('/api/')) return handleApi(req, res, urlPath, url.searchParams);
   if(req.method !== 'GET' && req.method !== 'HEAD'){ res.writeHead(405, { ...STATIC_HEADERS, 'Allow': 'GET, HEAD' }); return res.end(); }
