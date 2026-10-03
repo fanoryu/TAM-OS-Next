@@ -14,19 +14,33 @@ use TamOs\Policy\Action;
  *   Submitted  → Rejected    reject   overtime.manage       (CEO)
  *   Reviewed   → Rejected    reject   overtime.manage       (CEO)
  *
- * Rejected is terminal. Editing and the hard delete exist only for a Draft. There is no Approved
- * status and no approval here: valuation and approval are BF-4b2. The status strings are the
- * frontend's (js/core/constants.js OVERTIME_STATUSES), and Policy's own-Draft rule reads 'Draft'.
+ * Rejected is terminal. Editing and the hard delete exist only for a Draft. The status strings are
+ * the frontend's (js/core/constants.js OVERTIME_STATUSES), and Policy's own-Draft rule reads 'Draft'.
+ *
+ * BF-4b2 (owner decision D-BF4b2-1 = A) adds exactly one more transition, which is NOT a member of
+ * TRANSITIONS and so never reachable through the generic transition path:
+ *
+ *   Reviewed   → Approved    approve  overtime.manage       (CEO; OvertimeService::approve)
+ *
+ * Approval values the record (OvertimeValuation) and freezes that valuation on the row in the same
+ * transaction; the database refuses an Approved row without it. Approved is terminal: no reject,
+ * no return to Reviewed or Draft, no revaluation. Payroll, a void or a correction are later slices.
  */
 final class OvertimeStatus
 {
     public const DRAFT = 'Draft';
     public const SUBMITTED = 'Submitted';
     public const REVIEWED = 'Reviewed';
+    public const APPROVED = 'Approved';
     public const REJECTED = 'Rejected';
-    public const VALUES = [self::DRAFT, self::SUBMITTED, self::REVIEWED, self::REJECTED];
+    public const VALUES = [self::DRAFT, self::SUBMITTED, self::REVIEWED, self::APPROVED, self::REJECTED];
+    /** BF-4b2: the statuses with no way out. */
+    public const TERMINAL = [self::APPROVED, self::REJECTED];
 
-    /** operation => [Action, source statuses, target status]; the only transitions there are. */
+    /** BF-4b2: the approval — [operation, Action, the one source status, target status]. */
+    public const APPROVE = ['approve', Action::OvertimeManage, self::REVIEWED, self::APPROVED];
+
+    /** operation => [Action, source statuses, target status]; the only generic transitions there are. */
     public const TRANSITIONS = [
         'submit' => [Action::OvertimeSubmitSelf, [self::DRAFT], self::SUBMITTED],
         'review' => [Action::OvertimeManage, [self::SUBMITTED], self::REVIEWED],

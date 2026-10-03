@@ -9,6 +9,7 @@ use TamOs\Http\Request;
 use TamOs\Identity\AuthSession;
 use TamOs\Identity\Principal;
 use TamOs\Overtime\OvertimeService;
+use TamOs\Overtime\OvertimeValuationView;
 use TamOs\Overtime\OvertimeView;
 
 /**
@@ -24,6 +25,14 @@ use TamOs\Overtime\OvertimeView;
  *   POST /api/overtime-records/submit          { overtimeRecord: record }   Draft → Submitted
  *   POST /api/overtime-records/review          { overtimeRecord: record }   Submitted → Reviewed
  *   POST /api/overtime-records/reject          { overtimeRecord: record }   Submitted / Reviewed → Rejected
+ *
+ * BF-4b2 (valuation and approval; the record shape is unchanged, its status gains Approved):
+ *
+ *   GET  /api/overtime-record/valuation?id=<id>  { overtimeValuation: valuation }   CEO preview of a
+ *                                                 Reviewed record, or the frozen valuation of an
+ *                                                 Approved one (CEO and owner)
+ *   POST /api/overtime-records/approve           { overtimeRecord: record, overtimeValuation: valuation }
+ *                                                 Reviewed → Approved; body { id, expectedVersion, expectedAmount }
  */
 final class OvertimeController
 {
@@ -102,6 +111,25 @@ final class OvertimeController
     public function reject(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
         return ['overtimeRecord' => OvertimeView::record($this->service->transition(self::principal($session), 'reject', $json, $requestId))];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{overtimeValuation: array<string, string>}
+     */
+    public function valuation(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['overtimeValuation' => $this->service->valuation(self::principal($session), self::query($request)['id'] ?? null)];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{overtimeRecord: array<string, mixed>, overtimeValuation: array<string, string>}
+     */
+    public function approve(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        $out = $this->service->approve(self::principal($session), $json, $requestId);
+        return ['overtimeRecord' => OvertimeView::record($out['record']), 'overtimeValuation' => $out['valuation']];
     }
 
     private static function principal(?AuthSession $session): Principal

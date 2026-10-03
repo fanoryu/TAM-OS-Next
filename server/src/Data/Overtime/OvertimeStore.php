@@ -24,6 +24,17 @@ use TamOs\Policy\Scope;
  *
  * The employee row an overtime record is created for is locked first (lock order: employee →
  * overtime), so a create serializes with an archive or an employment-status change of it.
+ *
+ * BF-4b2 (migration 0022): the approval. APPROVE_SQL is the ONLY statement that writes the
+ * valuation snapshot (valuation_method, valuation_salary, valuation_standard_hours,
+ * approved_amount, approved_at) and the only one that can produce 'Approved': a compare-and-swap
+ * from 'Reviewed' at the expected version, company scope only (an Employee never approves, so
+ * there is no self variant). No statement ever changes the snapshot afterwards — UPDATE_SQL is
+ * Draft-only and transition() refuses an Approved source or target — and the database refuses
+ * an Approved row without a complete snapshot, or a snapshot on any other status. Approval locks
+ * the owning employee first (salary and archive state), then the record: the create lock order.
+ * The valuation reads expose the snapshot of an Approved record (to its owner too); the employee
+ * salary is read only by the CEO's company-scope statements. Still no payroll and no finance.
  */
 final class OvertimeStore
 {
@@ -53,6 +64,14 @@ final class OvertimeStore
     public const LOCK_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id FOR UPDATE';
     public const LOCK_EMPLOYEE_SELF_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id AND id = :self_employee_id FOR UPDATE';
 
+    // BF-4b2: the valuation inputs of the record's owner — CEO company scope only. The lock is taken
+    // inside the approval transaction, before the record's own lock.
+    public const VALUATION_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, monthly_base_salary, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id';
+    public const LOCK_VALUATION_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, monthly_base_salary, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id FOR UPDATE';
+    // BF-4b2: a record with its frozen valuation (all NULL unless Approved), for the CEO and the owner.
+    public const VALUATION_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, hours, status, version, valuation_method, valuation_salary, valuation_standard_hours, approved_amount FROM overtime_records WHERE id = :id AND company_id = :company_id';
+    public const VALUATION_SELF_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, hours, status, version, valuation_method, valuation_salary, valuation_standard_hours, approved_amount FROM overtime_records WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id';
+
     // Writes. A new record is always a version 1 Draft; the owner comes from the authorized
     // candidate (CEO) or the scope itself (Employee), never from the request.
     public const CREATE_SQL = "INSERT INTO overtime_records (id, company_id, employee_id, month_key, overtime_date, hours, work_description, notes, status, version, created_at, updated_at) VALUES (:id, :company_id, :employee_id, :month_key, :overtime_date, :hours, :work_description, :notes, 'Draft', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))";
@@ -61,6 +80,8 @@ final class OvertimeStore
     public const UPDATE_SELF_SQL = "UPDATE overtime_records SET month_key = :month_key, overtime_date = :overtime_date, hours = :hours, work_description = :work_description, notes = :notes, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'";
     public const TRANSITION_SQL = 'UPDATE overtime_records SET status = :to_status, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status';
     public const TRANSITION_SELF_SQL = 'UPDATE overtime_records SET status = :to_status, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND version = :expected_version AND status = :from_status';
+    // BF-4b2: Reviewed → Approved with its snapshot, the only writer of the valuation columns.
+    public const APPROVE_SQL = "UPDATE overtime_records SET status = 'Approved', valuation_method = :valuation_method, valuation_salary = :valuation_salary, valuation_standard_hours = :valuation_standard_hours, approved_amount = :approved_amount, approved_at = UTC_TIMESTAMP(6), version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Reviewed'";
     public const DELETE_DRAFT_SQL = "DELETE FROM overtime_records WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'";
     public const DELETE_DRAFT_SELF_SQL = "DELETE FROM overtime_records WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'";
 
@@ -169,6 +190,9 @@ final class OvertimeStore
         if (!in_array($auth->action, [Action::OvertimeSubmitSelf, Action::OvertimeManage], true)) {
             throw new \LogicException('an overtime status moves only under overtime.submitSelf or overtime.manage');
         }
+        if ($from === 'Approved' || $to === 'Approved') {
+            throw new \LogicException('Approved is reached only by approve() and never left');
+        }
         $sql = $auth->scope->isSelf() ? self::TRANSITION_SELF_SQL : self::TRANSITION_SQL;
         return $this->db->execute($auth, $sql, ['id' => self::authorized($auth)->id, 'expected_version' => $expectedVersion, 'from_status' => $from, 'to_status' => $to]);
     }
@@ -181,6 +205,80 @@ final class OvertimeStore
         }
         $sql = $auth->scope->isSelf() ? self::DELETE_DRAFT_SELF_SQL : self::DELETE_DRAFT_SQL;
         return $this->db->execute($auth, $sql, ['id' => self::authorized($auth)->id, 'expected_version' => $expectedVersion]);
+    }
+
+    /**
+     * BF-4b2: the current valuation inputs of an overtime record's owner, read in the CEO's company
+     * scope (the preview: nothing is locked or stored), or null.
+     *
+     * @return array{salary: ?string, archived: bool}|null
+     */
+    public function valuationInputs(Scope $scope, string $ownerEmployeeId): ?array
+    {
+        if ($scope->isSelf()) {
+            throw new \LogicException('valuation inputs are read only in company scope');
+        }
+        return self::inputs($this->db->select($scope, self::VALUATION_EMPLOYEE_SQL, ['employee_id' => $ownerEmployeeId]));
+    }
+
+    /**
+     * BF-4b2: locks the owning employee of the authorized approval and returns its valuation
+     * inputs, or null. Must run inside the approval transaction, before lock().
+     *
+     * @return array{salary: ?string, archived: bool}|null
+     */
+    public function lockValuationInputs(Authorization $auth): ?array
+    {
+        $record = self::authorized($auth);
+        if ($auth->action !== Action::OvertimeManage || $auth->scope->isSelf() || $record->ownerEmployeeId === null) {
+            throw new \LogicException('the owner is locked for valuation only under overtime.manage, in company scope');
+        }
+        return self::inputs($this->db->select($auth->scope, self::LOCK_VALUATION_EMPLOYEE_SQL, ['employee_id' => $record->ownerEmployeeId]));
+    }
+
+    /**
+     * BF-4b2: the record with its frozen valuation columns (all null unless Approved), or null.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function valuation(Scope $scope, string $id): ?array
+    {
+        $rows = $this->db->select($scope, $scope->isSelf() ? self::VALUATION_SELF_SQL : self::VALUATION_SQL, ['id' => $id]);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * BF-4b2: Reviewed → Approved, writing the valuation snapshot, when the version still matches.
+     *
+     * @param array{method: string, salary: string, standardHours: string, hours: string, amount: string} $valuation
+     * @return int 1 when approved; 0 when the version moved or it is no longer Reviewed
+     */
+    public function approve(Authorization $auth, int $expectedVersion, array $valuation): int
+    {
+        if ($auth->action !== Action::OvertimeManage || $auth->scope->isSelf()) {
+            throw new \LogicException('overtime is approved only under overtime.manage, in company scope');
+        }
+        return $this->db->execute($auth, self::APPROVE_SQL, [
+            'id' => self::authorized($auth)->id,
+            'expected_version' => $expectedVersion,
+            'valuation_method' => $valuation['method'],
+            'valuation_salary' => $valuation['salary'],
+            'valuation_standard_hours' => $valuation['standardHours'],
+            'approved_amount' => $valuation['amount'],
+        ]);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array{salary: ?string, archived: bool}|null
+     */
+    private static function inputs(array $rows): ?array
+    {
+        if ($rows === []) {
+            return null;
+        }
+        $salary = $rows[0]['monthly_base_salary'];
+        return ['salary' => $salary === null ? null : (string) $salary, 'archived' => $rows[0]['archived_at'] !== null];
     }
 
     private static function authorized(Authorization $auth): ScopedRecord

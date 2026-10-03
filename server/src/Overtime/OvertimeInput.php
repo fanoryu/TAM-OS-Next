@@ -20,6 +20,11 @@ use TamOs\Http\ErrorCode;
  *                 multiple of 0.25 (D-BF4b1-2), checked in integer hundredths, never as a float.
  *                 A JSON number is refused. Hours are time, not money.
  *   workDescription / notes  optional text, trimmed; "" becomes null.
+ *
+ * BF-4b2: approve takes exactly id, expectedVersion and expectedAmount. expectedAmount is the
+ * whole-Rupiah "N.00" the CEO was shown by the valuation preview — an optimistic guard compared
+ * for exact equality with the server's own valuation, never stored and never authority. No
+ * salary, hours, rate, multiplier, method, status or employee is ever accepted from a browser.
  */
 final class OvertimeInput
 {
@@ -109,6 +114,30 @@ final class OvertimeInput
         self::onlyKeys($json, ['id', 'expectedVersion']);
         [$id, $version] = self::target($json);
         return ['id' => $id, 'expectedVersion' => $version];
+    }
+
+    /**
+     * BF-4b2 approve: exactly id, expectedVersion and expectedAmount ("N.00", a JSON string).
+     *
+     * @param array<string, mixed> $json
+     * @return array{id: string, expectedVersion: int, expectedAmount: string}
+     */
+    public static function approve(array $json): array
+    {
+        self::onlyKeys($json, ['id', 'expectedVersion', 'expectedAmount']);
+        $bad = [];
+        try {
+            [$id, $version] = self::target($json);
+        } catch (ApiError $e) {
+            $bad = $e->fields;
+        }
+        if (!OvertimeValuation::isAmount($json['expectedAmount'] ?? null)) {
+            $bad[] = 'expectedAmount';
+        }
+        if ($bad !== []) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'invalid overtime approval', fields: $bad);
+        }
+        return ['id' => $id, 'expectedVersion' => $version, 'expectedAmount' => $json['expectedAmount']];
     }
 
     /** GET /api/overtime-records?month= : the required month (400 invalid_query otherwise). */
