@@ -654,6 +654,29 @@ function firewall(rt, label, overtimeOpened){
     firewall(rt, 'J. sections', true);
   }
 
+  /* ---------- L. the store's own guards (defense in depth beneath the controller's) ---------- */
+  {
+    const rt = await open({});
+    const S = rt.SessionPayrollStore;
+    const P = (o) => rt.parse(JSON.stringify(o));
+    const listA = S.begin('list', '2031-04');
+    const listB = S.begin('list', '2031-05');
+    check(S.applyList(listA, P([P1])) === false && S.snapshot().list === null && S.snapshot().listMonth === '2031-05',
+      'L. the store refuses a superseded list answer by itself (month A after month B)');
+    check(S.applyList(listB, P([])) === true && S.snapshot().list.length === 0, 'L. the current list answer applies');
+    const detA = S.begin('detail', ID1);
+    const detB = S.begin('detail', ID2);
+    check(S.applyDetail(detA, rt.PayrollDecoders.detailResponse(P(det(P1)))) === false && S.snapshot().detail === null && S.snapshot().detailId === ID2,
+      'L. the store refuses a superseded detail answer by itself (plan A after plan B)');
+    check(S.applyDetail(detB, rt.PayrollDecoders.detailResponse(P(det(P1)))) === false && S.snapshot().detail === null,
+      'L. the store refuses a detail answer for another plan than the one asked for');
+    check(S.applyDetail(detB, rt.PayrollDecoders.detailResponse(P(det(P2)))) === true && S.snapshot().detail.plan.id === ID2, 'L. the current detail answer applies');
+    const gen = S.snapshot().generation;
+    S.clear();
+    check(S.applyList(listB, P([P1])) === false && S.applyDetail(detB, rt.PayrollDecoders.detailResponse(P(det(P2)))) === false && S.snapshot().generation === gen + 1,
+      'L. after clear() (logout, a new principal) no earlier answer applies');
+  }
+
   /* ---------- K. sources: no money arithmetic, no LOCAL, Overtime or Finance authority ---------- */
   {
     const code = (f) => fs.readFileSync(path.join(root, 'js', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
