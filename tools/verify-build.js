@@ -6385,6 +6385,75 @@ console.log('== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL ==');
     'AFI-4b2: frontend only — migration head 0026 after BF-4c1, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
 }
 
+// ===== BF-4c1 — PAYROLL PLAN FOUNDATION (backend only) =====
+// Owner decisions D-PAY-1..6 = A: Payroll is Base Salary + Approved Overtime only — the employee's
+// monthly_base_salary plus the FROZEN approved_amount of the month's Approved overtime, one half-up
+// rounding to the whole Rupiah, integer arithmetic, never TAM-OT-1 again, never statutory. One plan
+// per employee and month (a generated live key), generate + Draft recalculation, the canonical
+// pre-commit lifecycle under the existing payroll.manage (ACTIONS stay 21), CEO reads only. No
+// Commit, no Employee read, no drift read (BF-4c2), no finance, no frontend, no package change.
+console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  const m24 = srv('migrations/0024_create_payroll_plans.sql');
+  const m25 = srv('migrations/0025_create_payroll_plan_overtime.sql');
+  const m26 = srv('migrations/0026_replace_audit_events_payroll_checks.sql');
+  check(migrations.slice(-3).join() === '0024_create_payroll_plans.sql,0025_create_payroll_plan_overtime.sql,0026_replace_audit_events_payroll_checks.sql'
+    && [m24, m25, m26].every((m) => (m.match(/;/g) || []).length === 1),
+    'BF-4c1: migrations 0024 (payroll_plans), 0025 (payroll_plan_overtime), 0026 (payroll audit vocabulary) exist, one statement each; head 0026');
+  check(/payroll_plans_status CHECK \(status IN \('Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled'\)\)/.test(m24)
+    && /live_key TINYINT UNSIGNED AS \(CASE WHEN status = 'Cancelled' THEN NULL ELSE 1 END\) STORED/.test(m24)
+    && /UNIQUE KEY payroll_plans_live \(company_id, month_key, employee_id, live_key\)/.test(m24)
+    && /payroll_plans_committed CHECK \(\(status = 'Committed'\) = \(committed_at IS NOT NULL\)\)/.test(m24)
+    && /base_salary DECIMAL\(15,2\) NOT NULL/.test(m24) && /overtime_amount DECIMAL\(17,2\) NOT NULL/.test(m24) && /total_amount DECIMAL\(17,2\) NOT NULL/.test(m24)
+    && !/tax|pph|bpjs|thr|allowance|deduction|bonus|benefit|loan|net_|gross|paid|payment|transaction|valuation|rate/i.test(m24 + m25),
+    'BF-4c1: 0024 stores the plan with the canonical five statuses, exact DECIMAL money, committed_at ⇔ Committed and a generated live key; no statutory, finance or valuation column');
+  check(/PRIMARY KEY \(id\)/.test(m25) && /FOREIGN KEY \(company_id, id\) REFERENCES overtime_records \(company_id, id\)/.test(m25)
+    && /FOREIGN KEY \(company_id, payroll_plan_id\) REFERENCES payroll_plans \(company_id, id\)/.test(m25) && !/CASCADE/i.test(m25),
+    'BF-4c1: 0025 identifies a link by the overtime record it consumes — one record is consumed at most once (double-consumption protection in the database)');
+  check(/WHEN 'payroll\.manage' THEN operation IS NOT NULL AND operation IN \('create', 'recalculate', 'review', 'approve', 'return', 'cancel'\)/.test(m26)
+    && /\(entity = 'payrollPlan'\) = \(action = 'payroll\.manage'\)/.test(m26) && !/'commit'/.test(m26),
+    'BF-4c1: 0026 admits exactly create, recalculate, review, approve, return and cancel under payroll.manage on payrollPlan (no commit)');
+  const calc = srv('src/Payroll/PayrollCalculation.php');
+  const calcCode = calc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/'[^']*'/g, "''");
+  check(/intdiv\(\$totalSen, self::SEN_PER_RUPIAH\)/.test(calc) && /if \(2 \* \(\$totalSen % self::SEN_PER_RUPIAH\) >= self::SEN_PER_RUPIAH\)/.test(calc) && /PHP_INT_SIZE !== 8/.test(calc)
+    && !/\(float\)|floatval|\bround\(|\bfloor\(|\bbc[a-z]+\(|gmp_|\/|\b\d+\.\d+/.test(calcCode) && !/OvertimeValuation|TAM-OT-1/.test(calcCode),
+    'BF-4c1: the calculation is integer sen with one explicit half-up rounding, 64-bit asserted; no float, division operator, BCMath, GMP or overtime valuation');
+  const routes = srv('src/Http/Routes.php');
+  const payrollRoutes = (routes.match(/new Route\('[A-Z]+', '\/api\/payroll[^']*'[^\n]*/g) || []);
+  check(payrollRoutes.length === 7
+    && ['generate', 'review', 'approve', 'return', 'cancel'].every((op) => payrollRoutes.some((l) => l.startsWith("new Route('POST', '/api/payroll-plans/" + op + "'") && /RouteAuth::Required, Action::PayrollManage\)/.test(l)))
+    && payrollRoutes.some((l) => /new Route\('GET', '\/api\/payroll-plans', \$payroll->month\(\.\.\.\), \['month'\], RouteAuth::Required\)/.test(l))
+    && payrollRoutes.some((l) => /new Route\('GET', '\/api\/payroll-plan', \$payroll->find\(\.\.\.\), \['id'\], RouteAuth::Required\)/.test(l))
+    && !/commit|payslip|status'/.test(payrollRoutes.join('\n')),
+    'BF-4c1: exactly seven payroll routes — two CEO reads and five writes under payroll.manage; no commit, status or payslip route');
+  const input = srv('src/Payroll/PayrollInput.php');
+  check(/self::onlyKeys\(\$json, \['month'\]\);/.test(input) && /self::onlyKeys\(\$json, \['id', 'expectedVersion'\]\);/.test(input)
+    && (input.match(/self::onlyKeys\(\$json,/g) || []).length === 2,
+    'BF-4c1: the payroll inputs are exactly { month } and { id, expectedVersion } — no browser salary, amount, total, status, employee or company');
+  check(/public const FIELDS = \['id', 'employeeId', 'monthKey', 'status', 'employeeCode', 'employeeName', 'department',\s*'baseSalary', 'overtimeAmount', 'overtimeHours', 'overtimeCount', 'totalAmount', 'version'\];/.test(srv('src/Payroll/PayrollView.php'))
+    && /public const OVERTIME_FIELDS = \['id', 'hours', 'amount'\];/.test(srv('src/Payroll/PayrollView.php')),
+    'BF-4c1: the plan projection is exactly thirteen fields and the contributing overtime exactly { id, hours, amount }');
+  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+    && /'payroll\.manage':\s+'payrollPlan'/.test(read(path.join(root, 'js', 'core', 'authz.js'))) && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4c1: ACTIONS stay 21 (payroll reuses payroll.manage on payrollPlan), AUTH_MODE stays LOCAL');
+  const jsFiles = [];
+  const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
+  walkJs(path.join(root, 'js'));
+  check(!jsFiles.some((f) => /\/api\/payroll/.test(read(f))),
+    'BF-4c1: backend only — no frontend module names a payroll API route (Payroll AFI not started)');
+  const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(manifest.files.length === 97 && manifest.packageDigest === '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions === 21,
+    'BF-4c1: the production package is unchanged (97 files, digest 2d826d4d…, ACTIONS 21)');
+  check(['Unit/PayrollCalculationTest.php', 'Unit/PayrollDomainTest.php', 'Http/PayrollRoutingTest.php', 'Db/PayrollSchemaTest.php', 'Db/PayrollWorkflowTest.php', 'Db/PayrollConcurrencyTest.php', 'Support/payroll-worker.php']
+    .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))),
+    'BF-4c1: the calculation, domain, routing, schema, workflow and concurrency tests exist');
+  const docRule = /Commit is BF-4c2/;
+  check(docRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && docRule.test(read(path.join(root, 'ARCHITECTURE.md'))) && /BF-4c1/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
+    'BF-4c1: documented — Commit is BF-4c2 (AI_CONTEXT, ARCHITECTURE) and the deployment note (DEPLOYMENT)');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
