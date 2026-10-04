@@ -31,7 +31,7 @@ use function TamOs\Tests\testDbConfig;
 \TamOs\installErrorHandler();
 
 [, $token, $csrf, $operation, $body] = $argv;
-if (!in_array($operation, ['generate', 'review', 'approve', 'return', 'cancel'], true)) {
+if (!in_array($operation, ['generate', 'review', 'approve', 'return', 'cancel', 'commit'], true)) {
     exit(2);
 }
 $config = testDbConfig();
