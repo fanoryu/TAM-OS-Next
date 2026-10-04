@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **BF-4c2 Payroll Commit and the Employee's own payroll (backend only, not shipped).** The CEO can now commit a Ready
+  payroll plan: it becomes a fixed payroll obligation that can no longer be changed — it is still not a payment, and
+  nothing is posted to Finance. Commit only succeeds when the total the CEO confirmed is exactly the plan's total and
+  nothing has changed since the plan was prepared: if the employee was archived, is no longer active, has no salary or
+  a different salary, or has overtime approved for that month that the plan does not include, TAM OS refuses and the
+  plan must be returned to Draft and prepared again. The server can also explain why a plan can no longer be committed.
+  Sending the same commit twice (for example after a lost connection) never commits twice. Employees can now read their
+  own committed payroll — never a plan still in preparation and never a colleague's. No screens yet; the shipped
+  `AUTH_MODE` stays **LOCAL**.
 - **AFI-4c1 SESSION Payroll (frontend; SESSION mode only, CEO only, not shipped).** Signed in through the backend session,
   the CEO has a Payroll section next to Employees and Overtime. It shows one month's payroll plans — employee, status,
   base salary, overtime and total, exactly as TAM OS's server calculated them — and a plan's detail with the approved

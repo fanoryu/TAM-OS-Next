@@ -198,8 +198,8 @@ at READ COMMITTED and locks employees and plans by primary key in id order, so i
 and overtime approvals without a deadlock. **Ready is an approved obligation, not a payment. Commit is BF-4c2**, with the
 Employee's read of their own Committed plan, the D-PAY-4 drift guard and the MU-4 privacy proof; Finance posting comes
 later. No frontend change and an unchanged package (97 files, `2d826d4d…`); BF-4c1 only adds routes, so it can be
-deployed without a Payroll AFI. `AUTH_MODE` stays LOCAL. **AFI-4c1** (local candidate on `feature/afi-4c1-session-payroll`; not pushed, not
-merged, not deployed; owner decisions D-AFI4c1-1 = A, D-AFI4c1-2 = A, D-AFI4c1-3 = A, D-AFI4c1-4 = A) is the SESSION
+deployed without a Payroll AFI. `AUTH_MODE` stays LOCAL. **AFI-4c1** (merged to `main` as source, PR #45, canonical merge
+`6834a572485e0057f01897283f006ccaa00769c6`; not deployed; owner decisions D-AFI4c1-1 = A, D-AFI4c1-2 = A, D-AFI4c1-3 = A, D-AFI4c1-4 = A) is the SESSION
 Payroll workspace over BF-4c1, **CEO only**: a third section, "Payroll", beside Employees | Overtime (an Employee's
 sections are unchanged and make no Payroll request). It shows one month at a time (memory only, the local calendar month
 first), the month's plans in the server's order with the exact money strings the server sends (labelled "(Rp)"; nothing
@@ -214,7 +214,34 @@ confirmation and reads the plan again; an unconfirmed write is never resent. New
 backend, migration or ACTION change (still 21), no new body-key exception (D-AFI4b1-3 unchanged), `AUTH_MODE` stays
 LOCAL. Its dedicated harness, `tools/verify-session-payroll-runtime.js`, is the **tenth** CI harness (D-AFI4c1-2 = A,
 after a repeated-run and UTC-12 … UTC+14 determinism proof). AFI-4c1 needs BF-4c1 at runtime; it adds no
-deploy-together constraint of its own.
+deploy-together constraint of its own. **BF-4c2** (local candidate on `feature/bf-4c2-payroll-commit`; not pushed, not
+merged, not deployed; owner decisions D-BF4c2-1 = A, D-BF4c2-2 = A, D-BF4c2-3 = A, D-BF4c2-4 = A) completes the Payroll
+backend, **backend only**. `POST /api/payroll-plans/commit` (CEO only, the existing `payroll.manage`; **ACTIONS stay 21**)
+turns a **Ready** plan into a **Committed** one — an immutable payroll obligation, never a payment, an execution or a
+Finance posting. It takes exactly `{ id, expectedVersion, expectedTotal, idempotencyKey }`: `expectedTotal` is the exact
+whole-Rupiah total the CEO was shown, compared as a string with the locked plan (never authority, never stored), and the
+key — 32 lowercase hex characters — is the **SDR-0002 §10** idempotency key Commit must accept (a requirement recorded
+with BF-4c1 in PR #44). D-BF4c2-1 = A: the key is a body field stored permanently on the committed plan (migration `0027`,
+unique within a company, present if and only if Committed); the fingerprint is the immutable plan itself, so a repeat of
+the same request answers the original Committed plan with no write and no audit row, while the same key with any other
+request, or another key on a Committed plan, is 409 — no header, no generic idempotency table, no stored response, no
+expiry. A refused or failed commit stores no key. D-BF4c2-2 = A: Commit refuses (409) a plan that has **drifted** — the
+employee archived, not Active or without a salary, the salary changed, or the month's Approved overtime no longer the
+plan's linked set — and the CEO must return it to Draft and prepare the month again (D-PAY-4); a changed code, name or
+department never blocks (the obligation keeps its snapshot). D-BF4c2-4 = A: the CEO drift read
+`GET /api/payroll-plan/drift?id=` answers `{ payrollPlanDrift: { id, current, reasons } }` with the closed reasons
+`employee_archived`, `employee_not_active`, `salary_missing`, `salary_changed`, `overtime_changed` (in that order) and no
+input value; it and Commit share one evaluator, `PayrollDrift`, over the existing calculation (no second formula), and
+Commit always re-checks under its own locks. D-BF4c2-3 = A: Commit runs at READ COMMITTED — the narrow extension of the
+generate exception, nothing else — locking the plan's employee, then the plan, by primary key; C1–C8 races (commit
+against commit, salary, archive, approval, return, cancel and generate) and the duplicate-key race of one key on two
+plans are proven against MariaDB with no deadlock. D-PAY-5 = A: the two existing plan reads become role-aware — an
+Employee reads **only their own Committed** plans (their own Draft, Reviewed, Ready or Cancelled plan, a colleague's
+and another company's are 404; every write and the drift read are 403), proven with real sessions (the MU-4 privacy
+proof for Payroll). The CEO plan projection keeps exactly its thirteen keys, so AFI-4c1 is unaffected and BF-4c2 can be
+deployed behind it; migrations `0027`–`0028` (head **0028**; `0028` adds the `commit` audit operation). No frontend or
+package change (100 files, `a0a95b13…`), no Finance, payment or statutory effect, `AUTH_MODE` stays LOCAL. The Commit
+and My Payroll screens are AFI-4c2.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
