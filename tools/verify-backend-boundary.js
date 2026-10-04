@@ -143,14 +143,19 @@ const OVERTIME_DIR = 'server/src/Overtime/';
 const OVERTIME_CONTROLLER = 'server/src/Controller/OvertimeController.php';
 // BF-4c1 (owner decisions D-PAY-1..6 = A): the payroll plan and its overtime links have one
 // writer; Payroll reads Approved overtime and never values it; its calculation is integer-only;
-// it has no Commit (BF-4c2), no finance and no statutory side effect; each payroll write route
-// declares the existing payroll.manage (ACTIONS stay 21); its inputs take no identity key.
+// it has no finance and no statutory side effect; each payroll write route declares the existing
+// payroll.manage (ACTIONS stay 21); its inputs take no identity key.
+// BF-4c2 authorized revision (D-BF4c2-1..4 = A): exactly one statement — COMMIT_STATEMENT — writes
+// 'Committed', committed_at and the commit idempotency key, and the one commit route joins the
+// payroll writes. Was: no statement wrote 'Committed' and there was no commit route.
 const PAYROLL_STORE = 'server/src/Data/Payroll/PayrollStore.php';
 const PAYROLL_DIR = 'server/src/Payroll/';
 const PAYROLL_CONTROLLER = 'server/src/Controller/PayrollController.php';
 const PAYROLL_CALCULATION = 'server/src/Payroll/PayrollCalculation.php';
 const PAYROLL_INPUT = 'server/src/Payroll/PayrollInput.php';
-const PAYROLL_ROUTES = ['/api/payroll-plans/generate', '/api/payroll-plans/review', '/api/payroll-plans/approve', '/api/payroll-plans/return', '/api/payroll-plans/cancel'];
+const PAYROLL_ROUTES = ['/api/payroll-plans/generate', '/api/payroll-plans/review', '/api/payroll-plans/approve', '/api/payroll-plans/return', '/api/payroll-plans/cancel', '/api/payroll-plans/commit'];
+const PAYROLL_COMMIT_ROUTE = '/api/payroll-plans/commit';
+const COMMIT_STATEMENT = "UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'";
 const ACTION_COUNT = 21;
 
 // ---------------------------------------------------------------------------------------------
@@ -373,15 +378,17 @@ function checkRouteActions(src) {
     if (!line) out.push('Routes.php: overtime route POST ' + path + ' is missing');
     else if (!new RegExp('\\bAction::' + action + '\\)').test(line)) out.push('Routes.php: overtime route POST ' + path + ' must declare Action::' + action);
   }
-  // BF-4c1: exactly the five payroll writes declare payroll.manage; no commit or status route.
+  // BF-4c1 + BF-4c2: exactly the six payroll writes (the five BF-4c1 ones and commit) declare
+  // payroll.manage; no other status, payment or payslip route.
   for (const path of PAYROLL_ROUTES) {
     const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
     if (!line) out.push('Routes.php: payroll route POST ' + path + ' is missing');
     else if (!/\bAction::PayrollManage\)/.test(line)) out.push('Routes.php: payroll route POST ' + path + ' must declare Action::PayrollManage');
   }
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
-    if (/\bAction::PayrollManage\b/.test(m[3]) && !PAYROLL_ROUTES.includes(m[2])) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a BF-4c1 payroll write and must not declare Action::PayrollManage');
-    if (/payroll/i.test(m[2]) && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[2] + ' — no payroll commit, status, payment or payslip route in BF-4c1');
+    if (/\bAction::PayrollManage\b/.test(m[3]) && (!PAYROLL_ROUTES.includes(m[2]) || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a payroll write and must not declare Action::PayrollManage');
+    const commitRoute = m[1] === 'POST' && m[2] === PAYROLL_COMMIT_ROUTE;
+    if (/payroll/i.test(m[2]) && !commitRoute && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no payroll status, payment or payslip route (the one commit route is POST ' + PAYROLL_COMMIT_ROUTE + ')');
   }
   return out;
 }
@@ -515,18 +522,29 @@ function checkPhp(file, src) {
   return out;
 }
 
-// BF-4c1: every statement that writes a payroll plan is a pre-commit compare-and-swap, and none
-// writes 'Committed' or committed_at (Commit is BF-4c2): an UPDATE names the company, the expected
-// version and a pre-commit status (status = 'Draft', or status IN ('Draft', 'Reviewed', 'Ready'))
-// and no OR; the INSERT writes a 'Draft'. The only link DELETE names the company and its plan
+// BF-4c1: every statement that writes a payroll plan is a pre-commit compare-and-swap: an UPDATE
+// names the company, the expected version and a pre-commit status (status = 'Draft', or status IN
+// ('Draft', 'Reviewed', 'Ready')) and no OR; the INSERT writes a 'Draft'. BF-4c2 authorized
+// revision: exactly one statement, COMMIT_STATEMENT (Ready → Committed at the expected version),
+// writes 'Committed', committed_at or the commit idempotency key — every other write naming any of
+// them is a violation. Was: no statement wrote 'Committed' or committed_at. Every Employee
+// (:self_employee_id) payroll read is a plain SELECT of Committed plans only (D-PAY-5 = A). The only link DELETE names the company and its plan
 // (:id) and requires that plan to be pre-commit, so a Committed plan's links are frozen. Any payroll
 // statement reading overtime_records reads Approved records only, and never a valuation column.
 const PRE_COMMIT_STATUS = /\bstatus = 'Draft'|\bstatus IN \('Draft', 'Reviewed', 'Ready'\)/;
 function checkPayrollStatements(file, lex) {
   const out = [];
+  let commits = 0;
   for (const s of lex.strings) {
+    if (file === PAYROLL_STORE && s === COMMIT_STATEMENT) {
+      commits++;
+      continue;
+    }
     const writesPlan = /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?payroll_plans\b/i.test(s);
-    if (writesPlan && /'Committed'|\bcommitted_at\s*=/.test(s)) out.push("no BF-4c1 statement writes 'Committed' or committed_at (Commit is BF-4c2)");
+    if (writesPlan && /'Committed'|\bcommitted_at\s*=|\bcommit_idempotency_key\b/.test(s)) out.push("only the one COMMIT_SQL statement writes 'Committed', committed_at or the commit idempotency key (Ready → Committed at the expected version, in company scope)");
+    if (file === PAYROLL_STORE && /:self_employee_id\b/.test(s) && (!/^SELECT\b/.test(s) || !/\b(p\.)?status = 'Committed'/.test(s) || /\bFOR\s+UPDATE\b|\bOR\b/i.test(s))) {
+      out.push("an Employee payroll read is a plain SELECT of their own Committed plans only (status = 'Committed', no lock, no OR)");
+    }
     if (/^\s*UPDATE\s+`?payroll_plans\b/i.test(s)) {
       const where = s.split(/\bWHERE\b/i)[1] || '';
       if (!/\bcompany_id = :company_id\b/.test(where) || !/\bversion = :expected_version\b/.test(where) || !PRE_COMMIT_STATUS.test(where) || /\bOR\b/i.test(where)) {
@@ -550,6 +568,7 @@ function checkPayrollStatements(file, lex) {
       out.push('payroll locks rows only by primary key (WHERE id = :x AND company_id = :company_id FOR UPDATE on employees or payroll_plans) — never a range, a join or an overtime record');
     }
   }
+  if (file === PAYROLL_STORE && commits !== 1) out.push('PayrollStore has exactly one Commit statement (COMMIT_SQL, Ready → Committed at the expected version); found ' + commits);
   return out;
 }
 
@@ -577,13 +596,15 @@ function checkPayrollFirewall(lex) {
 
 // BF-4c1: the payroll inputs take exactly { month } (generate) and { id, expectedVersion } (the
 // transitions) — no employee, company, role, salary, amount, total or status key, and no new
-// identity exception (D-AFI4b1-3 stays the one overtime create selector).
+// identity exception (D-AFI4b1-3 stays the one overtime create selector). BF-4c2 authorized
+// revision: commit takes exactly { id, expectedVersion, expectedTotal, idempotencyKey }. Was: two
+// allowlists.
 function checkPayrollInput(lex) {
   // The allowlists, recovered from the lexed code and the string spans inside each call.
   const lists = [...lex.code.matchAll(/self::onlyKeys\(\$json, \[[^\]]*\]\)/g)]
     .map((m) => lex.spans.filter((sp) => sp.start >= m.index && sp.end <= m.index + m[0].length).map((sp) => sp.value).join(','));
   const out = [];
-  if (lists.length !== 2 || lists[0] !== 'month' || lists[1] !== 'id,expectedVersion') out.push('the payroll inputs allow exactly { month } and { id, expectedVersion }');
+  if (lists.length !== 3 || lists[0] !== 'month' || lists[1] !== 'id,expectedVersion' || lists[2] !== 'id,expectedVersion,expectedTotal,idempotencyKey') out.push('the payroll inputs allow exactly { month }, { id, expectedVersion } and (commit) { id, expectedVersion, expectedTotal, idempotencyKey }');
   if (lex.strings.some((s) => /^(employeeId|companyId|role|salary|baseSalary|amount|totalAmount|total|status|overtimeAmount)$/.test(s))) out.push('a payroll input never names an identity, money or status key');
   return out;
 }
@@ -1316,6 +1337,14 @@ function selftest() {
   dirty('a payroll TRUNCATE is caught', PAYROLL_STORE, inPayroll("public const T_SQL = 'TRUNCATE TABLE payroll_plans';"), 'never deleted');
   dirty('a payroll link TRUNCATE is caught', PAYROLL_STORE, inPayroll("public const T_SQL = 'TRUNCATE TABLE payroll_plan_overtime';"), 'never truncated');
   dirty('a write of Committed is caught (M8)', PAYROLL_STORE, inPayroll("public const C_SQL = \"UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), "writes 'Committed'");
+  // BF-4c2: the one Commit statement — from Ready only, versioned, never widened, never duplicated.
+  dirty('a commit from Draft is caught (M1)', PAYROLL_STORE, realPayroll.replace("AND version = :expected_version AND status = 'Ready'\";", "AND version = :expected_version AND status = 'Draft'\";"), "writes 'Committed'");
+  dirty('a commit from Reviewed or Ready is caught (M2)', PAYROLL_STORE, realPayroll.replace("AND version = :expected_version AND status = 'Ready'\";", "AND version = :expected_version AND status IN ('Reviewed', 'Ready')\";"), "writes 'Committed'");
+  dirty('a commit without its version predicate is caught', PAYROLL_STORE, realPayroll.replace("WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'\";", "WHERE id = :id AND company_id = :company_id AND status = 'Ready'\";"), "writes 'Committed'");
+  dirty('a missing Commit statement is caught', PAYROLL_STORE, realPayroll.replace("AND version = :expected_version AND status = 'Ready'\";", "AND version = :expected_version AND status = 'Ready' \";"), 'exactly one Commit statement');
+  dirty('a second write of the commit key is caught', PAYROLL_STORE, inPayroll("public const K_SQL = \"UPDATE payroll_plans SET commit_idempotency_key = :k, version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), 'commit idempotency key');
+  dirty('an Employee read of a non-Committed plan is caught (M14)', PAYROLL_STORE, realPayroll.replace("AND employee_id = :self_employee_id AND status = 'Committed' ORDER BY", "AND employee_id = :self_employee_id ORDER BY"), 'own Committed plans only');
+  dirty('an Employee lock is caught', PAYROLL_STORE, inPayroll("public const L2_SQL = \"SELECT id, company_id, employee_id AS owner_employee_id FROM payroll_plans WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND status = 'Committed' FOR UPDATE\";"), 'own Committed plans only');
   dirty('a transition without its pre-commit predicate is caught (M8/M9)', PAYROLL_STORE, realPayroll.replace(" AND status = :from_status AND status IN ('Draft', 'Reviewed', 'Ready')\";", " AND status = :from_status\";"), 'pre-commit compare-and-swap');
   dirty('a transition without its version predicate is caught (M7)', PAYROLL_STORE, realPayroll.replace("WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status", "WHERE id = :id AND company_id = :company_id AND status = :from_status"), 'pre-commit compare-and-swap');
   dirty('a recalculation of a non-Draft plan is caught', PAYROLL_STORE, realPayroll.replace("AND version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL", "AND version = :expected_version AND status <> 'Cancelled'\";\n    public const TRANSITION_SQL"), 'pre-commit compare-and-swap');
@@ -1355,6 +1384,8 @@ function selftest() {
   clean('the real PayrollInput passes', PAYROLL_INPUT, realPayrollInput);
   dirty('a browser salary key on generate is caught (M1)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['month']);", "self::onlyKeys($json, ['month', 'salary']);"), 'exactly { month }');
   dirty('a browser total key on a transition is caught (M2)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['id', 'expectedVersion']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'totalAmount']);"), 'exactly { month }');
+  dirty('a commit without its idempotency key is caught (M13)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal']);"), 'idempotencyKey');
+  dirty('a browser salary key on commit is caught', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey', 'baseSalary']);"), 'idempotencyKey');
   dirty('an employeeId key on generate is caught (identity)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['month']);", "self::onlyKeys($json, ['employeeId']);"), 'never names an identity');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
@@ -1388,7 +1419,10 @@ function selftest() {
   cases.push({ name: 'a missing account route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/employees/enable-account', $employees->enableAccount(...), [], RouteAuth::Required, Action::AccountManage),\n", '')), expect: 'is missing' });
   cases.push({ name: 'a payroll write under a weaker Action is caught', run: () => checkRouteActions(realRoutes.replace("$payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage)", "$payroll->cancel(...), [], RouteAuth::Required, Action::OvertimeManage)")), expect: 'must declare Action::PayrollManage' });
   cases.push({ name: 'a missing payroll route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/return', $payroll->returnToDraft(...), [], RouteAuth::Required, Action::PayrollManage),\n", '')), expect: 'payroll route POST /api/payroll-plans/return is missing' });
-  cases.push({ name: 'a payroll commit route is caught (BF-4c2 scope)', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/cancel',", "            new Route('POST', '/api/payroll-plans/commit', $payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage),\n            new Route('POST', '/api/payroll-plans/cancel',")), expect: 'not a BF-4c1 payroll write' });
+  cases.push({ name: 'a payroll payment route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/cancel',", "            new Route('POST', '/api/payroll-plans/pay', $payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage),\n            new Route('POST', '/api/payroll-plans/cancel',")), expect: 'not a payroll write' });
+  cases.push({ name: 'a payroll status read is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/cancel',", "            new Route('GET', '/api/payroll-plan/status', $payroll->find(...), ['id'], RouteAuth::Required),\n            new Route('POST', '/api/payroll-plans/cancel',")), expect: 'no payroll status, payment or payslip route' });
+  cases.push({ name: 'a missing commit route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/commit', $payroll->commit(...), [], RouteAuth::Required, Action::PayrollManage),\n", '')), expect: 'payroll route POST /api/payroll-plans/commit is missing' });
+  cases.push({ name: 'payroll.manage on the drift read is caught', run: () => checkRouteActions(realRoutes.replace("$payroll->drift(...), ['id'], RouteAuth::Required)", "$payroll->drift(...), ['id'], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
   cases.push({ name: 'payroll.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->reject(...), [], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 

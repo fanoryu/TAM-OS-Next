@@ -16,11 +16,20 @@ use TamOs\Overtime\OvertimeInput;
  *   generate                         exactly { month }: "YYYY-MM", the canonical month (the same
  *                                    validation as overtime monthKey; a calendar value, no timezone)
  *   review / approve / return / cancel   exactly { id, expectedVersion }
+ *   commit (BF-4c2)                  exactly { id, expectedVersion, expectedTotal, idempotencyKey }:
+ *                                    expectedTotal is the whole-Rupiah "N.00" total the CEO was shown
+ *                                    (PayrollCalculation::isAmount, one spelling per value) — a
+ *                                    confirmation compared for exact string equality with the locked
+ *                                    plan, never stored and never authority; idempotencyKey is 32
+ *                                    lowercase hex characters (D-BF4c2-1 = A), stored on the
+ *                                    committed plan
  *   GET ?month= / ?id=               the required month (400 invalid_query) / the plan id
  */
 final class PayrollInput
 {
     public const ID_PATTERN = '/^[0-9a-f]{32}$/';
+    /** BF-4c2: the commit idempotency key — the repository id grammar. */
+    public const KEY_PATTERN = '/^[0-9a-f]{32}$/';
     public const MAX_VERSION = 4294967295;
 
     /**
@@ -46,18 +55,35 @@ final class PayrollInput
     public static function transition(array $json): array
     {
         self::onlyKeys($json, ['id', 'expectedVersion']);
-        $bad = [];
-        if (!is_string($json['id'] ?? null) || preg_match(self::ID_PATTERN, $json['id']) !== 1) {
-            $bad[] = 'id';
-        }
-        $version = $json['expectedVersion'] ?? null;
-        if (!is_int($version) || $version < 1 || $version > self::MAX_VERSION) {
-            $bad[] = 'expectedVersion';
-        }
+        $bad = self::target($json);
         if ($bad !== []) {
             throw new ApiError(ErrorCode::ValidationFailed, 'invalid payroll target', fields: $bad);
         }
-        return ['id' => $json['id'], 'expectedVersion' => $version];
+        return ['id' => $json['id'], 'expectedVersion' => $json['expectedVersion']];
+    }
+
+    /**
+     * BF-4c2 commit: exactly id, expectedVersion, expectedTotal ("N.00", a JSON string) and
+     * idempotencyKey (32 lowercase hex characters, a JSON string). Never coerced.
+     *
+     * @param array<string, mixed> $json
+     * @return array{id: string, expectedVersion: int, expectedTotal: string, idempotencyKey: string}
+     */
+    public static function commit(array $json): array
+    {
+        self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);
+        $bad = self::target($json);
+        if (!PayrollCalculation::isAmount($json['expectedTotal'] ?? null)) {
+            $bad[] = 'expectedTotal';
+        }
+        $key = $json['idempotencyKey'] ?? null;
+        if (!is_string($key) || preg_match(self::KEY_PATTERN, $key) !== 1) {
+            $bad[] = 'idempotencyKey';
+        }
+        if ($bad !== []) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'invalid payroll commit', fields: $bad);
+        }
+        return ['id' => $json['id'], 'expectedVersion' => $json['expectedVersion'], 'expectedTotal' => $json['expectedTotal'], 'idempotencyKey' => $key];
     }
 
     /** GET /api/payroll-plans?month= : the required month (400 invalid_query otherwise). */
@@ -82,6 +108,25 @@ final class PayrollInput
     public static function isMonth(mixed $v): bool
     {
         return OvertimeInput::isMonth($v);
+    }
+
+    /**
+     * The invalid target fields of a write: the plan id and the optimistic version.
+     *
+     * @param array<string, mixed> $json
+     * @return list<string>
+     */
+    private static function target(array $json): array
+    {
+        $bad = [];
+        if (!is_string($json['id'] ?? null) || preg_match(self::ID_PATTERN, $json['id']) !== 1) {
+            $bad[] = 'id';
+        }
+        $version = $json['expectedVersion'] ?? null;
+        if (!is_int($version) || $version < 1 || $version > self::MAX_VERSION) {
+            $bad[] = 'expectedVersion';
+        }
+        return $bad;
     }
 
     /**

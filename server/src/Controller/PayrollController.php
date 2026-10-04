@@ -12,9 +12,11 @@ use TamOs\Payroll\PayrollService;
 use TamOs\Payroll\PayrollView;
 
 /**
- * BF-4c1 payroll routes. Every one requires a session (RouteAuth::Required) and, in this slice,
- * the CEO: an Employee is 403 on all of them. The reads add no Action; each write declares the
- * existing payroll.manage (Routes). No route commits, pays or reads a payslip.
+ * The payroll routes (BF-4c1, BF-4c2). Every one requires a session (RouteAuth::Required). Every
+ * write and the drift read are CEO-only: an Employee is 403. The two plan reads serve the CEO in
+ * company scope and an Employee their OWN COMMITTED plans only (404 otherwise). The reads add no
+ * Action; each write declares the existing payroll.manage (Routes). No route pays, posts or renders
+ * a payslip.
  *
  *   GET  /api/payroll-plans?month=YYYY-MM   { payrollPlans: [plan…] }   every plan of the month
  *   GET  /api/payroll-plan?id=<id>          { payrollPlan: plan, payrollPlanOvertime: [{ id, hours, amount }…] }
@@ -25,6 +27,10 @@ use TamOs\Payroll\PayrollView;
  *   POST /api/payroll-plans/return          { payrollPlan: plan }   Reviewed / Ready → Draft
  *   POST /api/payroll-plans/cancel          { payrollPlan: plan }   Draft / Reviewed / Ready → Cancelled
  *                                           transitions take exactly { id, expectedVersion }
+ *   POST /api/payroll-plans/commit          { payrollPlan: plan }   Ready → Committed (BF-4c2)
+ *                                           body exactly { id, expectedVersion, expectedTotal, idempotencyKey };
+ *                                           a replay answers the original Committed plan
+ *   GET  /api/payroll-plan/drift?id=<id>    { payrollPlanDrift: { id, current, reasons } }   CEO only (BF-4c2)
  */
 final class PayrollController
 {
@@ -95,6 +101,24 @@ final class PayrollController
     public function cancel(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
         return ['payrollPlan' => PayrollView::plan($this->service->transition(self::principal($session), 'cancel', $json, $requestId))];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{payrollPlan: array<string, mixed>}
+     */
+    public function commit(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['payrollPlan' => PayrollView::plan($this->service->commit(self::principal($session), $json, $requestId))];
+    }
+
+    /**
+     * @param array<string, mixed> $json
+     * @return array{payrollPlanDrift: array{id: string, current: bool, reasons: list<string>}}
+     */
+    public function drift(Request $request, ?AuthSession $session, array $json, string $requestId): array
+    {
+        return ['payrollPlanDrift' => PayrollView::drift($this->service->drift(self::principal($session), self::query($request)['id'] ?? null))];
     }
 
     private static function principal(?AuthSession $session): Principal

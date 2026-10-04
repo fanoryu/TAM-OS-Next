@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TamOs\Payroll;
 
 use TamOs\Data\BusinessData;
+use TamOs\Data\DatabaseError;
 use TamOs\Data\Payroll\PayrollStore;
 use TamOs\Http\ApiError;
 use TamOs\Http\ErrorCode;
@@ -19,10 +20,13 @@ use TamOs\Policy\Scope;
  * employee, a role, a salary, an amount or a status from a browser — the company and actor come
  * from the session principal, every money value from the database.
  *
- * BF-4c1 is CEO-only. An Employee principal is refused (403) on every payroll route before any
- * lookup: their read of their own Committed plan is BF-4c2 (D-PAY-5 = A).
+ * Every write and the drift read are CEO-only: an Employee principal is refused (403) before any
+ * lookup. BF-4c2 (D-PAY-5 = A): an Employee reads their OWN COMMITTED plans through the same two
+ * reads, under their self scope — any other plan, their own Draft / Reviewed / Ready / Cancelled
+ * included, is 404, indistinguishable from absent.
  *
- *   list / read  validate (400) → CEO (403) → company scope; absent or another company is 404
+ *   list / read  validate (400) → the principal's scope (CEO: company; Employee: own Committed);
+ *                absent, out of scope or another company is 404
  *   generate     validate { month } (400) → CEO (403) → payroll.manage on the period (403) → one
  *                READ COMMITTED transaction: lock every employee of the company by primary key in
  *                id order, read the month's Approved overtime (frozen by those locks), lock the
@@ -44,22 +48,46 @@ use TamOs\Policy\Scope;
  * (PayrollCalculation) and never writes an overtime record. An overtime approval serialized before
  * a generate is included; one serialized after it is not, and approval is never blocked. Nothing
  * here commits a plan, pays it, or has any finance or statutory effect: Ready is an approved
- * obligation awaiting the BF-4c2 Commit, never a payment.
+ * obligation awaiting Commit, never a payment.
+ *
+ * BF-4c2 (owner decisions D-BF4c2-1..4 = A):
+ *
+ *   commit       validate exactly { id, expectedVersion, expectedTotal, idempotencyKey } (400) → CEO
+ *                (403) → scoped load (404) → payroll.manage (403) → one READ COMMITTED transaction
+ *                (D-BF4c2-3, the narrow extension of the generate exception) in the global order:
+ *                lock the plan's employee by primary key → lock the plan by primary key → the
+ *                idempotency key: held by this plan, Committed at expectedVersion + 1 with
+ *                expectedTotal → the original commit, replayed (no write, no audit); held by any
+ *                other request → 409 idempotency_mismatch → Ready (409 payroll_state) → the
+ *                expected version (409 payroll_version) → expectedTotal equals the locked total as
+ *                an exact string (409 payroll_total) → PayrollDrift on the inputs read under those
+ *                locks (409 payroll_drift) → the compare-and-swap that sets Committed, committed_at
+ *                and the key → audit 'commit'. A duplicate key raised by that one statement is a
+ *                concurrent commit with the same key on another plan: 409 idempotency_mismatch.
+ *                A refused or failed commit stores no key, so the key is not consumed.
+ *   drift        validate (400) → CEO (403) → in one transaction, the same PayrollDrift over the
+ *                plan's current inputs (404 when absent or another company; 409 payroll_state when
+ *                the plan is Committed or Cancelled and can no longer be committed). Read-only and
+ *                advisory: Commit always re-checks under its own locks.
+ *
+ * Committed is an immutable obligation: never paid, executed or posted anywhere.
  */
 final class PayrollService
 {
     /** The generate exclusion reasons, in precedence order. */
     public const EXCLUSIONS = ['archived', 'not_active', 'salary_missing'];
+    /** MariaDB ER_DUP_ENTRY: under commit, only the company-unique commit idempotency key can raise it. */
+    private const DUPLICATE_KEY = 1062;
 
     public function __construct(private readonly BusinessData $data)
     {
     }
 
-    /** @return list<array<string, mixed>> every plan of $month (CEO) */
+    /** @return list<array<string, mixed>> every plan of $month (CEO), or the Employee's own Committed plans of it */
     public function month(Principal $actor, ?string $month): array
     {
         $monthKey = PayrollInput::month($month);            // 400 before any lookup
-        $scope = self::companyScope($actor);                // 403 before any connection
+        $scope = Scope::of($actor);                         // an Employee: self scope, own Committed only
         $rows = $this->data->payroll()->month($scope, $monthKey);
         if (count($rows) > PayrollStore::LIST_CAP) {
             throw new ApiError(ErrorCode::InternalError, 'payroll month above its cap', logReason: 'payroll_list_cap');
@@ -67,11 +95,11 @@ final class PayrollService
         return $rows;
     }
 
-    /** @return array{plan: array<string, mixed>, overtime: list<array<string, mixed>>} one plan and its contributing overtime (CEO) */
+    /** @return array{plan: array<string, mixed>, overtime: list<array<string, mixed>>} one plan and its contributing overtime (CEO; an Employee: their own Committed plan) */
     public function read(Principal $actor, ?string $id): array
     {
         $id = PayrollInput::id($id);                        // 400 before any lookup
-        $scope = self::companyScope($actor);
+        $scope = Scope::of($actor);
         $plan = $this->data->payroll()->record($scope, $id) ?? throw new ApiError(ErrorCode::NotFound);
         return ['plan' => $plan, 'overtime' => $this->data->payroll()->overtimeOf($scope, $id)];
     }
@@ -209,6 +237,93 @@ final class PayrollService
         return $this->data->payroll()->record($scope, $in['id']) ?? throw new \LogicException('transitioned plan not readable');
     }
 
+    /**
+     * BF-4c2: Ready → Committed, idempotent on the key (D-BF4c2-1 = A).
+     *
+     * @param array<string, mixed> $json
+     * @return array<string, mixed> the Committed plan (the original one on a replay)
+     */
+    public function commit(Principal $actor, array $json, string $requestId): array
+    {
+        $in = PayrollInput::commit($json);                  // 400 before any lookup
+        $scope = self::companyScope($actor);                // an Employee: 403 before any lookup
+        $record = $this->data->payroll()->find($scope, $in['id']) ?? throw new ApiError(ErrorCode::NotFound);
+        $auth = Policy::authorize($actor, Action::PayrollManage, $record);
+        $this->data->atomically(function () use ($auth, $actor, $in, $requestId): void {
+            // The global lock order: employee → payroll_plan → (plain reads) → audit.
+            $store = $this->data->payroll();
+            $store->lockOwner($auth) ?? throw new ApiError(ErrorCode::NotFound);
+            $current = $store->lockForCommit($auth) ?? throw new ApiError(ErrorCode::NotFound);
+            $holder = $store->keyHolder($auth->scope, $in['idempotencyKey']);
+            if ($holder !== null) {
+                if (self::isReplay($current, $holder, $in)) {
+                    return;                                 // the original commit: no write, no audit
+                }
+                throw new ApiError(ErrorCode::Conflict, logReason: 'idempotency_mismatch');
+            }
+            if ($current['status'] !== PayrollStatus::COMMIT_FROM) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_state');
+            }
+            if ((int) $current['version'] !== $in['expectedVersion']) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_version');
+            }
+            if ((string) $current['total_amount'] !== $in['expectedTotal']) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_total');
+            }
+            $inputs = $store->driftInputs($auth->scope, (string) $current['id']) ?? throw new \LogicException('a locked plan has no drift inputs');
+            if (PayrollDrift::reasons($inputs['plan'], $inputs['employee'], $inputs['approved'], $inputs['linked']) !== []) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_drift');
+            }
+            try {
+                $written = $store->commit($auth, $in['expectedVersion'], $in['idempotencyKey']);
+            } catch (DatabaseError $e) {
+                if ($e->driverCode === self::DUPLICATE_KEY) {
+                    // The key was taken meanwhile by a concurrent commit of another plan.
+                    throw new ApiError(ErrorCode::Conflict, logReason: 'idempotency_mismatch');
+                }
+                throw $e;
+            }
+            if ($written !== 1) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_state');
+            }
+            $this->data->audit()->appendPayroll($auth, $actor, 'commit', $requestId);
+        }, readCommitted: true);
+        return $this->data->payroll()->record($scope, $in['id']) ?? throw new \LogicException('committed plan not readable');
+    }
+
+    /**
+     * BF-4c2: why a plan could no longer be committed as it is (D-BF4c2-4 = A) — the same
+     * PayrollDrift Commit applies, over the plan's current inputs. CEO only; read-only.
+     *
+     * @return array{id: string, reasons: list<string>}
+     */
+    public function drift(Principal $actor, ?string $id): array
+    {
+        $id = PayrollInput::id($id);                        // 400 before any lookup
+        $scope = self::companyScope($actor);                // an Employee: 403 before any lookup
+        $inputs = $this->data->atomically(fn (): ?array => $this->data->payroll()->driftInputs($scope, $id)) ?? throw new ApiError(ErrorCode::NotFound);
+        if (!in_array($inputs['plan']['status'], PayrollStatus::PRE_COMMIT, true)) {
+            throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_state');
+        }
+        return ['id' => $id, 'reasons' => PayrollDrift::reasons($inputs['plan'], $inputs['employee'], $inputs['approved'], $inputs['linked'])];
+    }
+
+    /**
+     * A commit request is the replay of the commit that stored its key when that commit was of this
+     * plan, from expectedVersion, at expectedTotal — the fingerprint the immutable plan implies.
+     *
+     * @param array<string, mixed> $current the locked plan
+     * @param array{id: string, expectedVersion: int, expectedTotal: string, idempotencyKey: string} $in
+     */
+    private static function isReplay(array $current, string $holder, array $in): bool
+    {
+        return $holder === (string) $current['id']
+            && $current['status'] === PayrollStatus::COMMITTED
+            && $current['commit_idempotency_key'] === $in['idempotencyKey']
+            && (int) $current['version'] === $in['expectedVersion'] + 1
+            && (string) $current['total_amount'] === $in['expectedTotal'];
+    }
+
     /** The reason a locked employee row gets no plan, or null when eligible (D-PAY-2 = A). */
     private static function exclusion(array $e): ?string
     {
@@ -246,7 +361,7 @@ final class PayrollService
         return $rows;
     }
 
-    /** BF-4c1: payroll is CEO-only — an Employee principal is refused before any lookup. */
+    /** Every payroll write and the drift read are CEO-only — an Employee principal is refused before any lookup. */
     private static function companyScope(Principal $actor): Scope
     {
         $scope = Scope::of($actor);
