@@ -1744,7 +1744,8 @@ and approval); its valuation inputs and exact-decimal method were deferred to BF
 `AI_CONTEXT.md`). BF-4b1 is merged (PR #40, canonical `9fbdd448ea36dea57a74c254fb49b5017081e9c6`), AFI-4b1 is merged
 (PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), BF-4b2 is merged (PR #42, canonical
 `78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is merged (PR #43, canonical `58e1127a0e44b60bf771e2d399ea15336b6f9610`).
-Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`) and AFI-4c1 (below) is a local candidate.
+Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`), AFI-4c1 is merged (PR #45, canonical
+`6834a572485e0057f01897283f006ccaa00769c6`), and BF-4c2 (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -1953,10 +1954,10 @@ idempotence, recalculation, the lifecycle matrix, terminality, cancel and replac
 snapshot, audit rollback, out-of-bounds, the firewalls, migration from `0023`, lock, loser and race proofs including
 generate against generate, salary change, archive and overtime approval).
 
-### SESSION Payroll CEO workspace — AFI-4c1 (local candidate; frontend; SESSION mode only)
+### SESSION Payroll CEO workspace — AFI-4c1 (merged as PR #45, canonical `6834a572`; frontend; SESSION mode only)
 
 AFI-4c1 is the SESSION counterpart of BF-4c1 (owner decisions D-AFI4c1-1 = A, D-AFI4c1-2 = A, D-AFI4c1-3 = A,
-D-AFI4c1-4 = A). It is a local candidate on `feature/afi-4c1-session-payroll`; not pushed, merged or deployed. Frontend
+D-AFI4c1-4 = A). It is merged to `main` as source (PR #45, canonical merge `6834a572485e0057f01897283f006ccaa00769c6`), not deployed. Frontend
 only: no backend change, no migration, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, no CSS change.
 
 **Placement and authority.** A third section of the SESSION workspace, "Payroll", for the **CEO only** (Employees |
@@ -2006,6 +2007,90 @@ stub and a fixed clock; its fabricated plans are deliberately inconsistent (a to
 pass. The Employee and Overtime harnesses were revised narrowly to admit exactly the CEO's Payroll section button.
 `tools/serve-auth-stub.js` models BF-4c1 for browser QA (`/__stub/bump-payroll` makes a shown plan stale). AFI-4c1 needs
 BF-4c1 at runtime and adds no deploy-together constraint of its own.
+
+### Payroll Commit and Employee self-read — BF-4c2 (local candidate; backend only, not deployed)
+
+BF-4c2 completes the Payroll backend (Phase 0 owner decisions D-BF4c2-1 = A, D-BF4c2-2 = A, D-BF4c2-3 = A,
+D-BF4c2-4 = A, 2026-10-04, over D-PAY-1/4/5/6 = A). It is a local candidate on `feature/bf-4c2-payroll-commit`; not
+pushed, merged or deployed. Backend only: no frontend change, the package is unchanged (100 files, digest `a0a95b13…`),
+ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
+
+**Commit.** `POST /api/payroll-plans/commit` declares the existing `payroll.manage` and takes exactly
+`{ id, expectedVersion, expectedTotal, idempotencyKey }` (anything else is a 400 naming the key). Ready → Committed only,
+as its own named operation (`PayrollStatus::COMMIT_FROM`), never a generic transition. Committed is an **immutable payroll
+obligation**: the plan's snapshot, total and links become the record; it is never paid, executed, posted or ledgered, and
+no Finance, payment, overtime or employee row is written (a DB test compares every table around a commit). Exactly one
+statement writes `'Committed'` — `COMMIT_SQL`, a compare-and-swap from `'Ready'` at the expected version that sets
+`committed_at` (the database clock) and the key — and every BF-4c1 guard already keeps a Committed plan from being
+recalculated, reviewed, approved, returned, cancelled or released. One `payroll.manage` audit row, operation `commit`
+(migration `0028`), in the same transaction; a failed audit rolls everything back. The answer is `{ payrollPlan }`, the
+same thirteen-key projection.
+
+**Idempotency (SDR-0002 §10; D-BF4c2-1 = A).** Commit is a composite, irreversible operation, so it accepts an
+idempotency key — the requirement BF-4c1 recorded in PR #44. The key is the body field `idempotencyKey`
+(`^[0-9a-f]{32}$`) and is stored permanently on the committed plan: migration `0027` adds
+`commit_idempotency_key CHAR(32)` (ascii_bin), `UNIQUE (company_id, commit_idempotency_key)`, and CHECKs that it is present
+if and only if the plan is Committed and is 32 lowercase hex characters. There is no header, no generic idempotency
+table, no stored response and no expiry. The fingerprint is implicit in the immutable plan — its id, its version
+(`expectedVersion + 1`) and its total (`expectedTotal`) — so:
+
+| Request | Answer |
+|---|---|
+| First valid commit | 200 `{ payrollPlan }` Committed, one write, one audit row |
+| Same key, same plan, `expectedVersion`, `expectedTotal` (a retry after an unknown outcome) | 200, the original Committed plan; no write, no audit |
+| Same key with another `expectedVersion` or `expectedTotal`, or on another plan | 409 (`idempotency_mismatch`) |
+| Another key on a Committed plan | 409 (`payroll_state`) |
+| A concurrent commit of another plan taking the same key | 409 — the duplicate key of that one statement is mapped, never a 500 |
+| 400, 409 drift / version / total, rollback, 503 | Nothing stored: the key is not consumed |
+
+**Guards, in order.** 400 → CEO (an Employee is 403 before any lookup) → scoped load (404) → `payroll.manage` → one
+transaction: the key (replay or mismatch) → status Ready (409) → `expectedVersion` (409) → `expectedTotal` equals the locked
+`total_amount` as an exact string (409; a confirmation, never authority, never stored) → drift (409) → the
+compare-and-swap (0 rows: 409) → audit. 409 reasons are log-only, as everywhere.
+
+**Drift (D-PAY-4 = A, D-BF4c2-2 = A).** `TamOs\Payroll\PayrollDrift::reasons()` is the one definition, a pure function
+over the plan, the employee's current eligibility and salary, their Approved overtime of the plan month (with the frozen
+`approved_amount`) and the plan's links: `employee_archived`, `employee_not_active`, `salary_missing` (no salary > 0),
+`salary_changed` (exact decimal strings), `overtime_changed` (the Approved id set is not the linked set, or the existing
+`PayrollCalculation` over the plan's base salary and that set no longer gives the plan's overtime amount, hours, count and
+total — no second formula, no rounding of its own, never TAM-OT-1). The employee's code, name and department are display
+snapshots and never drift. A drifted plan is refused; the CEO returns it to Draft and prepares the month again.
+
+**Drift read (D-BF4c2-4 = A).** `GET /api/payroll-plan/drift?id=` (a read, no Action, CEO only — an Employee is 403)
+answers `{ payrollPlanDrift: { id, current, reasons } }`: `current` is true exactly when `reasons` is empty; the reasons
+are the closed enum above, each at most once, in that order — never a salary, total, amount or other input value. It runs
+the same `PayrollDrift` in one consistent-read transaction, writes nothing, and is advisory: Commit always re-checks under
+its own locks. Absent or another company is 404; a Committed or Cancelled plan, which can no longer be committed, is 409.
+
+**Locking (D-BF4c2-3 = A).** Commit runs at READ COMMITTED — the narrow extension of the generate exception (a unit test
+pins exactly two such transactions in the backend) — in the global order: the plan's employee (`LOCK_EMPLOYEE_SQL`, by
+primary key), then the plan (`LOCK_COMMIT_SQL`, by primary key), then plain reads of the key, the drift inputs and the
+links, then the compare-and-swap and the audit row. Every other payroll, salary, archive and approval writer takes the
+employee before the plan or only the plan, so no lock cycle exists. MariaDB proofs: commit waits on its employee and plan
+locks (503, nothing written) and never locks overtime; C1 two commits with the same key → one commit and one replay; C2
+different keys → one commit and one 409; C3 / C4 / C5 a salary change, an archive or status change, an approval
+committed first → 409 drift, and after a commit each succeeds while the obligation stays frozen; C6 / C7 commit against
+return and cancel → whichever holds the plan first wins; C8 commit and generate serialize on the employee; the duplicate
+key of one key on two plans → 409. No deadlock is accepted.
+
+**Employee self-read (D-PAY-5 = A; SDR-0002 §9.1).** The two existing plan reads become role-aware, like the Employee
+and Overtime reads: under an Employee's self scope `FIND_SELF_SQL`, `RECORD_SELF_SQL`, `MONTH_SELF_SQL` and
+`PLAN_OVERTIME_SELF_SQL` name `:self_employee_id` and `status = 'Committed'`, so the Employee reads only their own Committed
+plans, with the same thirteen-key projection and their frozen contributing overtime `{ id, hours, amount }`. Their own
+Draft, Reviewed, Ready or Cancelled plan, a colleague's, another company's and an unknown id are 404 (SDR-0002 §8.3);
+every payroll write — commit included — and the drift read are 403. The **MU-4 privacy proof** for Payroll runs these
+probes with real sessions. No payslip document, no tax, BPJS, THR, allowance, deduction, bank or payment-date field.
+
+**Compatibility.** The CEO `payrollPlan` keeps exactly its thirteen keys (the key and `committed_at` never leave the
+server), so the AFI-4c1 strict decoders and the read-only Committed display keep working: BF-4c2 can be deployed behind
+AFI-4c1 with no deploy-together constraint. The Commit control, the drift explanation and My Payroll are AFI-4c2.
+
+**Proof.** Unit (`PayrollCommitTest`: the commit input, the drift evaluator and projection; `PayrollDomainTest`: the
+statements, the one Commit statement, the self reads, the READ COMMITTED scope), HTTP (`PayrollRoutingTest`), MariaDB
+(`PayrollSchemaTest`: 0027–0028 and the upgrade from 0026; `PayrollCommitTest`: commit, replay, mismatch, drift, drift
+read, terminality, self-read, MU-4, rollback, firewalls; `PayrollConcurrencyTest`: C1–C8, the lock proofs and the
+duplicate-key race), the boundary tool (exactly one `'Committed'` write, Employee reads Committed-only, the commit
+allowlist and route) and the verifier's BF-4c2 section.
 
 ### Release engineering
 

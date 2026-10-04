@@ -9,7 +9,8 @@ declare(strict_types=1);
  * Committed never silently altered, the pre-commit lifecycle, Cancelled releasing its overtime and
  * being replaced, the CEO reads, the snapshot, the audit rows, rollback when the audit row cannot
  * be written, out-of-bounds refusal, hostile principals, and the overtime / finance firewalls.
- * Fabricated data only: salaries, overtime and the one Committed plan are set with test-only SQL.
+ * Fabricated data only: salaries and overtime are set with test-only SQL; the Committed plan is
+ * committed through the BF-4c2 route (tests/Db/PayrollCommitTest.php proves Commit itself).
  */
 
 use TamOs\Data\Auth\AuthData;
@@ -226,15 +227,15 @@ return [
             }
         }
     },
-    'Committed is terminal: no operation, no generate and no link release touches it (M8); Cancelled is terminal (M9)' => static function () use ($world, $overtime, $generate, $ok, $step, $code, $planOf, $links, $row): void {
+    'Committed is terminal: no operation, no generate and no link release touches it (M8); Cancelled is terminal (M9)' => static function () use ($world, $overtime, $generate, $ok, $step, $code, $planOf, $links, $row, $post): void {
         $w = $world();
         $db = $w['db'];
         $o = $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', 'Approved', '21875.00');
         $data = $ok($generate($w), 'generate');
         $p = $ok($step($w, 'approve', $planOf($data, 'e_a1')), 'approve')['payrollPlan'];
-        // Test-only SQL: BF-4c1 has no Commit; this stands in for a BF-4c2 Committed plan.
-        $db->execute("UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), version = version + 1 WHERE id = ?", [$p['id']]);
-        $committed = ['id' => $p['id'], 'version' => $p['version'] + 1];
+        // BF-4c2 authorized revision: committed through the production commit route. Was: test-only
+        // SQL standing in for Commit (0027 now requires a commit key on every Committed row).
+        $committed = $ok($post($w, 'ceoA', '/api/payroll-plans/commit', ['id' => $p['id'], 'expectedVersion' => $p['version'], 'expectedTotal' => $p['totalAmount'], 'idempotencyKey' => bin2hex(random_bytes(16))]), 'commit')['payrollPlan'];
         $before = $row($db, $p['id']);
         foreach (['review', 'approve', 'return', 'cancel'] as $op) {
             assertSame([409, 'conflict'], $code($step($w, $op, $committed)), $op . ' on Committed');
@@ -267,7 +268,7 @@ return [
         assertSame(['Cancelled', 'Draft'], array_values(array_map(static fn (array $x): string => $x['status'], array_filter($list, static fn (array $x): bool => $x['employeeId'] === 'e_a1'))));
         assertSame([[$p['id'], 'create'], [$p['id'], 'cancel']], array_values(array_filter(array_map('array_values', $audits($db)), static fn (array $a): bool => $a[0] === $p['id'])));
     },
-    'reads: the CEO month list and detail with the contributing overtime; another company is 404; an Employee is 403; nothing internal leaks' => static function () use ($world, $overtime, $generate, $ok, $get, $code, $planOf): void {
+    'reads: the CEO month list and detail with the contributing overtime; another company is 404; an Employee reads no pre-commit plan; nothing internal leaks' => static function () use ($world, $overtime, $generate, $ok, $get, $code, $planOf): void {
         $w = $world();
         $o = $overtime($w['db'], $w['a'], 'e_a1', '2026-10', '2.50', 'Approved', '54688.00');
         $p = $planOf($ok($generate($w), 'generate'), 'e_a1');
@@ -281,8 +282,10 @@ return [
         assertSame([404, 'not_found'], $code($get($w, 'ceoB', '/api/payroll-plan', 'id=' . $p['id'])), 'another company CEO');
         assertSame([], $ok($get($w, 'ceoB', '/api/payroll-plans', 'month=2026-10'), 'company B list')['payrollPlans'], 'company B sees none of A (M11)');
         assertSame([404, 'not_found'], $code($get($w, 'ceoA', '/api/payroll-plan', 'id=' . str_repeat('0', 32))), 'absent');
-        assertSame([403, 'forbidden'], $code($get($w, 'empA1', '/api/payroll-plan', 'id=' . $p['id'])), 'not even the owner reads a plan in BF-4c1 (D-PAY-5: Committed self-read is BF-4c2)');
-        assertSame([403, 'forbidden'], $code($get($w, 'empA1', '/api/payroll-plans', 'month=2026-10')), 'Employee list');
+        // BF-4c2 authorized revision (D-PAY-5 = A): the owner reads only their own Committed plans, so
+        // their own Draft is absent (404) and their month list empty. Was: 403 on every Employee read.
+        assertSame([404, 'not_found'], $code($get($w, 'empA1', '/api/payroll-plan', 'id=' . $p['id'])), 'the owner does not read their own Draft');
+        assertSame([], $ok($get($w, 'empA1', '/api/payroll-plans', 'month=2026-10'), 'Employee list')['payrollPlans'], 'Employee list: no Committed plan yet');
     },
     'hostile principals: an Employee is 403 on every write; another company CEO is 404 on every transition and its generate never touches company A (M11, M12)' => static function () use ($world, $generate, $ok, $step, $code, $planOf, $counts, $post): void {
         $w = $world();

@@ -132,6 +132,12 @@ before a Payroll frontend exists. Its migrations must run before its routes are 
 first (or with it). It changes no existing backend contract and adds no deploy-together constraint of its own: it
 decodes every BF-4c1 status, Committed included (display-only). It is not deployed.
 
+**Deployment note — Payroll Commit (BF-4c2).** BF-4c2 adds the commit and drift routes, migrations `0027`–`0028` and
+lets an Employee read their own Committed plans through the existing reads. It keeps the CEO plan projection exactly as
+BF-4c1 defined it, so it can be deployed behind AFI-4c1 (which shows Committed read-only) with no deploy-together
+constraint; the Commit and My Payroll screens are AFI-4c2. Its migrations must run before its routes are reachable. It is
+not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

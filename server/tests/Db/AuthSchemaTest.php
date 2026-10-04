@@ -43,7 +43,7 @@ $insertUser = 'INSERT INTO users (id, email, password_hash, status, created_at, 
 $insertMembership = 'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))';
 
 return [
-    'production migrations 0001–0026 apply in order, create exactly the auth tables, the employees, the mail outbox, the audit trail, the overtime records and the payroll plans with their overtime links, and seed nothing' => static function () use ($tables, $authTables): void {
+    'production migrations 0001–0028 apply in order, create exactly the auth tables, the employees, the mail outbox, the audit trail, the overtime records and the payroll plans with their overtime links, and seed nothing' => static function () use ($tables, $authTables): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events',
@@ -53,7 +53,7 @@ return [
             '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation',
             '0020_create_overtime_records', '0021_replace_audit_events_overtime_checks',
             '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve',
-            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks'],
+            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'],
             array_map(static fn ($m): string => $m->label(), $applied));
         assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'users'], $tables($db));
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans')[0]['n'], 'no payroll plan');
@@ -84,7 +84,7 @@ return [
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
             $files[basename($path)] = (string) file_get_contents($path);
         }
-        assertSame(26, count($files), 'the production set through 0026 (BF-4c1)');
+        assertSame(28, count($files), 'the production set through 0028 (BF-4c2)');
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());
@@ -119,12 +119,12 @@ return [
         $checks = array_map(static fn (array $r): string => (string) $r['n'],
             $db->select('SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY CONSTRAINT_NAME'));
         assertSame(['account_tokens_expiry', 'account_tokens_final', 'account_tokens_purpose_v2', 'account_tokens_used_in_time',
-            'audit_events_account_target', 'audit_events_action_operation_v3', 'audit_events_action_v4', 'audit_events_entity_id', 'audit_events_entity_v3', 'audit_events_fields', 'audit_events_operation_v4',
+            'audit_events_account_target', 'audit_events_action_operation_v4', 'audit_events_action_v4', 'audit_events_entity_id', 'audit_events_entity_v3', 'audit_events_fields', 'audit_events_operation_v5',
             'auth_events_event_v3', 'employees_code', 'employees_employment_status', 'employees_full_name', 'employees_id', 'employees_salary', 'employees_version',
             'mail_outbox_attempts', 'mail_outbox_kind_v2', 'mail_outbox_status', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
             'overtime_records_approved_amount', 'overtime_records_date_in_month', 'overtime_records_hours', 'overtime_records_id', 'overtime_records_month_key', 'overtime_records_status_v2',
             'overtime_records_valuation', 'overtime_records_valuation_hours', 'overtime_records_valuation_method', 'overtime_records_valuation_salary', 'overtime_records_version',
-            'payroll_plans_base_salary', 'payroll_plans_committed', 'payroll_plans_id', 'payroll_plans_month_key', 'payroll_plans_overtime', 'payroll_plans_snapshot', 'payroll_plans_status',
+            'payroll_plans_base_salary', 'payroll_plans_committed', 'payroll_plans_commit_key_committed', 'payroll_plans_commit_key_format', 'payroll_plans_id', 'payroll_plans_month_key', 'payroll_plans_overtime', 'payroll_plans_snapshot', 'payroll_plans_status',
             'payroll_plans_total', 'payroll_plans_version', 'payroll_plan_overtime_id',
             'users_email_normalized', 'users_password_hash', 'users_status'], $checks);
         $fks = array_map(static fn (array $r): string => $r['t'] . '.' . $r['n'] . '->' . $r['r'],

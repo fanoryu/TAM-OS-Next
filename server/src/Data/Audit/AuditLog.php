@@ -38,6 +38,9 @@ use TamOs\Policy\Scope;
  * always names its operation — create or recalculate (generate), review, approve, return or
  * cancel. It names no field and carries no value — never the salary, an overtime amount or the
  * total; the plan row's own snapshot is the evidence. CEO company scope only.
+ *
+ * BF-4c2 (migration 0028): Commit is payroll.manage with operation 'commit' — one row per plan,
+ * written with the commit; an idempotent replay writes none. No new Action (ACTIONS stay 21).
  */
 final class AuditLog
 {
@@ -49,8 +52,8 @@ final class AuditLog
     /** BF-4b1: the overtime Actions appendOvertime() audits, and the operation each transition names (0021). */
     public const OVERTIME_ACTIONS = [Action::OvertimeCreateSelfDraft, Action::OvertimeUpdateSelfDraft, Action::OvertimeDeleteSelfDraft, Action::OvertimeSubmitSelf, Action::OvertimeManage];
     public const OVERTIME_OPERATIONS = ['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage, 'approve' => Action::OvertimeManage];
-    /** BF-4c1: the payroll.manage operations appendPayroll() audits (migration 0026's CHECK). */
-    public const PAYROLL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel'];
+    /** BF-4c1 + BF-4c2: the payroll.manage operations appendPayroll() audits (migration 0028's CHECK). */
+    public const PAYROLL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';

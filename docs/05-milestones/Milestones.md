@@ -384,7 +384,11 @@ generate and Draft recalculation, the pre-commit lifecycle and CEO reads under t
 no Employee read, no finance, no statutory payroll) is merged as source (PR #44, canonical `ff53e7b4`), backend only; Commit,
 the Employee's own Committed read and the MU-4 privacy proof are BF-4c2. **AFI-4c1** (the CEO's SESSION Payroll section
 over BF-4c1 — month list, detail, Prepare payroll with named exclusions, the pre-commit lifecycle; exact server money
-strings, Committed display-only; *D-AFI4c1-1..4 = A*) is a local candidate on a feature branch, frontend only. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+strings, Committed display-only; *D-AFI4c1-1..4 = A*) is merged as source (PR #45, canonical `6834a572`), frontend only.
+**BF-4c2** (Commit — Ready → Committed, an immutable obligation under the existing `payroll.manage`, idempotent on an
+SDR-0002 §10 key stored on the plan, guarded by `expectedTotal` and the drift guard; the CEO drift read; the Employee's
+read of their own Committed plans and the MU-4 privacy proof; migrations `0027`–`0028`; *D-BF4c2-1..4 = A*) is a local
+candidate on a feature branch, backend only. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

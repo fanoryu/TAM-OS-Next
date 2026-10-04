@@ -12,14 +12,18 @@ use TamOs\Policy\Scope;
 /**
  * The server payroll plan (BF-4c1, migrations 0024–0025): one plan per employee and month —
  * Base Salary + Approved Overtime, calculated by the server — and the record of which Approved
- * overtime contributed to it. CEO company scope only in this slice: there is no *_SELF_SQL, so
- * ScopedDatabase refuses every statement here under an Employee scope (the Employee's read of their
- * own Committed plan is BF-4c2).
+ * overtime contributed to it. Every write, lock, idempotency and drift read is CEO company scope
+ * only. BF-4c2 (D-PAY-5 = A) adds the Employee's read of their OWN COMMITTED plans: the *_SELF_SQL
+ * reads name :self_employee_id and status = 'Committed', so under an Employee scope a Draft,
+ * Reviewed, Ready or Cancelled plan — their own included — is absent (404), exactly like another
+ * employee's.
  *
  * The one writer of payroll_plans and payroll_plan_overtime. Writes are compare-and-swap on
  * `version` against the record the caller authorized, and every UPDATE names the pre-commit status
- * it expects, so no statement here can change a Committed or a Cancelled plan, and none writes
- * 'Committed' (Commit is BF-4c2). There is no DELETE of a plan. A link row's id is the overtime
+ * it expects, so no statement here can change a Committed or a Cancelled plan. Exactly one statement
+ * writes 'Committed' — COMMIT_SQL (BF-4c2): a compare-and-swap from 'Ready' at the expected version
+ * that also sets committed_at and the commit idempotency key, both frozen afterwards. There is no
+ * DELETE of a plan. A link row's id is the overtime
  * record it consumes, so the primary key makes double consumption impossible; links are written
  * at calculation, replaced when a Draft is recalculated and released when a plan is cancelled —
  * the link DELETE itself requires its plan to be pre-commit, so a Committed plan's links freeze.
@@ -48,13 +52,19 @@ final class PayrollStore
 
     // Anchor read: id, company, owner and status — the record a Policy decision needs.
     public const FIND_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, status FROM payroll_plans WHERE id = :id AND company_id = :company_id';
+    // BF-4c2: the Employee's anchor read — their own Committed plan only.
+    public const FIND_SELF_SQL = "SELECT id, company_id, employee_id AS owner_employee_id, status FROM payroll_plans WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND status = 'Committed'";
 
     // Plan reads (CEO company scope).
     public const RECORD_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version FROM payroll_plans WHERE id = :id AND company_id = :company_id';
     public const MONTH_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version FROM payroll_plans WHERE company_id = :company_id AND month_key = :month_key ORDER BY employee_code_snapshot, employee_id, created_at, id LIMIT 2001';
     public const LIVE_MONTH_SQL = "SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version FROM payroll_plans WHERE company_id = :company_id AND month_key = :month_key AND status <> 'Cancelled' ORDER BY employee_code_snapshot, employee_id, id LIMIT 2001";
+    // BF-4c2: the Employee's reads — their own Committed plans only (D-PAY-5 = A).
+    public const RECORD_SELF_SQL = "SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version FROM payroll_plans WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND status = 'Committed'";
+    public const MONTH_SELF_SQL = "SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version FROM payroll_plans WHERE company_id = :company_id AND month_key = :month_key AND employee_id = :self_employee_id AND status = 'Committed' ORDER BY employee_code_snapshot, employee_id, created_at, id LIMIT 2001";
     // The contributing overtime of one plan: its frozen amounts, through the plan's own links.
     public const PLAN_OVERTIME_SQL = "SELECT o.id, o.company_id, o.employee_id AS owner_employee_id, o.hours, o.approved_amount FROM payroll_plan_overtime l JOIN overtime_records o ON o.company_id = l.company_id AND o.id = l.id WHERE l.company_id = :company_id AND l.payroll_plan_id = :payroll_plan_id AND o.status = 'Approved' ORDER BY o.id";
+    public const PLAN_OVERTIME_SELF_SQL = "SELECT o.id, o.company_id, o.employee_id AS owner_employee_id, o.hours, o.approved_amount FROM payroll_plan_overtime l JOIN payroll_plans p ON p.company_id = l.company_id AND p.id = l.payroll_plan_id JOIN overtime_records o ON o.company_id = l.company_id AND o.id = l.id WHERE l.company_id = :company_id AND l.payroll_plan_id = :payroll_plan_id AND p.employee_id = :self_employee_id AND p.status = 'Committed' AND o.employee_id = p.employee_id AND o.status = 'Approved' ORDER BY o.id";
 
     // Generate, in the global lock order: ids by a plain read, then each row locked by primary key.
     public const EMPLOYEE_IDS_SQL = 'SELECT id, company_id, id AS owner_employee_id FROM employees WHERE company_id = :company_id ORDER BY id LIMIT 2001';
@@ -66,10 +76,24 @@ final class PayrollStore
     // A transition's lock of the one plan it was authorized on.
     public const LOCK_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, version FROM payroll_plans WHERE id = :id AND company_id = :company_id FOR UPDATE';
 
+    // BF-4c2 Commit, in the global order: the plan's employee (LOCK_EMPLOYEE_SQL, by primary key),
+    // then the plan with everything the guards compare, then plain reads under those locks.
+    public const LOCK_COMMIT_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version, commit_idempotency_key FROM payroll_plans WHERE id = :id AND company_id = :company_id FOR UPDATE';
+    // The company's plan (if any) already holding a commit idempotency key.
+    public const KEY_HOLDER_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM payroll_plans WHERE company_id = :company_id AND commit_idempotency_key = :commit_idempotency_key';
+    // The drift inputs (PayrollDrift): the plan, its employee's eligibility and salary now, their
+    // Approved overtime of the plan month with the frozen amounts, and the plan's links.
+    public const DRIFT_PLAN_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, status, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, version FROM payroll_plans WHERE id = :id AND company_id = :company_id';
+    public const DRIFT_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, monthly_base_salary, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id';
+    public const EMPLOYEE_APPROVED_SQL = "SELECT id, company_id, employee_id AS owner_employee_id, hours, approved_amount FROM overtime_records WHERE company_id = :company_id AND employee_id = :employee_id AND month_key = :month_key AND status = 'Approved' ORDER BY id LIMIT 2001";
+    public const PLAN_LINKS_SQL = 'SELECT l.id, l.company_id, p.employee_id AS owner_employee_id FROM payroll_plan_overtime l JOIN payroll_plans p ON p.company_id = l.company_id AND p.id = l.payroll_plan_id WHERE l.company_id = :company_id AND l.payroll_plan_id = :payroll_plan_id ORDER BY l.id';
+
     // Writes. A new plan is always a version 1 Draft; its owner comes from the authorized candidate.
     public const CREATE_SQL = "INSERT INTO payroll_plans (id, company_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, calculated_at, committed_at, version, created_at, updated_at) VALUES (:id, :company_id, :employee_id, :month_key, 'Draft', :employee_code_snapshot, :employee_name_snapshot, :department_snapshot, :base_salary, :overtime_amount, :overtime_hours, :overtime_count, :total_amount, UTC_TIMESTAMP(6), NULL, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))";
     public const RECALCULATE_SQL = "UPDATE payroll_plans SET employee_code_snapshot = :employee_code_snapshot, employee_name_snapshot = :employee_name_snapshot, department_snapshot = :department_snapshot, base_salary = :base_salary, overtime_amount = :overtime_amount, overtime_hours = :overtime_hours, overtime_count = :overtime_count, total_amount = :total_amount, calculated_at = UTC_TIMESTAMP(6), version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'";
     public const TRANSITION_SQL = "UPDATE payroll_plans SET status = :to_status, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status AND status IN ('Draft', 'Reviewed', 'Ready')";
+    // BF-4c2: the one statement that writes 'Committed' — from Ready at the expected version only.
+    public const COMMIT_SQL = "UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'";
     public const LINK_SQL = 'INSERT INTO payroll_plan_overtime (id, company_id, payroll_plan_id, created_at) VALUES (:overtime_id, :company_id, :id, UTC_TIMESTAMP(6))';
     public const UNLINK_SQL = "DELETE FROM payroll_plan_overtime WHERE company_id = :company_id AND payroll_plan_id = :id AND EXISTS (SELECT 1 FROM payroll_plans p WHERE p.company_id = payroll_plan_overtime.company_id AND p.id = payroll_plan_overtime.payroll_plan_id AND p.status IN ('Draft', 'Reviewed', 'Ready'))";
 
@@ -80,8 +104,7 @@ final class PayrollStore
     /** The plan with this id the scope can see, or null (absent and out of scope alike). */
     public function find(Scope $scope, string $id): ?ScopedRecord
     {
-        self::companyOnly($scope);
-        return $this->db->find($scope, self::ENTITY, self::FIND_SQL, ['id' => $id]);
+        return $this->db->find($scope, self::ENTITY, $scope->isSelf() ? self::FIND_SELF_SQL : self::FIND_SQL, ['id' => $id]);
     }
 
     /** The create candidate for a new Draft of the employee record $employee (read in scope). */
@@ -96,23 +119,21 @@ final class PayrollStore
         return $this->db->periodCandidate($scope, self::ENTITY, $monthKey);
     }
 
-    /** @return array<string, mixed>|null the plan, or null */
+    /** @return array<string, mixed>|null the plan, or null (an Employee: their own Committed plan only) */
     public function record(Scope $scope, string $id): ?array
     {
-        self::companyOnly($scope);
-        return $this->db->select($scope, self::RECORD_SQL, ['id' => $id])[0] ?? null;
+        return $this->db->select($scope, $scope->isSelf() ? self::RECORD_SELF_SQL : self::RECORD_SQL, ['id' => $id])[0] ?? null;
     }
 
     /**
      * Every plan of one month, Cancelled included — at most LIST_LIMIT rows, so a caller can tell
-     * that LIST_CAP was exceeded.
+     * that LIST_CAP was exceeded. An Employee: their own Committed plans of the month only.
      *
      * @return list<array<string, mixed>>
      */
     public function month(Scope $scope, string $monthKey): array
     {
-        self::companyOnly($scope);
-        return $this->db->select($scope, self::MONTH_SQL, ['month_key' => $monthKey]);
+        return $this->db->select($scope, $scope->isSelf() ? self::MONTH_SELF_SQL : self::MONTH_SQL, ['month_key' => $monthKey]);
     }
 
     /** @return list<array<string, mixed>> the month's live (non-Cancelled) plans, at most LIST_LIMIT */
@@ -122,11 +143,10 @@ final class PayrollStore
         return $this->db->select($scope, self::LIVE_MONTH_SQL, ['month_key' => $monthKey]);
     }
 
-    /** @return list<array<string, mixed>> the overtime that contributed to one plan, with its frozen amounts */
+    /** @return list<array<string, mixed>> the overtime that contributed to one plan, with its frozen amounts (an Employee: of their own Committed plan only) */
     public function overtimeOf(Scope $scope, string $planId): array
     {
-        self::companyOnly($scope);
-        return $this->db->select($scope, self::PLAN_OVERTIME_SQL, ['payroll_plan_id' => $planId]);
+        return $this->db->select($scope, $scope->isSelf() ? self::PLAN_OVERTIME_SELF_SQL : self::PLAN_OVERTIME_SQL, ['payroll_plan_id' => $planId]);
     }
 
     /**
@@ -206,6 +226,77 @@ final class PayrollStore
     }
 
     /**
+     * BF-4c2 Commit, step 1: locks the authorized plan's employee by primary key (the global order:
+     * employee before plan) and returns its current inputs, or null.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function lockOwner(Authorization $auth): ?array
+    {
+        $record = self::authorized($auth);
+        if ($record->ownerEmployeeId === null) {
+            throw new \LogicException('a payroll plan has an owning employee');
+        }
+        return $this->db->select($auth->scope, self::LOCK_EMPLOYEE_SQL, ['employee_id' => $record->ownerEmployeeId])[0] ?? null;
+    }
+
+    /**
+     * BF-4c2 Commit, step 2: locks the authorized plan with the values the guards compare, or null.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function lockForCommit(Authorization $auth): ?array
+    {
+        return $this->db->select($auth->scope, self::LOCK_COMMIT_SQL, ['id' => self::authorized($auth)->id])[0] ?? null;
+    }
+
+    /** BF-4c2: the id of the company's plan holding this commit idempotency key, or null. */
+    public function keyHolder(Scope $scope, string $key): ?string
+    {
+        self::companyOnly($scope);
+        $rows = $this->db->select($scope, self::KEY_HOLDER_SQL, ['commit_idempotency_key' => self::key($key)]);
+        return isset($rows[0]) ? (string) $rows[0]['id'] : null;
+    }
+
+    /**
+     * BF-4c2: the drift inputs of one plan (PayrollDrift::reasons) — the plan, its employee's current
+     * eligibility and salary, their Approved overtime of the plan month and the plan's links — or
+     * null when the plan or its employee is absent. Plain reads in company scope: under Commit they
+     * follow the employee and plan locks; the CEO drift read runs them in one transaction.
+     *
+     * @return array{plan: array<string, mixed>, employee: array<string, mixed>, approved: list<array<string, mixed>>, linked: list<string>}|null
+     */
+    public function driftInputs(Scope $scope, string $planId): ?array
+    {
+        self::companyOnly($scope);
+        $plan = $this->db->select($scope, self::DRIFT_PLAN_SQL, ['id' => $planId])[0] ?? null;
+        if ($plan === null) {
+            return null;
+        }
+        $employee = $this->db->select($scope, self::DRIFT_EMPLOYEE_SQL, ['employee_id' => (string) $plan['employee_id']])[0] ?? null;
+        if ($employee === null) {
+            return null;
+        }
+        $approved = $this->db->select($scope, self::EMPLOYEE_APPROVED_SQL, ['employee_id' => (string) $plan['employee_id'], 'month_key' => (string) $plan['month_key']]);
+        if (count($approved) > self::LIST_CAP) {
+            throw new \LogicException('an employee month above the payroll overtime cap');
+        }
+        $linked = array_map(static fn (array $r): string => (string) $r['id'], $this->db->select($scope, self::PLAN_LINKS_SQL, ['payroll_plan_id' => $planId]));
+        return ['plan' => $plan, 'employee' => $employee, 'approved' => $approved, 'linked' => $linked];
+    }
+
+    /**
+     * BF-4c2: Ready → Committed for the authorized plan at the expected version, storing the commit
+     * idempotency key (D-BF4c2-1 = A); committed_at is the database clock.
+     *
+     * @return int 1 when committed; 0 when the version or status moved
+     */
+    public function commit(Authorization $auth, int $expectedVersion, string $key): int
+    {
+        return $this->db->execute($auth, self::COMMIT_SQL, ['id' => self::authorized($auth)->id, 'expected_version' => $expectedVersion, 'commit_idempotency_key' => self::key($key)]);
+    }
+
+    /**
      * Inserts the authorized candidate as a version 1 Draft of $monthKey.
      *
      * @param array<string, int|string|null> $values exactly the VALUES columns
@@ -265,8 +356,16 @@ final class PayrollStore
     private static function companyOnly(Scope $scope): void
     {
         if ($scope->isSelf()) {
-            throw new \LogicException('payroll plans are read only in company scope in BF-4c1');
+            throw new \LogicException('payroll drift and idempotency reads are company scope only');
         }
+    }
+
+    private static function key(string $key): string
+    {
+        if (preg_match('/^[0-9a-f]{32}$/', $key) !== 1) {
+            throw new \LogicException('a commit idempotency key is 32 lowercase hex characters');
+        }
+        return $key;
     }
 
     /** The plan a write or lock was authorized on, under payroll.manage in company scope. */

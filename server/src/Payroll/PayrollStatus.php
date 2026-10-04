@@ -16,10 +16,17 @@ namespace TamOs\Payroll;
  *   Ready      → Draft       return
  *   Draft / Reviewed / Ready → Cancelled   cancel
  *
- * A Draft is created and recalculated only by generate. Committed is in the vocabulary (the stored
- * statuses are the frontend's PAYROLL_STATUSES) but nothing in BF-4c1 reaches it: Commit is BF-4c2.
- * Committed and Cancelled are terminal — no operation has either as its source. Ready is an approved
- * obligation awaiting commit, never a payment.
+ * A Draft is created and recalculated only by generate. Committed and Cancelled are terminal — no
+ * operation has either as its source. Ready is an approved obligation awaiting commit, never a
+ * payment.
+ *
+ * BF-4c2 (owner decisions D-BF4c2-1..4 = A): Commit is a separate named operation, not one of these
+ * transitions, because it is guarded by more than a status and a version (expectedTotal, the drift
+ * guard and an idempotency key):
+ *
+ *   Ready      → Committed   commit   (COMMIT_FROM → COMMITTED; nothing else reaches Committed)
+ *
+ * Committed is an immutable payroll obligation — never paid, executed or posted anywhere.
  */
 final class PayrollStatus
 {
@@ -33,6 +40,8 @@ final class PayrollStatus
     public const TERMINAL = [self::COMMITTED, self::CANCELLED];
     /** The statuses a BF-4c1 operation may start from. */
     public const PRE_COMMIT = [self::DRAFT, self::REVIEWED, self::READY];
+    /** BF-4c2: the one status Commit starts from. */
+    public const COMMIT_FROM = self::READY;
 
     /** operation => [source statuses, target status]; the only transitions there are. */
     public const TRANSITIONS = [

@@ -34,11 +34,14 @@ use TamOs\Policy\Action;
  * read by scope; a preview is decided by the handler under overtime.manage), and approve declares
  * the existing overtime.manage — record-bearing, 404 before 403. ACTIONS stay 21.
  *
- * BF-4c1: the payroll reads need a session and add no Action (CEO only in this slice; the month
- * list requires ?month=). generate, review, approve, return and cancel each declare the existing
- * payroll.manage — record-bearing, decided by the handler (generate against the period, the others
- * after their scoped load: 404 before 403). There is no commit route and no generic status route.
- * ACTIONS stay 21.
+ * BF-4c1: the payroll reads need a session and add no Action (the month list requires ?month=).
+ * generate, review, approve, return and cancel each declare the existing payroll.manage —
+ * record-bearing, decided by the handler (generate against the period, the others after their
+ * scoped load: 404 before 403). There is no generic status route.
+ *
+ * BF-4c2: commit declares the existing payroll.manage (record-bearing, 404 before 403); the drift
+ * read adds no Action (CEO only, decided by the handler). The two plan reads become role-aware: an
+ * Employee reads their own Committed plans. ACTIONS stay 21.
  *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
@@ -98,7 +101,7 @@ final class Routes
             // BF-4b2: valuation and approval (TAM-OT-1); no payroll, no finance.
             new Route('GET', '/api/overtime-record/valuation', $overtime->valuation(...), ['id'], RouteAuth::Required),
             new Route('POST', '/api/overtime-records/approve', $overtime->approve(...), [], RouteAuth::Required, Action::OvertimeManage),
-            // BF-4c1: payroll plans — CEO only, payroll.manage, no commit (BF-4c2).
+            // BF-4c1: payroll plans — payroll.manage writes; BF-4c2: the reads serve an Employee their own Committed plans.
             new Route('GET', '/api/payroll-plans', $payroll->month(...), ['month'], RouteAuth::Required),
             new Route('GET', '/api/payroll-plan', $payroll->find(...), ['id'], RouteAuth::Required),
             new Route('POST', '/api/payroll-plans/generate', $payroll->generate(...), [], RouteAuth::Required, Action::PayrollManage),
@@ -106,6 +109,9 @@ final class Routes
             new Route('POST', '/api/payroll-plans/approve', $payroll->approve(...), [], RouteAuth::Required, Action::PayrollManage),
             new Route('POST', '/api/payroll-plans/return', $payroll->returnToDraft(...), [], RouteAuth::Required, Action::PayrollManage),
             new Route('POST', '/api/payroll-plans/cancel', $payroll->cancel(...), [], RouteAuth::Required, Action::PayrollManage),
+            // BF-4c2: Commit (an immutable obligation — never a payment) and the CEO drift read.
+            new Route('POST', '/api/payroll-plans/commit', $payroll->commit(...), [], RouteAuth::Required, Action::PayrollManage),
+            new Route('GET', '/api/payroll-plan/drift', $payroll->drift(...), ['id'], RouteAuth::Required),
         ]);
     }
 

@@ -2,11 +2,13 @@
 declare(strict_types=1);
 
 /*
- * BF-4c1 payroll structure without a database: the pre-commit state machine (the canonical LOCAL
- * graph, with Committed and Cancelled terminal and Commit absent), the strict inputs (exactly
- * { month } and { id, expectedVersion } — every identity, money or status key a 400), the
- * projections, the store's statements and guards (company scope only, compare-and-swap, no
- * 'Committed', frozen links, Approved overtime only) and the payroll audit vocabulary.
+ * BF-4c1 + BF-4c2 payroll structure without a database: the pre-commit state machine (the
+ * canonical LOCAL graph, with Committed and Cancelled terminal) and Commit as its own operation from
+ * Ready, the strict inputs (exactly { month }, { id, expectedVersion } and, for commit, { id,
+ * expectedVersion, expectedTotal, idempotencyKey } — every identity, money or status key a 400),
+ * the projections, the store's statements and guards (company scope for every write, lock and drift
+ * read; the Employee's reads of their own Committed plans only; compare-and-swap; exactly one
+ * statement writing 'Committed'; frozen links; Approved overtime only) and the audit vocabulary.
  * Behaviour is proven against MariaDB in tests/Db/Payroll*Test.php.
  */
 
@@ -126,12 +128,22 @@ return [
             assertThrows(\LogicException::class, static fn () => PayrollView::plan([$col => $bad] + $row), $col);
         }
     },
-    'the store statements: company scope only, named parameters, compare-and-swap on a pre-commit status, no Committed, no plan DELETE, Approved overtime only' => static function () use ($sqlOf): void {
+    // BF-4c2 authorized revision: the *_SELF_SQL reads (an Employee's own Committed plans) name
+    // :self_employee_id, and COMMIT_SQL is the one statement writing 'Committed'. Was: company scope
+    // only and no 'Committed' anywhere.
+    'the store statements: company scope for every write and lock, the Employee reads own Committed only, named parameters, compare-and-swap on a pre-commit status, exactly one Commit, no plan DELETE, Approved overtime only' => static function () use ($sqlOf): void {
         $sql = $sqlOf();
         foreach ($sql as $name => $s) {
             assertTrue(str_contains($s, ':company_id'), $name . ' names :company_id');
-            assertTrue(!str_contains($s, ':self_employee_id') && !str_contains($s, '?'), $name . ': company scope, named parameters only');
-            assertTrue(!str_contains($s, "'Committed'") && !preg_match('/committed_at\s*=/', $s), $name . ' never writes Committed');
+            assertTrue(!str_contains($s, '?'), $name . ': named parameters only');
+            if (str_contains($s, ':self_employee_id')) {
+                assertTrue(str_ends_with($name, '_SELF_SQL') && str_starts_with($s, 'SELECT ') && (bool) preg_match("/\b(p\.)?status = 'Committed'/", $s) && !str_contains($s, 'FOR UPDATE'), $name . ': an Employee reads their own Committed plans only, without a lock (M14)');
+            } else {
+                assertTrue(!str_ends_with($name, '_SELF_SQL'), $name);
+            }
+            if ($name !== 'COMMIT_SQL' && !str_ends_with($name, '_SELF_SQL')) {
+                assertTrue(!str_contains($s, "'Committed'") && !preg_match('/committed_at\s*=/', $s) && !(str_contains($s, 'commit_idempotency_key') && !str_starts_with($s, 'SELECT ')), $name . ' never writes Committed, committed_at or the commit key');
+            }
             assertTrue(!preg_match('/^\s*DELETE\s+FROM\s+payroll_plans\b/i', $s), $name . ': no plan DELETE');
             if (str_contains($s, 'overtime_records')) {
                 assertTrue(str_contains($s, "status = 'Approved'") && !str_contains($s, 'valuation_'), $name . ': Approved overtime only, frozen amount only');
@@ -148,17 +160,43 @@ return [
         }
         assertTrue(str_ends_with($sql['LOCK_EMPLOYEE_SQL'], 'WHERE id = :employee_id AND company_id = :company_id FOR UPDATE') && str_ends_with($sql['LOCK_PLAN_ROW_SQL'], 'WHERE id = :plan_id AND company_id = :company_id FOR UPDATE'), 'generate locks employees and plans by primary key');
         assertTrue(!str_contains($sql['APPROVED_OVERTIME_SQL'], 'FOR UPDATE') && str_contains($sql['APPROVED_OVERTIME_SQL'], 'month_key = :month_key'), 'the plan month only (M5), never locked');
+        assertSame("UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'", $sql['COMMIT_SQL'], 'commit: Ready only, versioned, sets committed_at and the key (M1, M2)');
+        assertTrue(str_ends_with($sql['LOCK_COMMIT_SQL'], 'WHERE id = :id AND company_id = :company_id FOR UPDATE') && str_contains($sql['LOCK_COMMIT_SQL'], 'commit_idempotency_key'), 'commit locks its plan by primary key');
+        assertTrue(!str_contains($sql['EMPLOYEE_APPROVED_SQL'], 'FOR UPDATE') && str_contains($sql['EMPLOYEE_APPROVED_SQL'], "employee_id = :employee_id AND month_key = :month_key AND status = 'Approved'"), 'drift reads the employee month Approved set, unlocked');
         assertTrue(\TamOs\Data\Database::READ_COMMITTED_SQL === 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED', 'generate runs at READ COMMITTED');
+        // BF-4c2 authorized revision (D-BF4c2-3 = A): Commit is the one other READ COMMITTED
+        // transaction. Was: exactly the generate transaction.
         $service = (string) file_get_contents(dirname(__DIR__, 2) . '/src/Payroll/PayrollService.php');
-        assertSame(1, substr_count($service, '}, readCommitted: true);'), 'exactly the generate transaction is READ COMMITTED');
+        assertSame(2, substr_count($service, '}, readCommitted: true);'), 'exactly the generate and commit transactions are READ COMMITTED');
+        assertTrue(str_contains($service, "            \$this->data->audit()->appendPayroll(\$auth, \$actor, 'commit', \$requestId);\n        }, readCommitted: true);"), 'the commit transaction is the second one');
+        $all = '';
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(dirname(__DIR__, 2) . '/src', \FilesystemIterator::SKIP_DOTS)) as $f) {
+            $all .= str_ends_with((string) $f, '.php') ? (string) file_get_contents((string) $f) : '';
+        }
+        assertSame(2, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow)');
         assertSame(['employee_code_snapshot', 'employee_name_snapshot', 'department_snapshot', 'base_salary', 'overtime_amount', 'overtime_hours', 'overtime_count', 'total_amount'], PayrollStore::VALUES);
     },
-    'the store refuses an Employee scope, a foreign Action, a period write and a write without its plan' => static function () use ($db, $principal): void {
+    // BF-4c2 authorized revision: an Employee scope may read (own Committed plans); it is refused on
+    // the drift and idempotency reads. Was: refused on every read.
+    'the store refuses an Employee scope on the drift and key reads, a foreign Action, a period write, a write without its plan and a malformed commit key' => static function () use ($db, $principal): void {
         $store = new PayrollStore($db());
         $ceo = $principal('ceo', null);
         $emp = $principal('employee', 'emp_1');
-        assertThrows(\LogicException::class, static fn () => $store->month(Scope::of($emp), '2026-10'), 'no Employee read in BF-4c1');
-        assertThrows(\LogicException::class, static fn () => $store->find(Scope::of($emp), str_repeat('b', 32)), 'no Employee find');
+        $e = assertThrows(\LogicException::class, static fn () => $store->driftInputs(Scope::of($emp), str_repeat('b', 32)), 'no Employee drift read');
+        assertSame('payroll drift and idempotency reads are company scope only', $e->getMessage());
+        $e = assertThrows(\LogicException::class, static fn () => $store->keyHolder(Scope::of($emp), str_repeat('f', 32)), 'no Employee key read');
+        assertSame('payroll drift and idempotency reads are company scope only', $e->getMessage());
+        $plan = new Authorization(Action::PayrollManage, Scope::of($ceo), new ScopedRecord(Scope::of($ceo), 'payrollPlan', str_repeat('b', 32), 'emp_1', 'Ready'));
+        $e = assertThrows(\LogicException::class, static fn () => $store->commit($plan, 1, str_repeat('F', 32)), 'a malformed key');
+        assertSame('a commit idempotency key is 32 lowercase hex characters', $e->getMessage());
+        $e = assertThrows(\LogicException::class, static fn () => $store->keyHolder(Scope::of($ceo), 'x'), 'a malformed key read');
+        assertSame('a commit idempotency key is 32 lowercase hex characters', $e->getMessage());
+        $selfAuth = new Authorization(Action::PayrollManage, Scope::of($emp), new ScopedRecord(Scope::of($emp), 'payrollPlan', str_repeat('b', 32), 'emp_1', 'Ready'));
+        assertThrows(\LogicException::class, static fn () => $store->commit($selfAuth, 1, str_repeat('f', 32)), 'never an Employee commit');
+        assertThrows(\LogicException::class, static fn () => $store->lockOwner($selfAuth), 'never an Employee lock');
+        $periodAuth = Policy::authorize($ceo, Action::PayrollManage, $store->periodCandidate(Scope::of($ceo), '2026-10'));
+        assertThrows(\LogicException::class, static fn () => $store->lockForCommit($periodAuth), 'a period is not a plan');
+        assertThrows(\LogicException::class, static fn () => $store->commit($periodAuth, 1, str_repeat('f', 32)), 'no commit under a period');
         $period = Policy::authorize($ceo, Action::PayrollManage, $store->periodCandidate(Scope::of($ceo), '2026-10'));
         assertThrows(\LogicException::class, static fn () => $store->lock($period), 'a period is not a plan');
         assertThrows(\LogicException::class, static fn () => $store->transition($period, 1, 'Draft', 'Reviewed'), 'no write under a period');
@@ -177,24 +215,32 @@ return [
         assertTrue(Policy::allows($ceo, Action::PayrollManage, $store->periodCandidate(Scope::of($ceo), '2026-10')), 'CEO');
         assertTrue(!Policy::allows($emp, Action::PayrollManage, $store->periodCandidate(Scope::of($emp), '2026-10')), 'Employee');
         assertTrue(!Policy::allows($ceo, Action::OvertimeManage, $store->periodCandidate(Scope::of($ceo), '2026-10')), 'another action');
-        $e = assertThrows(ApiError::class, static fn () => (new PayrollService($unreachable()))->month($emp, '2026-10'));
-        assertSame(ErrorCode::Forbidden, $e->errorCode, 'an Employee read is 403 before any lookup');
         $e = assertThrows(ApiError::class, static fn () => (new PayrollService($unreachable()))->generate($emp, ['month' => '2026-10'], str_repeat('d', 32)));
         assertSame(ErrorCode::Forbidden, $e->errorCode, 'an Employee generate is 403 before any lookup');
+        $body = ['id' => str_repeat('b', 32), 'expectedVersion' => 1, 'expectedTotal' => '1.00', 'idempotencyKey' => str_repeat('f', 32)];
+        $e = assertThrows(ApiError::class, static fn () => (new PayrollService($unreachable()))->commit($emp, $body, str_repeat('d', 32)));
+        assertSame(ErrorCode::Forbidden, $e->errorCode, 'an Employee commit is 403 before any lookup (M16)');
+        $e = assertThrows(ApiError::class, static fn () => (new PayrollService($unreachable()))->drift($emp, str_repeat('b', 32)));
+        assertSame(ErrorCode::Forbidden, $e->errorCode, 'an Employee drift read is 403 before any lookup');
+        // BF-4c2 authorized revision: an Employee's month read reaches the data layer (own Committed
+        // plans only). Was: 403 before any lookup.
+        assertThrows(\TamOs\Data\DatabaseError::class, static fn () => (new PayrollService($unreachable()))->month($emp, '2026-10'), 'an Employee read is scoped, not refused');
     },
-    'the payroll audit vocabulary: payroll.manage operations, no field, no value' => static function () use ($db, $principal): void {
-        assertSame(['create', 'recalculate', 'review', 'approve', 'return', 'cancel'], AuditLog::PAYROLL_OPERATIONS);
+    'the payroll audit vocabulary: payroll.manage operations, commit included (BF-4c2), no field, no value' => static function () use ($db, $principal): void {
+        assertSame(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'], AuditLog::PAYROLL_OPERATIONS);
         assertTrue(str_ends_with(AuditLog::APPEND_PAYROLL_SQL, ':operation, NULL, :request_id, NULL)'), 'no target user, no field list');
         $audit = new AuditLog($db());
         $ceo = $principal('ceo', null);
         $plan = new Authorization(Action::PayrollManage, Scope::of($ceo), new ScopedRecord(Scope::of($ceo), 'payrollPlan', str_repeat('b', 32), 'emp_1', 'Draft'));
-        assertThrows(\LogicException::class, static fn () => $audit->appendPayroll($plan, $ceo, 'commit', str_repeat('d', 32)), 'no commit operation');
+        assertThrows(\LogicException::class, static fn () => $audit->appendPayroll($plan, $ceo, 'pay', str_repeat('d', 32)), 'no payment operation');
         $period = new Authorization(Action::PayrollManage, Scope::of($ceo), new ScopedRecord(Scope::of($ceo), 'payrollPlan', '2026-10', null, null));
         assertThrows(\LogicException::class, static fn () => $audit->appendPayroll($period, $ceo, 'create', str_repeat('d', 32)), 'a period is never audited as a plan');
         $other = new Authorization(Action::OvertimeManage, Scope::of($ceo), new ScopedRecord(Scope::of($ceo), 'overtime', str_repeat('b', 32), 'emp_1', 'Reviewed'));
         assertThrows(\LogicException::class, static fn () => $audit->appendPayroll($other, $ceo, 'approve', str_repeat('d', 32)), 'payroll.manage only');
         $migration = (string) file_get_contents(dirname(__DIR__, 2) . '/migrations/0026_replace_audit_events_payroll_checks.sql');
-        assertTrue(str_contains($migration, "WHEN 'payroll.manage' THEN operation IS NOT NULL AND operation IN ('create', 'recalculate', 'review', 'approve', 'return', 'cancel')")
-            && str_contains($migration, "(entity = 'payrollPlan') = (action = 'payroll.manage')"), '0026 admits exactly these under payroll.manage on payrollPlan');
+        assertTrue(str_contains($migration, "(entity = 'payrollPlan') = (action = 'payroll.manage')"), '0026 ties payroll.manage to payrollPlan');
+        $m28 = (string) file_get_contents(dirname(__DIR__, 2) . '/migrations/0028_replace_audit_events_payroll_commit.sql');
+        assertTrue(str_contains($m28, "WHEN 'payroll.manage' THEN operation IS NOT NULL AND operation IN ('create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit')")
+            && !str_contains($m28, 'audit_events_action_v') && !str_contains($m28, 'audit_events_entity_v'), '0028 adds commit under payroll.manage and nothing else: no new Action, no new entity');
     },
 ];

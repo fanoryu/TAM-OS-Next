@@ -75,6 +75,7 @@ return [
             'POST /api/payroll-plans/approve' => Action::PayrollManage,
             'POST /api/payroll-plans/return' => Action::PayrollManage,
             'POST /api/payroll-plans/cancel' => Action::PayrollManage,
+            'POST /api/payroll-plans/commit' => Action::PayrollManage,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

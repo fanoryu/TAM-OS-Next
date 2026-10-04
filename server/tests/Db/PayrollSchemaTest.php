@@ -9,6 +9,11 @@ declare(strict_types=1);
  * table's primary key (one overtime record consumed at most once, ever), the composite tenant FKs
  * without cascade, the audit vocabulary of 0026, and the forward migration of a schema-0023
  * database whose Employee, Overtime and audit rows survive unchanged with no seed row.
+ *
+ * BF-4c2 (migrations 0027–0028): the commit idempotency key — present if and only if Committed, 32
+ * lowercase hex characters, unique within a company (another company may hold the same key) — the
+ * commit audit operation, and the forward migration of a schema-0026 database whose existing plans
+ * (Draft, Ready, Cancelled) survive unchanged with no key.
  */
 
 use TamOs\Data\Database;
@@ -40,9 +45,11 @@ $company = static function (Database $db): array {
 $plan = static function (Database $db, array $c, string $employee, array $over = []): string {
     $id = $over['id'] ?? bin2hex(random_bytes(16));
     $v = $over + ['month' => '2026-10', 'status' => 'Draft', 'base' => '3500000.00', 'ot' => '0.00', 'hours' => '0.00', 'count' => 0, 'total' => '3500000.00', 'committed' => null];
-    $db->execute('INSERT INTO payroll_plans (id, company_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, calculated_at, committed_at, version, created_at, updated_at)'
-        . " VALUES (?, ?, ?, ?, ?, 'CODE', 'Fixture', NULL, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), " . ($v['committed'] === null ? 'NULL' : 'UTC_TIMESTAMP(6)') . ', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
-        [$id, $c['id'], $employee, $v['month'], $v['status'], $v['base'], $v['ot'], $v['hours'], $v['count'], $v['total']]);
+    // BF-4c2: a test-only Committed row carries a commit key unless 'key' says otherwise (0027).
+    $key = array_key_exists('key', $v) ? $v['key'] : ($v['committed'] === null ? null : bin2hex(random_bytes(16)));
+    $db->execute('INSERT INTO payroll_plans (id, company_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, calculated_at, committed_at, commit_idempotency_key, version, created_at, updated_at)'
+        . " VALUES (?, ?, ?, ?, ?, 'CODE', 'Fixture', NULL, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), " . ($v['committed'] === null ? 'NULL' : 'UTC_TIMESTAMP(6)') . ', ?, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+        [$id, $c['id'], $employee, $v['month'], $v['status'], $v['base'], $v['ot'], $v['hours'], $v['count'], $v['total'], $key]);
     return $id;
 };
 $approved = static function (Database $db, array $c, string $employee): string {
@@ -96,7 +103,7 @@ return [
             'employee_code_snapshot' => ['varchar(32)', 'utf8mb4', 'NO'], 'employee_name_snapshot' => ['varchar(160)', 'utf8mb4', 'NO'], 'department_snapshot' => ['varchar(120)', 'utf8mb4', 'YES'],
             'base_salary' => ['decimal(15,2)', null, 'NO'], 'overtime_amount' => ['decimal(17,2)', null, 'NO'], 'overtime_hours' => ['decimal(9,2)', null, 'NO'],
             'overtime_count' => ['int(10) unsigned', null, 'NO'], 'total_amount' => ['decimal(17,2)', null, 'NO'],
-            'calculated_at' => ['datetime(6)', null, 'NO'], 'committed_at' => ['datetime(6)', null, 'YES'], 'version' => ['int(10) unsigned', null, 'NO'],
+            'calculated_at' => ['datetime(6)', null, 'NO'], 'committed_at' => ['datetime(6)', null, 'YES'], 'commit_idempotency_key' => ['char(32)', 'ascii', 'YES'], 'version' => ['int(10) unsigned', null, 'NO'],
             'created_at' => ['datetime(6)', null, 'NO'], 'updated_at' => ['datetime(6)', null, 'NO'], 'live_key' => ['tinyint(3) unsigned', null, 'YES'],
         ], $cols, 'no float, no statutory, finance or valuation column');
     },
@@ -152,7 +159,8 @@ return [
             assertSame(['RESTRICT', 'RESTRICT'], [(string) $fk['u'], (string) $fk['d']], (string) $fk['n'] . ' does not cascade');
         }
     },
-    '0026: the audit vocabulary admits create, recalculate, review, approve, return and cancel under payroll.manage on payrollPlan only' => static function () use ($refused, $company): void {
+    // BF-4c2 authorized revision: 0028 admits commit. Was: commit refused (BF-4c1).
+    '0026 + 0028: the audit vocabulary admits create, recalculate, review, approve, return, cancel and commit under payroll.manage on payrollPlan only' => static function () use ($refused, $company): void {
         $db = authDatabase();
         $c = $company($db);
         $user = bin2hex(random_bytes(16));
@@ -161,10 +169,14 @@ return [
         $db->execute("INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, 'ceo', NULL, 'active', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))", [$m, $user, $c['id']]);
         $ins = "INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (?, UTC_TIMESTAMP(6), ?, ?, ?, ?, 'p1', ?, NULL, ?, NULL)";
         $rid = str_repeat('a', 32);
-        foreach (['create', 'recalculate', 'review', 'approve', 'return', 'cancel'] as $op) {
+        foreach (['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'] as $op) {
             $db->execute($ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', $op, $rid]);
         }
-        $refused($db, $ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', 'commit', $rid], 'no commit operation (BF-4c2)');
+        foreach (['pay', 'post', 'execute', 'submit'] as $op) {
+            $refused($db, $ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', $op, $rid], 'no ' . $op . ' operation under payroll.manage');
+        }
+        $refused($db, $ins, [$c['id'], $user, $m, 'overtime.manage', 'overtime', 'commit', $rid], 'commit is only a payroll operation');
+        $refused($db, $ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', 'Commit', $rid], 'exact spelling');
         $refused($db, $ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', null, $rid], 'an operation is required');
         $refused($db, $ins, [$c['id'], $user, $m, 'payroll.manage', 'employee', 'create', $rid], 'payroll.manage is a payrollPlan row');
         $refused($db, $ins, [$c['id'], $user, $m, 'employee.update', 'payrollPlan', null, $rid], 'payrollPlan is only payroll.manage');
@@ -173,7 +185,7 @@ return [
         $db->execute($ins, [$c['id'], $user, $m, 'overtime.manage', 'overtime', 'approve', $rid]);
         $db->execute("INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (?, UTC_TIMESTAMP(6), ?, ?, 'employee.update', 'employee', 'e1', NULL, NULL, ?, 'fullName')", [$c['id'], $user, $m, $rid]);
     },
-    '0024–0026 migrate a schema-0023 database forward: Employee, Overtime and audit rows survive unchanged; no payroll row is seeded' => static function (): void {
+    '0024–0028 migrate a schema-0023 database forward: Employee, Overtime and audit rows survive unchanged; no payroll row is seeded' => static function (): void {
         $db = testDatabase();
         $files = [];
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
@@ -198,9 +210,71 @@ return [
         $snapshot = static fn (): array => [$db->select('SELECT * FROM employees ORDER BY id'), $db->select('SELECT * FROM overtime_records ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0026, current');
+        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1 and BF-4c2 migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0028, current');
         assertSame($before, $snapshot(), 'every Employee, Overtime and audit row is unchanged');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plan_overtime')[0]['n']], 'no payroll row is seeded');
+    },
+    '0027: the commit key exists if and only if Committed, is 32 lowercase hex characters and is unique within a company only' => static function () use ($refused, $company, $plan): void {
+        $db = authDatabase();
+        $c = $company($db);
+        $key = bin2hex(random_bytes(16));
+        $committed = $plan($db, $c, $c['e1'], ['status' => 'Committed', 'committed' => true, 'key' => $key]);
+        foreach ([
+            'Committed without a key' => ['status' => 'Committed', 'committed' => true, 'key' => null],
+            'a key on a Ready plan' => ['status' => 'Ready', 'key' => bin2hex(random_bytes(16))],
+            'a key on a Cancelled plan' => ['status' => 'Cancelled', 'key' => bin2hex(random_bytes(16))],
+            'an uppercase key' => ['status' => 'Committed', 'committed' => true, 'key' => strtoupper(bin2hex(random_bytes(16)))],
+            'a short key' => ['status' => 'Committed', 'committed' => true, 'key' => substr(bin2hex(random_bytes(16)), 1)],
+            'the same key twice in one company' => ['status' => 'Committed', 'committed' => true, 'key' => $key],
+        ] as $label => $over) {
+            try {
+                $plan($db, $c, $c['e2'], $over + ['month' => '2026-11']);
+            } catch (\Throwable) {
+                continue;
+            }
+            throw new \TamOs\Tests\AssertionFailed('expected the database to refuse: ' . $label);
+        }
+        $d = $company($db);
+        $plan($db, $d, $d['e1'], ['status' => 'Committed', 'committed' => true, 'key' => $key]);
+        assertSame(2, (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans WHERE commit_idempotency_key = ?', [$key])[0]['n'], 'another company may hold the same key');
+        $refused($db, 'UPDATE payroll_plans SET commit_idempotency_key = NULL WHERE id = ?', [$committed], 'a Committed plan cannot lose its key');
+        $refused($db, "UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6) WHERE id = ?", [$plan($db, $c, $c['e2'])], 'a commit without a key');
+        $idx = array_map(static fn (array $r): string => (string) $r['c'], $db->select("SELECT COLUMN_NAME AS c FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payroll_plans' AND INDEX_NAME = 'payroll_plans_commit_key' AND NON_UNIQUE = 0 ORDER BY SEQ_IN_INDEX"));
+        assertSame(['company_id', 'commit_idempotency_key'], $idx, 'the company-scoped unique key');
+    },
+    '0027–0028 migrate a schema-0026 database forward: existing Draft, Ready and Cancelled plans, links and audit rows survive unchanged, with no key; nothing is seeded' => static function () use ($company, $plan, $approved, $link): void {
+        $db = testDatabase();
+        $files = [];
+        foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
+            if ((int) substr(basename($path), 0, 4) <= 26) {
+                $files[basename($path)] = (string) file_get_contents($path);
+            }
+        }
+        (new Migrator($db, migrationFixture($files)))->apply();
+        $c = $company($db);
+        $insert = static fn (string $employee, string $status, string $month): string => (static function () use ($db, $c, $employee, $status, $month): string {
+            $id = bin2hex(random_bytes(16));
+            $db->execute("INSERT INTO payroll_plans (id, company_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, calculated_at, committed_at, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'CODE', 'Fixture', NULL, '3500000.00', '0.00', '0.00', 0, '3500000.00', UTC_TIMESTAMP(6), NULL, 3, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))", [$id, $c['id'], $employee, $month, $status]);
+            return $id;
+        })();
+        $draft = $insert($c['e1'], 'Draft', '2026-10');
+        $insert($c['e2'], 'Ready', '2026-10');
+        $insert($c['e1'], 'Cancelled', '2026-09');
+        $db->execute($link, [$approved($db, $c, $c['e1']), $c['id'], $draft]);
+        $snapshot = static fn (): array => [$db->select('SELECT * FROM payroll_plans ORDER BY id'), $db->select('SELECT * FROM payroll_plan_overtime ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
+        $before = $snapshot();
+        $applied = (new Migrator($db, productionMigrationsDir()))->apply();
+        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2 migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0028, current');
+        [$plans, $links, $audit] = $snapshot();
+        $sorted = static function (array $r): array {
+            ksort($r);
+            return $r;
+        };
+        assertSame(array_map(static fn (array $r): array => $sorted($r + ['commit_idempotency_key' => null]), $before[0]), array_map($sorted, $plans), 'every plan is unchanged, with no key');
+        assertSame([$before[1], $before[2]], [$links, $audit], 'links and audit rows are unchanged');
+        assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans WHERE commit_idempotency_key IS NOT NULL')[0]['n'], 'no key is seeded');
+        $plan($db, $c, $c['e2'], ['month' => '2026-12', 'status' => 'Committed', 'committed' => true]);
     },
 ];
