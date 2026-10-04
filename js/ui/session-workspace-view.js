@@ -14,7 +14,8 @@
    LOCAL Overtime page. Sections do not switch while a write of either is in flight.
    AFI-4c1: the CEO gets a third section, "Payroll" (renderSessionPayrollHTML(),
    js/ui/session-payroll-view.js, SessionPayroll's memory-only data) — never the LOCAL
-   Payroll Workspace; an Employee's sections are unchanged and never include it.
+   Payroll Workspace. AFI-4c2: an Employee's third section is "My payroll" — their own
+   Committed payroll only, through the same SessionPayroll data; never the CEO's controls.
 
      CEO       Employees: Active / Archived tabs, the company list, a record's
                detail; the derived account state is status text only.
@@ -339,7 +340,8 @@ function sessionWorkspaceSelfHTML(w){
 }
 
 // AFI-4b1: the two SESSION sections. A section button shows its section; neither switches while
-// a write of either section is in flight. AFI-4c1: the CEO's third section, Payroll (CEO only).
+// a write of either section is in flight. AFI-4c1: the CEO's third section, Payroll. AFI-4c2: the
+// Employee's third section, My payroll.
 function sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll){
   const dis = busy ? ' disabled' : '';
   const tab = function(id, label, current){
@@ -347,7 +349,7 @@ function sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll){
   };
   return '<nav aria-label="Workspace sections"><div class="tabs">'
     + tab('swSectionMain', ceo ? 'Employees' : 'My profile', !overtime && !payroll) + tab('swSectionOvertime', ceo ? 'Overtime' : 'My overtime', overtime)
-    + (ceo ? tab('swSectionPayroll', 'Payroll', payroll === true) : '')
+    + tab('swSectionPayroll', ceo ? 'Payroll' : 'My payroll', payroll === true)
     + '</div></nav>';
 }
 
@@ -358,13 +360,13 @@ function sessionWorkspaceHTML(auth, w){
   const employee = !!principal && principal.principalType === PRINCIPAL_TYPES.EMPLOYEE;
   const ot = SessionOvertimeStore.snapshot();
   const pr = SessionPayrollStore.snapshot();
-  const payroll = ceo && pr.open;                                      // AFI-4c1: CEO only
+  const payroll = (ceo || employee) && pr.open;                        // AFI-4c1 CEO Payroll; AFI-4c2 Employee My payroll
   const overtime = (ceo || employee) && ot.open && !payroll;
   const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING || ot.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING
     || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING;
   let title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
   let body;
-  if(payroll){ title = renderSessionPayrollTitle(pr); body = renderSessionPayrollHTML(principal, pr); }
+  if(payroll){ title = renderSessionPayrollTitle(pr, principal); body = renderSessionPayrollHTML(principal, pr); }
   else if(overtime){ title = renderSessionOvertimeTitle(principal, ot); body = renderSessionOvertimeHTML(principal, ot); }
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
@@ -381,7 +383,8 @@ function bindSessionWorkspace(app){
   const on = function(id, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener('click', fn); };
   on('authSignOutBtn', function(){ AuthBoot.signOut(); });
   // AFI-4b1: the section switch — never while an Employee write is in flight. AFI-4c1: nor while
-  // an Overtime or Payroll write is; Payroll is shown only to the CEO (SessionPayroll.show).
+  // an Overtime or Payroll write is; SessionPayroll.show decides who may open it (the CEO's Payroll,
+  // AFI-4c2 an Employee's My payroll).
   const idle = function(){
     return SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING
       && SessionOvertimeStore.snapshot().mutation.status !== SESSION_OVERTIME_MUTATION_STATUS.PENDING
@@ -475,7 +478,7 @@ function sessionWorkspaceFocus(app, hint, kept){
 function renderSessionWorkspace(app, auth){
   SessionWorkspace.ensureLoaded(auth.principal);
   SessionOvertime.ensureLoaded(auth.principal);                // AFI-4b1: binds (or destroys) the Overtime data too
-  SessionPayroll.ensureLoaded(auth.principal);                 // AFI-4c1: and the Payroll data (CEO only)
+  SessionPayroll.ensureLoaded(auth.principal);                 // AFI-4c1: and the Payroll data (AFI-4c2: My payroll too)
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
