@@ -214,8 +214,8 @@ confirmation and reads the plan again; an unconfirmed write is never resent. New
 backend, migration or ACTION change (still 21), no new body-key exception (D-AFI4b1-3 unchanged), `AUTH_MODE` stays
 LOCAL. Its dedicated harness, `tools/verify-session-payroll-runtime.js`, is the **tenth** CI harness (D-AFI4c1-2 = A,
 after a repeated-run and UTC-12 … UTC+14 determinism proof). AFI-4c1 needs BF-4c1 at runtime; it adds no
-deploy-together constraint of its own. **BF-4c2** (local candidate on `feature/bf-4c2-payroll-commit`; not pushed, not
-merged, not deployed; owner decisions D-BF4c2-1 = A, D-BF4c2-2 = A, D-BF4c2-3 = A, D-BF4c2-4 = A) completes the Payroll
+deploy-together constraint of its own. **BF-4c2** (merged to `main` as source, PR #46, canonical merge
+`df15b41a9097411eabde39be175f2b38c0809a04`; not deployed; owner decisions D-BF4c2-1 = A, D-BF4c2-2 = A, D-BF4c2-3 = A, D-BF4c2-4 = A) completes the Payroll
 backend, **backend only**. `POST /api/payroll-plans/commit` (CEO only, the existing `payroll.manage`; **ACTIONS stay 21**)
 turns a **Ready** plan into a **Committed** one — an immutable payroll obligation, never a payment, an execution or a
 Finance posting. It takes exactly `{ id, expectedVersion, expectedTotal, idempotencyKey }`: `expectedTotal` is the exact
@@ -241,7 +241,24 @@ and another company's are 404; every write and the drift read are 403), proven w
 proof for Payroll). The CEO plan projection keeps exactly its thirteen keys, so AFI-4c1 is unaffected and BF-4c2 can be
 deployed behind it; migrations `0027`–`0028` (head **0028**; `0028` adds the `commit` audit operation). No frontend or
 package change (100 files, `a0a95b13…`), no Finance, payment or statutory effect, `AUTH_MODE` stays LOCAL. The Commit
-and My Payroll screens are AFI-4c2.
+and My Payroll screens are AFI-4c2. **AFI-4c2** (local candidate on `feature/afi-4c2-session-payroll`; not pushed, not merged, not deployed; owner
+decisions D-AFI4c2-1 = A, D-AFI4c2-2 = A, D-AFI4c2-3 = A) is the SESSION frontend of BF-4c2, frontend only. The CEO's
+Payroll section offers **Commit payroll** on a Ready plan: an inline confirmation shows the plan's own server strings and
+says Commit makes it the final payroll obligation — no later return or cancel — and is not a payment and posts nothing to
+Finance. One deliberate confirmation creates one in-memory commit intent: the plan's decoded `totalAmount` string, sent
+unchanged as `expectedTotal`, and a key of 16 Web Crypto bytes (never `Math.random`, never stored). Success is only the same
+plan, Committed, at version + 1, with exactly that total. A 409 is never explained by a guessed cause (the server reports
+one generic conflict): the intent is dropped and the plan is read again. An outcome that cannot be known keeps the intent
+and reads the plan again — never resent automatically (D-AFI4c2-1 = A): Committed at version + 1 with the same total is
+the success; still Ready at the same version and total offers **Retry commit**, which on a deliberate click sends the same
+body and key (the BF-4c2 replay — the one exception to AFI-4c1's "never resent"); anything else drops the intent as stale.
+D-AFI4c2-2 = A: a Ready plan's drift is read when its detail becomes current (so after a commit 409 too) and lists what
+changed in fixed words, never a value; it never offers or refuses Commit, and nothing is returned or regenerated
+automatically. D-AFI4c2-3 = A: Committed reads **"Committed — final, not paid"**. An Employee gets **My payroll** (My
+profile | My overtime | My payroll): their own Committed plans by month and a read-only, payslip-like card of the server's
+fields only — no control, no drift read, no write, no statutory or bank concept. The four existing Payroll and workspace
+modules are extended (no new module, no ApiClient, AuthBoot, backend or migration change); the package keeps 100 files with
+a new digest; the dedicated Payroll harness is extended (CI stays at ten harnesses). `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

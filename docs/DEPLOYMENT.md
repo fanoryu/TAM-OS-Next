@@ -138,6 +138,10 @@ BF-4c1 defined it, so it can be deployed behind AFI-4c1 (which shows Committed r
 constraint; the Commit and My Payroll screens are AFI-4c2. Its migrations must run before its routes are reachable. It is
 not deployed.
 
+**Deployment note — SESSION Payroll Commit and My payroll (AFI-4c2).** AFI-4c2 calls the BF-4c2 commit and drift routes and
+the Employee's self-read, so it needs BF-4c2 deployed first (or with it). It changes no backend contract and adds no
+deploy-together constraint of its own. It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

@@ -1745,7 +1745,8 @@ and approval); its valuation inputs and exact-decimal method were deferred to BF
 (PR #41, canonical `77332ca20ccc01c56845938b214c7238646ff90f`), BF-4b2 is merged (PR #42, canonical
 `78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is merged (PR #43, canonical `58e1127a0e44b60bf771e2d399ea15336b6f9610`).
 Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`), AFI-4c1 is merged (PR #45, canonical
-`6834a572485e0057f01897283f006ccaa00769c6`), and BF-4c2 (below) is a local candidate.
+`6834a572485e0057f01897283f006ccaa00769c6`), BF-4c2 is merged (PR #46, canonical `df15b41a9097411eabde39be175f2b38c0809a04`), and
+AFI-4c2 (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2008,11 +2009,11 @@ pass. The Employee and Overtime harnesses were revised narrowly to admit exactly
 `tools/serve-auth-stub.js` models BF-4c1 for browser QA (`/__stub/bump-payroll` makes a shown plan stale). AFI-4c1 needs
 BF-4c1 at runtime and adds no deploy-together constraint of its own.
 
-### Payroll Commit and Employee self-read — BF-4c2 (local candidate; backend only, not deployed)
+### Payroll Commit and Employee self-read — BF-4c2 (merged as PR #46, canonical `df15b41a`; backend only, not deployed)
 
 BF-4c2 completes the Payroll backend (Phase 0 owner decisions D-BF4c2-1 = A, D-BF4c2-2 = A, D-BF4c2-3 = A,
-D-BF4c2-4 = A, 2026-10-04, over D-PAY-1/4/5/6 = A). It is a local candidate on `feature/bf-4c2-payroll-commit`; not
-pushed, merged or deployed. Backend only: no frontend change, the package is unchanged (100 files, digest `a0a95b13…`),
+D-BF4c2-4 = A, 2026-10-04, over D-PAY-1/4/5/6 = A). It is merged to `main` as source (PR #46, canonical merge
+`df15b41a9097411eabde39be175f2b38c0809a04`), not deployed. Backend only: no frontend change, the package is unchanged (100 files, digest `a0a95b13…`),
 ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
 
 **Commit.** `POST /api/payroll-plans/commit` declares the existing `payroll.manage` and takes exactly
@@ -2091,6 +2092,59 @@ statements, the one Commit statement, the self reads, the READ COMMITTED scope),
 read, terminality, self-read, MU-4, rollback, firewalls; `PayrollConcurrencyTest`: C1–C8, the lock proofs and the
 duplicate-key race), the boundary tool (exactly one `'Committed'` write, Employee reads Committed-only, the commit
 allowlist and route) and the verifier's BF-4c2 section.
+
+### SESSION Payroll Commit and My payroll — AFI-4c2 (local candidate; frontend; SESSION mode only)
+
+AFI-4c2 is the SESSION frontend of BF-4c2 (owner decisions D-AFI4c2-1 = A, D-AFI4c2-2 = A, D-AFI4c2-3 = A). It is a local
+candidate on `feature/afi-4c2-session-payroll`; not pushed, merged or deployed. Frontend only: no backend change, no
+migration, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, no CSS change, no new module — `core/payroll-api.js`,
+`core/session-payroll.js`, `ui/session-payroll-view.js` and `ui/session-workspace-view.js` are extended, so the package
+keeps 100 files (its digest changes). ApiClient and AuthBoot are unchanged: the commit body has no forbidden key, and
+`SessionPayrollStore.clear()` (already called on logout, session loss and a principal change) destroys the new state.
+
+**Commit (CEO).** The control matrix gains `commit` on Ready only. "Commit payroll" opens an inline confirmation that shows
+the plan's server strings (employee and code, month, base salary, overtime hours and amount, total, version) and says the
+plan becomes the final payroll obligation, can no longer be changed, returned or cancelled, and is not a payment — nothing
+is paid or posted to Finance. Confirming creates ONE commit intent in the store — `{ id, version, total, key }`, frozen,
+memory only — whose `total` is the decoded `totalAmount` string and whose `key` is `payrollIdempotencyKey()`: 16 bytes of
+`crypto.getRandomValues`, hex-encoded (no Web Crypto: nothing is sent). `PayrollApi.commit(intent)` sends exactly
+`{ id, expectedVersion, expectedTotal, idempotencyKey }` once; the confirmation's first action is synchronous, so a double
+click, Enter + click or a re-render cannot send twice. It is confirmed only by the same plan, `Committed`, at
+`expectedVersion + 1`, with `totalAmount === expectedTotal`.
+
+**Outcomes (D-AFI4c2-1 = A).** Success: the plan is shown Committed and read again; the intent ends. A 409 (one generic
+wire code — BF-4c2's reasons are log-only, so the page never names a cause) or another definite refusal: the intent ends,
+the plan is read again (its drift too while Ready), and a new deliberate decision is needed. An unknown outcome (503, 500,
+network, timeout, a malformed or non-confirming answer): the intent is kept and the plan read again; the read decides —
+Committed at version + 1 with the same total is the success; still Ready at the same version and total keeps the intent
+and offers **Retry commit**, which only on a deliberate click sends the same body and key again (the server replays; it
+can never commit twice); anything else drops the intent as stale; a failed read keeps it and sends nothing. While an
+intent is open, Commit payroll is not offered again (no second intent, no second key).
+
+**Drift (D-AFI4c2-2 = A).** `PayrollApi.drift(id)` reads `GET /api/payroll-plan/drift` with a strict decoder: exactly
+`{ id, current, reasons }`, the requested id, the five BF-4c2 reasons each once in canonical order, `current` exactly when
+there is none. It is read whenever a Ready detail becomes current (so after a 409 too), under its own sequence token, and
+a late answer never attaches to another plan. The page lists the reasons in fixed words and says "Return it to Draft, then
+prepare payroll for <month> again"; it shows nothing when current, never decides Commit and never returns, regenerates or
+commits anything itself.
+
+**Words (D-AFI4c2-3 = A).** "Commit payroll", "Committing…", "Retry commit", and Committed as **"Committed — final, not
+paid"** in both views; never Paid, Pay, Mark paid, Execute payment or Post to Finance.
+
+**My payroll (Employee).** A third section, My profile | My overtime | My payroll, over the same store and month bar (memory
+only, the local month first). `PayrollApi.myMonth` / `myGet` read the same two routes and refuse any plan that is not
+Committed and the principal's own (defence in depth — the server scopes them). The list shows month, status and money; a
+plan opens a read-only, payslip-like card titled "Payroll — <month>" with the server's fields only (employee, code,
+department, month, status, base salary, overtime hours and amount, total, the approved overtime counted) — no version, no
+control, no PDF or print, no statutory, net or bank concept. An Employee never reads drift and never writes.
+
+**Proof.** `tools/verify-session-payroll-runtime.js` (still the tenth CI harness) adds the Commit, Retry, drift, My payroll
+and store-guard sections: an injectable deterministic `crypto`, an inconsistent total (`999.00`) that must be sent verbatim,
+the four outcome cases, 409, double clicks, races, and an Employee who reads only their own Committed plans. The Employee and
+Overtime harnesses were revised narrowly to admit the Employee's "My payroll" button. `tools/serve-auth-stub.js` models
+BF-4c2 for browser QA (commit with key replay and mismatch, drift, the Employee's self-scope; `/__stub/drift-payroll`,
+`/__stub/fail-next-commit` — applied, then answered 503). AFI-4c2 needs BF-4c2 at runtime and adds no deploy-together
+constraint of its own.
 
 ### Release engineering
 
