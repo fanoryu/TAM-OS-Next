@@ -129,6 +129,26 @@
  *                              so its drift read explains it and its commit answers 409
  *   /__stub/fail-next-commit   the next commit is APPLIED and then answered 503: an unknown
  *                              outcome the page must reconcile by reading the plan again
+ *
+ * AFI-4d Supplemental Payroll (a test-only model of BF-4d): GET /api/supplemental-payrolls?month=
+ * (CEO: every document of the month; an Employee: their own Committed ones), GET
+ * /api/supplemental-payroll?id= (the same scope, else 404; the captured overtime with its frozen
+ * amounts, none for a Cancelled document), GET /api/supplemental-payrolls/eligibility?month= (CEO;
+ * the month's Committed plans with Approved overtime held by no plan and no document); POST
+ * /api/supplemental-payrolls/generate { payrollPlanId } (the plan must be Committed: an open
+ * Reviewed / Ready document is returned untouched, an open Draft recalculated, else a new Draft —
+ * 409 when nothing or only 0.00 is eligible); review { id, expectedVersion } Draft → Reviewed,
+ * approve Reviewed → Ready (NO Draft → Ready), return Reviewed / Ready → Draft, cancel Draft /
+ * Reviewed / Ready → Cancelled (the overtime is released); commit { id, expectedVersion,
+ * expectedTotal, idempotencyKey } exactly as the payroll commit (key replay / mismatch, then Ready,
+ * version, amount). CEO only, CSRF, exact body keys; the write-* scenarios apply. Fixtures: two late
+ * Approved overtime records of EMP-006 (whose current-month plan is Committed),
+ * and for the Employee (EMP-001, last month's Committed plan) two Committed documents (two
+ * waves), a Draft and a Cancelled one (never shown to them).
+ *   /__stub/late-overtime                  one more Approved record of EMP-006 (the next wave)
+ *   /__stub/bump-supplemental              bumps every open document's version (a stale view)
+ *   /__stub/fail-next-supplemental-commit  the next Supplemental commit is APPLIED, then answered 503
+ * Nothing here pays, posts or touches Finance.
  */
 'use strict';
 const http = require('http');
@@ -195,7 +215,14 @@ function stubOvertime(){
     r(5, 'emp_stub_5', m, '11', '4.00', 'Draft', 1, null), r(6, 'emp_stub_1', prev, '20', '3.00', 'Reviewed', 2, 'Fabricated month-end close'),
     // AFI-4b2: a Reviewed record of a live, salaried owner, and an Approved one with its frozen snapshot.
     r(7, 'emp_stub_1', m, '14', '6.00', 'Reviewed', 3, 'Fabricated quarter close'),
-    Object.assign(r(8, 'emp_stub_1', m, '18', '2.50', 'Approved', 4, 'Fabricated vendor visit'), { frozenSalary: '7000000.00' })];
+    Object.assign(r(8, 'emp_stub_1', m, '18', '2.50', 'Approved', 4, 'Fabricated vendor visit'), { frozenSalary: '7000000.00' }),
+    // AFI-4d: overtime approved after the payroll it belongs to was committed (EMP-006 this month;
+    // EMP-001 last month, captured by the fixture Supplemental documents below).
+    Object.assign(r(9, 'emp_stub_6', m, '21', '3.00', 'Approved', 4, 'Fabricated late fix'), { frozenSalary: '6000000.00' }),
+    Object.assign(r('a', 'emp_stub_6', m, '22', '1.50', 'Approved', 4, 'Fabricated late check'), { frozenSalary: '6000000.00' }),
+    Object.assign(r('b', 'emp_stub_1', prev, '24', '2.00', 'Approved', 4, 'Fabricated late close'), { frozenSalary: '7000000.00' }),
+    Object.assign(r('d', 'emp_stub_1', prev, '25', '1.25', 'Approved', 4, 'Fabricated late audit'), { frozenSalary: '7000000.00' }),
+    Object.assign(r('e', 'emp_stub_1', prev, '26', '0.75', 'Approved', 4, 'Fabricated late review'), { frozenSalary: '7000000.00' })];
 }
 // AFI-4b2 TAM-OT-1 (test-only mirror of server/src/Overtime/OvertimeValuation.php): salary × hours ÷ 160
 // in integer sen × quarter-hours, one half-up rounding to the whole Rupiah.
@@ -266,6 +293,40 @@ function prCalc(e, month){
 }
 const prOrder = (a, b) => (a.employeeCode < b.employeeCode ? -1 : a.employeeCode > b.employeeCode ? 1 : (a.id < b.id ? -1 : 1));
 
+// AFI-4d fabricated Supplemental documents (test-only model of BF-4d): the Employee's (EMP-001) last
+// month — two Committed waves, a Draft and a Cancelled one, all on the Committed plan c4.
+const SP_VIEW = ['id', 'payrollPlanId', 'employeeId', 'monthKey', 'status', 'employeeCode', 'employeeName', 'department', 'overtimeAmount', 'overtimeHours', 'overtimeCount', 'version'];
+const SP_GRAPH = { review: [['Draft'], 'Reviewed'], approve: [['Reviewed'], 'Ready'], return: [['Reviewed', 'Ready'], 'Draft'], cancel: [['Draft', 'Reviewed', 'Ready'], 'Cancelled'] };
+const SP_OPEN = ['Draft', 'Reviewed', 'Ready'];
+let supplemental = [];         // AFI-4d: this scenario's Supplemental documents (each with its links)
+let failNextSuppCommit = false;
+let lateSeq = 0;
+// The exact sum of some Approved records (test-only mirror of PayrollCalculation::overtime).
+function spSum(records){
+  let rupiah = 0n, quarters = 0n;
+  records.forEach((r) => { rupiah += BigInt(otAmount(r.frozenSalary, r.hours).replace('.00', '')); quarters += BigInt(r.hours.replace('.', '')) / 25n; });
+  const h = quarters * 25n;
+  return { overtimeAmount: rupiah + '.00', overtimeHours: (h / 100n) + '.' + String(h % 100n).padStart(2, '0'), overtimeCount: records.length };
+}
+function stubSupplemental(){
+  const plan = payroll.find((x) => x.status === 'Committed' && x.employeeId === 'emp_stub_1');
+  const d = (n, status, version, links) => Object.assign({ id: ('5' + n).repeat(16).slice(0, 32), payrollPlanId: plan.id, employeeId: plan.employeeId, monthKey: plan.monthKey,
+    status: status, employeeCode: plan.employeeCode, employeeName: plan.employeeName, department: plan.department, version: version, links: links,
+    commitKey: status === 'Committed' ? crypto.randomBytes(16).toString('hex') : null }, spSum(links.map((id) => overtime.find((o) => o.id === id))));
+  const id = (c) => c.repeat(32);
+  const cancelled = d(4, 'Cancelled', 2, [id('e')]);
+  cancelled.links = [];
+  return [d(1, 'Committed', 4, [id('b')]), d(2, 'Committed', 4, [id('d')]), d(3, 'Draft', 1, [id('e')]), cancelled];
+}
+const spOrder = (a, b) => (a.employeeCode < b.employeeCode ? -1 : a.employeeCode > b.employeeCode ? 1 : (a.seq || 0) - (b.seq || 0) || (a.id < b.id ? -1 : 1));
+// The Approved overtime of a plan's employee and month that no plan and no document (but `open`) holds.
+function spEligible(plan, open){
+  const held = new Set();
+  payroll.forEach((x) => (x.links || []).forEach((id) => held.add(id)));
+  supplemental.forEach((x) => { if(x !== open) x.links.forEach((id) => held.add(id)); });
+  return overtime.filter((r) => r.employeeId === plan.employeeId && r.monthKey === plan.monthKey && r.status === 'Approved' && !held.has(r.id)).sort((a, c) => (a.id < c.id ? -1 : 1));
+}
+
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '': 'text/plain; charset=utf-8' };
 
 let scenario = 'signed-out';
@@ -284,6 +345,8 @@ function reset(name){
   overtime = stubOvertime();
   payroll = stubPayroll();
   failNextCommit = false;
+  supplemental = stubSupplemental();   // AFI-4d
+  failNextSuppCommit = false; lateSeq = 0;
   session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
@@ -410,6 +473,35 @@ async function handleApi(req, res, p, query){
     const reasons = PR_DRIFT_REASONS.filter((r) => (x.drift || []).indexOf(r) !== -1);
     return api(res, 200, { payrollPlanDrift: { id: x.id, current: reasons.length === 0, reasons: reasons } });
   }
+  // AFI-4d: the Supplemental reads — CEO: the company's; an Employee: their own Committed documents.
+  if((p === '/api/supplemental-payrolls' || p === '/api/supplemental-payroll' || p === '/api/supplemental-payrolls/eligibility') && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    const ceo = session.user.role === 'ceo';
+    const mine = ceo ? () => true : (x) => x.employeeId === session.user.employeeId && x.status === 'Committed';
+    if(p === '/api/supplemental-payroll'){
+      if([...query.keys()].join() !== 'id' || !/^[0-9a-f]{32}$/.test(query.get('id') || '')) return api(res, 400, 'validation_failed', null, ['id']);
+      const x = supplemental.find((y) => y.id === query.get('id') && mine(y));
+      if(!x) return api(res, 404, 'not_found');
+      return api(res, 200, { supplementalPayroll: pick(x, SP_VIEW), supplementalPayrollOvertime: x.links.map((id) => { const r = overtime.find((o) => o.id === id); return { id: r.id, hours: r.hours, amount: otAmount(r.frozenSalary, r.hours) }; }) });
+    }
+    if([...query.keys()].join() !== 'month' || !otMonth(query.get('month'))) return api(res, 400, 'invalid_query');
+    const month = query.get('month');
+    if(p === '/api/supplemental-payrolls') return api(res, 200, { supplementalPayrolls: supplemental.filter((x) => x.monthKey === month && mine(x)).sort(spOrder).map((x) => pick(x, SP_VIEW)) });
+    if(!ceo) return api(res, 403, 'forbidden');
+    const out = [];
+    payroll.filter((x) => x.monthKey === month && x.status === 'Committed').sort((a, c) => (a.employeeId < c.employeeId ? -1 : 1)).forEach((plan) => {
+      const records = spEligible(plan, null);
+      if(!records.length) return;
+      const sum = spSum(records);
+      out.push({ payrollPlanId: plan.id, employeeId: plan.employeeId, eligibleCount: sum.overtimeCount, eligibleHours: sum.overtimeHours, eligibleAmount: sum.overtimeAmount });
+    });
+    return api(res, 200, { supplementalEligibility: out });
+  }
+  const spWrite = { '/api/supplemental-payrolls/generate': 'generate', '/api/supplemental-payrolls/review': 'review', '/api/supplemental-payrolls/approve': 'approve',
+    '/api/supplemental-payrolls/return': 'return', '/api/supplemental-payrolls/cancel': 'cancel', '/api/supplemental-payrolls/commit': 'commit' }[p];
+  if(spWrite && req.method === 'POST') return handleSupplementalWrite(req, res, spWrite);
   const prWrite = { '/api/payroll-plans/generate': 'generate', '/api/payroll-plans/review': 'review', '/api/payroll-plans/approve': 'approve',
     '/api/payroll-plans/return': 'return', '/api/payroll-plans/cancel': 'cancel', '/api/payroll-plans/commit': 'commit' }[p];
   if(prWrite && req.method === 'POST') return handlePayrollWrite(req, res, prWrite);
@@ -675,6 +767,77 @@ async function handlePayrollWrite(req, res, kind){
   return done({ payrollPlan: pick(x, PR_VIEW) });
 }
 
+/* ---------- AFI-4d: the Supplemental writes (test-only model of BF-4d) ---------- */
+async function handleSupplementalWrite(req, res, kind){
+  const b = await readJson(req);
+  if(!session) return api(res, 401, 'unauthenticated');
+  if(scenario === 'write-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+  if(scenario === 'write-stale-csrf' && !session.rotated){ session.rotated = true; session.csrf = token(); return api(res, 403, 'forbidden'); }
+  if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
+  if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+  if(!b) return api(res, 400, 'validation_failed');
+  const allowed = kind === 'generate' ? ['payrollPlanId'] : kind === 'commit' ? ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey'] : ['id', 'expectedVersion'];
+  const unknown = Object.keys(b).filter((k) => allowed.indexOf(k) === -1);
+  if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
+  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [kind === 'generate' ? 'payrollPlanId' : 'id']);
+  if(scenario === 'write-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '45' });
+  if(scenario === 'write-error') return api(res, 500, 'internal_error');
+  if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
+  if(scenario === 'write-conflict') return api(res, 409, 'conflict');
+  if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
+  const done = (x) => (scenario === 'write-malformed' ? api(res, 200, { supplementalPayroll: pick(x, SP_VIEW), internalNote: 'x' }) : api(res, 200, { supplementalPayroll: pick(x, SP_VIEW) }));
+  if(kind === 'generate'){
+    if(typeof b.payrollPlanId !== 'string' || !/^[0-9a-f]{32}$/.test(b.payrollPlanId)) return api(res, 400, 'validation_failed', null, ['payrollPlanId']);
+    const plan = payroll.find((x) => x.id === b.payrollPlanId);
+    if(!plan) return api(res, 404, 'not_found');
+    if(plan.status !== 'Committed') return api(res, 409, 'conflict');
+    const open = supplemental.find((x) => x.payrollPlanId === plan.id && SP_OPEN.indexOf(x.status) !== -1) || null;
+    if(open && open.status !== 'Draft') return done(open);                // frozen: returned untouched
+    const records = spEligible(plan, open);
+    if(!records.length) return api(res, 409, 'conflict');
+    const sum = spSum(records);
+    if(sum.overtimeAmount === '0.00') return api(res, 409, 'conflict');
+    const links = records.map((r) => r.id);
+    if(!open){
+      const x = Object.assign({ id: crypto.randomBytes(16).toString('hex'), payrollPlanId: plan.id, employeeId: plan.employeeId, monthKey: plan.monthKey, status: 'Draft',
+        employeeCode: plan.employeeCode, employeeName: plan.employeeName, department: plan.department, version: 1, links: links, commitKey: null, seq: Date.now() }, sum);
+      supplemental.push(x);
+      return done(x);
+    }
+    if(JSON.stringify([open.overtimeAmount, open.overtimeHours, open.overtimeCount, open.links]) !== JSON.stringify([sum.overtimeAmount, sum.overtimeHours, sum.overtimeCount, links])){
+      Object.assign(open, sum, { links: links }); open.version++;
+    }
+    return done(open);
+  }
+  const target = [];
+  if(typeof b.id !== 'string' || !/^[0-9a-f]{32}$/.test(b.id)) target.push('id');
+  if(!Number.isInteger(b.expectedVersion) || b.expectedVersion < 1 || b.expectedVersion > 4294967295) target.push('expectedVersion');
+  if(kind === 'commit'){
+    if(typeof b.expectedTotal !== 'string' || !/^(0|[1-9][0-9]{0,14})\.00$/.test(b.expectedTotal)) target.push('expectedTotal');
+    if(typeof b.idempotencyKey !== 'string' || !/^[0-9a-f]{32}$/.test(b.idempotencyKey)) target.push('idempotencyKey');
+  }
+  if(target.length) return api(res, 400, 'validation_failed', null, target);
+  const x = supplemental.find((y) => y.id === b.id);
+  if(!x) return api(res, 404, 'not_found');
+  if(kind === 'commit'){
+    // The BF-4d order: the key first (replay or mismatch), then status, version, amount.
+    const holder = supplemental.find((y) => y.commitKey === b.idempotencyKey);
+    if(holder){
+      if(holder === x && x.status === 'Committed' && x.version === b.expectedVersion + 1 && x.overtimeAmount === b.expectedTotal) return done(x);
+      return api(res, 409, 'conflict');
+    }
+    if(x.status !== 'Ready' || x.version !== b.expectedVersion || x.overtimeAmount !== b.expectedTotal) return api(res, 409, 'conflict');
+    x.status = 'Committed'; x.version++; x.commitKey = b.idempotencyKey;
+    // Applied, then answered 503: an outcome the page must reconcile by reading the document again.
+    if(failNextSuppCommit){ failNextSuppCommit = false; return api(res, 503, 'service_unavailable'); }
+    return done(x);
+  }
+  if(SP_GRAPH[kind][0].indexOf(x.status) === -1 || x.version !== b.expectedVersion) return api(res, 409, 'conflict');
+  x.status = SP_GRAPH[kind][1]; x.version++;
+  if(kind === 'cancel') x.links = [];
+  return done(x);
+}
+
 // AFI-4a3: the account operations (test-only model of AccountService's guards).
 function accountWrite(res, kind, b, done){
   if(typeof b.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(b.id)) return api(res, 400, 'validation_failed', null, ['id']);
@@ -739,6 +902,24 @@ http.createServer((req, res) => {
     failNextCommit = true;
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('the next commit answer will be dropped');
+  }
+  if(urlPath === '/__stub/late-overtime' && req.method === 'GET'){
+    // AFI-4d: one more Approved record of EMP-006 this month — the next Supplemental wave.
+    lateSeq++;
+    overtime.push({ id: ('f' + lateSeq).repeat(16).slice(0, 32), employeeId: 'emp_stub_6', monthKey: stubMonth(0), overtimeDate: null, hours: '2.00',
+      workDescription: 'Fabricated later fix', notes: null, status: 'Approved', version: 4, frozenSalary: '6000000.00' });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('late overtime approved');
+  }
+  if(urlPath === '/__stub/bump-supplemental' && req.method === 'GET'){
+    supplemental.forEach((x) => { if(SP_OPEN.indexOf(x.status) !== -1) x.version++; });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('open supplemental documents bumped');
+  }
+  if(urlPath === '/__stub/fail-next-supplemental-commit' && req.method === 'GET'){
+    failNextSuppCommit = true;
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('the next supplemental commit answer will be dropped');
   }
   if(urlPath === '/__stub/bump-payroll' && req.method === 'GET'){
     // AFI-4c1: another change to the live plans (no scenario switch, the session stays).

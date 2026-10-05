@@ -22,6 +22,13 @@
    "999.00" for a base of "8000000.50" and overtime of "12345.00"), so a page that added, rounded
    or reformatted money could not show the server's strings. Every write request (method, path,
    body, CSRF header) is recorded and asserted exactly.
+
+   AFI-4d (owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A): sections S–S8 prove the SESSION
+   Supplemental Payroll over BF-4d — the strict 12 / 3 / 5-key decoders, the CEO month card
+   (eligibility named from the plan snapshot, documents), generate { payrollPlanId }, the linear
+   lifecycle with NO Draft → Ready, Commit with one intent and a same-key Retry, the Employee's own
+   Committed documents as separate rows, and the firewall (memory only, cleared, no LOCAL engine,
+   no global collision). Supplemental amounts deliberately differ from their lines' sum.
    ============================================================ */
 
 const fs = require('fs');
@@ -47,7 +54,11 @@ const NEVER = ['loadState', 'saveState', 'applyTheme', 'installGlobalUIHandlers'
   'renderShell', 'renderView', 'renderIdentitySelectorHTML', 'restoreCompleteBackup', 'renderSmartImport', 'openGlobalSearch',
   'renderEmployees', 'renderEmployeeDetail', 'renderOvertime', 'renderOvertimeWorksheet', 'renderPayrollWorkspace', 'renderPayrollDetail',
   'generatePayrollForMonth', 'transitionPayrollLifecycle', 'commitReadyPayroll', 'computePayrollPlanned', 'persistPayrollPlans',
-  'renderDashboard', 'renderExecutiveDashboard', 'renderTransactions', 'renderExecutionCenter'];
+  'renderDashboard', 'renderExecutiveDashboard', 'renderTransactions', 'renderExecutionCenter',
+  // AFI-4d: the LOCAL Supplemental engine (js/people/supplemental-engine.js) is never reached.
+  'generateSupplementalForPlan', 'refreshSupplemental', 'transitionSupplemental', 'postSupplemental', 'persistSupplementalPayments',
+  'renderSupplementalPayments', 'renderSupplementalDetail', 'handleSupplementalAction', 'supplementalEligibleOvertime', 'linkSupplementalExecution',
+  'recoverSupplementalOrphans'];
 
 /* ---------- fabricated records ---------- */
 const E1 = { id: 'e_1', employeeCode: 'EMP-001', fullName: 'Fabricated <Alpha>', jobTitle: null, department: null, employmentStatus: 'Active', archived: false, accountState: 'none', accountManageable: true };
@@ -74,6 +85,33 @@ const ID6 = '6'.repeat(32), ID7 = '7'.repeat(32);
 const PRX = plan(ID6, 'e_7', 'EMP-007', 'Ready', 5, { baseSalary: '8000000.50', overtimeAmount: '12345.00', overtimeHours: '7.50', overtimeCount: 1, totalAmount: '999.00' });
 const MINE = plan(ID7, 'emp_srv_1', 'EMP-777', 'Committed', 4, { employeeName: 'Fabricated Self', baseSalary: '1000000.00', overtimeAmount: '54688.00', overtimeHours: '2.50', overtimeCount: 1, totalAmount: '777.00' });
 const MONTH_RX = { payrollPlans: [P1, P2, P3, P4, P5, PRX] };
+// AFI-4d: Supplemental Payroll fixtures — Committed base plans P4, P8, P9; documents whose amount
+// deliberately differs from their lines (only the exact strings may be shown or sent).
+const ID8 = '8'.repeat(32), ID9 = '9'.repeat(32), IDO2 = 'b'.repeat(32), IDO3 = 'c'.repeat(32);
+const P8 = plan(ID8, 'e_8', 'EMP-008', 'Committed', 3);
+const P9 = plan(ID9, 'e_9', 'EMP-009', 'Committed', 3);
+const MONTH_S = { payrollPlans: [P1, P2, P3, P4, P5, P8, P9] };
+const sdoc = (id, p, status, version, extra) => Object.assign({ id: id, payrollPlanId: p.id, employeeId: p.employeeId, monthKey: MONTH, status: status,
+  employeeCode: p.employeeCode, employeeName: p.employeeName, department: null, overtimeAmount: '4321.00', overtimeHours: '2.25', overtimeCount: 1, version: version }, extra || {});
+const SID_DRAFT = 'd1'.repeat(16), SID_REV = 'd2'.repeat(16), SID_READY = 'd3'.repeat(16), SID_COM = 'd4'.repeat(16), SID_CAN = 'd5'.repeat(16),
+  SID_COM2 = 'd6'.repeat(16), SID_NEW = 'd7'.repeat(16), SID_MINE1 = 'e1'.repeat(16), SID_MINE2 = 'e2'.repeat(16);
+const SREV = sdoc(SID_REV, P4, 'Reviewed', 2);
+const SCOM = sdoc(SID_COM, P4, 'Committed', 4);
+const SCAN = sdoc(SID_CAN, P4, 'Cancelled', 2);
+const SCOM2 = sdoc(SID_COM2, P4, 'Committed', 4, { overtimeAmount: '99.00', overtimeHours: '0.25' });
+const SDRAFT = sdoc(SID_DRAFT, P8, 'Draft', 1);
+const SREADY = sdoc(SID_READY, P9, 'Ready', 3);
+const SNEW = sdoc(SID_NEW, P4, 'Draft', 1, { overtimeAmount: '7777.00', overtimeHours: '3.50', overtimeCount: 2 });
+const SMINE1 = sdoc(SID_MINE1, MINE, 'Committed', 4);
+const SMINE2 = sdoc(SID_MINE2, MINE, 'Committed', 4, { overtimeAmount: '99.00', overtimeHours: '0.25' });
+const SMONTH = { supplementalPayrolls: [SREV, SCOM, SCAN, SCOM2, SDRAFT, SREADY] };
+const SLINE = { id: IDO2, hours: '2.25', amount: '1234.00' };
+const SLINE2 = { id: IDO3, hours: '0.25', amount: '11.00' };
+const ELIG = { payrollPlanId: ID4, employeeId: 'e_5', eligibleCount: 2, eligibleHours: '3.50', eligibleAmount: '7777.00' };
+const ELIG0 = { payrollPlanId: ID8, employeeId: 'e_8', eligibleCount: 1, eligibleHours: '0.25', eligibleAmount: '0.00' };
+const ELIGX = { payrollPlanId: '0'.repeat(32), employeeId: 'e_0', eligibleCount: 1, eligibleHours: '1.00', eligibleAmount: '500.00' };
+const SELIGS = { supplementalEligibility: [ELIG, ELIG0, ELIGX] };
+const ME_CEO_PRINCIPAL = { id: 'u_ceo_x', principalType: 'ceo', employeeId: null };
 
 const LIST = (m) => '/api/payroll-plans?month=' + m;
 const DET = (id) => '/api/payroll-plan?id=' + id;
@@ -82,6 +120,12 @@ const W = { generate: '/api/payroll-plans/generate', review: '/api/payroll-plans
   return: '/api/payroll-plans/return', cancel: '/api/payroll-plans/cancel', commit: '/api/payroll-plans/commit' };
 const DRIFT = (id) => '/api/payroll-plan/drift?id=' + id;
 const COMMIT_KEYS = 'expectedTotal,expectedVersion,id,idempotencyKey';
+// AFI-4d: the BF-4d Supplemental routes.
+const SLIST = (m) => '/api/supplemental-payrolls?month=' + m;
+const SDET = (id) => '/api/supplemental-payroll?id=' + id;
+const SELIG = (m) => '/api/supplemental-payrolls/eligibility?month=' + m;
+const SW = { generate: '/api/supplemental-payrolls/generate', review: '/api/supplemental-payrolls/review', approve: '/api/supplemental-payrolls/approve',
+  return: '/api/supplemental-payrolls/return', cancel: '/api/supplemental-payrolls/cancel', commit: '/api/supplemental-payrolls/commit' };
 
 /* ---------- scripted responses ---------- */
 function resp(status, body, headers){
@@ -96,6 +140,8 @@ const err = (status, code) => resp(status, { ok: false, error: { code: code, mes
 const NETFAIL = () => new TypeError('Failed to fetch');
 const one = (p) => ({ payrollPlan: p });
 const driftOk = (id, reasons) => ok({ payrollPlanDrift: { id: id, current: reasons.length === 0, reasons: reasons } });
+const sone = (d) => ({ supplementalPayroll: d });
+const sdet = (d, lines) => ({ supplementalPayroll: d, supplementalPayrollOvertime: lines || [] });
 function deferred(){ let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise: promise, resolve: resolve }; }
 
 /* ---------- a recording #app (the SESSION harnesses' element) ---------- */
@@ -168,7 +214,10 @@ function loadRuntime(routes, opts){
     + ' SessionPayrollStore: SessionPayrollStore, SessionPayroll: SessionPayroll, SessionOvertimeStore: SessionOvertimeStore,'
     + ' sessionPayrollActions: sessionPayrollActions, sessionPayrollCurrentMonth: sessionPayrollCurrentMonth,'
     + ' sessionPayrollExcludedName: sessionPayrollExcludedName, render: render, parse: function(json){ return JSON.parse(json); },'
-    + ' sessionPayrollIntentState: sessionPayrollIntentState, payrollIdempotencyKey: payrollIdempotencyKey, PAYROLL_DRIFT_REASONS: PAYROLL_DRIFT_REASONS };';
+    + ' sessionPayrollIntentState: sessionPayrollIntentState, payrollIdempotencyKey: payrollIdempotencyKey, PAYROLL_DRIFT_REASONS: PAYROLL_DRIFT_REASONS,'
+    + ' SupplementalApi: SupplementalApi, SupplementalDecoders: SupplementalDecoders, SupplementalRequests: SupplementalRequests,'
+    + ' sessionSupplementalActions: sessionSupplementalActions, sessionSupplementalIntentState: sessionSupplementalIntentState,'
+    + ' LOCAL_SUPPLEMENTAL_STATUSES: SUPPLEMENTAL_STATUSES };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => {
@@ -257,6 +306,10 @@ const countOf = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
 const payrollCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/payroll/.test(c.url));
 const keys = (o) => Object.keys(o).sort().join();
 const buttons = (html) => ['swpReviewBtn', 'swpApproveBtn', 'swpReturnBtn', 'swpCancelBtn'].filter((b) => html.indexOf('id="' + b + '"') !== -1).map((b) => b.slice(3, -3)).join();
+// AFI-4d: the Supplemental writes and the Supplemental action buttons shown, in page order.
+const suppPosts = (rt, route) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && (route ? c.url === route : /^\/api\/supplemental-payrolls\//.test(c.url)));
+const suppButtons = (html) => ['swpSuppReviewBtn', 'swpSuppApproveBtn', 'swpSuppReturnBtn', 'swpSuppCancelBtn', 'swpSuppCommitBtn']
+  .filter((b) => html.indexOf('id="' + b + '"') !== -1).sort((a, b) => html.indexOf('id="' + a + '"') - html.indexOf('id="' + b + '"')).map((b) => b.slice(7, -3)).join();
 
 async function boot(me, routes, opts){
   const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1] })] } : { '/api/employee?id=emp_srv_1': [ok({ employee: { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active', joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' } })] };
@@ -285,6 +338,20 @@ async function detail(id, answer, routes){
   return rt;
 }
 
+// AFI-4d: signed in as the CEO, the Payroll month page with its Supplemental card.
+async function openS(routes, opts){
+  const rt = await boot(ME_CEO, Object.assign({ [LIST(MONTH)]: [ok(MONTH_S)], [SLIST(MONTH)]: [ok(SMONTH)], [SELIG(MONTH)]: [ok(SELIGS)] }, routes || {}), opts);
+  rt.app.fire('swSectionPayroll', 'click'); await flush();
+  return rt;
+}
+// AFI-4d: the Supplemental document `doc` of SMONTH open, with `lines`.
+async function suppDetail(doc, lines, routes, opts){
+  const rt = await openS(Object.assign({ [SDET(doc.id)]: [ok(sdet(doc, lines))] }, routes || {}), opts);
+  const i = SMONTH.supplementalPayrolls.findIndex((x) => x.id === doc.id);
+  rt.app.fire('swpSuppOpen' + i, 'click'); await flush();
+  return rt;
+}
+
 // The SESSION firewall, after every phase.
 function firewall(rt, label, overtimeOpened){
   check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0,
@@ -297,7 +364,9 @@ function firewall(rt, label, overtimeOpened){
     label + ': no statutory payroll, payslip or gross / net vocabulary in the DOM');
   // AFI-4c2 authorized revision: the Commit confirmation, like the preparation one, says nothing is
   // posted to Finance. Was: only the preparation confirmation.
-  const outsideGenerate = html.replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>(Prepare payroll for this month|Commit this payroll plan)\?<\/h2>[\s\S]*?<\/section>/, '');
+  // AFI-4d authorized revision: the Supplemental preparation and Commit confirmations say so too.
+  // Was: the payroll preparation and Commit confirmations only.
+  const outsideGenerate = html.replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>(Prepare payroll for this month|Commit this payroll plan|Prepare supplemental payroll|Commit this supplemental payroll)\?<\/h2>[\s\S]*?<\/section>/, '');
   check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(outsideGenerate) && !/\bPaid\b|Mark paid|\bPay\b/.test(html),
     label + ': no Finance, payment, execution or posting wording (only the preparation and Commit confirmations say nothing is posted to Finance)');
   // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Commit payroll / Retry commit exist, on a Ready
@@ -306,7 +375,8 @@ function firewall(rt, label, overtimeOpened){
   const d = rt.pr().detail;
   check(!/expectedTotal|idempotency/i.test(html) && (!/id="swp(Commit|RetryCommit)Btn"/.test(html) || (!!who && who.principalType === 'ceo' && !!d && d.plan.status === 'Ready')),
     label + ': a Commit control appears only on a Ready plan shown to the CEO; no key or total field in the page');
-  check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO, 'g'), '')), label + ': no opaque plan id in the page (only a contributing overtime record id, by design)');
+  // AFI-4d authorized revision: a Supplemental document's captured overtime record ids too. Was: IDO only.
+  check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO + '|' + IDO2 + '|' + IDO3, 'g'), '')), label + ': no opaque plan or document id in the page (only an overtime record id, by design)');
   check(rt.State.employees.length === 0 && rt.State.payrollPlans.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
     label + ': legacy State (employees, payroll plans) stays empty and the business shell is never granted');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
@@ -321,11 +391,20 @@ function firewall(rt, label, overtimeOpened){
     label + ': no Overtime, Finance, status or payment request is ever made by the Payroll section');
   if(who && who.principalType === 'employee'){
     check(posts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/payroll-plan\/drift/.test(c.url)), label + ': an Employee never writes Payroll and never reads drift');
+    // AFI-4d: nor writes Supplemental payroll or reads its eligibility.
+    check(suppPosts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/supplemental-payrolls\/eligibility/.test(c.url)), label + ': an Employee never writes Supplemental payroll and never reads its eligibility');
   }
+  // AFI-4d: every Supplemental write is a CSRF POST of exactly { payrollPlanId }, { id, expectedVersion }
+  // or (commit) { id, expectedVersion, expectedTotal, idempotencyKey }; the LOCAL engine's words never appear.
+  const badSupp = suppPosts(rt).filter((c) => {
+    const want = c.url === SW.generate ? 'payrollPlanId' : c.url === SW.commit ? COMMIT_KEYS : 'expectedVersion,id';
+    return keys(bodyOf(c)) !== want || c.init.headers['X-CSRF-Token'] === undefined;
+  });
+  check(badSupp.length === 0 && !/Supplemental Payments|Supplements|overtime_drift/.test(html), label + ': every Supplemental write has exactly its BF-4d keys and the CSRF token; no LOCAL Supplemental wording');
 }
 
 (async function main(){
-  console.log('== AFI-4c1 + AFI-4c2 SESSION PAYROLL — RUNTIME VERIFICATION ==');
+  console.log('== AFI-4c1 + AFI-4c2 + AFI-4d SESSION PAYROLL — RUNTIME VERIFICATION ==');
 
   /* ---------- 0. the harness itself ---------- */
   {
@@ -970,6 +1049,473 @@ function firewall(rt, label, overtimeOpened){
       'P. the reconciliation reads exactly: Committed at version + 1 with the same total, still Ready at the same version and total, or stale');
   }
 
+  /* ---------- S. AFI-4d Supplemental Payroll: strict DTO decoders and request encoders ---------- */
+  {
+    const rt = loadRuntime({});
+    const D = rt.SupplementalDecoders;
+    const P = (o) => rt.parse(JSON.stringify(o));
+    const good = D.doc(P(SDRAFT));
+    check(!!good && Object.isFrozen(good) && keys(good) === keys(SDRAFT) && Object.keys(good).length === 12 && good.overtimeAmount === '4321.00',
+      'S. a canonical Supplemental document decodes, frozen, exactly its twelve keys (SupplementalView::FIELDS); money the exact string');
+    check(['Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled'].every((s) => !!D.doc(P(Object.assign({}, SDRAFT, { status: s })))), 'S. the five BF-4d statuses decode');
+    const bads = [
+      ['unknown key', Object.assign({}, SDRAFT, { companyId: 'c' })], ['missing key', (() => { const c = Object.assign({}, SDRAFT); delete c.payrollPlanId; return c; })()],
+      ['a total key', Object.assign({}, SDRAFT, { totalAmount: '1.00' })], ['a paid flag', Object.assign({}, SDRAFT, { paid: false })],
+      ['amount 0.00', Object.assign({}, SDRAFT, { overtimeAmount: '0.00' })], ['amount with sen', Object.assign({}, SDRAFT, { overtimeAmount: '4321.50' })],
+      ['amount number', Object.assign({}, SDRAFT, { overtimeAmount: 4321 })], ['hours 0.00', Object.assign({}, SDRAFT, { overtimeHours: '0.00' })],
+      ['hours not quarter', Object.assign({}, SDRAFT, { overtimeHours: '2.10' })], ['count 0', Object.assign({}, SDRAFT, { overtimeCount: 0 })],
+      ['count string', Object.assign({}, SDRAFT, { overtimeCount: '1' })], ['status Approved (LOCAL word)', Object.assign({}, SDRAFT, { status: 'Approved' })],
+      ['status Review (LOCAL word)', Object.assign({}, SDRAFT, { status: 'Review' })], ['status Posted', Object.assign({}, SDRAFT, { status: 'Posted' })],
+      ['status Paid', Object.assign({}, SDRAFT, { status: 'Paid' })], ['bad payrollPlanId', Object.assign({}, SDRAFT, { payrollPlanId: 'x' })],
+      ['upper-case id', Object.assign({}, SDRAFT, { id: 'D'.repeat(32) })], ['bad employeeId', Object.assign({}, SDRAFT, { employeeId: 'e 5' })],
+      ['month 13', Object.assign({}, SDRAFT, { monthKey: '2031-13' })], ['version 0', Object.assign({}, SDRAFT, { version: 0 })],
+      ['empty name', Object.assign({}, SDRAFT, { employeeName: '' })], ['department empty', Object.assign({}, SDRAFT, { department: '' })]
+    ];
+    bads.forEach(([label, o]) => check(D.doc(P(o)) === null, 'S. document refused: ' + label));
+    const list = D.monthResponse(P(SMONTH), MONTH);
+    check(!!list && list.length === SMONTH.supplementalPayrolls.length && Object.isFrozen(list), 'S. a month answer decodes in the server order, every status included');
+    check(D.monthResponse(P(SMONTH), '2031-05') === null && D.monthResponse(P({ supplementalPayrolls: [SDRAFT, Object.assign({}, SREV, { status: 'Paid' })] }), MONTH) === null
+      && D.monthResponse(P({ supplementalPayrolls: [SDRAFT], total: '1.00' }), MONTH) === null && D.monthResponse(P({ payrollPlans: [] }), MONTH) === null,
+      'S. another month, one bad document, an extra wrapper key (a total) or another wrapper name invalidates the whole list');
+    const d = D.detailResponse(P(sdet(SDRAFT, [SLINE])));
+    check(!!d && d.doc.id === SID_DRAFT && d.overtime.length === 1 && keys(d.overtime[0]) === 'amount,hours,id' && d.overtime[0].amount === '1234.00',
+      'S. a detail decodes: the document and its captured overtime { id, hours, amount } (three keys)');
+    check(!!D.detailResponse(P(sdet(SCAN, []))), 'S. a Cancelled document with no captured overtime decodes (cancel releases it)');
+    [['extra line key', sdet(SDRAFT, [Object.assign({}, SLINE, { valuationSalary: '1.00' })])], ['line hours 0.00', sdet(SDRAFT, [Object.assign({}, SLINE, { hours: '0.00' })])],
+      ['line amount with sen', sdet(SDRAFT, [Object.assign({}, SLINE, { amount: '1.50' })])], ['lines not a list', { supplementalPayroll: SDRAFT, supplementalPayrollOvertime: SLINE }],
+      ['extra wrapper key', Object.assign(sdet(SDRAFT, []), { payrollPlan: P4 })], ['the payroll wrapper', { payrollPlan: SDRAFT, payrollPlanOvertime: [] }]]
+      .forEach(([label, o]) => check(D.detailResponse(P(o)) === null, 'S. detail refused: ' + label));
+    check(D.docResponse(P(sone(SDRAFT))) !== null && D.docResponse(P({ supplementalPayroll: SDRAFT, supplementalPayrollOvertime: [] })) === null, 'S. { supplementalPayroll } is exact');
+    const e = D.eligibilityResponse(P(SELIGS));
+    check(!!e && e.length === SELIGS.supplementalEligibility.length && Object.keys(e[0]).length === 5 && keys(e[0]) === 'eligibleAmount,eligibleCount,eligibleHours,employeeId,payrollPlanId'
+      && e.some((x) => x.eligibleAmount === '0.00'), 'S. an eligibility answer decodes: exactly five keys per entry (ELIGIBILITY_FIELDS); an amount of 0.00 is accepted');
+    [['an employee name', { supplementalEligibility: [Object.assign({}, ELIG, { employeeName: 'x' })] }], ['count 0', { supplementalEligibility: [Object.assign({}, ELIG, { eligibleCount: 0 })] }],
+      ['amount number', { supplementalEligibility: [Object.assign({}, ELIG, { eligibleAmount: 7777 })] }], ['hours 0.00', { supplementalEligibility: [Object.assign({}, ELIG, { eligibleHours: '0.00' })] }],
+      ['a plan twice', { supplementalEligibility: [ELIG, ELIG] }], ['extra wrapper key', Object.assign({ total: '1.00' }, { supplementalEligibility: [] })]]
+      .forEach(([label, o]) => check(D.eligibilityResponse(P(o)) === null, 'S. eligibility refused: ' + label));
+    const Q = rt.SupplementalRequests;
+    const g = Q.generate(ID4);
+    check(g.ok && keys(g.body) === 'payrollPlanId' && g.body.payrollPlanId === ID4, 'S. generate: exactly { payrollPlanId }');
+    check(['x', 'A'.repeat(32), 4, null, ''].every((v) => !Q.generate(v).ok), 'S. generate refused before transport: a bad plan id');
+    const t = Q.target(SID_DRAFT, 3);
+    check(t.ok && keys(t.body) === 'expectedVersion,id', 'S. a transition: exactly { id, expectedVersion }');
+    const c = Q.commit({ id: SID_READY, version: 3, total: '4321.00', key: 'a'.repeat(32) });
+    check(c.ok && keys(c.body) === COMMIT_KEYS && c.body.expectedTotal === '4321.00' && !Q.commit({ id: SID_READY, version: 3, total: 4321, key: 'a'.repeat(32) }).ok
+      && !Q.commit({ id: SID_READY, version: 3, total: '4321.00', key: 'A'.repeat(32) }).ok, 'S. commit: exactly { id, expectedVersion, expectedTotal, idempotencyKey }; a number total or a bad key is refused before transport');
+  }
+
+  /* ---------- S1. AFI-4d CEO month: eligibility and the month's Supplemental documents ---------- */
+  {
+    const rt = await openS();
+    let html = rt.appHTML();
+    check(countOf(rt, LIST(MONTH)) === 1 && countOf(rt, SLIST(MONTH)) === 1 && countOf(rt, SELIG(MONTH)) === 1 && countOf(rt, EMPS) === 0,
+      'S1. the month page reads the plans, the Supplemental documents and the eligibility once each — never the Employee list (D-AFI4d-1 = A)');
+    check(/<h1[^>]*>Payroll<\/h1>/.test(html) && /id="swpSupp"/.test(html) && /Supplemental payroll — April 2031/.test(html) && !/id="swSectionSupplemental"/.test(html),
+      'S1. Supplemental payroll is a card of the Payroll month page — no new section');
+    check(/separate obligation; the committed payroll is never changed/.test(html), 'S1. the card explains a separate obligation; the committed payroll never changes');
+    check(html.indexOf('<td>EMP-005</td><td>Fabricated EMP-005</td><td>2</td><td>3.50</td><td>7777.00</td>') !== -1,
+      'S1. an eligible plan is named from its own Committed plan snapshot (same payrollPlanId); records, hours and amount verbatim');
+    check(/id="swpSuppPrep0"/.test(html) && !/id="swpSuppPrep1"/.test(html) && /Nothing to settle: the amount is 0\.00\./.test(html),
+      'S1. "Prepare supplemental payroll" is offered for an eligible amount, not for "0.00" (presentation only)');
+    check(/<td>—<\/td><td>Name not available<\/td>/.test(html), 'S1. an entry whose plan is not in the month list is never guessed: "Name not available"');
+    check(['<td>Draft</td>', '<td>Reviewed</td>', '<td>Ready — approved, not paid</td>', '<td>Committed — final, not paid</td>', '<td>Cancelled</td>'].every((t) => html.indexOf(t) !== -1)
+      && /id="swpSuppOpen4"/.test(html), 'S1. every document of the month is listed with the server status words, Committed — final, not paid; Cancelled included');
+    check((html.match(/4321\.00/g) || []).length === SMONTH.supplementalPayrolls.filter((x) => x.overtimeAmount === '4321.00').length && !/Grand total|Total compensation|Sum/i.test(html),
+      'S1. amounts are shown as sent, never added up — no combined or month total');
+    check(/Open supplemental payroll is Reviewed\./.test(html), 'S1. an eligible plan with an open Reviewed / Ready document says so');
+    firewall(rt, 'S1. month');
+    // Empty answers.
+    const e = await openS({ [SLIST(MONTH)]: [ok({ supplementalPayrolls: [] })], [SELIG(MONTH)]: [ok({ supplementalEligibility: [] })] });
+    check(/No approved overtime of April 2031 is waiting for supplemental payroll\./.test(e.appHTML()) && /No supplemental payroll for April 2031\./.test(e.appHTML()) && !/swpSuppPrep/.test(e.appHTML()),
+      'S1. no eligibility and no documents: both say so; nothing to prepare');
+    // A failed read, then Retry supplemental payroll.
+    const f = await openS({ [SELIG(MONTH)]: [err(500, 'internal_error'), ok(SELIGS)] });
+    check(/Payroll information could not be loaded/.test(f.appHTML()) && /id="swpSuppRetryBtn"/.test(f.appHTML()) && /<td>Draft<\/td>/.test(f.appHTML()),
+      'S1. a failed eligibility read says so (the documents still show) and offers Retry');
+    f.app.fire('swpSuppRetryBtn', 'click'); await flush();
+    check(countOf(f, SELIG(MONTH)) === 2 && countOf(f, SLIST(MONTH)) === 1 && /id="swpSuppPrep0"/.test(f.appHTML()), 'S1. Retry supplemental payroll reads only what failed');
+    const m = await openS({ [SLIST(MONTH)]: [ok({ supplementalPayrolls: [SDRAFT, Object.assign({}, SREV, { overtimeAmount: 1 })] })] });
+    check(m.pr().suppList === null && /TAM OS sent an unexpected response/.test(m.appHTML()), 'S1. a malformed document list shows nothing of it — the whole answer is refused');
+    // The month bar moves all three reads; a late answer for another month never applies.
+    const late = deferred();
+    const r = await openS({ [SLIST('2031-05')]: [late.promise], [LIST('2031-05')]: [ok({ payrollPlans: [] })], [SELIG('2031-05')]: [ok({ supplementalEligibility: [] })],
+      [LIST('2031-06')]: [ok({ payrollPlans: [] })], [SLIST('2031-06')]: [ok({ supplementalPayrolls: [] })], [SELIG('2031-06')]: [ok({ supplementalEligibility: [] })] });
+    r.app.fire('swpNextMonth', 'click'); await flush();
+    r.app.fire('swpNextMonth', 'click'); await flush();
+    late.resolve(ok({ supplementalPayrolls: [Object.assign({}, SDRAFT, { monthKey: '2031-05' })] })); await flush();
+    check(r.pr().month === '2031-06' && r.pr().suppListMonth === '2031-06' && (r.pr().suppList || []).length === 0 && !/<td>Draft<\/td>/.test(r.appHTML()),
+      'S1. a late Supplemental answer of 2031-05 never overwrites the month shown (2031-06)');
+    firewall(r, 'S1. month bar');
+  }
+
+  /* ---------- S2. AFI-4d Prepare supplemental payroll (generate) ---------- */
+  {
+    const rt = await openS({ [SW.generate]: [ok(sone(SNEW))] });
+    rt.app.fire('swpSuppPrep0', 'click'); await flush();
+    let html = rt.appHTML();
+    check(suppPosts(rt).length === 0 && rt.pr().panel && rt.pr().panel.kind === 'suppGenerate' && /Prepare supplemental payroll\?/.test(html)
+      && /Fabricated EMP-005 \(EMP-005\) — April 2031: 2 approved overtime records, 3\.50 hours \(Rp\) 7777\.00 eligible now\./.test(html)
+      && /creates a Draft of the approved overtime this committed payroll does not contain, or recalculates the open Draft/.test(html)
+      && /An open Reviewed or Ready supplemental payroll is returned unchanged/.test(html) && /The committed payroll is not changed\. Nothing is paid and nothing is posted to Finance\./.test(html),
+      'S2. Prepare asks first: the plan, month and eligible strings; Draft created or recalculated; an open Reviewed / Ready one returned unchanged; not paid, nothing posted to Finance — nothing sent');
+    check(rt.app.fire('swpNextMonth', 'click') === 'absent' || (rt.SessionPayroll.shiftMonth(1), rt.pr().month === MONTH), 'S2. the month cannot change while the confirmation is open');
+    rt.app.fire('swpPanelCancel', 'click'); await flush();
+    check(rt.pr().panel === null && suppPosts(rt).length === 0, 'S2. Back closes it; nothing sent');
+    rt.SessionPayroll.openPanel('suppGenerate', ID8); await flush();
+    check(rt.pr().panel === null, 'S2. an entry of "0.00" cannot be prepared, even by hand (UX only — the server answers 409 anyway)');
+    rt.SessionPayroll.openPanel('suppGenerate', 'e'.repeat(32)); await flush();
+    check(rt.pr().panel === null, 'S2. nor a plan that is not eligible this month');
+    const reads = [countOf(rt, LIST(MONTH)), countOf(rt, SLIST(MONTH)), countOf(rt, SELIG(MONTH))];
+    rt.app.fire('swpSuppPrep0', 'click'); await flush();
+    rt.app.fire('swpPanelConfirm', 'click');
+    const twice = rt.app.fire('swpPanelConfirm', 'click');
+    await flush();
+    const sent = suppPosts(rt, SW.generate);
+    check(sent.length === 1 && twice !== 'fired' && JSON.stringify(bodyOf(sent[0])) === JSON.stringify({ payrollPlanId: ID4 }) && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+      'S2. confirmed (double-clicked): exactly one POST /api/supplemental-payrolls/generate with exactly { payrollPlanId } and the CSRF token — no key, no amount');
+    html = rt.appHTML();
+    check(/Supplemental payroll prepared: its Draft holds the approved overtime that is eligible now\./.test(html) && countOf(rt, LIST(MONTH)) === reads[0] + 1
+      && countOf(rt, SLIST(MONTH)) === reads[1] + 1 && countOf(rt, SELIG(MONTH)) === reads[2] + 1, 'S2. a Draft answer: a fixed notice; the plans, documents and eligibility are read again');
+    check(!/new Draft|created a Draft/i.test(html.replace(/creates a Draft/g, '')), 'S2. the notice never claims a new Draft was made (it may be a recalculated one)');
+    firewall(rt, 'S2. generate');
+    // The base plan's open document is Reviewed / Ready: returned untouched — said so.
+    for(const open of [SREV, Object.assign({}, SREADY, { payrollPlanId: ID4, employeeId: 'e_5' })]){
+      const r = await openS({ [SW.generate]: [ok(sone(open))] });
+      r.SessionPayroll.openPanel('suppGenerate', ID4); await r.SessionPayroll.confirmPanel(); await flush();
+      check(/already has an open supplemental payroll that is Reviewed or Ready, and TAM OS returned it unchanged/.test(r.appHTML()) && !/its Draft holds/.test(r.appHTML())
+        && r.pr().mutation.status === 'idle', 'S2. an open ' + open.status + ' document answered: the unchanged-document notice (canonical meaning), never a "prepared Draft"');
+    }
+    // Answers that do not confirm, and outcomes that cannot be known: never resent; the month is read again.
+    for(const [label, answer, want] of [
+      ['another plan', ok(sone(Object.assign({}, SNEW, { payrollPlanId: ID1 }))), /could not confirm whether supplemental payroll was prepared/],
+      ['a Committed document', ok(sone(Object.assign({}, SNEW, { status: 'Committed' }))), /could not confirm whether supplemental payroll was prepared/],
+      ['another month', ok(sone(Object.assign({}, SNEW, { monthKey: '2031-05' }))), /could not confirm whether supplemental payroll was prepared/],
+      ['malformed', ok({ supplementalPayroll: SNEW, extra: 1 }), /could not confirm whether supplemental payroll was prepared/],
+      ['503', err(503, 'service_unavailable'), /could not confirm whether supplemental payroll was prepared/],
+      ['network', NETFAIL(), /could not confirm whether supplemental payroll was prepared/],
+      ['409', err(409, 'conflict'), /did not prepare supplemental payroll \(a conflict was reported\)/],
+      ['404', err(404, 'not_found'), /no longer available/]]){
+      const r = await openS({ [SW.generate]: [answer] });
+      const before = countOf(r, SELIG(MONTH));
+      r.SessionPayroll.openPanel('suppGenerate', ID4); await r.SessionPayroll.confirmPanel(); await flush(20);
+      check(suppPosts(r, SW.generate).length === 1 && countOf(r, SELIG(MONTH)) === before + 1 && want.test(r.appHTML()) && r.pr().panel === null,
+        'S2. generate ' + label + ': never resent; the month is read again; the outcome reported generically');
+      check(!/supplemental_(nothing_eligible|zero|plan_state|state|version)/.test(r.appHTML()), 'S2. generate ' + label + ': no server cause is claimed');
+      firewall(r, 'S2. generate ' + label);
+    }
+  }
+
+  /* ---------- S3. AFI-4d the Supplemental detail and its control matrix (no Draft → Ready) ---------- */
+  {
+    const rt = await suppDetail(SDRAFT, [SLINE]);
+    let html = rt.appHTML();
+    check(countOf(rt, SDET(SID_DRAFT)) === 1 && /<h1[^>]*>Supplemental payroll<\/h1>/.test(html) && rt.pr().detailId === null, 'S3. a document row opens its detail with one read (one detail at a time)');
+    const rows = ['Employee code</th><td>EMP-008', 'Employee</th><td>Fabricated EMP-008', 'Month</th><td>April 2031', 'Status</th><td>Draft', 'Overtime hours</th><td>2.25',
+      'Overtime records</th><td>1', 'Amount (Rp)</th><td>4321.00', 'Version</th><td>1'];
+    check(rows.every((r) => html.indexOf(r) !== -1), 'S3. the detail shows the snapshot, month, status, hours, count, amount and version exactly as sent');
+    check(html.indexOf('<td>' + IDO2 + '</td><td>2.25</td><td>1234.00</td>') !== -1 && /Approved overtime settled here/.test(html),
+      'S3. the frozen captured overtime is shown (record, hours, frozen amount) — and never summed (1234.00 is not the document amount 4321.00)');
+    check(suppButtons(html) === 'Review,Cancel' && !/id="swpSuppApproveBtn"/.test(html), 'S3. a Draft offers Review, Cancel — NO Approve (there is no Draft → Ready)');
+    rt.SessionPayroll.openPanel('suppApprove'); rt.SessionPayroll.openPanel('suppCommit'); rt.SessionPayroll.openPanel('suppReturn'); await flush();
+    check(rt.pr().panel === null && suppPosts(rt).length === 0, 'S3. Approve, Commit or Return invoked by hand on a Draft open nothing (no Draft → Ready)');
+    for(const [doc, want] of [[SREV, 'Approve,Return,Cancel'], [SREADY, 'Commit,Return,Cancel'], [SCOM, ''], [SCAN, '']]){
+      const r = await suppDetail(doc, doc === SCAN ? [] : [SLINE]);
+      check(suppButtons(r.appHTML()) === want, 'S3. ' + doc.status + ' offers ' + (want || 'nothing'));
+      if(doc === SCOM || doc === SCAN){
+        ['suppReview', 'suppApprove', 'suppReturn', 'suppCancel', 'suppCommit'].forEach((k) => r.SessionPayroll.openPanel(k));
+        await r.SessionPayroll.confirmPanel(); await flush();
+        check(r.pr().panel === null && suppPosts(r).length === 0, 'S3. ' + doc.status + ' is terminal: nothing can be opened or sent, even by hand');
+      }
+      if(doc === SCOM) check(/Status<\/th><td>Committed — final, not paid/.test(r.appHTML()), 'S3. Committed reads "Committed — final, not paid"');
+      if(doc === SCAN) check(/A cancelled supplemental payroll no longer holds overtime: its overtime was released\./.test(r.appHTML()) && /Overtime records<\/th><td>1/.test(r.appHTML()),
+        'S3. a Cancelled document explains why it lists no overtime (its count stays as sent)');
+      firewall(r, 'S3. ' + doc.status);
+    }
+    check(rt.sessionSupplementalActions(rt.AuthBoot.snapshot().principal, { status: 'Draft' }).join() === 'review,cancel'
+      && rt.sessionSupplementalActions(rt.AuthBoot.snapshot().principal, { status: 'Committed' }).length === 0
+      && rt.sessionSupplementalActions({ principalType: 'employee', employeeId: 'e_5' }, SREADY).length === 0, 'S3. the matrix: Draft review / cancel only; nothing on Committed; nothing to an Employee');
+    rt.app.fire('swpBackBtn', 'click'); await flush();
+    check(rt.pr().suppDetailId === null && /id="swpSupp"/.test(rt.appHTML()), 'S3. Back returns to the month page');
+    // A Committed plan's detail lists its Supplemental documents — several waves, separately.
+    const p = await openS({ [DET(ID4)]: [ok(det(P4))], [SDET(SID_COM)]: [ok(sdet(SCOM, [SLINE]))], [SDET(SID_COM2)]: [ok(sdet(SCOM2, [SLINE2]))] });
+    p.app.fire('swpOpen3', 'click'); await flush();
+    html = p.appHTML();
+    check(/Supplemental payroll for this payroll/.test(html) && /<td>1 of 4<\/td>/.test(html) && /<td>4 of 4<\/td>/.test(html) && /id="swpSuppLink3"/.test(html) && !/id="swpSuppLink4"/.test(html),
+      'S3. a Committed plan\'s detail lists its own Supplemental documents (several waves, each separate)');
+    p.app.fire('swpSuppLink3', 'click'); await flush();
+    check(p.pr().suppDetailId === SID_COM2 && p.pr().detailId === null && /Amount \(Rp\)<\/th><td>99\.00/.test(p.appHTML()), 'S3. a link opens that document (the plan detail gives way)');
+    firewall(p, 'S3. related');
+    const other = await openS({ [DET(ID1)]: [ok(det(P1))] });
+    other.app.fire('swpOpen0', 'click'); await flush();
+    check(!/Supplemental payroll for this payroll/.test(other.appHTML()), 'S3. a plan that is not Committed lists no Supplemental payroll');
+    // A late detail answer of document A never overwrites document B.
+    const late = deferred();
+    const r2 = await openS({ [SDET(SID_DRAFT)]: [late.promise], [SDET(SID_REV)]: [ok(sdet(SREV, [SLINE]))] });
+    r2.SessionPayroll.openSupplemental(SID_DRAFT); await flush();
+    r2.SessionPayroll.back(); r2.SessionPayroll.openSupplemental(SID_REV); await flush();
+    late.resolve(ok(sdet(SDRAFT, [SLINE]))); await flush();
+    check(r2.pr().suppDetailId === SID_REV && r2.pr().suppDetail.doc.id === SID_REV, 'S3. a late detail answer of document A never overwrites document B');
+    const r3 = await openS({ [SDET(SID_DRAFT)]: [ok(sdet(SREV, []))] });
+    r3.SessionPayroll.openSupplemental(SID_DRAFT); await flush();
+    check(r3.pr().suppDetail === null && /TAM OS sent an unexpected response/.test(r3.appHTML()), 'S3. a detail answer for another document id is refused');
+  }
+
+  /* ---------- S4. AFI-4d transitions ---------- */
+  {
+    const cases = [
+      ['review', SDRAFT, 'swpSuppReviewBtn', 'Reviewed', /Supplemental payroll marked as reviewed\./],
+      ['approve', SREV, 'swpSuppApproveBtn', 'Ready', /Supplemental payroll approved: it is now Ready — approved, not paid\./],
+      ['return', SREV, 'swpSuppReturnBtn', 'Draft', /Supplemental payroll returned to Draft\./],
+      ['return', SREADY, 'swpSuppReturnBtn', 'Draft', /Supplemental payroll returned to Draft\./],
+      ['cancel', SDRAFT, 'swpSuppCancelBtn', 'Cancelled', /Supplemental payroll cancelled\. Its overtime is released\./],
+      ['cancel', SREV, 'swpSuppCancelBtn', 'Cancelled', /Supplemental payroll cancelled/],
+      ['cancel', SREADY, 'swpSuppCancelBtn', 'Cancelled', /Supplemental payroll cancelled/]
+    ];
+    for(const [op, doc, btn, target, notice] of cases){
+      const after = bumped(doc, target);
+      const rt = await suppDetail(doc, [SLINE], { [SW[op]]: [ok(sone(after))] });
+      rt.app.fire(btn, 'click'); await flush();
+      check(suppPosts(rt).length === 0 && !!rt.pr().panel, 'S4. ' + op + ' from ' + doc.status + ' asks first; nothing sent');
+      if(op === 'approve') check(/It becomes Ready — approved, not paid\./.test(rt.appHTML()), 'S4. the Approve confirmation: Ready — approved, not paid');
+      if(op === 'cancel') check(/releases its overtime/.test(rt.appHTML()), 'S4. the Cancel confirmation says the overtime is released');
+      rt.net.routes[SDET(doc.id)] = [ok(sdet(after, op === 'cancel' ? [] : [SLINE]))];
+      rt.app.fire('swpPanelConfirm', 'click'); await flush();
+      const sent = suppPosts(rt, SW[op]);
+      check(sent.length === 1 && JSON.stringify(bodyOf(sent[0])) === JSON.stringify({ id: doc.id, expectedVersion: doc.version }) && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+        'S4. ' + op + ' from ' + doc.status + ': exactly one POST ' + SW[op] + ' with { id, expectedVersion: the version shown }');
+      check(rt.pr().suppDetail && rt.pr().suppDetail.doc.status === target && rt.pr().suppDetail.doc.version === doc.version + 1 && notice.test(rt.appHTML())
+        && countOf(rt, SDET(doc.id)) === 2 && rt.pr().listStale === true, 'S4. ' + op + ' from ' + doc.status + ': confirmed by the same document in ' + target + ' at version + 1; read again; a fixed notice; the month is stale');
+      firewall(rt, 'S4. ' + op + ' ' + doc.status);
+    }
+    // Answers that do not confirm, and unknown outcomes: AMBIGUOUS — never resent; the document read again.
+    for(const [label, answer] of [['version not + 1', ok(sone(Object.assign({}, SDRAFT, { status: 'Reviewed', version: 3 })))], ['Ready (a Draft → Ready)', ok(sone(bumped(SDRAFT, 'Ready')))],
+      ['another document', ok(sone(bumped(SREV, 'Reviewed')))], ['503', err(503, 'service_unavailable')], ['network', NETFAIL()]]){
+      const rt = await suppDetail(SDRAFT, [SLINE], { [SW.review]: [answer] });
+      rt.net.routes[SDET(SID_DRAFT)] = [ok(sdet(SDRAFT, [SLINE]))];
+      rt.SessionPayroll.openPanel('suppReview'); await rt.SessionPayroll.confirmPanel(); await flush(20);
+      check(suppPosts(rt, SW.review).length === 1 && rt.pr().mutation.status === 'ambiguous' && countOf(rt, SDET(SID_DRAFT)) === 2 && rt.pr().panel === null
+        && /TAM OS could not confirm the change\. The supplemental payroll read again is Draft, not Reviewed/.test(rt.appHTML()) && /id="swpSuppReloadBtn"/.test(rt.appHTML()),
+        'S4. review ' + label + ': AMBIGUOUS — never resent; the document read again and its state reported');
+      firewall(rt, 'S4. ambiguous ' + label);
+    }
+    // Any 409: generic; the document read again; a new deliberate action.
+    {
+      const rt = await suppDetail(SREV, [SLINE], { [SW.approve]: [err(409, 'conflict')] });
+      rt.net.routes[SDET(SID_REV)] = [ok(sdet(bumped(SREV, 'Draft'), [SLINE]))];
+      rt.SessionPayroll.openPanel('suppApprove'); await rt.SessionPayroll.confirmPanel(); await flush(20);
+      check(suppPosts(rt, SW.approve).length === 1 && rt.pr().panel === null && rt.pr().suppDetail.doc.status === 'Draft'
+        && /This supplemental payroll changed or the action is no longer available\. It was read again from TAM OS — check it, then choose again\./.test(rt.appHTML())
+        && suppButtons(rt.appHTML()) === 'Review,Cancel', 'S4. 409: generic stale message, the document read again (now Draft: Review / Cancel only), nothing resent');
+      rt.app.fire('swpSuppReloadBtn', 'click'); await flush();
+      check(countOf(rt, SDET(SID_REV)) === 3 && suppPosts(rt).length === 1, 'S4. Reload supplemental payroll reads it again — and sends nothing');
+    }
+    {
+      const rt = await suppDetail(SREADY, [SLINE], { [SW.cancel]: [err(404, 'not_found')] });
+      const reads = countOf(rt, SLIST(MONTH));
+      rt.SessionPayroll.openPanel('suppCancel'); await rt.SessionPayroll.confirmPanel(); await flush(20);
+      check(rt.pr().suppDetailId === null && countOf(rt, SLIST(MONTH)) === reads + 1 && /This supplemental payroll is no longer available/.test(rt.appHTML()),
+        'S4. 404: the detail closes and the month is read again');
+      const d = await suppDetail(SREADY, [SLINE], { [SW.cancel]: [err(403, 'forbidden')] });
+      d.net.routes['/api/auth/me'] = [ok(ME_CEO)];
+      d.SessionPayroll.openPanel('suppCancel'); await d.SessionPayroll.confirmPanel(); await flush(20);
+      check(/You do not have permission to make this change\./.test(d.appHTML()), 'S4. 403: an access failure');
+      const l = await suppDetail(SREADY, [SLINE], { [SW.cancel]: [resp(429, { ok: false, error: { code: 'rate_limited', message: 'x' }, requestId: RID }, { 'Retry-After': '30' })] });
+      l.SessionPayroll.openPanel('suppCancel'); await l.SessionPayroll.confirmPanel(); await flush(20);
+      check(/Too many requests\./.test(l.appHTML()) && suppPosts(l).length === 1, 'S4. 429: the rate-limit message; nothing resent');
+      const u = await suppDetail(SREADY, [SLINE], { [SW.cancel]: [err(401, 'unauthenticated')] });
+      u.SessionPayroll.openPanel('suppCancel'); await u.SessionPayroll.confirmPanel(); await flush(20);
+      check(u.state() === u.AUTH_STATES.SIGNED_OUT && u.pr().suppDetail === null && u.pr().suppList === null, 'S4. 401: the session ends and every Supplemental datum is destroyed');
+    }
+  }
+
+  /* ---------- S5. AFI-4d Commit (D-AFI4c2-1 reused): one intent, exact body, same-key Retry ---------- */
+  {
+    const committed = bumped(SREADY, 'Committed');
+    const rt = await suppDetail(SREADY, [SLINE], { [SW.commit]: [ok(sone(committed))] });
+    rt.app.fire('swpSuppCommitBtn', 'click'); await flush();
+    let html = rt.appHTML();
+    check(rt.pr().panel && rt.pr().panel.kind === 'suppCommit' && suppPosts(rt).length === 0 && rt.crypto.calls === 0 && rt.pr().suppIntent === null,
+      'S5. Commit supplemental asks first: nothing sent, no key, no intent');
+    check(/Commit this supplemental payroll\?/.test(html) && /final payroll obligation for April 2031: Fabricated EMP-009 \(EMP-009\), overtime 2\.25 hours in 1 records \(Rp\) 4321\.00, version 3\./.test(html)
+      && /can no longer be changed, returned or cancelled/.test(html) && /It is not a payment — nothing is paid and nothing is posted to Finance\./.test(html),
+      'S5. the confirmation: employee, month, hours, amount, version; final obligation; no return or cancel; NOT paid; nothing posted to Finance');
+    rt.net.routes[SDET(SID_READY)] = [ok(sdet(committed, [SLINE]))];
+    rt.app.fire('swpPanelConfirm', 'click');
+    const second = rt.app.fire('swpPanelConfirm', 'click');
+    await rt.SessionPayroll.confirmPanel(); await flush();
+    const sent = suppPosts(rt, SW.commit);
+    check(sent.length === 1 && rt.crypto.calls === 1 && second !== 'fired', 'S5. double-clicked and invoked again: exactly one key and one POST');
+    const b = sent.length ? bodyOf(sent[0]) : {};
+    check(keys(b) === COMMIT_KEYS && b.id === SID_READY && b.expectedVersion === 3 && b.expectedTotal === '4321.00' && b.expectedTotal === SREADY.overtimeAmount
+      && b.idempotencyKey === rt.crypto.last && /^[0-9a-f]{32}$/.test(b.idempotencyKey) && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+      'S5. the body is exactly { id, expectedVersion, expectedTotal, idempotencyKey }: the document\'s own overtimeAmount string (never the lines\' 1234.00), a Web Crypto key');
+    html = rt.appHTML();
+    check(rt.pr().suppDetail.doc.status === 'Committed' && /Status<\/th><td>Committed — final, not paid/.test(html) && rt.pr().suppIntent === null
+      && /Supplemental payroll committed: it is a final payroll obligation for April 2031 — not paid\./.test(html) && suppButtons(html) === '',
+      'S5. confirmed: Committed — final, not paid; the intent is gone; no control remains');
+    firewall(rt, 'S5. committed');
+    for(const [label, answer] of [['another id', sone(Object.assign({}, committed, { id: SID_REV }))], ['not Committed', sone(Object.assign({}, committed, { status: 'Ready' }))],
+      ['version not + 1', sone(Object.assign({}, committed, { version: 9 }))], ['another amount', sone(Object.assign({}, committed, { overtimeAmount: '1234.00' }))]]){
+      const r = await suppDetail(SREADY, [SLINE], { [SW.commit]: [ok(answer)] });
+      r.SessionPayroll.openPanel('suppCommit'); await r.SessionPayroll.confirmPanel(); await flush();
+      check(r.pr().mutation.status === 'ambiguous' && suppPosts(r, SW.commit).length === 1 && r.pr().suppIntent !== null,
+        'S5. a success with ' + label + ' is not a success: unknown outcome, read again, nothing resent, the intent kept');
+    }
+    // Ambiguous → Committed at version + 1 with the same amount: the success.
+    const a = await suppDetail(SREADY, [SLINE], { [SW.commit]: [NETFAIL()] });
+    a.net.routes[SDET(SID_READY)] = [ok(sdet(committed, [SLINE]))];
+    a.SessionPayroll.openPanel('suppCommit'); await a.SessionPayroll.confirmPanel(); await flush();
+    check(suppPosts(a, SW.commit).length === 1 && a.pr().suppIntent === null && a.pr().suppDetail.doc.status === 'Committed'
+      && /could not confirm the commit at first, but the supplemental payroll read again is committed/.test(a.appHTML()), 'S5. ambiguous → Committed on the re-read: resolved as the success; nothing resent');
+    // Ambiguous → still Ready: Retry commit with the SAME body and key, only on a click.
+    const r = await suppDetail(SREADY, [SLINE], { [SW.commit]: [NETFAIL(), ok(sone(committed))] });
+    r.SessionPayroll.openPanel('suppCommit'); await r.SessionPayroll.confirmPanel(); await flush();
+    const first = bodyOf(suppPosts(r, SW.commit)[0]);
+    html = r.appHTML();
+    check(suppPosts(r, SW.commit).length === 1 && r.pr().suppIntent && r.pr().suppIntent.key === first.idempotencyKey && /id="swpSuppRetryCommitBtn"/.test(html) && !/id="swpSuppCommitBtn"/.test(html)
+      && /still Ready with the same amount\. Retry commit sends the same commit again/.test(html), 'S5. ambiguous → still Ready: the intent kept; Retry commit offered; nothing resent automatically');
+    r.render(); await flush(); r.SessionPayroll.openPanel('suppCommit'); await flush();
+    check(suppPosts(r, SW.commit).length === 1 && r.pr().panel === null && r.crypto.calls === 1, 'S5. a re-render or another Commit never sends or makes a new key');
+    r.net.routes[SDET(SID_REV)] = [ok(sdet(SREV, [SLINE]))];
+    r.SessionPayroll.back(); await r.SessionPayroll.openSupplemental(SID_REV); await flush();
+    await r.SessionPayroll.retrySupplementalCommit(); await flush();
+    check(suppPosts(r, SW.commit).length === 1 && r.pr().suppIntent !== null && !/id="swpSuppRetryCommitBtn"/.test(r.appHTML()),
+      'S5. the unresolved intent belongs to its own document: Retry commit on another document sends nothing');
+    r.SessionPayroll.back(); await r.SessionPayroll.openSupplemental(SID_READY); await flush();
+    r.net.routes[SDET(SID_READY)] = [ok(sdet(committed, [SLINE]))];
+    r.app.fire('swpSuppRetryCommitBtn', 'click');
+    const again = r.app.fire('swpSuppRetryCommitBtn', 'click');
+    await r.SessionPayroll.retrySupplementalCommit(); await flush();
+    const retried = suppPosts(r, SW.commit);
+    check(retried.length === 2 && again !== 'fired' && JSON.stringify(bodyOf(retried[1])) === JSON.stringify(first) && r.crypto.calls === 1 && r.pr().suppDetail.doc.status === 'Committed',
+      'S5. Retry commit (double-clicked) sends exactly one more POST with the SAME body and key — then confirmed');
+    firewall(r, 'S5. retry');
+    // Ambiguous → changed: stale; the intent dropped.
+    const c = await suppDetail(SREADY, [SLINE], { [SW.commit]: [NETFAIL()] });
+    c.net.routes[SDET(SID_READY)] = [ok(sdet(Object.assign({}, SREADY, { version: 4 }), [SLINE]))];
+    c.SessionPayroll.openPanel('suppCommit'); await c.SessionPayroll.confirmPanel(); await flush();
+    check(c.pr().suppIntent === null && !/id="swpSuppRetryCommitBtn"/.test(c.appHTML()) && /the supplemental payroll read again has changed/.test(c.appHTML()) && suppPosts(c, SW.commit).length === 1,
+      'S5. ambiguous → changed on the re-read: the intent is dropped as stale; no Retry; nothing resent');
+    // A 500 is an unknown outcome; a 409 a definite refusal.
+    const e5 = await suppDetail(SREADY, [SLINE], { [SW.commit]: [err(500, 'internal_error')] });
+    e5.SessionPayroll.openPanel('suppCommit'); await e5.SessionPayroll.confirmPanel(); await flush();
+    check(e5.pr().mutation.status === 'ambiguous' && e5.pr().suppIntent !== null, 'S5. a 500 is an unknown outcome: the intent is kept, the document read again');
+    const k = await suppDetail(SREADY, [SLINE], { [SW.commit]: [err(409, 'conflict')] });
+    k.SessionPayroll.openPanel('suppCommit'); await k.SessionPayroll.confirmPanel(); await flush();
+    check(k.pr().suppIntent === null && k.pr().panel === null && countOf(k, SDET(SID_READY)) === 2 && suppPosts(k, SW.commit).length === 1
+      && /TAM OS did not commit this supplemental payroll: it changed, its amount no longer matches, or its overtime changed\./.test(k.appHTML())
+      && !/supplemental_(total|links|state|version)|idempotency_mismatch/.test(k.appHTML()) && /id="swpSuppCommitBtn"/.test(k.appHTML()),
+      'S5. 409: definitely refused — intent dropped, read again, the cause never claimed; a new deliberate Commit may follow');
+    // Session loss destroys the intent; no Web Crypto sends nothing.
+    const f = await suppDetail(SREADY, [SLINE], { [SW.commit]: [NETFAIL()] });
+    f.SessionPayroll.openPanel('suppCommit'); await f.SessionPayroll.confirmPanel(); await flush();
+    check(f.pr().suppIntent !== null, 'S5. (an unresolved intent is held in memory)');
+    f.AuthBoot.sessionLost(); await flush();
+    check(f.pr().suppIntent === null && f.pr().suppDetail === null && f.access.local.length === 0 && f.access.session.length === 0, 'S5. session loss destroys the intent and its key; nothing was stored');
+    const g = await suppDetail(SREADY, [SLINE], {}, { noCrypto: true });
+    g.SessionPayroll.openPanel('suppCommit'); await g.SessionPayroll.confirmPanel(); await flush();
+    check(suppPosts(g).length === 0 && g.pr().suppIntent === null && /cannot create a secure commit key\. Nothing was sent\./.test(g.appHTML()), 'S5. without Web Crypto nothing is sent');
+    check(rt.sessionSupplementalIntentState({ id: SID_READY, version: 3, total: '4321.00' }, committed) === 'committed'
+      && rt.sessionSupplementalIntentState({ id: SID_READY, version: 3, total: '4321.00' }, SREADY) === 'unresolved'
+      && rt.sessionSupplementalIntentState({ id: SID_READY, version: 3, total: '4321.00' }, Object.assign({}, SREADY, { overtimeAmount: '1.00' })) === 'stale',
+      'S5. the reconciliation reads exactly: Committed at version + 1 with the same amount, still Ready at the same version and amount, or stale');
+  }
+
+  /* ---------- S6. AFI-4d My payroll (Employee): own Committed Supplemental, separate rows ---------- */
+  {
+    const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [SLIST(MONTH)]: [ok({ supplementalPayrolls: [SMINE1, SMINE2] })],
+      [DET(ID7)]: [ok(det(MINE, [OT1]))], [SDET(SID_MINE2)]: [ok(sdet(SMINE2, [SLINE2]))], [SDET(SID_MINE1)]: [ok(sdet(SMINE1, [SLINE]))] });
+    rt.app.fire('swSectionPayroll', 'click'); await flush();
+    let html = rt.appHTML();
+    check(countOf(rt, SLIST(MONTH)) === 1 && countOf(rt, SELIG(MONTH)) === 0 && /Supplemental payroll — overtime approved after payroll was committed/.test(html),
+      'S6. My payroll reads the own Supplemental documents of the month — never the eligibility');
+    check(html.indexOf('<td>April 2031</td><td>Committed — final, not paid</td><td>2.25</td><td>4321.00</td>') !== -1 && html.indexOf('<td>April 2031</td><td>Committed — final, not paid</td><td>0.25</td><td>99.00</td>') !== -1
+      && html.indexOf('<td>1000000.00</td><td>54688.00</td><td>777.00</td>') !== -1, 'S6. each Committed Supplemental is its own row (two waves), beside the payroll row — every amount as sent');
+    check(!/4420\.00|1000099\.00|1004321\.00|Total compensation|Grand total/i.test(html) && (html.match(/777\.00/g) || []).length === 1,
+      'S6. the payroll and the Supplemental amounts are never added together — no combined total');
+    rt.app.fire('swpSuppOpen1', 'click'); await flush();
+    html = rt.appHTML();
+    const rows = ['Employee</th><td>Fabricated Self', 'Code</th><td>EMP-777', 'Month</th><td>April 2031', 'Status</th><td>Committed — final, not paid', 'Overtime hours</th><td>0.25',
+      'Overtime records</th><td>1', 'Amount (Rp)</th><td>99.00'];
+    check(rt.pr().suppDetailId === SID_MINE2 && /Supplemental payroll — April 2031/.test(html) && rows.every((x) => html.indexOf(x) !== -1) && html.indexOf('<td>' + IDO3 + '</td><td>0.25</td><td>11.00</td>') !== -1,
+      'S6. a row opens its own read-only card: the server fields and the frozen overtime lines');
+    check(!/Version|swpSupp(Review|Approve|Return|Cancel|Commit|RetryCommit|Reload)Btn|swpPanel|Prepare/.test(html), 'S6. read-only: no control, no version');
+    rt.app.fire('swpBackBtn', 'click'); await flush();
+    rt.app.fire('swpOpen0', 'click'); await flush();
+    html = rt.appHTML();
+    check(/Supplemental payroll for this payroll/.test(html) && /<td>1 of 2<\/td>/.test(html) && /<td>2 of 2<\/td>/.test(html) && /Total \(Rp\)<\/th><td>777\.00/.test(html),
+      'S6. the payroll card links its Supplemental documents (each separate); its total stays the payroll total as sent');
+    rt.app.fire('swpSuppLink0', 'click'); await flush();
+    check(rt.pr().suppDetailId === SID_MINE1 && rt.pr().detailId === null, 'S6. a link opens that Supplemental card');
+    ['suppGenerate', 'suppReview', 'suppApprove', 'suppReturn', 'suppCancel', 'suppCommit'].forEach((k) => rt.SessionPayroll.openPanel(k, ID7));
+    await rt.SessionPayroll.confirmPanel(); await rt.SessionPayroll.retrySupplementalCommit(); rt.SessionPayroll.reloadSupplemental(); await flush();
+    check(suppPosts(rt).length === 0 && rt.net.calls.every((c) => !/eligibility/.test(c.url)) && rt.pr().panel === null, 'S6. every Supplemental write or the eligibility, invoked by hand as an Employee, is a no-op');
+    firewall(rt, 'S6. My payroll');
+    // Defence in depth: a list holding a non-Committed, a colleague's or another company's document is refused whole.
+    for(const [label, item] of [['their own Draft', Object.assign({}, SMINE1, { status: 'Draft' })], ['their own Reviewed', Object.assign({}, SMINE1, { status: 'Reviewed' })],
+      ['their own Ready', Object.assign({}, SMINE1, { status: 'Ready' })], ['their own Cancelled', Object.assign({}, SMINE1, { status: 'Cancelled' })],
+      ['a colleague\'s', Object.assign({}, SMINE1, { employeeId: 'e_5' })], ['another company\'s (another employee id)', Object.assign({}, SMINE1, { employeeId: 'emp_other_co' })]]){
+      const r = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [SLIST(MONTH)]: [ok({ supplementalPayrolls: [SMINE2, item] })] });
+      r.app.fire('swSectionPayroll', 'click'); await flush();
+      check(r.pr().suppList === null && /TAM OS sent an unexpected response/.test(r.appHTML()) && !/<td>99\.00<\/td>/.test(r.appHTML()),
+        'S6. a list holding ' + label + ' document is refused whole — nothing of it shown');
+    }
+    const r2 = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [SLIST(MONTH)]: [ok({ supplementalPayrolls: [SMINE1] })],
+      [SDET(SID_MINE1)]: [ok(sdet(Object.assign({}, SMINE1, { employeeId: 'e_5' }), [SLINE]))] });
+    r2.app.fire('swSectionPayroll', 'click'); await flush();
+    r2.app.fire('swpSuppOpen0', 'click'); await flush();
+    check(r2.pr().suppDetail === null && /TAM OS sent an unexpected response/.test(r2.appHTML()), 'S6. a detail of a colleague\'s document is refused');
+    const r3 = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [] })], [SLIST(MONTH)]: [ok({ supplementalPayrolls: [] })] });
+    r3.app.fire('swSectionPayroll', 'click'); await flush();
+    check(/No supplemental payroll for April 2031\./.test(r3.appHTML()), 'S6. an empty month says so');
+  }
+
+  /* ---------- S7. AFI-4d SESSION firewall: memory only, cleared, stale answers dropped ---------- */
+  {
+    const rt = await openS({ [SDET(SID_READY)]: [ok(sdet(SREADY, [SLINE]))], [SW.commit]: [NETFAIL()] });
+    rt.SessionPayroll.openSupplemental(SID_READY); await flush();
+    rt.SessionPayroll.openPanel('suppCommit'); await rt.SessionPayroll.confirmPanel(); await flush();
+    check(rt.pr().suppIntent !== null && rt.pr().suppList !== null && rt.pr().elig !== null, 'S7. (Supplemental data and an intent held in memory)');
+    rt.SessionPayrollStore.bindPrincipal({ id: 'u_ceo_2', principalType: 'ceo', employeeId: null });
+    check(rt.pr().suppIntent === null && rt.pr().suppList === null && rt.pr().elig === null && rt.pr().suppDetail === null, 'S7. a different principal destroys every Supplemental datum and the intent');
+    const lo = await openS();
+    lo.AuthBoot.sessionLost(); await flush();
+    check(lo.pr().suppList === null && lo.pr().elig === null && lo.pr().open === false, 'S7. session loss / logout destroys the Supplemental data');
+    const late = deferred();
+    const l2 = await openS({ [SLIST(MONTH)]: [late.promise] });
+    l2.AuthBoot.sessionLost(); await flush();
+    late.resolve(ok(SMONTH)); await flush();
+    check(l2.pr().suppList === null, 'S7. a late Supplemental answer after the session ended is dropped');
+    const S = lo.SessionPayrollStore;
+    const P = (o) => lo.parse(JSON.stringify(o));
+    S.bindPrincipal(ME_CEO_PRINCIPAL); S.setOpen(true, MONTH);
+    const a = S.begin('suppList', MONTH), b = S.begin('suppList', MONTH);
+    check(S.applySuppList(a, P([SDRAFT])) === false && S.applySuppList(b, P([])) === true, 'S7. the store refuses a superseded Supplemental list answer by itself');
+    const d1 = S.begin('suppDetail', SID_DRAFT), d2 = S.begin('suppDetail', SID_REV);
+    check(S.applySuppDetail(d1, lo.SupplementalDecoders.detailResponse(P(sdet(SDRAFT, [])))) === false && S.applySuppDetail(d2, lo.SupplementalDecoders.detailResponse(P(sdet(SDRAFT, [])))) === false
+      && S.applySuppDetail(d2, lo.SupplementalDecoders.detailResponse(P(sdet(SREV, [])))) === true, 'S7. the store refuses a superseded detail and one for another document');
+    const e1 = S.begin('elig', MONTH);
+    S.setSuppIntent({ id: SID_READY, version: 3, total: '4321.00', key: 'f'.repeat(32) });
+    check(Object.isFrozen(S.snapshot().suppIntent), 'S7. the Supplemental intent is one frozen record');
+    S.clear();
+    check(S.applyElig(e1, P([])) === false && S.snapshot().suppIntent === null && S.snapshot().suppDetail === null, 'S7. after clear() no earlier answer applies, and the intent is gone');
+    check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0 && rt.access.url.length === 0 && rt.spy.length === 0,
+      'S7. no storage, cookie, URL / history or LOCAL engine use anywhere');
+  }
+
+  /* ---------- S8. AFI-4d no global collision with the LOCAL Supplemental engine ---------- */
+  {
+    const rt = loadRuntime({});
+    check(rt.spyErr.length === 0 && Array.isArray(rt.LOCAL_SUPPLEMENTAL_STATUSES) && rt.LOCAL_SUPPLEMENTAL_STATUSES.join() === 'Draft,Review,Approved,Posted,Executed,Cancelled'
+      && typeof rt.SupplementalApi === 'object' && typeof rt.SupplementalDecoders === 'object',
+      'S8. every production module loads together: the LOCAL Supplemental engine keeps its own names and statuses beside the SESSION SupplementalApi / Decoders (no redeclaration)');
+    const src = ['core/payroll-api.js', 'core/session-payroll.js', 'ui/session-payroll-view.js'].map((f) => fs.readFileSync(path.join(root, 'js', f), 'utf8')).join('\n');
+    const local = fs.readFileSync(path.join(root, 'js', 'people', 'supplemental-engine.js'), 'utf8');
+    const localNames = (local.match(/^(?:const|let|var|function|async function) +([A-Za-z_$][A-Za-z0-9_$]*)/gm) || []).map((l) => l.split(/\s+/).pop());
+    const mine = (src.match(/^(?:const|let|var|function|async function) +([A-Za-z_$][A-Za-z0-9_$]*)/gm) || []).map((l) => l.split(/\s+/).pop());
+    check(localNames.length > 20 && mine.every((n) => localNames.indexOf(n) === -1), 'S8. no top-level SESSION name equals a LOCAL supplemental-engine name');
+  }
+
   /* ---------- K. sources: no money arithmetic, no LOCAL, Overtime or Finance authority ---------- */
   {
     const code = (f) => fs.readFileSync(path.join(root, 'js', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
@@ -988,11 +1534,17 @@ function firewall(rt, label, overtimeOpened){
       'K. the commit key comes only from Web Crypto getRandomValues (16 bytes, in payroll-api.js) — never Math.random, never stored');
     check(/expectedTotal: i\.total/.test(code('core/payroll-api.js')) && /total: d\.plan\.totalAmount/.test(code('core/session-payroll.js')),
       'K. expectedTotal is the plan\'s own totalAmount string, carried unchanged by the intent');
+    // AFI-4d: the Supplemental commit total is the document's own overtimeAmount string; nothing of
+    // the LOCAL Supplemental engine or its store is named; no arithmetic on any eligibility amount.
+    check(/total: d\.doc\.overtimeAmount/.test(code('core/session-payroll.js')) && !/eligibleAmount\s*[-+*\/]|\+\s*[a-z.]*eligibleAmount/.test(all),
+      'K. the Supplemental expectedTotal is the document\'s own overtimeAmount string; no arithmetic on any eligible amount');
+    check(!/\b(generateSupplementalForPlan|refreshSupplemental|transitionSupplemental|postSupplemental|persistSupplementalPayments|supplementalById|supplementalsForPlan|SUPPLEMENTAL_STATUSES|SUPPLEMENTAL_TRANSITIONS|supplementalPayments|tam_supplemental_payments_v1)\b/.test(all),
+      'K. no LOCAL Supplemental engine, store or status vocabulary in the SESSION Payroll modules');
   }
 
   console.log('');
-  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
-  console.log('AFI-4c1 + AFI-4c2 SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
+  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 + AFI-4d SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
+  console.log('AFI-4c1 + AFI-4c2 + AFI-4d SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
   failures.forEach((f) => console.log('   - ' + f));
   process.exit(1);
 })().catch((e) => { console.error('HARNESS ERROR: ' + (e && e.stack || e)); process.exit(2); });
