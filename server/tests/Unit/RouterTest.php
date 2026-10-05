@@ -17,7 +17,8 @@ $router = new Router($production());
 $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiError::class, static fn () => $router->match($method, $path))->errorCode;
 
 return [
-    'production has exactly thirty-eight routes (BF-4c2: commit and the drift read); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime and payroll routes require one' => static function () use ($production): void {
+    // BF-4d authorized revision: the nine Supplemental Payroll routes follow (forty-seven). Was: thirty-eight.
+    'production has exactly forty-seven routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll and Supplemental routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -59,6 +60,15 @@ return [
             ['POST', '/api/payroll-plans/cancel', [], RouteAuth::Required],
             ['POST', '/api/payroll-plans/commit', [], RouteAuth::Required],
             ['GET', '/api/payroll-plan/drift', ['id'], RouteAuth::Required],
+            ['GET', '/api/supplemental-payrolls', ['month'], RouteAuth::Required],
+            ['GET', '/api/supplemental-payroll', ['id'], RouteAuth::Required],
+            ['GET', '/api/supplemental-payrolls/eligibility', ['month'], RouteAuth::Required],
+            ['POST', '/api/supplemental-payrolls/generate', [], RouteAuth::Required],
+            ['POST', '/api/supplemental-payrolls/review', [], RouteAuth::Required],
+            ['POST', '/api/supplemental-payrolls/approve', [], RouteAuth::Required],
+            ['POST', '/api/supplemental-payrolls/return', [], RouteAuth::Required],
+            ['POST', '/api/supplemental-payrolls/cancel', [], RouteAuth::Required],
+            ['POST', '/api/supplemental-payrolls/commit', [], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

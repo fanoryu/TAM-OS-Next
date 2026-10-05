@@ -35,7 +35,9 @@ return [
             'POST /api/auth/reset-password',
         ], Routes::ACCOUNT_SELF_SERVICE);
     },
-    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) approve under overtime.manage (BF-4b2) and the five payroll writes under payroll.manage (BF-4c1)' => static function (): void {
+    // BF-4d authorized revision: the six Supplemental Payroll writes under the existing,
+    // record-free supplemental.manage join. Was: no supplemental.manage route.
+    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) approve under overtime.manage (BF-4b2), the five payroll writes under payroll.manage (BF-4c1) and the six Supplemental writes under supplemental.manage (BF-4d)' => static function (): void {
         $routes = productionRoutes(testConfig());
         $selfService = [];
         $business = [];
@@ -76,6 +78,12 @@ return [
             'POST /api/payroll-plans/return' => Action::PayrollManage,
             'POST /api/payroll-plans/cancel' => Action::PayrollManage,
             'POST /api/payroll-plans/commit' => Action::PayrollManage,
+            'POST /api/supplemental-payrolls/generate' => Action::SupplementalManage,
+            'POST /api/supplemental-payrolls/review' => Action::SupplementalManage,
+            'POST /api/supplemental-payrolls/approve' => Action::SupplementalManage,
+            'POST /api/supplemental-payrolls/return' => Action::SupplementalManage,
+            'POST /api/supplemental-payrolls/cancel' => Action::SupplementalManage,
+            'POST /api/supplemental-payrolls/commit' => Action::SupplementalManage,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

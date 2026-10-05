@@ -169,11 +169,14 @@ return [
         $service = (string) file_get_contents(dirname(__DIR__, 2) . '/src/Payroll/PayrollService.php');
         assertSame(2, substr_count($service, '}, readCommitted: true);'), 'exactly the generate and commit transactions are READ COMMITTED');
         assertTrue(str_contains($service, "            \$this->data->audit()->appendPayroll(\$auth, \$actor, 'commit', \$requestId);\n        }, readCommitted: true);"), 'the commit transaction is the second one');
+        // BF-4d authorized revision: Supplemental Payroll generate and commit follow the same lesson
+        // (pinned in SupplementalDomainTest). Was: exactly 2 in the backend.
         $all = '';
         foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(dirname(__DIR__, 2) . '/src', \FilesystemIterator::SKIP_DOTS)) as $f) {
             $all .= str_ends_with((string) $f, '.php') ? (string) file_get_contents((string) $f) : '';
         }
-        assertSame(2, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow)');
+        assertSame(4, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow; BF-4d: Supplemental generate and commit)');
+        assertSame(2, substr_count((string) file_get_contents(dirname(__DIR__, 2) . '/src/Supplemental/SupplementalService.php'), 'readCommitted: true'), 'the other two are the Supplemental generate and commit');
         assertSame(['employee_code_snapshot', 'employee_name_snapshot', 'department_snapshot', 'base_salary', 'overtime_amount', 'overtime_hours', 'overtime_count', 'total_amount'], PayrollStore::VALUES);
     },
     // BF-4c2 authorized revision: an Employee scope may read (own Committed plans); it is refused on

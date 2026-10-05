@@ -210,8 +210,9 @@ return [
         $snapshot = static fn (): array => [$db->select('SELECT * FROM employees ORDER BY id'), $db->select('SELECT * FROM overtime_records ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1 and BF-4c2 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0028, current');
+        // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
+        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1, BF-4c2 and BF-4d migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0031, current');
         assertSame($before, $snapshot(), 'every Employee, Overtime and audit row is unchanged');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plan_overtime')[0]['n']], 'no payroll row is seeded');
     },
@@ -265,8 +266,9 @@ return [
         $snapshot = static fn (): array => [$db->select('SELECT * FROM payroll_plans ORDER BY id'), $db->select('SELECT * FROM payroll_plan_overtime ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0028, current');
+        // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
+        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2 and BF-4d migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0031, current');
         [$plans, $links, $audit] = $snapshot();
         $sorted = static function (array $r): array {
             ksort($r);
