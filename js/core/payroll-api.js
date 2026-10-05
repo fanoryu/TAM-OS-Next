@@ -1,10 +1,11 @@
 /* ============================================================
-   PAYROLL API (AFI-4c1) — js/core/payroll-api.js
+   PAYROLL API (AFI-4c1, AFI-4c2) — js/core/payroll-api.js
    ------------------------------------------------------------
-   The SESSION-mode client for the server payroll plan (BF-4c1, merged as PR #44): two reads
-   over ApiClient and five writes over authSessionMutation (js/core/auth-boot.js), each answer
-   strictly decoded before anything else sees it. CEO only: an Employee never reaches it
-   (SessionPayroll refuses before any call; the server answers 403 anyway).
+   The SESSION-mode client for the server payroll plan (BF-4c1, PR #44; BF-4c2, PR #46): three
+   reads over ApiClient and six writes over authSessionMutation (js/core/auth-boot.js), each
+   answer strictly decoded before anything else sees it. The writes and the drift read are the
+   CEO's; an Employee reads only their own Committed plans (myMonth / myGet), and SessionPayroll
+   never calls anything else for them (the server answers 403 anyway).
 
      month(monthKey)   GET /api/payroll-plans?month=YYYY-MM   every plan of the month, Cancelled
                                                              included, in the server's order
@@ -17,6 +18,20 @@
                                      POST /api/payroll-plans/review | approve | return | cancel
                                      Draft → Reviewed; Draft / Reviewed → Ready; Reviewed / Ready →
                                      Draft; Draft / Reviewed / Ready → Cancelled
+
+   AFI-4c2 (owner decisions D-AFI4c2-1..3 = A):
+     drift(id)         GET /api/payroll-plan/drift?id=<id>    { id, current, reasons } — why a plan
+                                     no longer matches TAM OS; explanatory only, never authority
+     commit(intent)    POST /api/payroll-plans/commit         exactly { id, expectedVersion,
+                                     expectedTotal, idempotencyKey } from ONE commit intent: the
+                                     plan's own decoded totalAmount string, unchanged, and a key of
+                                     16 Web Crypto random bytes (payrollIdempotencyKey). Confirmed
+                                     only by the same plan, Committed, at expectedVersion + 1, with
+                                     exactly expectedTotal. A retry sends the same intent again.
+     myMonth(monthKey, employeeId) / myGet(id, employeeId)
+                                     the Employee's reads: the same two routes, and every plan must
+                                     be Committed and the principal's own — defence in depth only,
+                                     the server scopes them
 
    MONEY IS THE SERVER'S (BF-4c1, owner decisions D-PAY-2/3 = A): Base Salary + the frozen
    approved amounts of the month's Approved overtime, calculated by the server. Every amount is
@@ -32,8 +47,9 @@
    one of the three BF-4c1 codes (PayrollService::EXCLUSIONS); an unknown one fails the answer.
 
    WRITES: PayrollRequests is the allowlisted mirror of the server's PayrollInput — exactly
-   { month } and { id, expectedVersion }. Never an employee, company, role, salary, amount, total,
-   status, confirmation total or idempotency key. A success counts only when the decoded answer
+   { month }, { id, expectedVersion } and (commit) { id, expectedVersion, expectedTotal,
+   idempotencyKey }. Never an employee, company, role, salary, amount or status. A success counts
+   only when the decoded answer
    confirms it (generate: every plan of the month asked for; a transition: the same plan in the
    target status at expectedVersion + 1) — otherwise INVALID_RESPONSE. Nothing is persisted,
    cached, logged or resent here.
@@ -62,6 +78,12 @@ const PAYROLL_AMOUNT_PATTERN = /^(0|[1-9][0-9]{0,14})\.00$/;
 const PAYROLL_HOURS_TOTAL_PATTERN = /^(0|[1-9][0-9]{0,6})\.(00|25|50|75)$/;
 const PAYROLL_RECORD_HOURS_PATTERN = /^(0|[1-9][0-9]{0,2})\.(00|25|50|75)$/;
 // The transitions: operation → [route, target status].
+// AFI-4c2: BF-4c2 PayrollDrift::REASONS (canonical order) and PayrollView::DRIFT_FIELDS (sorted);
+// PayrollInput::KEY_PATTERN.
+const PAYROLL_DRIFT_REASONS = Object.freeze(['employee_archived', 'employee_not_active', 'salary_missing', 'salary_changed', 'overtime_changed']);
+const PAYROLL_DRIFT_KEYS = Object.freeze(['current', 'id', 'reasons']);
+const PAYROLL_KEY_PATTERN = /^[0-9a-f]{32}$/;
+const PAYROLL_HEX = '0123456789abcdef';
 const PAYROLL_TRANSITIONS = Object.freeze({
   review: Object.freeze(['/api/payroll-plans/review', 'Reviewed']),
   approve: Object.freeze(['/api/payroll-plans/approve', 'Ready']),
@@ -78,6 +100,18 @@ function payrollIsRecordHours(v){
   if(typeof v !== 'string' || !PAYROLL_RECORD_HOURS_PATTERN.test(v) || v === '0.00') return false;
   const whole = v.slice(0, v.indexOf('.'));
   return whole.length < 3 || whole < '744' || v === '744.00';
+}
+
+// AFI-4c2: one commit idempotency key — 16 bytes from Web Crypto as 32 lowercase hex characters,
+// or null when this browser offers no crypto.getRandomValues (the commit is then not sent).
+// Never Math.random; never stored anywhere but the in-memory commit intent.
+function payrollIdempotencyKey(){
+  const c = (typeof crypto !== 'undefined') ? crypto : null;
+  if(!c || typeof c.getRandomValues !== 'function') return null;
+  const bytes = c.getRandomValues(new Uint8Array(16));
+  let out = '';
+  for(let i = 0; i < 16; i++) out += PAYROLL_HEX.charAt(bytes[i] >> 4) + PAYROLL_HEX.charAt(bytes[i] & 15);
+  return PAYROLL_KEY_PATTERN.test(out) ? out : null;
 }
 
 const PayrollDecoders = (function(){
@@ -178,6 +212,26 @@ const PayrollDecoders = (function(){
         ex.push(e);
       }
       return Object.freeze({ plans: p, excluded: Object.freeze(ex) });
+    },
+    // AFI-4c2: { payrollPlanDrift: { id, current, reasons } } of plan `id` -> frozen copy, or
+    // null. reasons: the closed BF-4c2 codes, each once, in their canonical order; current is
+    // true exactly when there is none. Nothing else — never a salary, total or other value.
+    driftResponse(data, id){
+      if(!isPlain(data) || !exactKeys(data, ['payrollPlanDrift'])) return null;
+      const d = data.payrollPlanDrift;
+      if(!isPlain(d) || !exactKeys(d, PAYROLL_DRIFT_KEYS) || d.id !== id || typeof d.current !== 'boolean' || !Array.isArray(d.reasons)) return null;
+      let last = -1;
+      for(let i = 0; i < d.reasons.length; i++){
+        const at = PAYROLL_DRIFT_REASONS.indexOf(d.reasons[i]);
+        if(at <= last) return null;            // unknown, repeated or out of order
+        last = at;
+      }
+      if(d.current !== (d.reasons.length === 0)) return null;
+      return Object.freeze({ id: d.id, current: d.current, reasons: Object.freeze(d.reasons.slice()) });
+    },
+    // AFI-4c2: the Employee's own Committed plan, or null (defence in depth; the server scopes).
+    ownCommitted(p, employeeId){
+      return (p && p.status === 'Committed' && typeof employeeId === 'string' && p.employeeId === employeeId) ? p : null;
     }
   });
 })();
@@ -194,6 +248,17 @@ const PayrollRequests = Object.freeze({
     if(typeof id !== 'string' || !PAYROLL_ID_PATTERN.test(id)) bad.push('id');
     if(!Number.isInteger(expectedVersion) || expectedVersion < 1 || expectedVersion > PAYROLL_MAX_VERSION) bad.push('expectedVersion');
     return bad.length ? Object.freeze({ ok: false, fields: Object.freeze(bad) }) : Object.freeze({ ok: true, body: { id: id, expectedVersion: expectedVersion } });
+  },
+  // AFI-4c2 commit: exactly { id, expectedVersion, expectedTotal, idempotencyKey } of one intent —
+  // the total is the plan's decoded totalAmount string, sent as it is.
+  commit(intent){
+    const i = intent || {};
+    const t = PayrollRequests.target(i.id, i.version);
+    const bad = t.ok ? [] : t.fields.slice();
+    if(!payrollIsAmount(i.total)) bad.push('expectedTotal');
+    if(typeof i.key !== 'string' || !PAYROLL_KEY_PATTERN.test(i.key)) bad.push('idempotencyKey');
+    return bad.length ? Object.freeze({ ok: false, fields: Object.freeze(bad) })
+      : Object.freeze({ ok: true, body: { id: i.id, expectedVersion: i.version, expectedTotal: i.total, idempotencyKey: i.key } });
   }
 });
 
@@ -252,6 +317,26 @@ const PayrollApi = (function(){
     review: transition('review'),
     approve: transition('approve'),
     returnToDraft: transition('return'),
-    cancel: transition('cancel')
+    cancel: transition('cancel'),
+    // AFI-4c2: the CEO drift read of plan `id`.
+    async drift(id){
+      if(typeof id !== 'string' || !PAYROLL_ID_PATTERN.test(id)) return refused;
+      const res = await ApiClient.request('/api/payroll-plan/drift', { method: 'GET', query: { id: id } });
+      return outcome(res, (d) => PayrollDecoders.driftResponse(d, id));
+    },
+    // AFI-4c2: one commit intent { id, version, total, key }, sent once per deliberate click.
+    commit(intent){
+      return write('/api/payroll-plans/commit', PayrollRequests.commit(intent), (d) => PayrollDecoders.planResponse(d),
+        (p) => p.id === intent.id && p.status === 'Committed' && p.version === intent.version + 1 && p.totalAmount === intent.total);
+    },
+    // AFI-4c2: the Employee's reads — every plan Committed and their own, else INVALID_RESPONSE.
+    async myMonth(monthKey, employeeId){
+      const out = await PayrollApi.month(monthKey);
+      return out.ok && !out.data.every((p) => PayrollDecoders.ownCommitted(p, employeeId)) ? refused : out;
+    },
+    async myGet(id, employeeId){
+      const out = await PayrollApi.get(id);
+      return out.ok && !PayrollDecoders.ownCommitted(out.data.plan, employeeId) ? refused : out;
+    }
   });
 })();

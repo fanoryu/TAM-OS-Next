@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **AFI-4c2 SESSION Payroll Commit and My payroll (frontend; SESSION mode only, not shipped).** The CEO can commit a
+  payroll plan that is Ready: "Commit payroll" shows the plan's exact amounts and explains that committing makes it the
+  final payroll obligation for the month — it can no longer be returned or cancelled — and that it is not a payment and
+  posts nothing to Finance. A committed plan reads "Committed — final, not paid". If TAM OS cannot confirm a commit (for
+  example after a lost connection) it reads the plan again instead of sending anything; if the plan is still waiting, the
+  CEO can press "Retry commit", which can never commit twice. A Ready plan whose employee, salary or approved overtime
+  changed lists what changed and asks the CEO to return it to Draft and prepare the month again. Employees get "My payroll":
+  their own committed payroll by month, as a simple read-only summary. The shipped `AUTH_MODE` stays **LOCAL**.
 - **BF-4c2 Payroll Commit and the Employee's own payroll (backend only, not shipped).** The CEO can now commit a Ready
   payroll plan: it becomes a fixed payroll obligation that can no longer be changed — it is still not a payment, and
   nothing is posted to Finance. Commit only succeeds when the total the CEO confirmed is exactly the plan's total and

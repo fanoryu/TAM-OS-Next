@@ -68,12 +68,20 @@ const OT1 = { id: IDO, hours: '7.50', amount: '12345.00' };
 const det = (p, ot) => ({ payrollPlan: p, payrollPlanOvertime: ot || [] });
 const GEN = { payrollPlans: [P1, P2, P3, P4], excluded: [{ employeeId: 'e_3', reason: 'archived' }, { employeeId: 'e_9', reason: 'salary_missing' }, { employeeId: 'e_1', reason: 'not_active' }] };
 const bumped = (p, status) => Object.assign({}, p, { status: status, version: p.version + 1 });
+// AFI-4c2: a Ready plan whose total is deliberately NOT base + overtime (only the exact string may
+// be sent); an Employee's own Committed plan (also inconsistent on purpose).
+const ID6 = '6'.repeat(32), ID7 = '7'.repeat(32);
+const PRX = plan(ID6, 'e_7', 'EMP-007', 'Ready', 5, { baseSalary: '8000000.50', overtimeAmount: '12345.00', overtimeHours: '7.50', overtimeCount: 1, totalAmount: '999.00' });
+const MINE = plan(ID7, 'emp_srv_1', 'EMP-777', 'Committed', 4, { employeeName: 'Fabricated Self', baseSalary: '1000000.00', overtimeAmount: '54688.00', overtimeHours: '2.50', overtimeCount: 1, totalAmount: '777.00' });
+const MONTH_RX = { payrollPlans: [P1, P2, P3, P4, P5, PRX] };
 
 const LIST = (m) => '/api/payroll-plans?month=' + m;
 const DET = (id) => '/api/payroll-plan?id=' + id;
 const EMPS = '/api/employees?archived=1';
 const W = { generate: '/api/payroll-plans/generate', review: '/api/payroll-plans/review', approve: '/api/payroll-plans/approve',
-  return: '/api/payroll-plans/return', cancel: '/api/payroll-plans/cancel' };
+  return: '/api/payroll-plans/return', cancel: '/api/payroll-plans/cancel', commit: '/api/payroll-plans/commit' };
+const DRIFT = (id) => '/api/payroll-plan/drift?id=' + id;
+const COMMIT_KEYS = 'expectedTotal,expectedVersion,id,idempotencyKey';
 
 /* ---------- scripted responses ---------- */
 function resp(status, body, headers){
@@ -87,6 +95,7 @@ const ok = (data) => resp(200, { ok: true, data: data, requestId: RID });
 const err = (status, code) => resp(status, { ok: false, error: { code: code, message: 'server text' }, requestId: RID });
 const NETFAIL = () => new TypeError('Failed to fetch');
 const one = (p) => ({ payrollPlan: p });
+const driftOk = (id, reasons) => ok({ payrollPlanDrift: { id: id, current: reasons.length === 0, reasons: reasons } });
 function deferred(){ let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise: promise, resolve: resolve }; }
 
 /* ---------- a recording #app (the SESSION harnesses' element) ---------- */
@@ -138,7 +147,7 @@ function mkApp(mkEl, dom){
 }
 
 /* ---------- runtime loader ---------- */
-function loadRuntime(routes){
+function loadRuntime(routes, opts){
   const jsFiles = require(path.join(root, 'tools', 'module-order.js'));
   const parts = jsFiles.map((f) => {
     let src = fs.readFileSync(path.join(root, 'js', f), 'utf8');
@@ -158,7 +167,8 @@ function loadRuntime(routes){
     + ' PayrollApi: PayrollApi, PayrollDecoders: PayrollDecoders, PayrollRequests: PayrollRequests,'
     + ' SessionPayrollStore: SessionPayrollStore, SessionPayroll: SessionPayroll, SessionOvertimeStore: SessionOvertimeStore,'
     + ' sessionPayrollActions: sessionPayrollActions, sessionPayrollCurrentMonth: sessionPayrollCurrentMonth,'
-    + ' sessionPayrollExcludedName: sessionPayrollExcludedName, render: render, parse: function(json){ return JSON.parse(json); } };';
+    + ' sessionPayrollExcludedName: sessionPayrollExcludedName, render: render, parse: function(json){ return JSON.parse(json); },'
+    + ' sessionPayrollIntentState: sessionPayrollIntentState, payrollIdempotencyKey: payrollIdempotencyKey, PAYROLL_DRIFT_REASONS: PAYROLL_DRIFT_REASONS };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => {
@@ -220,11 +230,20 @@ function loadRuntime(routes){
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: document
   };
+  // AFI-4c2: a deterministic Web Crypto (every key is predictable here, and every call counted);
+  // opts.noCrypto: a browser without crypto.getRandomValues.
+  const cryptoLog = { calls: 0, last: null };
+  if(!(opts && opts.noCrypto)) sandbox.crypto = { getRandomValues: function(a){
+    cryptoLog.calls++;
+    for(let i = 0; i < a.length; i++) a[i] = (cryptoLog.calls * 37 + i * 11 + 171) & 255;
+    cryptoLog.last = Array.from(a).map((b) => (b < 16 ? '0' : '') + b.toString(16)).join('');
+    return a;
+  } };
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
   dom.doc = sandbox.document;
   vm.runInContext(src, vm.createContext(sandbox), { filename: 'tam-afi4c1-runtime.js' });
   const rt = sandbox.__TAM__;
-  rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr;
+  rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr; rt.crypto = cryptoLog;
   rt.appHTML = () => (els.app ? els.app.innerHTML : '');
   rt.app = els.app; rt.dom = dom; rt.loc = sandbox.location;
   rt.pr = () => rt.SessionPayrollStore.snapshot();
@@ -239,9 +258,9 @@ const payrollCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/payroll/.test(c
 const keys = (o) => Object.keys(o).sort().join();
 const buttons = (html) => ['swpReviewBtn', 'swpApproveBtn', 'swpReturnBtn', 'swpCancelBtn'].filter((b) => html.indexOf('id="' + b + '"') !== -1).map((b) => b.slice(3, -3)).join();
 
-async function boot(me, routes){
+async function boot(me, routes, opts){
   const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1] })] } : { '/api/employee?id=emp_srv_1': [ok({ employee: { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active', joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' } })] };
-  const rt = loadRuntime(Object.assign({ '/api/auth/me': [ok(me)] }, base, routes || {}));
+  const rt = loadRuntime(Object.assign({ '/api/auth/me': [ok(me)] }, base, routes || {}), opts);
   await flush();
   return rt;
 }
@@ -249,6 +268,13 @@ async function boot(me, routes){
 async function open(routes){
   const rt = await boot(ME_CEO, Object.assign({ [LIST(MONTH)]: [ok(MONTH_ALL)] }, routes || {}));
   rt.app.fire('swSectionPayroll', 'click'); await flush();
+  return rt;
+}
+// AFI-4c2: the Ready plan PRX open (its drift current unless `routes` says otherwise).
+async function openReady(routes, opts){
+  const rt = await boot(ME_CEO, Object.assign({ [LIST(MONTH)]: [ok(MONTH_RX)], [DET(ID6)]: [ok(det(PRX, [OT1]))], [DRIFT(ID6)]: [driftOk(ID6, [])] }, routes || {}), opts);
+  rt.app.fire('swSectionPayroll', 'click'); await flush();
+  rt.app.fire('swpOpen5', 'click'); await flush();
   return rt;
 }
 // The detail of `id` open.
@@ -269,26 +295,37 @@ function firewall(rt, label, overtimeOpened){
     label + ': no "Acting as", navigation or local data tool in the DOM');
   check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|gross|net pay|payslip)\b/i.test(html),
     label + ': no statutory payroll, payslip or gross / net vocabulary in the DOM');
-  const outsideGenerate = html.replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Prepare payroll for this month\?<\/h2>[\s\S]*?<\/section>/, '');
-  check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(outsideGenerate) && !/\bPaid\b/.test(html),
-    label + ': no Finance, payment, execution or posting wording (the preparation confirmation alone says nothing is posted to Finance)');
-  check(!/Commit(?!ted)|commit\b|expectedTotal|swpCommit/i.test(html), label + ': no Commit control or wording — Committed appears only as a status');
+  // AFI-4c2 authorized revision: the Commit confirmation, like the preparation one, says nothing is
+  // posted to Finance. Was: only the preparation confirmation.
+  const outsideGenerate = html.replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>(Prepare payroll for this month|Commit this payroll plan)\?<\/h2>[\s\S]*?<\/section>/, '');
+  check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(outsideGenerate) && !/\bPaid\b|Mark paid|\bPay\b/.test(html),
+    label + ': no Finance, payment, execution or posting wording (only the preparation and Commit confirmations say nothing is posted to Finance)');
+  // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Commit payroll / Retry commit exist, on a Ready
+  // plan of the CEO only. Was: no Commit control or wording at all.
+  const who = rt.AuthBoot.snapshot().principal;
+  const d = rt.pr().detail;
+  check(!/expectedTotal|idempotency/i.test(html) && (!/id="swp(Commit|RetryCommit)Btn"/.test(html) || (!!who && who.principalType === 'ceo' && !!d && d.plan.status === 'Ready')),
+    label + ': a Commit control appears only on a Ready plan shown to the CEO; no key or total field in the page');
   check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO, 'g'), '')), label + ': no opaque plan id in the page (only a contributing overtime record id, by design)');
   check(rt.State.employees.length === 0 && rt.State.payrollPlans.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
     label + ': legacy State (employees, payroll plans) stays empty and the business shell is never granted');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
   const bad = posts(rt).filter((c) => {
     const b = bodyOf(c);
-    const want = c.url === W.generate ? 'month' : 'expectedVersion,id';
+    const want = c.url === W.generate ? 'month' : c.url === W.commit ? COMMIT_KEYS : 'expectedVersion,id';
     return keys(b) !== want || c.init.headers['X-CSRF-Token'] === undefined;
   });
-  check(bad.length === 0, label + ': every Payroll write is a CSRF POST of exactly { month } or { id, expectedVersion } — no employee, company, role, status or money');
-  check(rt.net.calls.every((c) => !(overtimeOpened ? /^\/api\/(finance|transactions|payments)/ : /^\/api\/(overtime|finance|transactions|payments)/).test(c.url) && !/^\/api\/payroll-plans\/(commit|status|pay|post)/.test(c.url)),
-    label + ': no Overtime, Finance or commit request is ever made by the Payroll section');
+  check(bad.length === 0, label + ': every Payroll write is a CSRF POST of exactly { month }, { id, expectedVersion } or (commit) { id, expectedVersion, expectedTotal, idempotencyKey } — no employee, company, role, status or other money');
+  // AFI-4c2 authorized revision: POST /api/payroll-plans/commit exists (CEO). Was: never a commit request.
+  check(rt.net.calls.every((c) => !(overtimeOpened ? /^\/api\/(finance|transactions|payments)/ : /^\/api\/(overtime|finance|transactions|payments)/).test(c.url) && !/^\/api\/payroll-plans\/(status|pay|post)/.test(c.url)),
+    label + ': no Overtime, Finance, status or payment request is ever made by the Payroll section');
+  if(who && who.principalType === 'employee'){
+    check(posts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/payroll-plan\/drift/.test(c.url)), label + ': an Employee never writes Payroll and never reads drift');
+  }
 }
 
 (async function main(){
-  console.log('== AFI-4c1 SESSION PAYROLL CEO WORKSPACE — RUNTIME VERIFICATION ==');
+  console.log('== AFI-4c1 + AFI-4c2 SESSION PAYROLL — RUNTIME VERIFICATION ==');
 
   /* ---------- 0. the harness itself ---------- */
   {
@@ -383,7 +420,8 @@ function firewall(rt, label, overtimeOpened){
       'C. five rows, in the server order (no client sorting)');
     check(html.indexOf('<td>8000000.50</td><td>12345.00</td><td>999.00</td>') !== -1, 'C. money is shown exactly as sent — the deliberately inconsistent total 999.00 verbatim (no client arithmetic, rounding or reformatting)');
     check(/Base salary \(Rp\)/.test(html) && /Total \(Rp\)/.test(html) && !/Rp ?[0-9]|[0-9]\.[0-9]{3},|8\.000\.000/.test(html), 'C. amounts are labelled (Rp) and never reformatted (no locale grouping)');
-    check(/<td>Ready — approved, not paid<\/td>/.test(html) && /<td>Committed<\/td>/.test(html) && /<td>Cancelled<\/td>/.test(html) && /<td>Reviewed<\/td>/.test(html) && /<td>Draft<\/td>/.test(html)
+    // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Committed reads "Committed — final, not paid". Was: "Committed".
+    check(/<td>Ready — approved, not paid<\/td>/.test(html) && /<td>Committed — final, not paid<\/td>/.test(html) && /<td>Cancelled<\/td>/.test(html) && /<td>Reviewed<\/td>/.test(html) && /<td>Draft<\/td>/.test(html)
       && !/<td>Approved<\/td>/.test(html), 'C. the server status words are shown (D-AFI4c1-3 = A): Ready reads "Ready — approved, not paid"; never the LOCAL "Approved"');
     check(/Fabricated &lt;Alpha&gt;/.test(html) && !/<Alpha>/.test(html), 'C. server text is escaped');
     check(!/Total payroll|Sum|Grand total/i.test(html) && (html.match(/999\.00/g) || []).length === 1, 'C. no month total or summary is computed');
@@ -405,19 +443,20 @@ function firewall(rt, label, overtimeOpened){
     firewall(rt4, 'C. malformed list');
   }
 
-  /* ---------- D. Employee: no Payroll at all ---------- */
+  /* ---------- D. Employee: never the CEO's Payroll ---------- */
+  // AFI-4c2 authorized revision: an Employee now has "My payroll" (section O) — their own Committed
+  // payroll only. Was: no Payroll section and zero /api/payroll* requests. What stays: no CEO
+  // section, no CEO control, no write and no drift read, whatever is invoked by hand.
   {
-    const rt = await boot(ME_EMP, {});
+    const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [] })] });
     const html = rt.appHTML();
-    check(!/swSectionPayroll|Payroll/.test(html) && /id="swSectionMain" aria-pressed="true"[^>]*>My profile</.test(html) && /id="swSectionOvertime"[^>]*>My overtime</.test(html),
-      'D. an Employee sees exactly My profile | My overtime — no Payroll section');
-    rt.SessionPayroll.show(true); await flush();
-    rt.SessionPayroll.ensureLoaded(rt.AuthBoot.snapshot().principal); await flush();
-    rt.SessionPayroll.openPanel('generate'); rt.SessionPayroll.shiftMonth(1); rt.SessionPayroll.openDetail(ID1); await rt.SessionPayroll.confirmPanel(); await flush();
-    check(rt.pr().open === false && !/Payroll|swp/.test(rt.appHTML()), 'D. invoking the Payroll section by hand as an Employee is a no-op (fails closed)');
-    check(payrollCalls(rt).length === 0, 'D. an Employee makes zero /api/payroll* requests');
+    check(/id="swSectionMain" aria-pressed="true"[^>]*>My profile</.test(html) && /id="swSectionOvertime"[^>]*>My overtime</.test(html) && /id="swSectionPayroll"[^>]*>My payroll</.test(html)
+      && !/>Payroll</.test(html), 'D. an Employee sees exactly My profile | My overtime | My payroll — never the CEO Payroll section');
+    check(payrollCalls(rt).length === 0, 'D. an Employee makes zero /api/payroll* requests until My payroll is opened');
+    rt.SessionPayroll.openPanel('generate'); rt.SessionPayroll.openPanel('commit'); await rt.SessionPayroll.confirmPanel(); await rt.SessionPayroll.retryCommit(); rt.SessionPayroll.reloadPlan(); await flush();
+    check(posts(rt).length === 0 && rt.pr().panel === null && payrollCalls(rt).length === 0, 'D. CEO writes invoked by hand as an Employee are no-ops (fail closed)');
     rt.app.fire('swSectionOvertime', 'click'); await flush();
-    check(!/Payroll|swSectionPayroll/.test(rt.appHTML()) && payrollCalls(rt).length === 0, 'D. nor from the Overtime section');
+    check(payrollCalls(rt).length === 0, 'D. nor from the Overtime section');
     firewall(rt, 'D. Employee', true);
   }
 
@@ -455,8 +494,10 @@ function firewall(rt, label, overtimeOpened){
     check(buttons(html) === 'Review,Approve,Cancel', 'F. a Draft offers Review, Approve, Cancel');
     const matrix = [[P2, 'Approve,Return,Cancel'], [P3, 'Return,Cancel'], [P4, ''], [P5, '']];
     for(const [p, want] of matrix){
-      const r = await detail(p.id, det(p));
+      const r = await detail(p.id, det(p), { [DRIFT(p.id)]: [driftOk(p.id, [])] });
       check(buttons(r.appHTML()) === want, 'F. ' + p.status + ' offers ' + (want || 'nothing'));
+      // AFI-4c2 authorized revision: Ready also offers Commit payroll (CEO). Was: Return, Cancel only.
+      check(/id="swpCommitBtn"/.test(r.appHTML()) === (p.status === 'Ready'), 'F. ' + p.status + (p.status === 'Ready' ? ' also offers Commit payroll' : ' offers no Commit payroll'));
       if(p.status === 'Committed'){
         check(/Status<\/th><td>Committed/.test(r.appHTML()) && !/Commit(?!ted)|expectedTotal/.test(r.appHTML()), 'F. Committed is display-only: no Commit control or confirmation (D-AFI4c1-1 = A)');
         r.SessionPayroll.openPanel('cancel'); r.SessionPayroll.openPanel('review'); await flush();
@@ -677,6 +718,258 @@ function firewall(rt, label, overtimeOpened){
       'L. after clear() (logout, a new principal) no earlier answer applies');
   }
 
+  /* ---------- M. AFI-4c2 Commit (CEO): control, confirmation, the exact body, one intent ---------- */
+  {
+    const committedOf = (p) => bumped(p, 'Committed');
+    // M1 visibility: Ready only, CEO only.
+    for(const p of [P1, P2, P3, P4, P5]){
+      const r = await detail(p.id, det(p), { [DRIFT(p.id)]: [driftOk(p.id, [])] });
+      check(/id="swpCommitBtn"/.test(r.appHTML()) === (p.status === 'Ready'), 'M. ' + p.status + (p.status === 'Ready' ? ' offers Commit payroll' : ' never offers Commit payroll'));
+      r.SessionPayroll.openPanel('commit'); await flush();
+      check((r.pr().panel !== null) === (p.status === 'Ready') && posts(r).length === 0, 'M. ' + p.status + ': the Commit confirmation opens only on Ready, and asks first');
+    }
+    // The confirmation: exactly the plan's own server strings.
+    const rt = await openReady({ [W.commit]: [ok(one(committedOf(PRX)))] });
+    rt.app.fire('swpCommitBtn', 'click'); await flush();
+    let html = rt.appHTML();
+    check(rt.pr().panel && rt.pr().panel.kind === 'commit' && posts(rt).length === 0 && rt.crypto.calls === 0 && rt.pr().commitIntent === null,
+      'M. Commit payroll asks first (an inline confirmation): nothing sent, no key made, no intent yet');
+    check(/Commit this payroll plan\?/.test(html) && /final payroll obligation for April 2031/.test(html) && /can no longer be changed, returned or cancelled/.test(html)
+      && /It is not a payment — nothing is paid and nothing is posted to Finance\./.test(html), 'M. the confirmation says: final obligation, no return or cancel, not a payment, nothing posted to Finance');
+    check(/Fabricated EMP-007 \(EMP-007\)/.test(html) && /base salary \(Rp\) 8000000\.50/.test(html) && /overtime 7\.50 hours \(Rp\) 12345\.00/.test(html) && /total \(Rp\) 999\.00/.test(html) && /version 5\./.test(html),
+      'M. it shows the server strings verbatim — base salary, overtime hours and amount, the (inconsistent) total 999.00, the version');
+    check(/>Commit payroll</.test(html) && /btn btn-danger" type="button" id="swpPanelConfirm"/.test(html), 'M. the confirm button reads "Commit payroll" (a deliberate, danger-styled action)');
+    // Double click: one intent, one key, one POST.
+    rt.net.routes[DET(ID6)] = [ok(det(committedOf(PRX), [OT1]))];
+    rt.app.fire('swpPanelConfirm', 'click');
+    const second = rt.app.fire('swpPanelConfirm', 'click');
+    await rt.SessionPayroll.confirmPanel();
+    await flush();
+    const sent = posts(rt, W.commit);
+    check(sent.length === 1 && rt.crypto.calls === 1 && second !== 'fired', 'M. one confirmation, double-clicked and invoked again: exactly one key and one POST (M28)');
+    const b = sent.length ? bodyOf(sent[0]) : {};
+    check(keys(b) === COMMIT_KEYS && b.id === ID6 && b.expectedVersion === 5 && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+      'M. the body is exactly { id, expectedVersion, expectedTotal, idempotencyKey }, a CSRF POST');
+    check(b.expectedTotal === '999.00' && b.expectedTotal === PRX.totalAmount && typeof b.expectedTotal === 'string',
+      'M. expectedTotal is the plan\'s exact totalAmount string 999.00 — never base + overtime, never a number (M5, M6)');
+    check(/^[0-9a-f]{32}$/.test(b.idempotencyKey) && b.idempotencyKey === rt.crypto.last, 'M. the key is the 16 Web Crypto bytes as 32 lowercase hex characters (M7, M8)');
+    html = rt.appHTML();
+    check(rt.pr().detail.plan.status === 'Committed' && /Status<\/th><td>Committed — final, not paid/.test(html) && rt.pr().commitIntent === null,
+      'M. a confirmed commit: the plan is Committed — final, not paid; the intent is gone');
+    check(/Payroll plan committed: it is the final payroll obligation for April 2031 — not paid\./.test(html), 'M. the notice: final payroll obligation — not paid');
+    check(!/id="swp(Commit|RetryCommit|Return|Cancel|Review|Approve)Btn"/.test(html), 'M. Committed offers no control at all (M18)');
+    check(countOf(rt, DRIFT(ID6)) === 1, 'M. a Committed plan is never checked for drift');
+    firewall(rt, 'M. committed');
+    // The success answer must confirm the intent exactly (M11, M12, M13, total).
+    for(const [label, answer] of [['another id', one(Object.assign({}, committedOf(PRX), { id: ID1 }))], ['not Committed', one(Object.assign({}, committedOf(PRX), { status: 'Ready' }))],
+      ['version not + 1', one(Object.assign({}, committedOf(PRX), { version: 7 }))], ['another total', one(Object.assign({}, committedOf(PRX), { totalAmount: '1000.00' }))]]){
+      const r = await openReady({ [W.commit]: [ok(answer)] });
+      r.app.fire('swpCommitBtn', 'click'); await flush();
+      r.app.fire('swpPanelConfirm', 'click'); await flush();
+      check(r.pr().mutation.status === 'ambiguous' && posts(r, W.commit).length === 1 && r.pr().detail && r.pr().detail.plan.status === 'Ready' && r.pr().commitIntent !== null,
+        'M. a success answer with ' + label + ' is not a success: unknown outcome, the plan read again, nothing resent, the intent kept');
+    }
+  }
+
+  /* ---------- M2. AFI-4c2 the unknown outcome and Retry commit (D-AFI4c2-1 = A) ---------- */
+  {
+    // A: the commit was applied — the re-read resolves it.
+    const a = await openReady({ [W.commit]: [NETFAIL()] });
+    a.app.fire('swpCommitBtn', 'click'); await flush();
+    a.net.routes[DET(ID6)] = [ok(det(bumped(PRX, 'Committed'), [OT1]))];
+    a.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(posts(a, W.commit).length === 1 && a.pr().commitIntent === null && a.pr().detail.plan.status === 'Committed'
+      && /could not confirm the commit at first, but the plan read again is committed: it is the final payroll obligation for April 2031 — not paid\./.test(a.appHTML()),
+      'M2. A: a network failure, then the re-read shows Committed at version + 1 with the same total — resolved as the success, nothing resent (M10)');
+    firewall(a, 'M2. A');
+    // B: still Ready, same version and total — Retry commit, the same body and key, only on a click.
+    const b = await openReady({ [W.commit]: [NETFAIL(), ok(one(bumped(PRX, 'Committed')))] });
+    b.app.fire('swpCommitBtn', 'click'); await flush();
+    b.app.fire('swpPanelConfirm', 'click'); await flush();
+    const first = bodyOf(posts(b, W.commit)[0]);
+    let html = b.appHTML();
+    check(posts(b, W.commit).length === 1 && b.pr().commitIntent && b.pr().commitIntent.key === first.idempotencyKey && /id="swpRetryCommitBtn"/.test(html) && !/id="swpCommitBtn"/.test(html)
+      && /still Ready with the same total\. Retry commit sends the same commit again/.test(html), 'M2. B: still Ready at the same version and total — the intent is kept and Retry commit is offered; nothing was resent');
+    b.render(); await flush(); b.SessionPayroll.ensureLoaded(b.AuthBoot.snapshot().principal); await flush();
+    b.SessionPayroll.openPanel('commit'); await flush();
+    check(posts(b, W.commit).length === 1 && b.pr().panel === null && b.crypto.calls === 1, 'M2. B: a re-render, a reload of state or another Commit payroll never sends or makes a new key (M9)');
+    b.net.routes[DET(ID6)] = [ok(det(bumped(PRX, 'Committed'), [OT1]))];
+    b.app.fire('swpRetryCommitBtn', 'click');
+    const again = b.app.fire('swpRetryCommitBtn', 'click');
+    await b.SessionPayroll.retryCommit();
+    await flush();
+    const retried = posts(b, W.commit);
+    check(retried.length === 2 && again !== 'fired' && JSON.stringify(bodyOf(retried[1])) === JSON.stringify(first) && b.crypto.calls === 1,
+      'M2. B: Retry commit (double-clicked) sends exactly one POST with the SAME id, expectedVersion, expectedTotal and key — no new key');
+    check(b.pr().detail.plan.status === 'Committed' && b.pr().commitIntent === null && /final payroll obligation for April 2031 — not paid/.test(b.appHTML()), 'M2. B: the retried commit is confirmed');
+    firewall(b, 'M2. B');
+    // C: the re-read shows something else — the intent is dropped as stale.
+    const c = await openReady({ [W.commit]: [NETFAIL()] });
+    c.app.fire('swpCommitBtn', 'click'); await flush();
+    c.net.routes[DET(ID6)] = [ok(det(Object.assign({}, PRX, { version: 6 }), [OT1]))];
+    c.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c.pr().commitIntent === null && !/id="swpRetryCommitBtn"/.test(c.appHTML()) && /the plan read again has changed/.test(c.appHTML()) && posts(c, W.commit).length === 1,
+      'M2. C: another version on the re-read — the old intent is dropped as stale; no Retry; nothing resent');
+    // D: the re-read fails — the intent is kept and nothing is sent; Reload plan reads it.
+    const d = await openReady({ [W.commit]: [NETFAIL()] });
+    d.app.fire('swpCommitBtn', 'click'); await flush();
+    d.net.routes[DET(ID6)] = [err(500, 'internal_error'), ok(det(PRX, [OT1]))];
+    d.app.fire('swpPanelConfirm', 'click'); await flush();
+    html = d.appHTML();
+    check(d.pr().commitIntent !== null && /could not be read again\. Nothing is sent again/.test(html) && !/id="swpRetryCommitBtn"/.test(html) && posts(d, W.commit).length === 1,
+      'M2. D: the re-read fails — the intent is kept, nothing is sent, no Retry until the plan is read');
+    d.app.fire('swpRetryBtn', 'click'); await flush();
+    check(/id="swpRetryCommitBtn"/.test(d.appHTML()) && posts(d, W.commit).length === 1, 'M2. D: reading the plan again (still Ready, same version and total) offers Retry commit — still nothing sent');
+    // A 500 on commit is an unknown outcome too.
+    const e = await openReady({ [W.commit]: [err(500, 'internal_error')] });
+    e.app.fire('swpCommitBtn', 'click'); await flush();
+    e.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(e.pr().mutation.status === 'ambiguous' && e.pr().commitIntent !== null && posts(e, W.commit).length === 1, 'M2. a 500 answer to a commit is an unknown outcome: the intent is kept, the plan read again');
+    // Logout / session loss: the intent and its key are gone.
+    const f = await openReady({ [W.commit]: [NETFAIL()] });
+    f.app.fire('swpCommitBtn', 'click'); await flush();
+    f.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(f.pr().commitIntent !== null, 'M2. (an unresolved intent is held in memory)');
+    f.AuthBoot.sessionLost(); await flush();
+    check(f.pr().commitIntent === null && f.pr().detail === null && f.access.local.length === 0 && f.access.session.length === 0, 'M2. session loss destroys the intent and its key; nothing was ever stored (M26)');
+    // No Web Crypto: nothing is sent.
+    const g = await openReady({}, { noCrypto: true });
+    g.app.fire('swpCommitBtn', 'click'); await flush();
+    g.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(posts(g).length === 0 && g.pr().commitIntent === null && /cannot create a secure commit key\. Nothing was sent\./.test(g.appHTML()), 'M2. without Web Crypto the commit fails closed: nothing sent');
+  }
+
+  /* ---------- M3. AFI-4c2 Commit refused (409 and other definite answers) ---------- */
+  {
+    const rt = await openReady({ [W.commit]: [err(409, 'conflict')], [DRIFT(ID6)]: [driftOk(ID6, []), driftOk(ID6, ['salary_changed'])] });
+    rt.app.fire('swpCommitBtn', 'click'); await flush();
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    const html = rt.appHTML();
+    check(rt.pr().panel === null && rt.pr().commitIntent === null && posts(rt, W.commit).length === 1 && countOf(rt, DET(ID6)) === 2,
+      'M3. a 409: definitely refused — the confirmation closes, the intent is dropped, the plan is read again, nothing resent');
+    check(/TAM OS did not commit this plan: it changed, its total no longer matches, or its inputs changed\. It was read again — check it and any changes listed below\./.test(html)
+      && !/payroll_(state|version|total|drift)|idempotency_mismatch/.test(html), 'M3. the conflict message never claims which cause it was');
+    check(countOf(rt, DRIFT(ID6)) === 2 && /The employee&#39;s monthly base salary changed after this plan was prepared\./.test(html), 'M3. after the 409 the still-Ready plan\'s drift is read again and shown');
+    check(/id="swpCommitBtn"/.test(html), 'M3. a new deliberate Commit payroll may follow (a new intent)');
+    firewall(rt, 'M3. 409');
+    const nf = await openReady({ [W.commit]: [err(404, 'not_found')] });
+    nf.app.fire('swpCommitBtn', 'click'); await flush();
+    nf.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(nf.pr().commitIntent === null && nf.pr().detailId === null && posts(nf, W.commit).length === 1, 'M3. a 404: the intent is dropped, the detail closes, the month is read again');
+  }
+
+  /* ---------- N. AFI-4c2 drift (D-AFI4c2-2 = A): explanation only ---------- */
+  {
+    const all = ['employee_archived', 'employee_not_active', 'salary_missing', 'salary_changed', 'overtime_changed'];
+    const rt = await openReady({ [DRIFT(ID6)]: [driftOk(ID6, all)] });
+    const html = rt.appHTML();
+    check(countOf(rt, DRIFT(ID6)) === 1, 'N. a Ready detail becoming current reads its drift once');
+    const texts = ['The employee is now archived.', 'The employee&#39;s employment status is no longer Active.', 'The employee no longer has a monthly base salary.',
+      'The employee&#39;s monthly base salary changed after this plan was prepared.', 'The employee&#39;s approved overtime for this month changed after this plan was prepared.'];
+    check(texts.every((t, i) => html.indexOf(t) !== -1 && (i === 0 || html.indexOf(texts[i - 1]) < html.indexOf(t))), 'N. every reason is shown together, in the canonical order, with its fixed text');
+    check(/This plan no longer matches TAM OS\. Return it to Draft, then prepare payroll for April 2031 again\./.test(html) && /id="swpReturnBtn"/.test(html), 'N. the way forward is the normal, deliberate Return to draft');
+    check(/id="swpCommitBtn"/.test(html) && posts(rt).length === 0, 'N. drift never hides Commit, never returns, regenerates or commits anything by itself (M14, M17)');
+    const clean = await openReady();
+    check(!/Changed since this plan was prepared/.test(clean.appHTML()) && /id="swpCommitBtn"/.test(clean.appHTML()) && !/ready to commit|safe to commit|matches TAM OS/i.test(clean.appHTML()),
+      'N. current = true shows nothing and grants nothing: Commit is offered by status alone');
+    for(const p of [P1, P2, P4, P5]){
+      const r = await detail(p.id, det(p));
+      check(countOf(r, DRIFT(p.id)) === 0, 'N. a ' + p.status + ' plan is never checked for drift');
+    }
+    const D = (o) => rt.PayrollDecoders.driftResponse(rt.parse(JSON.stringify(o)), ID6);
+    const good = { payrollPlanDrift: { id: ID6, current: false, reasons: ['salary_missing', 'overtime_changed'] } };
+    check(D(good) !== null && D({ payrollPlanDrift: { id: ID6, current: true, reasons: [] } }) !== null, 'N. the decoder accepts the canonical shapes');
+    const bad = [
+      ['an unknown reason', { payrollPlanDrift: { id: ID6, current: false, reasons: ['salary_increased'] } }],
+      ['a repeated reason', { payrollPlanDrift: { id: ID6, current: false, reasons: ['salary_changed', 'salary_changed'] } }],
+      ['reasons out of order', { payrollPlanDrift: { id: ID6, current: false, reasons: ['overtime_changed', 'salary_changed'] } }],
+      ['current true with a reason', { payrollPlanDrift: { id: ID6, current: true, reasons: ['salary_changed'] } }],
+      ['current false without a reason', { payrollPlanDrift: { id: ID6, current: false, reasons: [] } }],
+      ['another plan id', { payrollPlanDrift: { id: ID1, current: true, reasons: [] } }],
+      ['a current salary', { payrollPlanDrift: { id: ID6, current: false, reasons: ['salary_changed'], currentSalary: '1.00' } }],
+      ['a total', { payrollPlanDrift: { id: ID6, current: true, reasons: [], totalAmount: '1.00' } }],
+      ['an extra wrapper key', Object.assign({ salary: '1.00' }, good)],
+      ['a string current', { payrollPlanDrift: { id: ID6, current: 'false', reasons: ['salary_changed'] } }]
+    ];
+    check(bad.every(([, o]) => D(o) === null), 'N. the decoder refuses an unknown, repeated or reordered reason, an inconsistent current, another id and any value field (M15, M16)');
+    // A late drift answer for plan A never attaches to plan B.
+    const late = deferred();
+    const r2 = await openReady({ [DRIFT(ID6)]: [late.promise], [DET(ID3)]: [ok(det(P3))], [DRIFT(ID3)]: [driftOk(ID3, [])] });
+    r2.SessionPayroll.back(); await flush();
+    r2.SessionPayroll.openDetail(ID3); await flush();
+    late.resolve(driftOk(ID6, ['salary_changed'])); await flush();
+    check(r2.pr().detailId === ID3 && r2.pr().driftId === ID3 && r2.pr().drift && r2.pr().drift.id === ID3 && !/Changed since this plan was prepared/.test(r2.appHTML()),
+      'N. a late drift answer of plan A never attaches to plan B (M27)');
+    const r3 = await openReady({ [DRIFT(ID6)]: [err(500, 'internal_error')] });
+    check(/could not check this plan for changes/.test(r3.appHTML()) && /id="swpCommitBtn"/.test(r3.appHTML()) && posts(r3).length === 0, 'N. a failed drift read says so and changes nothing');
+    firewall(rt, 'N. drift');
+  }
+
+  /* ---------- O. AFI-4c2 My payroll (Employee): own Committed payroll only ---------- */
+  {
+    const MAY = '2031-05';
+    const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [DET(ID7)]: [ok(det(MINE, [OT1]))], [LIST(MAY)]: [ok({ payrollPlans: [] })] });
+    rt.app.fire('swSectionPayroll', 'click'); await flush();
+    let html = rt.appHTML();
+    check(rt.pr().open === true && /<h1[^>]*>My payroll<\/h1>/.test(html) && /id="swSectionPayroll" aria-pressed="true"[^>]*>My payroll</.test(html) && countOf(rt, LIST(MONTH)) === 1,
+      'O. My payroll opens on the current month with one read of the month');
+    check(html.indexOf('<td>April 2031</td><td>Committed — final, not paid</td><td>1000000.00</td><td>54688.00</td><td>777.00</td>') !== -1,
+      'O. the own Committed plan, money verbatim (the inconsistent total 777.00 as sent), Committed — final, not paid');
+    check(!/Prepare payroll|Not included|swpGenerateBtn/.test(html), 'O. no preparation, no exclusions');
+    rt.app.fire('swpOpen0', 'click'); await flush();
+    html = rt.appHTML();
+    const rows = ['Employee</th><td>Fabricated Self', 'Code</th><td>EMP-777', 'Month</th><td>April 2031', 'Status</th><td>Committed — final, not paid',
+      'Base salary (Rp)</th><td>1000000.00', 'Overtime hours</th><td>2.50', 'Overtime (Rp)</th><td>54688.00', 'Total (Rp)</th><td>777.00'];
+    check(/Payroll — April 2031/.test(html) && rows.every((r) => html.indexOf(r) !== -1) && html.indexOf('<td>' + IDO + '</td><td>7.50</td><td>12345.00</td>') !== -1 && /Approved overtime counted/.test(html),
+      'O. the payslip-like card: the server\'s fields only, verbatim, with the approved overtime counted');
+    check(!/Version|swp(Commit|RetryCommit|Return|Cancel|Review|Approve|Reload)Btn|Prepare payroll/.test(html) && !/print|pdf|download/i.test(html),
+      'O. read-only: no control, no version, no print or PDF');
+    check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|net|gross|bank|payment date)\b/i.test(html), 'O. no unsupported payroll concept (M24)');
+    rt.app.fire('swpBackBtn', 'click'); await flush();
+    rt.app.fire('swpNextMonth', 'click'); await flush();
+    check(countOf(rt, LIST(MAY)) === 1 && /No committed payroll for May 2031\./.test(rt.appHTML()), 'O. Next reads the next month; an empty month says so');
+    rt.SessionPayroll.openPanel('commit'); rt.SessionPayroll.openPanel('generate'); await rt.SessionPayroll.confirmPanel(); await rt.SessionPayroll.retryCommit(); await flush();
+    check(posts(rt).length === 0 && rt.net.calls.every((c) => !/drift/.test(c.url)) && rt.net.calls.filter((c) => /^\/api\/payroll/.test(c.url)).every((c) => c.url === LIST(MONTH) || c.url === LIST(MAY) || c.url === DET(ID7)),
+      'O. an Employee only ever reads the month and their own plan: no drift, no write, nothing else (M22, M23)');
+    firewall(rt, 'O. My payroll');
+    // Defence in depth: a non-Committed or another employee's plan is refused whole.
+    for(const [label, items] of [['a Ready plan of their own', [Object.assign({}, MINE, { status: 'Ready' })]], ['another employee\'s plan', [Object.assign({}, MINE, { employeeId: 'emp_other' })]]]){
+      const r = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: items })] });
+      r.app.fire('swSectionPayroll', 'click'); await flush();
+      check(r.pr().list === null && /TAM OS sent an unexpected response/.test(r.appHTML()), 'O. a list holding ' + label + ' is refused whole (M20, M21)');
+    }
+    const r2 = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [DET(ID7)]: [ok(det(Object.assign({}, MINE, { employeeId: 'emp_other' })))] });
+    r2.app.fire('swSectionPayroll', 'click'); await flush();
+    r2.app.fire('swpOpen0', 'click'); await flush();
+    check(r2.pr().detail === null && /TAM OS sent an unexpected response/.test(r2.appHTML()), 'O. a detail of another employee\'s plan is refused');
+    const ceo = await open();
+    check(/>Payroll</.test(ceo.appHTML()) && !/My payroll/.test(ceo.appHTML()), 'O. the CEO keeps Employees | Overtime | Payroll');
+  }
+
+  /* ---------- P. AFI-4c2 the store's own guards ---------- */
+  {
+    const rt = await boot(ME_CEO, {});
+    const S = rt.SessionPayrollStore;
+    S.bindPrincipal(rt.AuthBoot.snapshot().principal);
+    const det1 = S.begin('detail', ID6);
+    const dr = S.begin('drift', ID6);
+    const dRes = rt.PayrollDecoders.driftResponse(rt.parse(JSON.stringify({ payrollPlanDrift: { id: ID6, current: true, reasons: [] } })), ID6);
+    S.begin('detail', ID3);
+    check(S.applyDrift(dr, dRes) === false, 'P. a drift answer read before the detail changed never applies (the drift belongs to its detail)');
+    const dr3 = S.begin('drift', ID3);
+    check(S.applyDrift(dr3, dRes) === false, 'P. a drift answer for another plan than the one asked for never applies');
+    check(det1.kind === 'detail' && S.applyDetail(det1, null) === false, 'P. (an old detail token is dead)');
+    S.setIntent({ id: ID6, version: 5, total: '999.00', key: 'f'.repeat(32) });
+    check(Object.isFrozen(S.snapshot().commitIntent) && S.snapshot().commitIntent.key === 'f'.repeat(32), 'P. the intent is one frozen record');
+    S.clear();
+    check(S.snapshot().commitIntent === null && S.snapshot().drift === null, 'P. clear() (logout, session loss, a new principal) destroys the intent, its key and the drift');
+    check(rt.sessionPayrollIntentState({ id: ID6, version: 5, total: '999.00' }, bumped(PRX, 'Committed')) === 'committed'
+      && rt.sessionPayrollIntentState({ id: ID6, version: 5, total: '999.00' }, PRX) === 'unresolved'
+      && rt.sessionPayrollIntentState({ id: ID6, version: 5, total: '999.00' }, Object.assign({}, PRX, { totalAmount: '1000.00' })) === 'stale'
+      && rt.sessionPayrollIntentState({ id: ID6, version: 5, total: '999.00' }, Object.assign({}, bumped(PRX, 'Committed'), { totalAmount: '1000.00' })) === 'stale',
+      'P. the reconciliation reads exactly: Committed at version + 1 with the same total, still Ready at the same version and total, or stale');
+  }
+
   /* ---------- K. sources: no money arithmetic, no LOCAL, Overtime or Finance authority ---------- */
   {
     const code = (f) => fs.readFileSync(path.join(root, 'js', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
@@ -687,12 +980,19 @@ function firewall(rt, label, overtimeOpened){
       'K. no LOCAL State, repository, payroll engine, storage, Transport or Gateway fallback');
     check(!/\b(OvertimeApi|OvertimeDecoders|SessionOvertime|SessionOvertimeStore|OvertimeValuation|TAM-OT-1|valuation)\b/.test(all) && /OvertimeCalendar\./.test(all),
       'K. no Overtime authority (only the pure calendar helper is reused)');
-    check(!/finance|ledger|journal|payment|execut|\/post|commit\(|expectedTotal|idempotency/i.test(all.replace(/posted to Finance/g, '')), 'K. no Finance, payment, execution, posting, Commit or idempotency code');
+    // AFI-4c2 authorized revision: Commit, expectedTotal and the idempotency key exist. Was: none.
+    check(!/finance|ledger|journal|payment|execut|\/post|markPaid|\bpay\(/i.test(all.replace(/posted to Finance|It is not a payment/g, '')), 'K. no Finance, payment, execution or posting code (only the confirmations say it is not a payment and nothing is posted to Finance)');
+    check(!/Math\.random|crypto\.subtle|randomUUID|localStorage|sessionStorage|indexedDB|document\.cookie/.test(all)
+      && (all.match(/getRandomValues\(/g) || []).length === 1 && /c\.getRandomValues\(new Uint8Array\(16\)\)/.test(code('core/payroll-api.js'))
+      && !/getRandomValues/.test(code('core/session-payroll.js') + code('ui/session-payroll-view.js')),
+      'K. the commit key comes only from Web Crypto getRandomValues (16 bytes, in payroll-api.js) — never Math.random, never stored');
+    check(/expectedTotal: i\.total/.test(code('core/payroll-api.js')) && /total: d\.plan\.totalAmount/.test(code('core/session-payroll.js')),
+      'K. expectedTotal is the plan\'s own totalAmount string, carried unchanged by the intent');
   }
 
   console.log('');
-  if(failures.length === 0){ console.log('AFI-4c1 SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
-  console.log('AFI-4c1 SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
+  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
+  console.log('AFI-4c1 + AFI-4c2 SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
   failures.forEach((f) => console.log('   - ' + f));
   process.exit(1);
 })().catch((e) => { console.error('HARNESS ERROR: ' + (e && e.stack || e)); process.exit(2); });

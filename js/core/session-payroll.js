@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL DATA (AFI-4c1) — js/core/session-payroll.js
+   SESSION PAYROLL DATA (AFI-4c1, AFI-4c2) — js/core/session-payroll.js
    ------------------------------------------------------------
    The SESSION-mode Payroll section of the authenticated workspace — CEO only — over BF-4c1:
    one month's payroll plans, a plan's detail with its contributing overtime, "Prepare payroll"
@@ -51,23 +51,57 @@
    outcome that cannot be known (503, network, timeout, malformed or non-confirming success) is
    AMBIGUOUS: the same re-read, and the write is NEVER sent again by this module.
 
+   AFI-4c2 (over BF-4c2; owner decisions D-AFI4c2-1..3 = A):
+     COMMIT (CEO, a Ready plan): a deliberate confirmation creates ONE commit intent
+       { id, version, total, key } — the plan's decoded totalAmount string as it is and one Web
+       Crypto key — held here in memory only and sent once. A strictly confirming answer (the
+       same plan, Committed, version + 1, the same total) is a success. Any 409 (the server
+       reports one generic conflict; its cause is never claimed) or other definite refusal drops
+       the intent and reads the plan again. An outcome that cannot be known (503, 500, network,
+       timeout, a malformed or non-confirming answer) keeps the intent and reads the plan again —
+       NEVER resent automatically. That read decides: Committed at version + 1 with the same total
+       is the success; still Ready at the same version and total keeps the intent and offers
+       "Retry commit", which on a deliberate click sends exactly the same body and key (the
+       server's idempotent replay, SDR-0002 §10 — the one exception to "never resent"); anything
+       else drops the intent as stale; a failed read keeps it and sends nothing.
+     DRIFT (CEO): read whenever a Ready plan's detail becomes current (so also after a commit 409)
+       — the explanation of what changed, never authority: Commit is offered by status alone and
+       the server decides.
+     MY PAYROLL (Employee): the same section and month bar over the Employee's own Committed
+       plans only (PayrollApi.myMonth / myGet); never a drift read, never a write.
+   drift, driftId, driftSeq, driftStatus belong to the detail; commitIntent survives a re-read
+   and is destroyed by clear() (logout, session loss, a different principal).
+
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
 
 const SESSION_PAYROLL_STATUS = Object.freeze({ IDLE: 'idle', LOADING: 'loading', READY: 'ready', ERROR: 'error' });
 const SESSION_PAYROLL_MUTATION_STATUS = Object.freeze({ IDLE: 'idle', PENDING: 'pending', ERROR: 'error', AMBIGUOUS: 'ambiguous' });
-const SESSION_PAYROLL_PANEL_KINDS = Object.freeze(['generate', 'review', 'approve', 'return', 'cancel']);
+const SESSION_PAYROLL_PANEL_KINDS = Object.freeze(['generate', 'review', 'approve', 'return', 'cancel', 'commit']);
 const SESSION_PAYROLL_MUTATION_IDLE = Object.freeze({ kind: null, status: SESSION_PAYROLL_MUTATION_STATUS.IDLE, error: null, fields: null, target: null });
 
-// The control matrix of a plan (BF-4c1 PayrollStatus::TRANSITIONS) — UX only; the server decides
-// every write again. CEO only. Committed (BF-4c2) and Cancelled offer nothing.
+// The control matrix of a plan (BF-4c1 PayrollStatus::TRANSITIONS; BF-4c2 Commit from Ready) — UX
+// only; the server decides every write again. CEO only. Committed and Cancelled offer nothing.
 const SESSION_PAYROLL_ACTIONS = Object.freeze({
   Draft: Object.freeze(['review', 'approve', 'cancel']),
   Reviewed: Object.freeze(['approve', 'return', 'cancel']),
-  Ready: Object.freeze(['return', 'cancel'])
+  Ready: Object.freeze(['commit', 'return', 'cancel'])
 });
 const SESSION_PAYROLL_NONE = Object.freeze([]);
 function sessionPayrollIsCeo(principal){ return !!principal && principal.principalType === PRINCIPAL_TYPES.CEO; }
+// AFI-4c2: an Employee bound to their employee record reads their own Committed payroll (My payroll).
+function sessionPayrollIsEmployee(principal){
+  return !!principal && principal.principalType === PRINCIPAL_TYPES.EMPLOYEE && typeof principal.employeeId === 'string' && PAYROLL_EMPLOYEE_ID_PATTERN.test(principal.employeeId);
+}
+// AFI-4c2: what the reconciling read of a commit intent shows — 'committed' (the commit was
+// applied: Committed at version + 1 with the same total), 'unresolved' (still Ready at the same
+// version and total: Retry commit may send the same intent), or 'stale' (anything else).
+function sessionPayrollIntentState(intent, plan){
+  if(!intent || !plan || plan.id !== intent.id) return null;
+  if(plan.status === 'Committed' && plan.version === intent.version + 1 && plan.totalAmount === intent.total) return 'committed';
+  if(plan.status === 'Ready' && plan.version === intent.version && plan.totalAmount === intent.total) return 'unresolved';
+  return 'stale';
+}
 function sessionPayrollActions(principal, plan){
   if(!sessionPayrollIsCeo(principal) || !plan) return SESSION_PAYROLL_NONE;
   return Object.prototype.hasOwnProperty.call(SESSION_PAYROLL_ACTIONS, plan.status) ? SESSION_PAYROLL_ACTIONS[plan.status] : SESSION_PAYROLL_NONE;
@@ -98,18 +132,22 @@ const SessionPayrollStore = (function(){
   let error = null;
   let mutation = SESSION_PAYROLL_MUTATION_IDLE, mutationSeq = 0;
   let panel = null, notice = null, focus = null;
+  let drift = null, driftId = null, driftSeq = 0, driftStatus = SESSION_PAYROLL_STATUS.IDLE;   // AFI-4c2
+  let commitIntent = null;                                                                        // AFI-4c2
 
   function keyOf(p){
     return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null;
   }
   function seqOf(kind){
-    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'mutation' ? mutationSeq : -1;
+    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'mutation' ? mutationSeq : kind === 'drift' ? driftSeq : -1;
   }
   function isLive(token){ return !!token && token.gen === generation; }
   function isCurrent(token){
     return isLive(token) && token.seq === seqOf(token.kind);
   }
+  function forgetDrift(){ driftSeq++; drift = null; driftId = null; driftStatus = SESSION_PAYROLL_STATUS.IDLE; }
   function clear(){
+    forgetDrift(); commitIntent = null;
     open = false; month = null;
     list = null; listMonth = null; listStatus = SESSION_PAYROLL_STATUS.IDLE; listStale = false; listSeq++;
     detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; detailSeq++;
@@ -149,6 +187,7 @@ const SessionPayrollStore = (function(){
       month = key;
       list = null; listMonth = null; listStatus = SESSION_PAYROLL_STATUS.IDLE; listStale = false; listSeq++; clearError('list');
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; clearError('detail');
+      forgetDrift();
       excluded = null; excludedMonth = null; panel = null;
     },
     // A request token; the new request supersedes any earlier one of its kind.
@@ -159,7 +198,12 @@ const SessionPayrollStore = (function(){
       }
       if(kind === 'detail'){
         detailSeq++; detailId = arg; detail = null; detailStatus = SESSION_PAYROLL_STATUS.LOADING; clearError('detail');
+        forgetDrift();                       // a drift answer belongs to the detail it was read for
         return Object.freeze({ gen: generation, kind: kind, seq: detailSeq });
+      }
+      if(kind === 'drift'){
+        driftSeq++; driftId = arg; drift = null; driftStatus = SESSION_PAYROLL_STATUS.LOADING;
+        return Object.freeze({ gen: generation, kind: kind, seq: driftSeq, id: arg });
       }
       if(kind === 'labels'){
         labelsSeq++; people = null; labelsStatus = SESSION_PAYROLL_STATUS.LOADING; labelsError = null;
@@ -185,8 +229,15 @@ const SessionPayrollStore = (function(){
       people = items; labelsStatus = SESSION_PAYROLL_STATUS.READY;
       return true;
     },
+    // AFI-4c2: only for the plan it was read for, while that plan is still the detail.
+    applyDrift(token, item){
+      if(!isCurrent(token) || token.kind !== 'drift' || !item || item.id !== driftId || driftId !== detailId) return false;
+      drift = item; driftStatus = SESSION_PAYROLL_STATUS.READY;
+      return true;
+    },
     applyError(token, failed){
       if(!isCurrent(token)) return false;
+      if(token.kind === 'drift'){ drift = null; driftStatus = SESSION_PAYROLL_STATUS.ERROR; return true; }
       if(token.kind === 'labels'){ people = null; labelsStatus = SESSION_PAYROLL_STATUS.ERROR; labelsError = failure(failed); return true; }
       if(token.kind === 'list'){ list = null; listStatus = SESSION_PAYROLL_STATUS.ERROR; }
       else { detail = null; detailStatus = SESSION_PAYROLL_STATUS.ERROR; }
@@ -196,6 +247,7 @@ const SessionPayrollStore = (function(){
     // Leaves the detail: a pending detail answer is dropped, and the plan's confirmation goes.
     closeDetail(){
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; clearError('detail');
+      forgetDrift();
       if(panel && panel.kind !== 'generate') panel = null;
     },
 
@@ -240,6 +292,11 @@ const SessionPayrollStore = (function(){
       return true;
     },
     markListStale(){ listStale = true; },
+    // AFI-4c2: the one commit intent (frozen; memory only) and its end.
+    setIntent(intent){ commitIntent = Object.freeze({ id: intent.id, version: intent.version, total: intent.total, key: intent.key }); },
+    dropIntent(){ commitIntent = null; },
+    // The commit's outcome became known from a re-read: the message changes, nothing is sent.
+    resolveMutation(noticeKey){ mutation = SESSION_PAYROLL_MUTATION_IDLE; notice = noticeKey; },
     setNotice(key){ notice = key; },
     setFocus(hint){ focus = hint; },
     takeFocus(){ const f = focus; focus = null; return f; },
@@ -251,7 +308,8 @@ const SessionPayrollStore = (function(){
         detail: detail, detailId: detailId, detailStatus: detailStatus,
         excluded: excluded, excludedMonth: excludedMonth,
         people: people, labelsStatus: labelsStatus, labelsError: labelsError, error: error,
-        mutation: mutation, panel: panel, notice: notice
+        mutation: mutation, panel: panel, notice: notice,
+        drift: drift, driftId: driftId, driftStatus: driftStatus, commitIntent: commitIntent
       });
     }
   });
@@ -273,8 +331,28 @@ const SessionPayroll = (function(){
     if(!out.ok) applied = SessionPayrollStore.applyError(token, out);
     else if(kind === 'list') applied = SessionPayrollStore.applyList(token, out.data);
     else if(kind === 'detail') applied = SessionPayrollStore.applyDetail(token, out.data);
+    else if(kind === 'drift') applied = SessionPayrollStore.applyDrift(token, out.data);
     else applied = SessionPayrollStore.applyLabels(token, out.data);
+    if(applied && kind === 'detail' && out.ok) afterDetail(out.data.plan);
     if(applied) paint();
+  }
+
+  // AFI-4c2: a plan the CEO now sees — reconcile an open commit intent with it, and read its drift
+  // when it is Ready (D-AFI4c2-2 = A: explanatory only; Commit is offered by status alone).
+  function afterDetail(plan){
+    const principal = principalNow();
+    if(!sessionPayrollIsCeo(principal)) return;
+    const s = SessionPayrollStore.snapshot();
+    const state = s.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING ? null : sessionPayrollIntentState(s.commitIntent, plan);
+    if(state === 'committed'){
+      SessionPayrollStore.dropIntent();
+      SessionPayrollStore.resolveMutation('commitConfirmed');
+      SessionPayrollStore.markListStale();
+    } else if(state === 'stale'){
+      SessionPayrollStore.dropIntent();
+      if(s.mutation.kind === 'commit') SessionPayrollStore.resolveMutation('commitStale');
+    }
+    if(plan.status === 'Ready') loadDrift(plan.id);
   }
 
   function principalNow(){
@@ -282,15 +360,29 @@ const SessionPayroll = (function(){
     return a.state === AUTH_STATES.AUTHENTICATED ? a.principal : null;
   }
 
-  function loadMonth(key){ return run('list', key, () => PayrollApi.month(key)); }
-  function loadDetail(id){ return run('detail', id, () => PayrollApi.get(id)); }
+  // AFI-4c2: an Employee reads only their own Committed plans; the CEO the company's.
+  function loadMonth(key){
+    const p = principalNow();
+    return run('list', key, () => sessionPayrollIsEmployee(p) ? PayrollApi.myMonth(key, p.employeeId) : PayrollApi.month(key));
+  }
+  function loadDetail(id){
+    const p = principalNow();
+    return run('detail', id, () => sessionPayrollIsEmployee(p) ? PayrollApi.myGet(id, p.employeeId) : PayrollApi.get(id));
+  }
+  // AFI-4c2: CEO only.
+  function loadDrift(id){
+    if(!sessionPayrollIsCeo(principalNow())) return;
+    return run('drift', id, () => PayrollApi.drift(id));
+  }
   // D-AFI4c1-4 = A: the canonical CEO Employee list, archived records included, read-only.
   function loadLabels(){ return run('labels', null, () => EmployeeApi.list({ archived: true })); }
 
   /* ---------- writes ---------- */
-  // Outcomes that cannot be known: the write may or may not have been applied.
+  // Outcomes that cannot be known: the write may or may not have been applied. AFI-4c2: for a
+  // commit a 500 is one too (the server may have committed before failing to answer).
   const AMBIGUOUS = Object.freeze([API_RESULT_KINDS.UNAVAILABLE, PAYROLL_API_INVALID]);
-  const NOTICES = Object.freeze({ review: 'reviewed', approve: 'approved', return: 'returned', cancel: 'cancelled' });
+  const COMMIT_AMBIGUOUS = Object.freeze([API_RESULT_KINDS.UNAVAILABLE, PAYROLL_API_INVALID, API_RESULT_KINDS.SERVER_ERROR]);
+  const NOTICES = Object.freeze({ review: 'reviewed', approve: 'approved', return: 'returned', cancel: 'cancelled', commit: 'committed' });
   const TRANSITION_CALLS = Object.freeze({
     review: (id, v) => PayrollApi.review(id, v),
     approve: (id, v) => PayrollApi.approve(id, v),
@@ -299,8 +391,13 @@ const SessionPayroll = (function(){
   });
 
   function pending(){ return SessionPayrollStore.snapshot().mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING; }
-  // The authenticated CEO, the section shown, no write in flight.
+  // The authenticated CEO, the section shown, no write in flight (every write).
   function canAct(){ return sessionPayrollIsCeo(principalNow()) && SessionPayrollStore.snapshot().open && !pending(); }
+  // AFI-4c2: the CEO or a bound Employee, the section shown, no write in flight (navigation, reads).
+  function canRead(){
+    const p = principalNow();
+    return (sessionPayrollIsCeo(p) || sessionPayrollIsEmployee(p)) && SessionPayrollStore.snapshot().open && !pending();
+  }
 
   // Applies a write's outcome. Late (another identity) and superseded answers are dropped.
   function settle(token, out){
@@ -312,6 +409,7 @@ const SessionPayroll = (function(){
     const s = SessionPayrollStore.snapshot();
     const kind = s.mutation.kind;
     const generate = kind === 'generate';
+    if(kind === 'commit') return settleCommit(token, out, s);
     if(out.ok){
       if(generate){
         const target = s.mutation.target;
@@ -352,10 +450,49 @@ const SessionPayroll = (function(){
     paint();
   }
 
+  // AFI-4c2: a commit's outcome. Success: the Committed plan; definite refusal (any 409, other
+  // 4xx): the intent ends and the plan is read again (its drift too while Ready); unknown: the
+  // intent stays and the plan is read again — that read decides (afterDetail). Never resent here.
+  function settleCommit(token, out, s){
+    const intent = s.commitIntent;
+    if(out.ok){
+      if(SessionPayrollStore.applyTransitioned(token, out.data, NOTICES.commit)){
+        SessionPayrollStore.dropIntent();
+        SessionPayrollStore.setFocus('message');
+        loadDetail(out.data.id);
+      }
+      paint();
+      return;
+    }
+    const id = intent ? intent.id : s.detailId;
+    if(COMMIT_AMBIGUOUS.indexOf(out.kind) !== -1){
+      SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS, out);
+      SessionPayrollStore.markListStale();
+      SessionPayrollStore.setFocus('message');
+      if(id && id === s.detailId) loadDetail(id);
+      paint();
+      return;
+    }
+    SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, out);
+    SessionPayrollStore.dropIntent();
+    SessionPayrollStore.setFocus('message');
+    SessionPayrollStore.markListStale();
+    if(out.kind === API_RESULT_KINDS.NOT_FOUND){ SessionPayrollStore.closeDetail(); loadMonth(s.month); }
+    else if(s.detailId) loadDetail(s.detailId);
+    paint();
+  }
+
+  // AFI-4c2: sends the commit intent once. A missing Web Crypto key sends nothing.
+  async function sendCommit(intent, retry){
+    const token = SessionPayrollStore.beginMutation('commit', { id: intent.id, version: intent.version, retry: retry === true });
+    paint();
+    return settle(token, await PayrollApi.commit(intent));
+  }
+
   // The month field and Previous / Next: another month's plans, read from the server.
   function setMonth(key){
     const s = SessionPayrollStore.snapshot();
-    if(!canAct() || s.detailId || s.panel || !OvertimeCalendar.isMonth(key) || key === s.month) return;
+    if(!canRead() || s.detailId || s.panel || !OvertimeCalendar.isMonth(key) || key === s.month) return;
     SessionPayrollStore.resetMutation();
     SessionPayrollStore.setMonth(key);
     const loading = loadMonth(key);
@@ -371,13 +508,15 @@ const SessionPayroll = (function(){
       if(!principal) return;
       SessionPayrollStore.bindPrincipal(principal);
       const s = SessionPayrollStore.snapshot();
-      if(!s.open || !sessionPayrollIsCeo(principal)) return;
+      if(!s.open || !(sessionPayrollIsCeo(principal) || sessionPayrollIsEmployee(principal))) return;
       if(s.listStatus === SESSION_PAYROLL_STATUS.IDLE || (s.listStale && !s.detailId && s.listStatus !== SESSION_PAYROLL_STATUS.LOADING)) loadMonth(s.month);
     },
-    // The section switch of the workspace view: CEO only. Nothing changes while a write is in flight.
+    // The section switch of the workspace view: the CEO's Payroll, an Employee's My payroll
+    // (AFI-4c2). Nothing changes while a write is in flight.
     show(value){
       if(pending()) return;
-      if(value === true && !sessionPayrollIsCeo(principalNow())) return;
+      const p = principalNow();
+      if(value === true && !sessionPayrollIsCeo(p) && !sessionPayrollIsEmployee(p)) return;
       SessionPayrollStore.setOpen(value === true, sessionPayrollCurrentMonth());
       if(value === true) SessionPayrollStore.setFocus('section');
       paint();
@@ -385,12 +524,12 @@ const SessionPayroll = (function(){
     // Previous / Next (delta -1 / +1) and the month field ("YYYY-MM").
     shiftMonth(delta){
       const s = SessionPayrollStore.snapshot();
-      if(!canAct() || s.detailId || s.panel || (delta !== 1 && delta !== -1)) return;
+      if(!canRead() || s.detailId || s.panel || (delta !== 1 && delta !== -1)) return;
       return setMonth(OvertimeCalendar.shift(s.month, delta));
     },
     setMonth: setMonth,
     openDetail(id){
-      if(!canAct() || typeof id !== 'string') return;
+      if(!canRead() || typeof id !== 'string') return;
       const s = SessionPayrollStore.snapshot();
       if(s.panel) return;
       if(s.detailId === id && s.detailStatus === SESSION_PAYROLL_STATUS.LOADING) return;
@@ -407,7 +546,7 @@ const SessionPayroll = (function(){
     },
     retry(){
       const s = SessionPayrollStore.snapshot();
-      if(!canAct()) return;
+      if(!canRead()) return;
       let loading;
       if(s.error && s.error.scope === 'list') loading = loadMonth(s.month);
       else if(s.error && s.error.scope === 'detail' && s.detailId) loading = loadDetail(s.detailId);
@@ -445,6 +584,7 @@ const SessionPayroll = (function(){
         const d = s.detail;
         if(s.detailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.plan.id !== s.detailId) return;
         if(sessionPayrollActions(principalNow(), d.plan).indexOf(kind) === -1) return;
+        if(kind === 'commit' && s.commitIntent) return;     // an unresolved intent: Retry commit, never a second intent
         SessionPayrollStore.openPanel(kind, d.plan.id);
       }
       SessionPayrollStore.setFocus('panel');
@@ -472,9 +612,35 @@ const SessionPayroll = (function(){
       const d = s.detail;
       if(s.detailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.plan.id !== a.id) return;
       if(sessionPayrollActions(principalNow(), d.plan).indexOf(a.kind) === -1){ SessionPayrollStore.closePanel(); paint(); return; }
+      if(a.kind === 'commit'){
+        // AFI-4c2: ONE intent per deliberate confirmation — the plan's own totalAmount string and
+        // one Web Crypto key. Without Web Crypto nothing is sent.
+        if(s.commitIntent){ SessionPayrollStore.closePanel(); paint(); return; }
+        const key = payrollIdempotencyKey();
+        if(key === null){
+          const token = SessionPayrollStore.beginMutation('commit', { id: d.plan.id, version: d.plan.version, retry: false });
+          SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, { kind: 'CRYPTO_UNAVAILABLE' });
+          SessionPayrollStore.setFocus('message');
+          paint();
+          return;
+        }
+        SessionPayrollStore.setIntent({ id: d.plan.id, version: d.plan.version, total: d.plan.totalAmount, key: key });
+        return sendCommit(SessionPayrollStore.snapshot().commitIntent, false);
+      }
       const token = SessionPayrollStore.beginMutation(a.kind, { id: d.plan.id, version: d.plan.version });
       paint();
       return settle(token, await TRANSITION_CALLS[a.kind](d.plan.id, d.plan.version));
+    },
+    // AFI-4c2 (D-AFI4c2-1 = A): after an unknown outcome whose re-read still shows the plan Ready
+    // at the same version and total, a deliberate click sends the SAME intent — the same body and
+    // key — again. Never automatic; never a new key.
+    retryCommit(){
+      if(!canAct()) return;
+      const s = SessionPayrollStore.snapshot();
+      const d = s.detail;
+      if(s.panel || s.detailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.plan.id !== s.detailId) return;
+      if(sessionPayrollIntentState(s.commitIntent, d.plan) !== 'unresolved') return;
+      return sendCommit(s.commitIntent, true);
     }
   });
 })();

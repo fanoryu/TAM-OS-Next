@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL VIEW (AFI-4c1) — js/ui/session-payroll-view.js
+   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2) — js/ui/session-payroll-view.js
    ------------------------------------------------------------
    The Payroll section of the authenticated SESSION workspace — CEO only — rendered by
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js), its only caller, when the section
@@ -28,11 +28,23 @@
    list that was rendered. The contributing overtime of a plan shows its record id, hours and
    frozen amount, for traceability.
 
+   AFI-4c2 (owner decisions D-AFI4c2-1..3 = A): on a Ready plan the CEO also gets "Commit payroll"
+   — an inline confirmation showing the plan's own server strings (employee, month, base salary,
+   overtime hours and amount, total, version) and saying that Commit makes it the final payroll
+   obligation, that it can no longer be returned or cancelled, and that it is NOT a payment and
+   posts nothing to Finance. Committed reads "Committed — final, not paid" (CEO and Employee). An
+   unconfirmed commit whose re-read still shows the plan Ready at the same version and total
+   offers "Retry commit" (the same intent again). A Ready plan shows what changed since it was
+   prepared (the drift read) — explanation only, never a reason to offer or refuse Commit. A
+   Commit 409 never claims its cause. An Employee's section is "My payroll": their own Committed
+   plans by month and a payslip-like card of the server's fields only — no control, no other
+   payroll concept.
+
    Classic shared global scope; existing CSS classes only.
    ============================================================ */
 
 const SESSION_PAYROLL_STATUS_TEXT = Object.freeze({
-  Draft: 'Draft', Reviewed: 'Reviewed', Ready: 'Ready — approved, not paid', Committed: 'Committed', Cancelled: 'Cancelled'
+  Draft: 'Draft', Reviewed: 'Reviewed', Ready: 'Ready — approved, not paid', Committed: 'Committed — final, not paid', Cancelled: 'Cancelled'
 });
 const SESSION_PAYROLL_EXCLUSION_TEXT = Object.freeze({
   archived: 'Archived employee',
@@ -56,21 +68,37 @@ const SESSION_PAYROLL_MUTATION_ERRORS = Object.freeze({
   NOT_FOUND: 'This payroll plan is no longer available. The list was read again.',
   RATE_LIMITED: 'Too many requests.',
   SERVER_ERROR: 'The change was not made. Try again in a moment.',
-  CLIENT_FAULT: 'TAM OS could not process this request.'
+  CLIENT_FAULT: 'TAM OS could not process this request.',
+  CRYPTO_UNAVAILABLE: 'This browser cannot create a secure commit key. Nothing was sent.'
 });
 // The backend reports one generic conflict: the wording never claims which cause it was.
 const SESSION_PAYROLL_CONFLICTS = Object.freeze({
   generate: 'TAM OS could not prepare payroll for this month (a conflict was reported). The plans below were read again from TAM OS.',
-  transition: 'This plan changed or the action is no longer available. It was read again from TAM OS — check it, then choose again.'
+  transition: 'This plan changed or the action is no longer available. It was read again from TAM OS — check it, then choose again.',
+  commit: 'TAM OS did not commit this plan: it changed, its total no longer matches, or its inputs changed. It was read again — check it and any changes listed below.'
 });
 const SESSION_PAYROLL_NOTICES = Object.freeze({
   generated: 'Payroll prepared for this month. The plans below were read again from TAM OS.',
   reviewed: 'Payroll plan marked as reviewed.',
   approved: 'Payroll plan approved: it is now Ready — approved, not paid.',
   returned: 'Payroll plan returned to Draft.',
-  cancelled: 'Payroll plan cancelled.'
+  cancelled: 'Payroll plan cancelled.',
+  commitStale: 'TAM OS could not confirm the commit, and the plan read again has changed. Check it before choosing again.'
 });
-const SESSION_PAYROLL_TARGETS = Object.freeze({ review: 'Reviewed', approve: 'Ready', return: 'Draft', cancel: 'Cancelled' });
+// AFI-4c2: notices that name the plan's month.
+const SESSION_PAYROLL_MONTH_NOTICES = Object.freeze({
+  committed: ['Payroll plan committed: it is the final payroll obligation for ', ' — not paid.'],
+  commitConfirmed: ['TAM OS could not confirm the commit at first, but the plan read again is committed: it is the final payroll obligation for ', ' — not paid.']
+});
+const SESSION_PAYROLL_TARGETS = Object.freeze({ review: 'Reviewed', approve: 'Ready', return: 'Draft', cancel: 'Cancelled', commit: 'Committed' });
+// AFI-4c2: the BF-4c2 drift reasons, in their canonical order — what changed, never a value.
+const SESSION_PAYROLL_DRIFT_TEXT = Object.freeze({
+  employee_archived: 'The employee is now archived.',
+  employee_not_active: "The employee's employment status is no longer Active.",
+  salary_missing: 'The employee no longer has a monthly base salary.',
+  salary_changed: "The employee's monthly base salary changed after this plan was prepared.",
+  overtime_changed: "The employee's approved overtime for this month changed after this plan was prepared."
+});
 const SESSION_PAYROLL_PANELS = Object.freeze({
   generate: { title: 'Prepare payroll for this month?',
     text: 'TAM OS creates a Draft plan for each eligible employee and recalculates existing Drafts from the current salaries and approved overtime. Reviewed and Ready plans are not changed. Nothing is paid and nothing is posted to Finance.',
@@ -78,13 +106,17 @@ const SESSION_PAYROLL_PANELS = Object.freeze({
   review: { title: 'Mark this plan as reviewed?', text: 'A reviewed plan can still be approved, returned to Draft or cancelled.', submit: 'Mark reviewed', busy: 'Working…', danger: false },
   approve: { title: 'Approve this payroll plan?', text: 'The plan becomes Ready — approved, not paid. It can still be returned to Draft or cancelled.', submit: 'Approve', busy: 'Approving…', danger: false },
   return: { title: 'Return this plan to Draft?', text: 'A Draft is recalculated the next time payroll is prepared for this month.', submit: 'Return to draft', busy: 'Working…', danger: false },
-  cancel: { title: 'Cancel this payroll plan?', text: 'A cancelled plan is final and no longer counts the overtime it included. Preparing payroll again creates a new Draft for an eligible employee.', submit: 'Cancel plan', busy: 'Cancelling…', danger: true }
+  cancel: { title: 'Cancel this payroll plan?', text: 'A cancelled plan is final and no longer counts the overtime it included. Preparing payroll again creates a new Draft for an eligible employee.', submit: 'Cancel plan', busy: 'Cancelling…', danger: true },
+  commit: { title: 'Commit this payroll plan?',
+    text: 'It can no longer be changed, returned or cancelled. It is not a payment — nothing is paid and nothing is posted to Finance.',
+    submit: 'Commit payroll', busy: 'Committing…', danger: true }
 });
 const SESSION_PAYROLL_ACTION_BUTTONS = Object.freeze({
   review: { id: 'swpReviewBtn', label: 'Review', cls: 'btn' },
   approve: { id: 'swpApproveBtn', label: 'Approve', cls: 'btn btn-accent' },
   return: { id: 'swpReturnBtn', label: 'Return to draft', cls: 'btn' },
-  cancel: { id: 'swpCancelBtn', label: 'Cancel plan', cls: 'btn btn-danger' }
+  cancel: { id: 'swpCancelBtn', label: 'Cancel plan', cls: 'btn btn-danger' },
+  commit: { id: 'swpCommitBtn', label: 'Commit payroll', cls: 'btn btn-accent' }
 });
 
 function sessionPayrollValue(v){
@@ -109,6 +141,11 @@ function sessionPayrollErrorHTML(error){
 // An unconfirmed write, reported by what the read that followed it shows (never as a success).
 function sessionPayrollAmbiguousText(w){
   const m = w.mutation;
+  // AFI-4c2: the commit still unresolved after its re-read (D-AFI4c2-1 = A).
+  if(m.kind === 'commit' && w.detailStatus === SESSION_PAYROLL_STATUS.READY && w.detail && sessionPayrollIntentState(w.commitIntent, w.detail.plan) === 'unresolved'){
+    return 'TAM OS could not confirm the commit. The plan read again is still Ready with the same total. Retry commit sends the same commit again — it can never commit the plan twice.';
+  }
+  if(m.kind === 'commit' && w.detailStatus === SESSION_PAYROLL_STATUS.ERROR) return 'TAM OS could not confirm the commit, and the plan could not be read again. Nothing is sent again — use Retry to read the plan.';
   if(m.kind === 'generate') return 'TAM OS could not confirm whether payroll was prepared. The plans below were read again from TAM OS — check them before preparing payroll again.';
   if(w.detailStatus === SESSION_PAYROLL_STATUS.LOADING || w.detailStatus === SESSION_PAYROLL_STATUS.IDLE) return 'TAM OS could not confirm the change. The plan is being read again…';
   const p = w.detailStatus === SESSION_PAYROLL_STATUS.READY && w.detail ? w.detail.plan : null;
@@ -124,11 +161,14 @@ function sessionPayrollMutationHTML(w){
   if(m.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) text = sessionPayrollAmbiguousText(w);
   else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.ERROR && m.error){
     const k = m.error.kind;
-    if(k === 'CONFLICT') text = m.kind === 'generate' ? SESSION_PAYROLL_CONFLICTS.generate : SESSION_PAYROLL_CONFLICTS.transition;
+    if(k === 'CONFLICT') text = m.kind === 'generate' ? SESSION_PAYROLL_CONFLICTS.generate : m.kind === 'commit' ? SESSION_PAYROLL_CONFLICTS.commit : SESSION_PAYROLL_CONFLICTS.transition;
     else text = SESSION_PAYROLL_MUTATION_ERRORS[k] || SESSION_PAYROLL_MUTATION_ERRORS.CLIENT_FAULT;
     if(k === 'RATE_LIMITED' && typeof authWaitText === 'function') text += authWaitText(m.error.retryAfter);
   } else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && w.notice && SESSION_PAYROLL_NOTICES[w.notice]){
-    text = SESSION_PAYROLL_NOTICES[w.notice]; warn = false;
+    text = SESSION_PAYROLL_NOTICES[w.notice]; warn = w.notice === 'commitStale';
+  } else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && w.notice && SESSION_PAYROLL_MONTH_NOTICES[w.notice] && w.detail){
+    const n = SESSION_PAYROLL_MONTH_NOTICES[w.notice];
+    text = n[0] + sessionPayrollMonthLabel(w.detail.plan.monthKey) + n[1]; warn = false;
   }
   if(!text) return '';
   if(warn && m.error && m.error.requestId) text += ' Reference: ' + m.error.requestId + '.';
@@ -142,7 +182,12 @@ function sessionPayrollPanelHTML(w){
   const dis = busy ? ' disabled' : '';
   let what;
   if(w.panel.kind === 'generate') what = 'Month: ' + sessionPayrollMonthLabel(w.month) + '.';
-  else {
+  else if(w.panel.kind === 'commit'){
+    // AFI-4c2: exactly the plan's server strings — the total shown is the total sent.
+    const p = w.detail.plan;
+    what = ['Committing makes this plan the final payroll obligation for ', sessionPayrollMonthLabel(p.monthKey), ': ', p.employeeName, ' (', p.employeeCode, ')',
+      ', base salary (Rp) ', p.baseSalary, ', overtime ', p.overtimeHours, ' hours (Rp) ', p.overtimeAmount, ', total (Rp) ', p.totalAmount, ', version ', String(p.version), '.'].join('');
+  } else {
     const p = w.detail.plan;
     what = p.employeeName + ' (' + p.employeeCode + ') — ' + sessionPayrollMonthLabel(p.monthKey) + ' — ' + sessionPayrollStatusText(p.status) + '.';
   }
@@ -174,6 +219,63 @@ function sessionPayrollExcludedHTML(w, dis){
       + '<div class="auth-actions"><button class="btn" type="button" id="swpLabelsRetryBtn"' + dis + '>Retry employee names</button></div>' : '';
   return '<section class="card" id="swpExcluded" aria-labelledby="swpExcludedTitle"><h2 class="section-title" id="swpExcludedTitle">Not included (' + w.excluded.length + ')</h2>'
     + '<ul>' + names + '</ul>' + retry + '</section>';
+}
+
+// AFI-4c2: an Employee's own Committed plans of the month — no preparation, no exclusions.
+function sessionPayrollMineListHTML(w){
+  const dis = sessionPayrollBusy(w) ? ' disabled' : '';
+  const head = sessionPayrollMonthBarHTML(w, dis) + '<h2 class="section-title">' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '</h2>';
+  if(w.listStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'list'){
+    const retry = w.error.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button></div>';
+    return head + sessionPayrollErrorHTML(w.error) + retry;
+  }
+  if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return head + '<p class="auth-lead" role="status" aria-busy="true">Loading your payroll…</p>';
+  if(!w.list.length) return head + '<div class="empty">No committed payroll for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '.</div>';
+  const rows = w.list.map(function(p, i){
+    return '<tr><td>' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</td><td>' + escapeHtml(sessionPayrollStatusText(p.status)) + '</td>'
+      + '<td>' + escapeHtml(p.baseSalary) + '</td><td>' + escapeHtml(p.overtimeAmount) + '</td><td>' + escapeHtml(p.totalAmount) + '</td>'
+      + '<td><button class="btn" type="button" id="swpOpen' + i + '"' + dis + '>View</button></td></tr>';
+  }).join('');
+  return head + '<div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col">Status</th>'
+    + '<th scope="col">Base salary (Rp)</th><th scope="col">Overtime (Rp)</th><th scope="col">Total (Rp)</th><th scope="col" aria-label="Open payroll"></th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>';
+}
+
+// AFI-4c2: the payslip-like card of one own Committed plan — the server's fields only.
+function sessionPayrollMineDetailHTML(w){
+  const back = '<div class="auth-actions"><button class="btn" type="button" id="swpBackBtn">Back to my payroll</button>';
+  if(w.detailStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'detail'){
+    const retry = (w.error.kind === 'DENIED' || w.error.kind === 'NOT_FOUND') ? '' : '<button class="btn btn-accent" type="button" id="swpRetryBtn">Retry</button>';
+    return sessionPayrollErrorHTML(w.error) + back + retry + '</div>';
+  }
+  if(w.detailStatus !== SESSION_PAYROLL_STATUS.READY || !w.detail) return '<p class="auth-lead" role="status" aria-busy="true">Loading your payroll…</p>' + back + '</div>';
+  const p = w.detail.plan;
+  const rows = [
+    ['Employee', p.employeeName], ['Code', p.employeeCode], ['Department', p.department], ['Month', sessionPayrollMonthLabel(p.monthKey)],
+    ['Status', sessionPayrollStatusText(p.status)], ['Base salary (Rp)', p.baseSalary], ['Overtime hours', p.overtimeHours],
+    ['Overtime (Rp)', p.overtimeAmount], ['Total (Rp)', p.totalAmount]
+  ];
+  const ot = w.detail.overtime.length
+    ? '<div class="table-wrap"><table><thead><tr><th scope="col">Record</th><th scope="col">Hours</th><th scope="col">Amount (Rp)</th></tr></thead><tbody>'
+      + w.detail.overtime.map(function(r){ return '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.hours) + '</td><td>' + escapeHtml(r.amount) + '</td></tr>'; }).join('')
+      + '</tbody></table></div>'
+    : '<p class="hint">No approved overtime is counted in this payroll.</p>';
+  return '<section class="card" id="swpPayslip" aria-labelledby="swpPayslipTitle"><h2 class="section-title" id="swpPayslipTitle">Payroll — ' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</h2>'
+    + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    + '<h3 class="section-title">Approved overtime counted</h3>' + ot + '</section>'
+    + back + '</div>';
+}
+
+// AFI-4c2: what changed since a Ready plan was prepared (the drift read) — explanation only.
+function sessionPayrollDriftHTML(w){
+  const p = w.detail.plan;
+  if(p.status !== 'Ready' || w.driftId !== p.id) return '';
+  if(w.driftStatus === SESSION_PAYROLL_STATUS.LOADING) return '<p class="hint" role="status" aria-busy="true">Checking this plan against TAM OS…</p>';
+  if(w.driftStatus === SESSION_PAYROLL_STATUS.ERROR) return '<p class="hint">TAM OS could not check this plan for changes.</p>';
+  if(w.driftStatus !== SESSION_PAYROLL_STATUS.READY || !w.drift || w.drift.current) return '';
+  return '<section class="card" id="swpDrift" aria-labelledby="swpDriftTitle"><h2 class="section-title" id="swpDriftTitle">Changed since this plan was prepared</h2>'
+    + '<ul>' + w.drift.reasons.map(function(r){ return '<li>' + escapeHtml(SESSION_PAYROLL_DRIFT_TEXT[r]) + '</li>'; }).join('') + '</ul>'
+    + '<p class="auth-lead">' + escapeHtml('This plan no longer matches TAM OS. Return it to Draft, then prepare payroll for ' + sessionPayrollMonthLabel(p.monthKey) + ' again.') + '</p></section>';
 }
 
 function sessionPayrollListHTML(w){
@@ -212,11 +314,13 @@ function sessionPayrollDetailHTML(principal, w){
   }
   if(w.detailStatus !== SESSION_PAYROLL_STATUS.READY || !w.detail) return sessionPayrollMutationHTML(w) + '<p class="auth-lead" role="status" aria-busy="true">Loading the payroll plan…</p>' + back + '</div>';
   const p = w.detail.plan;
-  // Only the actions the matrix offers for this plan; the confirmation replaces them.
-  const actions = w.panel ? '' : sessionPayrollActions(principal, p).map(function(k){
+  // Only the actions the matrix offers for this plan; the confirmation replaces them. AFI-4c2: an
+  // open commit intent replaces Commit payroll — by Retry commit while it is unresolved.
+  const intentState = sessionPayrollIntentState(w.commitIntent, p);
+  const actions = w.panel ? '' : sessionPayrollActions(principal, p).filter(function(k){ return !(k === 'commit' && w.commitIntent); }).map(function(k){
     const b = SESSION_PAYROLL_ACTION_BUTTONS[k];
     return '<button class="' + b.cls + '" type="button" id="' + b.id + '"' + dis + '>' + escapeHtml(b.label) + '</button>';
-  }).join('');
+  }).join('') + (!w.panel && intentState === 'unresolved' ? '<button class="btn btn-accent" type="button" id="swpRetryCommitBtn"' + dis + '>Retry commit</button>' : '');
   const conflict = w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.ERROR && w.mutation.error && w.mutation.error.kind === 'CONFLICT';
   const reload = (conflict || w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) && !w.panel ? '<button class="btn" type="button" id="swpReloadBtn"' + dis + '>Reload plan</button>' : '';
   const rows = [
@@ -233,15 +337,18 @@ function sessionPayrollDetailHTML(principal, w){
     + (w.panel ? '' : sessionPayrollMutationHTML(w))
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
     + '<section class="card" aria-labelledby="swpOvertimeTitle"><h2 class="section-title" id="swpOvertimeTitle">Approved overtime counted</h2>' + ot + '</section>'
+    + sessionPayrollDriftHTML(w)
     + back + reload + actions + '</div>'
     + (w.panel && w.panel.id === p.id ? sessionPayrollPanelHTML(w) : '');
 }
 
-// The section title (the workspace heading) and body.
-function renderSessionPayrollTitle(w){
+// The section title (the workspace heading) and body. AFI-4c2: an Employee's is My payroll.
+function renderSessionPayrollTitle(w, principal){
+  if(sessionPayrollIsEmployee(principal)) return 'My payroll';
   return w.detailId ? 'Payroll plan' : 'Payroll';
 }
 function renderSessionPayrollHTML(principal, w){
+  if(sessionPayrollIsEmployee(principal)) return w.detailId ? sessionPayrollMineDetailHTML(w) : sessionPayrollMineListHTML(w);
   return w.detailId ? sessionPayrollDetailHTML(principal, w) : sessionPayrollListHTML(w);
 }
 
@@ -259,6 +366,7 @@ function bindSessionPayroll(app){
   Object.keys(SESSION_PAYROLL_ACTION_BUTTONS).forEach(function(k){ click(SESSION_PAYROLL_ACTION_BUTTONS[k].id, function(){ SessionPayroll.openPanel(k); }); });
   click('swpPanelCancel', function(){ SessionPayroll.cancelPanel(); });
   click('swpPanelConfirm', function(){ SessionPayroll.confirmPanel(); });
+  click('swpRetryCommitBtn', function(){ SessionPayroll.retryCommit(); });
   const w = SessionPayrollStore.snapshot();
   (w.list || []).forEach(function(row, i){ click('swpOpen' + i, function(){ SessionPayroll.openDetail(row.id); }); });
 }

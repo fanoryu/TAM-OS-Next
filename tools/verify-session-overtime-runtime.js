@@ -316,12 +316,16 @@ function firewall(rt, label){
   // pressed — the Payroll section is never open in this harness). Only that exact button is
   // removed before the deny test, only for the CEO; an Employee's switch has none, and any other
   // Payroll / Finance text still fails. Was: no "Payroll" text at all.
+  // AFI-4c2 authorized revision: an Employee's switch carries "My payroll" (not pressed — never
+  // open here), removed the same way. Was: an Employee's switch had no third button.
   const PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><\/div><\/nav>/;
+  const MY_PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>My payroll<\/button><\/div><\/nav>/;
   const pNow = rt.AuthBoot.snapshot().principal;
   const ceoNow = !!pNow && pNow.principalType === 'ceo';
-  check(ceoNow ? (html.match(/id="swSectionPayroll"/g) || []).length === (PAYROLL_TAB.test(html) ? 1 : 0) : !/swSectionPayroll|id="swp/.test(html),
-    label + ': the Payroll section button exists only for the CEO, unpressed; no Payroll section control is ever rendered here');
-  const denyHtml = ceoNow ? html.replace(PAYROLL_TAB, '</div></nav>') : html;
+  const TAB = ceoNow ? PAYROLL_TAB : MY_PAYROLL_TAB;
+  check((html.match(/id="swSectionPayroll"/g) || []).length === (TAB.test(html) ? 1 : 0) && !/id="swp/.test(html),
+    label + ': the Payroll section button (CEO "Payroll", Employee "My payroll") exists unpressed only; no Payroll section control is ever rendered here');
+  const denyHtml = html.replace(TAB, '</div></nav>');
   check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Payslip|Finance|ledger|journal|payment|\btax\b|Smart Import|Backup|Restore|Start fresh|Commit|Post to/i.test(denyHtml) && !/id="swp/.test(html),
     label + ': the DOM carries no "Acting as", navigation, Payroll / Finance entry or vocabulary (beyond the CEO\'s exact Payroll section button), commit / post control or local data tool');
   const w = rt.ot();

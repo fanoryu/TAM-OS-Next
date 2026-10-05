@@ -116,6 +116,19 @@
  *   /__stub/bump-payroll  bumps every live plan's version WITHOUT a scenario switch, so a plan
  *                         already shown is stale and its next action answers 409
  * Nothing here pays, posts or touches Finance.
+ *
+ * AFI-4c2 (a test-only model of BF-4c2): the two reads serve an Employee their OWN COMMITTED plans
+ * only (anything else 404, the month list filtered); GET /api/payroll-plan/drift?id= (CEO; 409 for
+ * a Committed or Cancelled plan) answers { id, current, reasons }; POST /api/payroll-plans/commit
+ * takes exactly { id, expectedVersion, expectedTotal, idempotencyKey } — the key 32 lowercase hex,
+ * the total "N.00" — and commits a Ready plan at the expected version with exactly that total and
+ * no drift (409 otherwise), storing the key on the plan; the same key and request again answers the
+ * same Committed plan (a replay: no change), the same key with any other request or on another plan
+ * is 409. Fixtures add a Ready plan, the Employee's (EMP-001) own Committed plan and own Ready plan.
+ *   /__stub/drift-payroll      marks every Ready plan as drifted (salary_changed, overtime_changed),
+ *                              so its drift read explains it and its commit answers 409
+ *   /__stub/fail-next-commit   the next commit is APPLIED and then answered 503: an unknown
+ *                              outcome the page must reconcile by reading the plan again
  */
 'use strict';
 const http = require('http');
@@ -229,8 +242,16 @@ function stubPayroll(){
   const p = (n, emp, code, name, status, version) => ({ id: ('c' + n).repeat(16).slice(0, 32), employeeId: emp, monthKey: m, status: status, employeeCode: code,
     employeeName: name, department: 'Operations', baseSalary: '6000000.00', overtimeAmount: '0.00', overtimeHours: '0.00', overtimeCount: 0,
     totalAmount: '6000000.00', version: version, links: [] });
-  return [p(1, 'emp_stub_6', 'EMP-006', 'Fabricated Disabled Person', 'Committed', 5), p(2, 'emp_stub_5', 'EMP-005', 'Fabricated Pending Person', 'Cancelled', 2)];
+  const out = [p(1, 'emp_stub_6', 'EMP-006', 'Fabricated Disabled Person', 'Committed', 5), p(2, 'emp_stub_5', 'EMP-005', 'Fabricated Pending Person', 'Cancelled', 2),
+    // AFI-4c2: a Ready plan to commit, and the Employee's (emp_stub_1) own Committed and own Ready plans.
+    Object.assign(p(3, 'emp_stub_2', 'EMP-002', 'Fabricated Beta', 'Ready', 3), { baseSalary: '6000000.50', totalAmount: '6000001.00' }),
+    Object.assign(p(4, 'emp_stub_1', 'EMP-001', 'Fabricated Alpha', 'Committed', 4), { monthKey: stubMonth(-1), overtimeAmount: '54688.00', overtimeHours: '2.50', overtimeCount: 1, totalAmount: '6054688.00' }),
+    p(5, 'emp_stub_1', 'EMP-001', 'Fabricated Alpha', 'Ready', 3)];
+  out.forEach((x) => { x.commitKey = x.status === 'Committed' ? crypto.randomBytes(16).toString('hex') : null; x.drift = []; });
+  return out;
 }
+const PR_DRIFT_REASONS = ['employee_archived', 'employee_not_active', 'salary_missing', 'salary_changed', 'overtime_changed'];
+let failNextCommit = false;    // AFI-4c2: /__stub/fail-next-commit
 // The stub's calculation of one plan (test-only mirror of PayrollCalculation): sen sums in BigInt,
 // one half-up rounding to the whole Rupiah.
 function prCalc(e, month){
@@ -262,6 +283,7 @@ function reset(name){
   employees = STUB_EMPLOYEES.map((e) => ({ ...e }));
   overtime = stubOvertime();
   payroll = stubPayroll();
+  failNextCommit = false;
   session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
@@ -362,22 +384,34 @@ async function handleApi(req, res, p, query){
     if(r.status !== 'Reviewed' || !otSalary(r)) return api(res, 409, 'conflict');
     return api(res, 200, { overtimeValuation: otValuation(r, 'preview', otSalary(r)) });
   }
-  // AFI-4c1 Payroll reads: CEO only.
+  // AFI-4c1 Payroll reads (CEO); AFI-4c2: an Employee reads their own Committed plans only.
   if((p === '/api/payroll-plans' || p === '/api/payroll-plan') && req.method === 'GET'){
     if(!session) return api(res, 401, 'unauthenticated');
     if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
     if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
-    if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+    const mine = session.user.role === 'ceo' ? () => true : (x) => x.employeeId === session.user.employeeId && x.status === 'Committed';
     if(p === '/api/payroll-plans'){
       if(!otMonth(query.get('month') || '')) return api(res, 400, 'invalid_query');
-      return api(res, 200, { payrollPlans: payroll.filter((x) => x.monthKey === query.get('month')).sort(prOrder).map((x) => pick(x, PR_VIEW)) });
+      return api(res, 200, { payrollPlans: payroll.filter((x) => x.monthKey === query.get('month') && mine(x)).sort(prOrder).map((x) => pick(x, PR_VIEW)) });
     }
-    const x = payroll.find((y) => y.id === query.get('id'));
+    const x = payroll.find((y) => y.id === query.get('id') && mine(y));
     if(!x) return api(res, 404, 'not_found');
     return api(res, 200, { payrollPlan: pick(x, PR_VIEW), payrollPlanOvertime: x.links.map((id) => { const r = overtime.find((o) => o.id === id); return { id: r.id, hours: r.hours, amount: otAmount(r.frozenSalary, r.hours) }; }) });
   }
+  // AFI-4c2: the CEO drift read.
+  if(p === '/api/payroll-plan/drift' && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+    const id = query.get('id') || '';
+    if(!/^[0-9a-f]{32}$/.test(id)) return api(res, 400, 'validation_failed', null, ['id']);
+    const x = payroll.find((y) => y.id === id);
+    if(!x) return api(res, 404, 'not_found');
+    if(x.status === 'Committed' || x.status === 'Cancelled') return api(res, 409, 'conflict');
+    const reasons = PR_DRIFT_REASONS.filter((r) => (x.drift || []).indexOf(r) !== -1);
+    return api(res, 200, { payrollPlanDrift: { id: x.id, current: reasons.length === 0, reasons: reasons } });
+  }
   const prWrite = { '/api/payroll-plans/generate': 'generate', '/api/payroll-plans/review': 'review', '/api/payroll-plans/approve': 'approve',
-    '/api/payroll-plans/return': 'return', '/api/payroll-plans/cancel': 'cancel' }[p];
+    '/api/payroll-plans/return': 'return', '/api/payroll-plans/cancel': 'cancel', '/api/payroll-plans/commit': 'commit' }[p];
   if(prWrite && req.method === 'POST') return handlePayrollWrite(req, res, prWrite);
   const otWrite = { '/api/overtime-records/create': 'create', '/api/overtime-records/update': 'update', '/api/overtime-records/delete': 'delete',
     '/api/overtime-records/submit': 'submit', '/api/overtime-records/review': 'review', '/api/overtime-records/reject': 'reject',
@@ -582,7 +616,7 @@ async function handlePayrollWrite(req, res, kind){
   if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
   if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
   if(!b) return api(res, 400, 'validation_failed');
-  const allowed = kind === 'generate' ? ['month'] : ['id', 'expectedVersion'];
+  const allowed = kind === 'generate' ? ['month'] : kind === 'commit' ? ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey'] : ['id', 'expectedVersion'];
   const unknown = Object.keys(b).filter((k) => allowed.indexOf(k) === -1);
   if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
   if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [kind === 'generate' ? 'month' : 'id']);
@@ -614,9 +648,27 @@ async function handlePayrollWrite(req, res, kind){
   const target = [];
   if(typeof b.id !== 'string' || !/^[0-9a-f]{32}$/.test(b.id)) target.push('id');
   if(!Number.isInteger(b.expectedVersion) || b.expectedVersion < 1 || b.expectedVersion > 4294967295) target.push('expectedVersion');
+  if(kind === 'commit'){
+    if(typeof b.expectedTotal !== 'string' || !/^(0|[1-9][0-9]{0,14})\.00$/.test(b.expectedTotal)) target.push('expectedTotal');
+    if(typeof b.idempotencyKey !== 'string' || !/^[0-9a-f]{32}$/.test(b.idempotencyKey)) target.push('idempotencyKey');
+  }
   if(target.length) return api(res, 400, 'validation_failed', null, target);
   const x = payroll.find((y) => y.id === b.id);
   if(!x) return api(res, 404, 'not_found');
+  if(kind === 'commit'){
+    // AFI-4c2: the BF-4c2 order — the key first (replay or mismatch), then status, version, total, drift.
+    const holder = payroll.find((y) => y.commitKey === b.idempotencyKey);
+    if(holder){
+      if(holder === x && x.version === b.expectedVersion + 1 && x.totalAmount === b.expectedTotal) return done({ payrollPlan: pick(x, PR_VIEW) });
+      return api(res, 409, 'conflict');
+    }
+    if(x.status !== 'Ready' || x.version !== b.expectedVersion || x.totalAmount !== b.expectedTotal || (x.drift || []).length) return api(res, 409, 'conflict');
+    x.status = 'Committed'; x.version++; x.commitKey = b.idempotencyKey;
+    // Applied, then the answer is a 503: an outcome the page cannot know. (Not a dropped connection:
+    // a browser may transparently resend a POST whose kept-alive connection closes.)
+    if(failNextCommit){ failNextCommit = false; return api(res, 503, 'service_unavailable'); }
+    return done({ payrollPlan: pick(x, PR_VIEW) });
+  }
   if(PR_GRAPH[kind][0].indexOf(x.status) === -1 || x.version !== b.expectedVersion) return api(res, 409, 'conflict');
   x.status = PR_GRAPH[kind][1]; x.version++;
   if(kind === 'cancel') x.links = [];
@@ -675,6 +727,18 @@ http.createServer((req, res) => {
     e.monthlyBaseSalary = (BigInt(e.monthlyBaseSalary.replace('.', '')) + 50000000n).toString().replace(/(..)$/, '.$1');
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('EMP-001 salary: ' + e.monthlyBaseSalary);
+  }
+  if(urlPath === '/__stub/drift-payroll' && req.method === 'GET'){
+    // AFI-4c2: every Ready plan no longer matches TAM OS (no scenario switch, the session stays).
+    payroll.forEach((x) => { if(x.status === 'Ready') x.drift = ['salary_changed', 'overtime_changed']; });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('ready plans drifted');
+  }
+  if(urlPath === '/__stub/fail-next-commit' && req.method === 'GET'){
+    // AFI-4c2: the next commit is applied, then its answer is dropped.
+    failNextCommit = true;
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('the next commit answer will be dropped');
   }
   if(urlPath === '/__stub/bump-payroll' && req.method === 'GET'){
     // AFI-4c1: another change to the live plans (no scenario switch, the session stays).
