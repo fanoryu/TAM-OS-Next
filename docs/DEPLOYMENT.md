@@ -142,6 +142,12 @@ not deployed.
 the Employee's self-read, so it needs BF-4c2 deployed first (or with it). It changes no backend contract and adds no
 deploy-together constraint of its own. It is not deployed.
 
+**Deployment note — Supplemental Payroll (BF-4d).** BF-4d adds the nine Supplemental Payroll routes and migrations
+`0029`–`0031` (two new tables and the audit vocabulary); it changes no existing table's rows, no existing route and no
+existing DTO — the base payroll plan keeps exactly its thirteen keys — so it is safe to deploy before any Supplemental
+frontend and behind the AFI-4c2 frontend, with no deploy-together constraint of its own. Its migrations must run before its
+routes are reachable. AFI-4d, the Supplemental screens, will need it deployed first (or with it). It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

@@ -5979,10 +5979,11 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   // BF-4c2 authorized revision: the head moved to 0028 (BF-4c2 commit). Was: 0026 after BF-4c1 (0023
-  // after BF-4b2, 0021 after BF-4b1 before that).
-  check(migrations[migrations.length - 1].startsWith('0028_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // after BF-4b2, 0021 after BF-4b1 before that). BF-4d authorized revision: the head moved to 0031
+  // (BF-4d Supplemental Payroll). Was: 0028.
+  check(migrations[migrations.length - 1].startsWith('0031_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'BF-4a3: no migration of its own (head 0028 after BF-4c2), ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'BF-4a3: no migration of its own (head 0031 after BF-4d), ACTIONS stay 21, AUTH_MODE stays LOCAL');
 }
 
 // ===== AFI-4a3 — CEO SESSION ACCOUNT ADMINISTRATION =====
@@ -6232,9 +6233,10 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // Invariants held by this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   // BF-4c2 authorized revision: the head moved to 0028 (BF-4c2). Was: 0026 after BF-4c1 (0023 after BF-4b2, 0021 before).
-  check(migrations[migrations.length - 1].startsWith('0028_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4d authorized revision: the head moved to 0031 (BF-4d). Was: 0028.
+  check(migrations[migrations.length - 1].startsWith('0031_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4b1: frontend only — migration head 0028 after BF-4c2, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'AFI-4b1: frontend only — migration head 0031 after BF-4d, ACTIONS stay 21, AUTH_MODE stays LOCAL');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-overtime-runtime.js')), 'AFI-4b1: runtime harness present — tools/verify-session-overtime-runtime.js');
 }
 
@@ -6252,10 +6254,11 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   const m23 = srv('migrations/0023_replace_audit_events_overtime_approve.sql');
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   // BF-4c2 authorized revision: the head is 0028 (BF-4c2). Was: 0026 after BF-4c1 (head === 0023 before).
+  // BF-4d authorized revision: the head is 0031 (BF-4d). Was: 0028.
   check(/^ALTER TABLE overtime_records\b/.test(m22) && /^ALTER TABLE audit_events\b/.test(m23) && migrations.includes('0023_replace_audit_events_overtime_approve.sql')
-    && migrations[migrations.length - 1] === '0028_replace_audit_events_payroll_commit.sql'
+    && migrations[migrations.length - 1] === '0031_replace_audit_events_supplemental_checks.sql'
     && (m22.match(/;/g) || []).length === 1 && (m23.match(/;/g) || []).length === 1,
-    'BF-4b2: migrations 0022 (valuation snapshot) and 0023 (approve audit operation) exist, one statement each; head 0028 after BF-4c2');
+    'BF-4b2: migrations 0022 (valuation snapshot) and 0023 (approve audit operation) exist, one statement each; head 0031 after BF-4d');
   check(/ADD COLUMN valuation_method\b[\s\S]*ADD COLUMN valuation_salary DECIMAL\(15,2\)[\s\S]*ADD COLUMN valuation_standard_hours DECIMAL\(5,2\)[\s\S]*ADD COLUMN approved_amount DECIMAL\(16,2\)[\s\S]*ADD COLUMN approved_at DATETIME\(6\)/.test(m22)
     && /overtime_records_status_v2 CHECK \(status IN \('Draft', 'Submitted', 'Reviewed', 'Approved', 'Rejected'\)\)/.test(m22)
     && /overtime_records_valuation CHECK \(\(status = 'Approved'\) = \(valuation_method IS NOT NULL\)/.test(m22) && /valuation_method IN \('TAM-OT-1'\)/.test(m22)
@@ -6404,10 +6407,11 @@ console.log('== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL ==');
   // Invariants of this slice.
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   // BF-4c2 authorized revision: the head moved to 0028 (BF-4c2). Was: 0026 after BF-4c1 (0023 before).
-  check(migrations[migrations.length - 1].startsWith('0028_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4d authorized revision: the head moved to 0031 (BF-4d). Was: 0028.
+  check(migrations[migrations.length - 1].startsWith('0031_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
     && (code(rd('transport/api-client.js')).match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4,
-    'AFI-4b2: frontend only — migration head 0028 after BF-4c2, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
+    'AFI-4b2: frontend only — migration head 0031 after BF-4d, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
 }
 
 // ===== BF-4c1 — PAYROLL PLAN FOUNDATION (backend only) =====
@@ -6425,9 +6429,10 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   const m25 = srv('migrations/0025_create_payroll_plan_overtime.sql');
   const m26 = srv('migrations/0026_replace_audit_events_payroll_checks.sql');
   // BF-4c2 authorized revision: 0027–0028 follow (head 0028). Was: 0024–0026 the last three, head 0026.
-  check(migrations.slice(-5, -2).join() === '0024_create_payroll_plans.sql,0025_create_payroll_plan_overtime.sql,0026_replace_audit_events_payroll_checks.sql'
+  // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: slice(-5, -2), head 0028.
+  check(migrations.slice(-8, -5).join() === '0024_create_payroll_plans.sql,0025_create_payroll_plan_overtime.sql,0026_replace_audit_events_payroll_checks.sql'
     && [m24, m25, m26].every((m) => (m.match(/;/g) || []).length === 1),
-    'BF-4c1: migrations 0024 (payroll_plans), 0025 (payroll_plan_overtime), 0026 (payroll audit vocabulary) exist, one statement each; then 0027–0028 (BF-4c2)');
+    'BF-4c1: migrations 0024 (payroll_plans), 0025 (payroll_plan_overtime), 0026 (payroll audit vocabulary) exist, one statement each; then 0027–0028 (BF-4c2) and 0029–0031 (BF-4d)');
   check(/payroll_plans_status CHECK \(status IN \('Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled'\)\)/.test(m24)
     && /live_key TINYINT UNSIGNED AS \(CASE WHEN status = 'Cancelled' THEN NULL ELSE 1 END\) STORED/.test(m24)
     && /UNIQUE KEY payroll_plans_live \(company_id, month_key, employee_id, live_key\)/.test(m24)
@@ -6556,9 +6561,10 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-payroll-runtime.js')), 'AFI-4c1: the dedicated runtime harness exists — tools/verify-session-payroll-runtime.js (D-AFI4c1-2 = A)');
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   // BF-4c2 authorized revision: the head moved to 0028 (BF-4c2, backend only). Was: 0026.
-  check(migrations[migrations.length - 1].startsWith('0028_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
+  check(migrations[migrations.length - 1].startsWith('0031_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4c1: frontend only — migration head 0028 after BF-4c2, ACTIONS 21, AUTH_MODE LOCAL');
+    'AFI-4c1: frontend only — migration head 0031 after BF-4d, ACTIONS 21, AUTH_MODE LOCAL');
   const docs = read(path.join(root, 'AI_CONTEXT.md')) + read(path.join(root, 'ARCHITECTURE.md'));
   check(['D-AFI4c1-1 = A', 'D-AFI4c1-2 = A', 'D-AFI4c1-3 = A', 'D-AFI4c1-4 = A'].every((d) => docs.indexOf(d) !== -1) && /AFI-4c1/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
     'AFI-4c1: the four owner decisions are recorded (AI_CONTEXT, ARCHITECTURE) and the deployment note exists (DEPLOYMENT)');
@@ -6577,9 +6583,10 @@ console.log('== BF-4c2 — PAYROLL COMMIT + EMPLOYEE SELF-READ (BACKEND ONLY) ==
   const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
   const m27 = srv('migrations/0027_add_payroll_plans_commit_key.sql');
   const m28 = srv('migrations/0028_replace_audit_events_payroll_commit.sql');
-  check(migrations.slice(-2).join() === '0027_add_payroll_plans_commit_key.sql,0028_replace_audit_events_payroll_commit.sql' && migrations.length === 28
+  // BF-4d authorized revision: 0029–0031 follow (head 0031, 31 files). Was: the last two, 28 files.
+  check(migrations.slice(-5, -3).join() === '0027_add_payroll_plans_commit_key.sql,0028_replace_audit_events_payroll_commit.sql' && migrations.length === 31
     && [m27, m28].every((m) => (m.match(/;/g) || []).length === 1),
-    'BF-4c2: migrations 0027 (commit idempotency key) and 0028 (commit audit operation) exist, one statement each; head 0028');
+    'BF-4c2: migrations 0027 (commit idempotency key) and 0028 (commit audit operation) exist, one statement each; then 0029–0031 (BF-4d)');
   check(/^ALTER TABLE payroll_plans\b/.test(m27) && /ADD COLUMN commit_idempotency_key CHAR\(32\) CHARACTER SET ascii COLLATE ascii_bin NULL/.test(m27)
     && /ADD UNIQUE KEY payroll_plans_commit_key \(company_id, commit_idempotency_key\)/.test(m27)
     && /CHECK \(\(status = 'Committed'\) = \(commit_idempotency_key IS NOT NULL\)\)/.test(m27) && /REGEXP '\^\[0-9a-f\]\{32\}\$'/.test(m27)
@@ -6675,11 +6682,101 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 100 && manifest.actions === 21,
     'AFI-4c2: no new production module — the package keeps 100 files, ACTIONS 21');
-  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0028_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'AFI-4c2: frontend only — migration head 0028, AUTH_MODE LOCAL');
+  // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0031_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'AFI-4c2: frontend only — migration head 0031 after BF-4d, AUTH_MODE LOCAL');
   const docRule = /D-AFI4c2-1 = A/;
   check(docRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && /AFI-4c2/.test(read(path.join(root, 'ARCHITECTURE.md'))) && /AFI-4c2/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
     'AFI-4c2: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE) and the deployment note (DEPLOYMENT)');
+}
+
+// ===== BF-4d — SUPPLEMENTAL PAYROLL (backend only) =====
+// Owner decisions D-SPAY-1..4 = A: a separate CEO-managed document for one employee and month that
+// settles Approved overtime NOT contained in the employee's already-Committed base plan — late
+// overtime only, never a generic component. The canonical Payroll lifecycle vocabulary (the
+// authorized linear graph Draft → Reviewed → Ready → Committed, + Cancelled), the existing
+// record-free supplemental.manage (ACTIONS stay 21), the frozen approved_amount summed in PHP by
+// PayrollCalculation::overtime, an idempotent Commit (a final obligation — never paid, posted or
+// executed), the Employee's read of their own Committed documents. The base Payroll, its thirteen-key
+// DTO and every overtime row are untouched. No frontend, no package change, AUTH_MODE LOCAL.
+console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  const migrations = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  const m29 = srv('migrations/0029_create_supplemental_payrolls.sql');
+  const m30 = srv('migrations/0030_create_supplemental_payroll_overtime.sql');
+  const m31 = srv('migrations/0031_replace_audit_events_supplemental_checks.sql');
+  check(migrations.slice(-3).join() === '0029_create_supplemental_payrolls.sql,0030_create_supplemental_payroll_overtime.sql,0031_replace_audit_events_supplemental_checks.sql'
+    && migrations.length === 31 && [m29, m30, m31].every((m) => (m.match(/;/g) || []).length === 1),
+    'BF-4d: migrations 0029 (supplemental_payrolls), 0030 (supplemental_payroll_overtime), 0031 (Supplemental audit vocabulary) exist, one statement each; head 0031');
+  check(/supplemental_payrolls_status CHECK \(status IN \('Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled'\)\)/.test(m29)
+    && /open_key TINYINT UNSIGNED AS \(CASE WHEN status IN \('Draft', 'Reviewed', 'Ready'\) THEN 1 ELSE NULL END\) STORED/.test(m29)
+    && /UNIQUE KEY supplemental_payrolls_open \(company_id, payroll_plan_id, open_key\)/.test(m29)
+    && /UNIQUE KEY supplemental_payrolls_commit_key \(company_id, commit_idempotency_key\)/.test(m29)
+    && /CHECK \(\(status = 'Committed'\) = \(committed_at IS NOT NULL\)\)/.test(m29) && /CHECK \(\(status = 'Committed'\) = \(commit_idempotency_key IS NOT NULL\)\)/.test(m29)
+    && /overtime_amount DECIMAL\(17,2\) NOT NULL/.test(m29) && /CHECK \(overtime_amount > 0 AND overtime_amount = FLOOR\(overtime_amount\)\)/.test(m29)
+    && /FOREIGN KEY \(company_id, payroll_plan_id\) REFERENCES payroll_plans \(company_id, id\)/.test(m29)
+    && !/tax|pph|bpjs|thr|allowance|deduction|bonus|benefit|loan|reimburs|commission|net_|gross|paid|payment|transaction|valuation|rate|bank|account|executed|posted/i.test(m29 + m30),
+    'BF-4d: 0029 stores the document with the canonical five statuses, at most one open document per base plan (a generated open key), committed_at and the key ⇔ Committed, a positive whole-Rupiah DECIMAL amount; no statutory, component, finance or valuation column');
+  check(/PRIMARY KEY \(id\)/.test(m30) && /FOREIGN KEY \(company_id, id\) REFERENCES overtime_records \(company_id, id\)/.test(m30)
+    && /FOREIGN KEY \(company_id, supplemental_payroll_id\) REFERENCES supplemental_payrolls \(company_id, id\)/.test(m30) && !/CASCADE|SET NULL/i.test(m29 + m30),
+    'BF-4d: 0030 identifies a link by the overtime record it captures — one record captured at most once (double-capture protection in the database); no cascade');
+  check(/WHEN 'supplemental\.manage' THEN operation IS NOT NULL AND operation IN \('create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'\)/.test(m31)
+    && /\(entity = 'supplementalPayroll'\) = \(action = 'supplemental\.manage'\)/.test(m31)
+    && /WHEN 'payroll\.manage' THEN operation IS NOT NULL AND operation IN \('create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'\)/.test(m31)
+    && !/'pay'|'post'|'execute'|'paid'/.test(m31),
+    'BF-4d: 0031 admits the Payroll operations under supplemental.manage on supplementalPayroll, keeps every existing rule, and no pay, post or execute operation');
+  const routes = srv('src/Http/Routes.php');
+  const suppRoutes = (routes.match(/new Route\('[A-Z]+', '\/api\/supplemental-payroll[^']*'[^\n]*/g) || []);
+  check(suppRoutes.length === 9
+    && ['generate', 'review', 'approve', 'return', 'cancel', 'commit'].every((op) => suppRoutes.some((l) => l.startsWith("new Route('POST', '/api/supplemental-payrolls/" + op + "'") && /RouteAuth::Required, Action::SupplementalManage\),$/.test(l)))
+    && ["new Route('GET', '/api/supplemental-payrolls', $supplemental->month(...), ['month'], RouteAuth::Required),", "new Route('GET', '/api/supplemental-payroll', $supplemental->find(...), ['id'], RouteAuth::Required),",
+      "new Route('GET', '/api/supplemental-payrolls/eligibility', $supplemental->eligibility(...), ['month'], RouteAuth::Required),"].every((l) => suppRoutes.includes(l))
+    && (routes.match(/Action::SupplementalManage/g) || []).length === 6 && !/status|pay'|post|execut|payslip/.test(suppRoutes.join('\n')),
+    'BF-4d: exactly nine Supplemental routes — two document reads and the CEO eligibility read (no Action), six writes under supplemental.manage; no status, payment, posting, execution or payslip route');
+  const input = srv('src/Supplemental/SupplementalInput.php');
+  check(/self::onlyKeys\(\$json, \['payrollPlanId'\]\);/.test(input) && /self::onlyKeys\(\$json, \['id', 'expectedVersion'\]\);/.test(input)
+    && /self::onlyKeys\(\$json, \['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey'\]\);/.test(input) && (input.match(/self::onlyKeys\(\$json,/g) || []).length === 3
+    && /PayrollCalculation::isAmount\(\$json\['expectedTotal'\] \?\? null\)/.test(input),
+    'BF-4d: the inputs are exactly { payrollPlanId }, { id, expectedVersion } and { id, expectedVersion, expectedTotal, idempotencyKey } — no browser amount, overtime, employee, company or status; expectedTotal the canonical "N.00" string');
+  const store = srv('src/Data/Supplemental/SupplementalStore.php');
+  const storeCode = store.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  check(store.includes("public const COMMIT_SQL = \"UPDATE supplemental_payrolls SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'\";")
+    && (store.match(/SET status = 'Committed'/g) || []).length === 1,
+    'BF-4d: exactly one statement writes Committed — from Ready at the expected version, setting committed_at and the key');
+  check(['RECORD_SELF_SQL', 'MONTH_SELF_SQL', 'OVERTIME_SELF_SQL'].every((n) => new RegExp('public const ' + n + " = \"SELECT [^\"]*:self_employee_id[^\"]*status = 'Committed'").test(store))
+    && (storeCode.match(/:self_employee_id/g) || []).length === 3,
+    'BF-4d: the Employee reads name :self_employee_id and Committed only — no other self statement (D-SPAY-3 = A)');
+  check(!/^\s*(INSERT|UPDATE|DELETE|REPLACE)[^"']*\b(payroll_plans|payroll_plan_overtime|overtime_records|employees)\b/m.test(storeCode.replace(/'[^']*'|"[^"]*"/g, (m) => '\n' + m.slice(1, -1)))
+    && !/\b(SUM|AVG)\s*\(/.test(storeCode) && !/->\s*(payroll|overtime|employees)\s*\(\s*\)/.test(srv('src/Supplemental/SupplementalService.php')),
+    'BF-4d: Supplemental never writes the base plan, its links, an overtime or an employee row, never calls their stores, and never sums money in SQL');
+  check(/public const FIELDS = \['id', 'payrollPlanId', 'employeeId', 'monthKey', 'status', 'employeeCode', 'employeeName', 'department',\s*'overtimeAmount', 'overtimeHours', 'overtimeCount', 'version'\];/.test(srv('src/Supplemental/SupplementalView.php'))
+    && /public const FIELDS = \['id', 'employeeId', 'monthKey', 'status', 'employeeCode', 'employeeName', 'department',\s*'baseSalary', 'overtimeAmount', 'overtimeHours', 'overtimeCount', 'totalAmount', 'version'\];/.test(srv('src/Payroll/PayrollView.php')),
+    'BF-4d: the document projection is exactly twelve keys; the base plan projection keeps exactly its thirteen');
+  const service = srv('src/Supplemental/SupplementalService.php');
+  const serviceCode = service.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  check((service.match(/PayrollCalculation::overtime\(/g) || []).length === 3 && (service.match(/readCommitted: true/g) || []).length === 2
+    && /public static function overtime\(array \$overtime\): array/.test(srv('src/Payroll/PayrollCalculation.php'))
+    && !/\(float\)|floatval|\bround\(|bc[a-z]+\(|gmp_|TAM-OT-1|OvertimeValuation|\bpostSupplemental|Executed|\bpaid\b/i.test(serviceCode),
+    'BF-4d: the one exact overtime sum (PayrollCalculation::overtime) for generate, eligibility and commit revalidation; READ COMMITTED for generate and commit only; no float, valuation, posting or paid state');
+  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+    && /self::SupplementalManage => Rule::CeoOnly,/.test(srv('src/Policy/Action.php')) && /self::SupplementalManage => null,/.test(srv('src/Policy/Action.php'))
+    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4d: ACTIONS stay 21 — the existing supplemental.manage, CEO-only and record-free; AUTH_MODE stays LOCAL');
+  const jsFiles = [];
+  const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
+  walkJs(path.join(root, 'js'));
+  check(jsFiles.every((f) => !/\/api\/supplemental/.test(read(f))), 'BF-4d: backend only — no frontend module names a Supplemental API route (AFI-4d is not implemented)');
+  const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(manifest.files.length === 100 && manifest.packageDigest === '16e06b7e8cacb75c1efbc5b482149d8b79e4a84ee06c9a40a178757532eed1a0' && manifest.actions === 21,
+    'BF-4d: the production package is unchanged — 100 files at digest 16e06b7e… (the AFI-4c2 package; the LOCAL supplemental engine and the SESSION Payroll modules untouched), ACTIONS 21');
+  check(['Unit/SupplementalDomainTest.php', 'Http/SupplementalRoutingTest.php', 'Db/SupplementalSchemaTest.php', 'Db/SupplementalWorkflowTest.php', 'Db/SupplementalConcurrencyTest.php', 'Support/supplemental-worker.php']
+    .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /C8 race/.test(srv('tests/Db/SupplementalConcurrencyTest.php')),
+    'BF-4d: the domain, routing, schema, workflow and C1–C8 concurrency tests exist');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md'));
+  check(/D-SPAY-1 = A/.test(ctx) && /D-SPAY-4 = A/.test(ctx) && /BF-4d/.test(read(path.join(root, 'ARCHITECTURE.md'))) && /BF-4d/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md')))
+    && /BF-4d/.test(read(path.join(root, 'docs', '05-milestones', 'Milestones.md'))) && !/AFI-4c2[^.]*local candidate/.test(ctx + read(path.join(root, 'ARCHITECTURE.md')) + read(path.join(root, 'docs', '05-milestones', 'Milestones.md'))),
+    'BF-4d: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the deployment note (DEPLOYMENT) and the milestone; AFI-4c2 is no longer described as a local candidate');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
