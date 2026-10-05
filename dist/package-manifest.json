@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "16e06b7e8cacb75c1efbc5b482149d8b79e4a84ee06c9a40a178757532eed1a0",
+  "packageDigest": "7768d72b54f2265b2ac024d6dfb0c95c5044d181f2167199e16e5a14f0cdcb4e",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 2928822,
-    "sha256": "25816578ed91436c890f3c68371d962f99f0c6eb87b4fab943059c567f279754"
+    "bytes": 2992059,
+    "sha256": "bede24ef086b632bc83d40f6c31f13aa2dbd741ec5e0c79079d40e9a4d9b02a5"
   },
   "files": [
     {
@@ -169,8 +169,8 @@
     },
     {
       "path": "js/core/payroll-api.js",
-      "bytes": 19736,
-      "sha256": "e3d4e952baa1483567bfbbdf5798ac7d4522c642c71bf9fe438031fd7fc5e80e"
+      "bytes": 33223,
+      "sha256": "450b8c971a53452c897b2c1b990c3f403a348d0aa360c64da582ac7fcd7bb34e"
     },
     {
       "path": "js/core/session-employee.js",
@@ -189,8 +189,8 @@
     },
     {
       "path": "js/core/session-payroll.js",
-      "bytes": 35201,
-      "sha256": "97260271367ce6379fd91abff2bc9c30a29d0326d100f827bc9ef21d96914bb5"
+      "bytes": 56971,
+      "sha256": "11bbc07d91565352f2ec66de5ee1b056acd60e1966846027d771707f44d78c1f"
     },
     {
       "path": "js/core/stabilization.js",
@@ -484,8 +484,8 @@
     },
     {
       "path": "js/ui/session-payroll-view.js",
-      "bytes": 29766,
-      "sha256": "e3d0353419215aa1d4756fa63e01f51eb3bf6422730d8ed4f1bbbaa15b34204a"
+      "bytes": 57746,
+      "sha256": "b4b14143a144c520805b462c362fa74d79bb55cc0a02ac8cb426ad3fc841281d"
     },
     {
       "path": "js/ui/session-workspace-view.js",

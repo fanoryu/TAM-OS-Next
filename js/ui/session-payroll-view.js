@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2) — js/ui/session-payroll-view.js
+   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2, AFI-4d) — js/ui/session-payroll-view.js
    ------------------------------------------------------------
    The Payroll section of the authenticated SESSION workspace — CEO only — rendered by
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js), its only caller, when the section
@@ -39,6 +39,20 @@
    Commit 409 never claims its cause. An Employee's section is "My payroll": their own Committed
    plans by month and a payslip-like card of the server's fields only — no control, no other
    payroll concept.
+
+   AFI-4d (owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A): SUPPLEMENTAL PAYROLL — a separate payroll
+   obligation for overtime approved after an employee's payroll for the month was committed; the
+   committed payroll itself never changes. The CEO's month page adds a Supplemental payroll card:
+   the eligible committed plans (named from the plan's own snapshot; records, hours and amount as
+   the server sent them) with "Prepare supplemental payroll" (not offered for "0.00"), and the
+   month's Supplemental documents, each opening its own detail in this section — its frozen
+   overtime, and only the actions BF-4d offers: Review / Cancel on a Draft (no Approve: there is no
+   Draft → Ready), Approve / Return to draft / Cancel on a Reviewed one, Commit / Return to draft /
+   Cancel on a Ready one, nothing on a Committed or Cancelled one. A Committed plan's detail lists
+   its Supplemental documents. Commit works exactly like the payroll Commit (one intent, "Retry
+   commit"). An Employee's My payroll lists their own Committed Supplemental documents as separate
+   rows, each opening its own read-only card; the payroll card links to them. A base plan and a
+   Supplemental document are never added together — there is no combined total anywhere.
 
    Classic shared global scope; existing CSS classes only.
    ============================================================ */
@@ -117,6 +131,57 @@ const SESSION_PAYROLL_ACTION_BUTTONS = Object.freeze({
   return: { id: 'swpReturnBtn', label: 'Return to draft', cls: 'btn' },
   cancel: { id: 'swpCancelBtn', label: 'Cancel plan', cls: 'btn btn-danger' },
   commit: { id: 'swpCommitBtn', label: 'Commit payroll', cls: 'btn btn-accent' }
+});
+
+// AFI-4d: Supplemental payroll words. Every message is fixed; the server never names a 409 cause.
+const SESSION_SUPPLEMENTAL_TITLE = 'Supplemental payroll';
+const SESSION_SUPPLEMENTAL_MINE_TITLE = 'Supplemental payroll — overtime approved after payroll was committed';
+const SESSION_SUPPLEMENTAL_MUTATION_ERRORS = Object.freeze({
+  VALIDATION: 'TAM OS could not accept this request.',
+  DENIED: 'You do not have permission to make this change.',
+  NOT_FOUND: 'This supplemental payroll is no longer available. The month was read again.',
+  RATE_LIMITED: 'Too many requests.',
+  SERVER_ERROR: 'The change was not made. Try again in a moment.',
+  CLIENT_FAULT: 'TAM OS could not process this request.',
+  CRYPTO_UNAVAILABLE: 'This browser cannot create a secure commit key. Nothing was sent.'
+});
+const SESSION_SUPPLEMENTAL_CONFLICTS = Object.freeze({
+  suppGenerate: 'TAM OS did not prepare supplemental payroll (a conflict was reported). The month was read again from TAM OS — check it before trying again.',
+  transition: 'This supplemental payroll changed or the action is no longer available. It was read again from TAM OS — check it, then choose again.',
+  suppCommit: 'TAM OS did not commit this supplemental payroll: it changed, its amount no longer matches, or its overtime changed. It was read again — check it before choosing again.'
+});
+const SESSION_SUPPLEMENTAL_NOTICES = Object.freeze({
+  suppGeneratedDraft: 'Supplemental payroll prepared: its Draft holds the approved overtime that is eligible now. The month was read again from TAM OS.',
+  suppGeneratedOpen: 'This plan already has an open supplemental payroll that is Reviewed or Ready, and TAM OS returned it unchanged. Overtime approved since is not added to it: return it to Draft and prepare again to include it, or commit it first.',
+  suppReviewed: 'Supplemental payroll marked as reviewed.',
+  suppApproved: 'Supplemental payroll approved: it is now Ready — approved, not paid.',
+  suppReturned: 'Supplemental payroll returned to Draft.',
+  suppCancelled: 'Supplemental payroll cancelled. Its overtime is released.',
+  suppCommitStale: 'TAM OS could not confirm the commit, and the supplemental payroll read again has changed. Check it before choosing again.'
+});
+const SESSION_SUPPLEMENTAL_MONTH_NOTICES = Object.freeze({
+  suppCommitted: ['Supplemental payroll committed: it is a final payroll obligation for ', ' — not paid.'],
+  suppCommitConfirmed: ['TAM OS could not confirm the commit at first, but the supplemental payroll read again is committed: it is a final payroll obligation for ', ' — not paid.']
+});
+const SESSION_SUPPLEMENTAL_TARGETS = Object.freeze({ suppReview: 'Reviewed', suppApprove: 'Ready', suppReturn: 'Draft', suppCancel: 'Cancelled', suppCommit: 'Committed' });
+const SESSION_SUPPLEMENTAL_PANELS = Object.freeze({
+  suppGenerate: { title: 'Prepare supplemental payroll?',
+    text: 'TAM OS creates a Draft of the approved overtime this committed payroll does not contain, or recalculates the open Draft. An open Reviewed or Ready supplemental payroll is returned unchanged. The committed payroll is not changed. Nothing is paid and nothing is posted to Finance.',
+    submit: 'Prepare supplemental payroll', busy: 'Preparing…', danger: false },
+  suppReview: { title: 'Mark this supplemental payroll as reviewed?', text: 'A reviewed supplemental payroll can be approved, returned to Draft or cancelled.', submit: 'Mark reviewed', busy: 'Working…', danger: false },
+  suppApprove: { title: 'Approve this supplemental payroll?', text: 'It becomes Ready — approved, not paid. It can still be returned to Draft or cancelled.', submit: 'Approve', busy: 'Approving…', danger: false },
+  suppReturn: { title: 'Return this supplemental payroll to Draft?', text: 'It keeps its overtime. Preparing supplemental payroll for this plan again recalculates it.', submit: 'Return to draft', busy: 'Working…', danger: false },
+  suppCancel: { title: 'Cancel this supplemental payroll?', text: 'A cancelled supplemental payroll is final and releases its overtime, which can then be prepared again.', submit: 'Cancel supplemental', busy: 'Cancelling…', danger: true },
+  suppCommit: { title: 'Commit this supplemental payroll?',
+    text: 'It can no longer be changed, returned or cancelled. It is not a payment — nothing is paid and nothing is posted to Finance.',
+    submit: 'Commit supplemental', busy: 'Committing…', danger: true }
+});
+const SESSION_SUPPLEMENTAL_ACTION_BUTTONS = Object.freeze({
+  review: { id: 'swpSuppReviewBtn', label: 'Review', cls: 'btn', panel: 'suppReview' },
+  approve: { id: 'swpSuppApproveBtn', label: 'Approve', cls: 'btn btn-accent', panel: 'suppApprove' },
+  return: { id: 'swpSuppReturnBtn', label: 'Return to draft', cls: 'btn', panel: 'suppReturn' },
+  cancel: { id: 'swpSuppCancelBtn', label: 'Cancel supplemental', cls: 'btn btn-danger', panel: 'suppCancel' },
+  commit: { id: 'swpSuppCommitBtn', label: 'Commit supplemental', cls: 'btn btn-accent', panel: 'suppCommit' }
 });
 
 function sessionPayrollValue(v){
@@ -225,18 +290,21 @@ function sessionPayrollExcludedHTML(w, dis){
 function sessionPayrollMineListHTML(w){
   const dis = sessionPayrollBusy(w) ? ' disabled' : '';
   const head = sessionPayrollMonthBarHTML(w, dis) + '<h2 class="section-title">' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '</h2>';
+  return head + sessionPayrollMinePlansHTML(w, dis) + sessionSupplementalMineListHTML(w, dis);   // AFI-4d: separate Supplemental rows (D-AFI4d-2 = A)
+}
+function sessionPayrollMinePlansHTML(w, dis){
   if(w.listStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'list'){
     const retry = w.error.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button></div>';
-    return head + sessionPayrollErrorHTML(w.error) + retry;
+    return sessionPayrollErrorHTML(w.error) + retry;
   }
-  if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return head + '<p class="auth-lead" role="status" aria-busy="true">Loading your payroll…</p>';
-  if(!w.list.length) return head + '<div class="empty">No committed payroll for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '.</div>';
+  if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return '<p class="auth-lead" role="status" aria-busy="true">Loading your payroll…</p>';
+  if(!w.list.length) return '<div class="empty">No committed payroll for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '.</div>';
   const rows = w.list.map(function(p, i){
     return '<tr><td>' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</td><td>' + escapeHtml(sessionPayrollStatusText(p.status)) + '</td>'
       + '<td>' + escapeHtml(p.baseSalary) + '</td><td>' + escapeHtml(p.overtimeAmount) + '</td><td>' + escapeHtml(p.totalAmount) + '</td>'
       + '<td><button class="btn" type="button" id="swpOpen' + i + '"' + dis + '>View</button></td></tr>';
   }).join('');
-  return head + '<div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col">Status</th>'
+  return '<div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col">Status</th>'
     + '<th scope="col">Base salary (Rp)</th><th scope="col">Overtime (Rp)</th><th scope="col">Total (Rp)</th><th scope="col" aria-label="Open payroll"></th></tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>';
 }
@@ -263,6 +331,7 @@ function sessionPayrollMineDetailHTML(w){
   return '<section class="card" id="swpPayslip" aria-labelledby="swpPayslipTitle"><h2 class="section-title" id="swpPayslipTitle">Payroll — ' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</h2>'
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
     + '<h3 class="section-title">Approved overtime counted</h3>' + ot + '</section>'
+    + sessionSupplementalRelatedHTML(w, p, '')
     + back + '</div>';
 }
 
@@ -284,22 +353,27 @@ function sessionPayrollListHTML(w){
   const generating = w.panel && w.panel.kind === 'generate';
   const head = (generating ? sessionPayrollPanelHTML(w)
       : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpGenerateBtn"' + dis + '>Prepare payroll for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '</button></div>'
-        + sessionPayrollMutationHTML(w))
+        + (sessionSupplementalOwnsMessage(w) ? '' : sessionPayrollMutationHTML(w)))
     + (generating ? '' : sessionPayrollMonthBarHTML(w, dis))
     + sessionPayrollExcludedHTML(w, dis)
     + '<h2 class="section-title">' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '</h2>';
+  return head + sessionPayrollPlansHTML(w, dis) + sessionSupplementalAreaHTML(w, dis);   // AFI-4d: the Supplemental card follows the plans
+}
+
+// The month's plans (the CEO list), or its loading / error / empty state.
+function sessionPayrollPlansHTML(w, dis){
   if(w.listStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'list'){
     const retry = w.error.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button></div>';
-    return head + sessionPayrollErrorHTML(w.error) + retry;
+    return sessionPayrollErrorHTML(w.error) + retry;
   }
-  if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return head + '<p class="auth-lead" role="status" aria-busy="true">Loading payroll plans…</p>';
-  if(!w.list.length) return head + '<div class="empty">No payroll plans for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '. Prepare payroll for this month to create them.</div>';
+  if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return '<p class="auth-lead" role="status" aria-busy="true">Loading payroll plans…</p>';
+  if(!w.list.length) return '<div class="empty">No payroll plans for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '. Prepare payroll for this month to create them.</div>';
   const rows = w.list.map(function(p, i){
     return '<tr><td>' + escapeHtml(p.employeeCode) + '</td><td>' + escapeHtml(p.employeeName) + '</td><td>' + escapeHtml(sessionPayrollStatusText(p.status)) + '</td>'
       + '<td>' + escapeHtml(p.baseSalary) + '</td><td>' + escapeHtml(p.overtimeAmount) + '</td><td>' + escapeHtml(p.totalAmount) + '</td>'
       + '<td><button class="btn" type="button" id="swpOpen' + i + '"' + dis + '>View</button></td></tr>';
   }).join('');
-  return head + '<div class="table-wrap"><table><thead><tr><th scope="col">Code</th><th scope="col">Employee</th><th scope="col">Status</th>'
+  return '<div class="table-wrap"><table><thead><tr><th scope="col">Code</th><th scope="col">Employee</th><th scope="col">Status</th>'
     + '<th scope="col">Base salary (Rp)</th><th scope="col">Overtime (Rp)</th><th scope="col">Total (Rp)</th><th scope="col" aria-label="Open plan"></th></tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>';
 }
@@ -338,6 +412,7 @@ function sessionPayrollDetailHTML(principal, w){
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
     + '<section class="card" aria-labelledby="swpOvertimeTitle"><h2 class="section-title" id="swpOvertimeTitle">Approved overtime counted</h2>' + ot + '</section>'
     + sessionPayrollDriftHTML(w)
+    + (p.status === 'Committed' ? sessionSupplementalRelatedHTML(w, p, dis) : '')
     + back + reload + actions + '</div>'
     + (w.panel && w.panel.id === p.id ? sessionPayrollPanelHTML(w) : '');
 }
@@ -345,11 +420,232 @@ function sessionPayrollDetailHTML(principal, w){
 // The section title (the workspace heading) and body. AFI-4c2: an Employee's is My payroll.
 function renderSessionPayrollTitle(w, principal){
   if(sessionPayrollIsEmployee(principal)) return 'My payroll';
+  if(w.suppDetailId) return SESSION_SUPPLEMENTAL_TITLE;          // AFI-4d
   return w.detailId ? 'Payroll plan' : 'Payroll';
 }
 function renderSessionPayrollHTML(principal, w){
-  if(sessionPayrollIsEmployee(principal)) return w.detailId ? sessionPayrollMineDetailHTML(w) : sessionPayrollMineListHTML(w);
+  if(sessionPayrollIsEmployee(principal)) return w.suppDetailId ? sessionSupplementalMineDetailHTML(w) : w.detailId ? sessionPayrollMineDetailHTML(w) : sessionPayrollMineListHTML(w);
+  if(w.suppDetailId) return sessionSupplementalDetailHTML(principal, w);      // AFI-4d
   return w.detailId ? sessionPayrollDetailHTML(principal, w) : sessionPayrollListHTML(w);
+}
+
+/* ---------- AFI-4d: Supplemental payroll ---------- */
+
+// The month's Supplemental documents of one base plan (for the plan's own card).
+function sessionSupplementalRelated(w, plan){
+  if(!plan || w.suppListStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppList || w.suppListMonth !== plan.monthKey) return [];
+  return w.suppList.filter(function(d){ return d.payrollPlanId === plan.id; });
+}
+// A base plan's own Supplemental documents, each opened by its position (no id in the page).
+function sessionSupplementalRelatedHTML(w, plan, dis){
+  if(w.suppListStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppList || w.suppListMonth !== plan.monthKey) return '';
+  const related = sessionSupplementalRelated(w, plan);
+  const body = related.length
+    ? '<div class="table-wrap"><table><thead><tr><th scope="col">Supplemental payroll</th><th scope="col">Status</th><th scope="col">Overtime hours</th><th scope="col">Amount (Rp)</th><th scope="col" aria-label="Open supplemental payroll"></th></tr></thead><tbody>'
+      + related.map(function(d, i){
+        return '<tr><td>' + (i + 1) + ' of ' + related.length + '</td><td>' + escapeHtml(sessionPayrollStatusText(d.status)) + '</td><td>' + escapeHtml(d.overtimeHours) + '</td>'
+          + '<td>' + escapeHtml(d.overtimeAmount) + '</td><td><button class="btn" type="button" id="swpSuppLink' + i + '"' + dis + '>View</button></td></tr>';
+      }).join('') + '</tbody></table></div>'
+    : '<p class="hint">No supplemental payroll for this payroll.</p>';
+  return '<section class="card" id="swpSuppRelated" aria-labelledby="swpSuppRelatedTitle"><h2 class="section-title" id="swpSuppRelatedTitle">' + escapeHtml(SESSION_SUPPLEMENTAL_TITLE) + ' for this payroll</h2>'
+    + '<p class="hint">Each supplemental payroll is a separate obligation for overtime approved after this payroll was committed.</p>' + body + '</section>';
+}
+
+// The Supplemental confirmation and write messages belong to the Supplemental card or detail.
+function sessionSupplementalOwnsMessage(w){
+  return SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(w.mutation.kind) !== -1
+    || (w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && !!w.notice && /^supp/.test(w.notice));
+}
+// An unconfirmed Supplemental write, reported by what the read that followed it shows.
+function sessionSupplementalAmbiguousText(w){
+  const m = w.mutation;
+  const d = w.suppDetailStatus === SESSION_PAYROLL_STATUS.READY && w.suppDetail ? w.suppDetail.doc : null;
+  if(m.kind === 'suppCommit' && d && sessionSupplementalIntentState(w.suppIntent, d) === 'unresolved'){
+    return 'TAM OS could not confirm the commit. The supplemental payroll read again is still Ready with the same amount. Retry commit sends the same commit again — it can never commit it twice.';
+  }
+  if(m.kind === 'suppCommit' && w.suppDetailStatus === SESSION_PAYROLL_STATUS.ERROR) return 'TAM OS could not confirm the commit, and the supplemental payroll could not be read again. Nothing is sent again — use Retry to read it.';
+  if(m.kind === 'suppGenerate') return 'TAM OS could not confirm whether supplemental payroll was prepared. The month was read again from TAM OS — check it before preparing again.';
+  if(w.suppDetailStatus === SESSION_PAYROLL_STATUS.LOADING || w.suppDetailStatus === SESSION_PAYROLL_STATUS.IDLE) return 'TAM OS could not confirm the change. The supplemental payroll is being read again…';
+  if(d && d.status === SESSION_SUPPLEMENTAL_TARGETS[m.kind]) return 'TAM OS could not confirm the change, but the supplemental payroll read again is now ' + d.status + '.';
+  if(d) return 'TAM OS could not confirm the change. The supplemental payroll read again is ' + d.status + ', not ' + SESSION_SUPPLEMENTAL_TARGETS[m.kind] + ' — check it before trying again.';
+  return 'TAM OS could not confirm the change, and the supplemental payroll could not be read again. Use Retry to read it.';
+}
+function sessionSupplementalMutationHTML(w){
+  if(!sessionSupplementalOwnsMessage(w)) return '';
+  const m = w.mutation;
+  let text = null, warn = true;
+  if(m.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) text = sessionSupplementalAmbiguousText(w);
+  else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.ERROR && m.error){
+    const k = m.error.kind;
+    if(k === 'CONFLICT') text = SESSION_SUPPLEMENTAL_CONFLICTS[m.kind] || SESSION_SUPPLEMENTAL_CONFLICTS.transition;
+    else text = SESSION_SUPPLEMENTAL_MUTATION_ERRORS[k] || SESSION_SUPPLEMENTAL_MUTATION_ERRORS.CLIENT_FAULT;
+    if(k === 'RATE_LIMITED' && typeof authWaitText === 'function') text += authWaitText(m.error.retryAfter);
+  } else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && w.notice && SESSION_SUPPLEMENTAL_NOTICES[w.notice]){
+    text = SESSION_SUPPLEMENTAL_NOTICES[w.notice]; warn = w.notice === 'suppCommitStale' || w.notice === 'suppGeneratedOpen';
+  } else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && w.notice && SESSION_SUPPLEMENTAL_MONTH_NOTICES[w.notice] && w.suppDetail){
+    const n = SESSION_SUPPLEMENTAL_MONTH_NOTICES[w.notice];
+    text = n[0] + sessionPayrollMonthLabel(w.suppDetail.doc.monthKey) + n[1]; warn = false;
+  }
+  if(!text) return '';
+  if(warn && m.error && m.error.requestId) text += ' Reference: ' + m.error.requestId + '.';
+  return '<p class="auth-message' + (warn ? ' auth-message-warn' : '') + '" id="swpMutationMessage" role="' + (warn ? 'alert' : 'status') + '" tabindex="-1">' + escapeHtml(text) + '</p>';
+}
+
+// The open Supplemental confirmation: exactly the server strings it acts on.
+function sessionSupplementalPanelHTML(w, eligible){
+  const panel = SESSION_SUPPLEMENTAL_PANELS[w.panel.kind];
+  const busy = sessionPayrollBusy(w);
+  const dis = busy ? ' disabled' : '';
+  let what;
+  if(w.panel.kind === 'suppGenerate'){
+    const plan = sessionSupplementalPlanOf(w.listStatus, w.list, eligible.payrollPlanId);
+    what = [plan ? plan.employeeName + ' (' + plan.employeeCode + ')' : 'This committed payroll', ' — ', sessionPayrollMonthLabel(w.month), ': ', String(eligible.eligibleCount),
+      ' approved overtime records, ', eligible.eligibleHours, ' hours (Rp) ', eligible.eligibleAmount, ' eligible now.'].join('');
+  } else {
+    const d = w.suppDetail.doc;
+    if(w.panel.kind === 'suppCommit'){
+      what = ['Committing makes this supplemental payroll a final payroll obligation for ', sessionPayrollMonthLabel(d.monthKey), ': ', d.employeeName, ' (', d.employeeCode, ')',
+        ', overtime ', d.overtimeHours, ' hours in ', String(d.overtimeCount), ' records (Rp) ', d.overtimeAmount, ', version ', String(d.version), '.'].join('');
+    } else {
+      what = [d.employeeName, ' (', d.employeeCode, ') — ', sessionPayrollMonthLabel(d.monthKey), ' — ', sessionPayrollStatusText(d.status), ' — (Rp) ', d.overtimeAmount, '.'].join('');
+    }
+  }
+  return '<section class="card" aria-labelledby="swpPanelTitle"' + (busy ? ' aria-busy="true"' : '') + '>'
+    + '<h2 class="section-title" id="swpPanelTitle" tabindex="-1">' + escapeHtml(panel.title) + '</h2>'
+    + '<p class="auth-lead">' + escapeHtml(what) + ' ' + escapeHtml(panel.text) + '</p>'
+    + sessionSupplementalMutationHTML(w)
+    + '<div class="auth-actions"><button class="btn" type="button" id="swpPanelCancel"' + dis + '>Back</button>'
+    + '<button class="btn ' + (panel.danger ? 'btn-danger' : 'btn-accent') + '" type="button" id="swpPanelConfirm"' + dis + (busy ? ' aria-busy="true"' : '') + '>'
+    + escapeHtml(busy ? panel.busy : panel.submit) + '</button></div></section>';
+}
+
+// The failure of one of the month's Supplemental reads, with one Retry for both.
+function sessionSupplementalReadErrorHTML(error, dis){
+  return sessionPayrollErrorHTML(error) + (error.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpSuppRetryBtn"' + dis + '>Retry supplemental payroll</button></div>');
+}
+
+// The CEO's Supplemental card of the month: what is eligible, then the documents.
+function sessionSupplementalAreaHTML(w, dis){
+  const month = sessionPayrollMonthLabel(w.month);
+  const generating = w.panel && w.panel.kind === 'suppGenerate';
+  let eligible;
+  if(w.eligStatus === SESSION_PAYROLL_STATUS.ERROR && w.eligError) eligible = sessionSupplementalReadErrorHTML(w.eligError, dis);
+  else if(w.eligStatus !== SESSION_PAYROLL_STATUS.READY || !w.elig || w.eligMonth !== w.month) eligible = '<p class="auth-lead" role="status" aria-busy="true">Checking for overtime approved after payroll was committed…</p>';
+  else if(!w.elig.length) eligible = '<div class="empty">No approved overtime of ' + escapeHtml(month) + ' is waiting for supplemental payroll.</div>';
+  else {
+    eligible = '<div class="table-wrap"><table><thead><tr><th scope="col">Code</th><th scope="col">Employee</th><th scope="col">Overtime records</th><th scope="col">Overtime hours</th>'
+      + '<th scope="col">Eligible amount (Rp)</th><th scope="col" aria-label="Prepare supplemental payroll"></th></tr></thead><tbody>'
+      + w.elig.map(function(e, i){
+        const plan = sessionSupplementalPlanOf(w.listStatus, w.list, e.payrollPlanId);
+        const waiting = w.listStatus === SESSION_PAYROLL_STATUS.LOADING ? 'Loading name…' : 'Name not available';
+        const open = (w.suppListStatus === SESSION_PAYROLL_STATUS.READY && w.suppList ? w.suppList : []).filter(function(d){
+          return d.payrollPlanId === e.payrollPlanId && (d.status === 'Reviewed' || d.status === 'Ready');
+        })[0];
+        const action = e.eligibleAmount === '0.00' ? '<span class="hint">Nothing to settle: the amount is 0.00.</span>'
+          : (open ? '<span class="hint">Open supplemental payroll is ' + escapeHtml(open.status) + '. </span>' : '')
+            + '<button class="btn btn-accent" type="button" id="swpSuppPrep' + i + '"' + (dis || (w.panel ? ' disabled' : '')) + '>Prepare supplemental payroll</button>';
+        return '<tr><td>' + escapeHtml(plan ? plan.employeeCode : '—') + '</td><td>' + escapeHtml(plan ? plan.employeeName : waiting) + '</td><td>' + escapeHtml(String(e.eligibleCount)) + '</td>'
+          + '<td>' + escapeHtml(e.eligibleHours) + '</td><td>' + escapeHtml(e.eligibleAmount) + '</td><td>' + action + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  let docs;
+  if(w.suppListStatus === SESSION_PAYROLL_STATUS.ERROR && w.suppListError) docs = w.eligStatus === SESSION_PAYROLL_STATUS.ERROR ? sessionPayrollErrorHTML(w.suppListError) : sessionSupplementalReadErrorHTML(w.suppListError, dis);
+  else if(w.suppListStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppList || w.suppListMonth !== w.month) docs = '<p class="auth-lead" role="status" aria-busy="true">Loading supplemental payroll…</p>';
+  else if(!w.suppList.length) docs = '<div class="empty">No supplemental payroll for ' + escapeHtml(month) + '.</div>';
+  else {
+    docs = '<div class="table-wrap"><table><thead><tr><th scope="col">Code</th><th scope="col">Employee</th><th scope="col">Status</th><th scope="col">Overtime hours</th>'
+      + '<th scope="col">Amount (Rp)</th><th scope="col" aria-label="Open supplemental payroll"></th></tr></thead><tbody>'
+      + w.suppList.map(function(d, i){
+        return '<tr><td>' + escapeHtml(d.employeeCode) + '</td><td>' + escapeHtml(d.employeeName) + '</td><td>' + escapeHtml(sessionPayrollStatusText(d.status)) + '</td>'
+          + '<td>' + escapeHtml(d.overtimeHours) + '</td><td>' + escapeHtml(d.overtimeAmount) + '</td>'
+          + '<td><button class="btn" type="button" id="swpSuppOpen' + i + '"' + dis + '>View</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  const eligibleEntry = generating && w.elig ? w.elig.filter(function(e){ return e.payrollPlanId === w.panel.id; })[0] : null;
+  return '<section class="card" id="swpSupp" aria-labelledby="swpSuppTitle"><h2 class="section-title" id="swpSuppTitle">' + escapeHtml(SESSION_SUPPLEMENTAL_TITLE + ' — ' + month) + '</h2>'
+    + '<p class="hint">Overtime approved after an employee\'s payroll for the month was committed. Each supplemental payroll is a separate obligation; the committed payroll is never changed.</p>'
+    + (eligibleEntry ? sessionSupplementalPanelHTML(w, eligibleEntry) : sessionSupplementalMutationHTML(w))
+    + '<h3 class="section-title">Eligible now</h3>' + eligible
+    + '<h3 class="section-title">' + escapeHtml(SESSION_SUPPLEMENTAL_TITLE + ' of ' + month) + '</h3>' + docs + '</section>';
+}
+
+// The captured overtime of a document — its frozen amounts; a cancelled one holds none.
+function sessionSupplementalLinesHTML(d, rows){
+  if(rows.length) return '<div class="table-wrap"><table><thead><tr><th scope="col">Overtime record</th><th scope="col">Hours</th><th scope="col">Approved amount (Rp)</th></tr></thead><tbody>'
+    + rows.map(function(r){ return '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.hours) + '</td><td>' + escapeHtml(r.amount) + '</td></tr>'; }).join('')
+    + '</tbody></table></div>';
+  return d.status === 'Cancelled' ? '<p class="hint">A cancelled supplemental payroll no longer holds overtime: its overtime was released.</p>'
+    : '<p class="hint">No overtime record is listed for this supplemental payroll.</p>';
+}
+
+// The CEO's Supplemental detail.
+function sessionSupplementalDetailHTML(principal, w){
+  const busy = sessionPayrollBusy(w);
+  const dis = busy ? ' disabled' : '';
+  const back = '<div class="auth-actions"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';
+  if(w.suppDetailStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'suppDetail'){
+    const retry = (w.error.kind === 'DENIED' || w.error.kind === 'NOT_FOUND') ? '' : '<button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button>';
+    return sessionSupplementalMutationHTML(w) + sessionPayrollErrorHTML(w.error) + back + retry + '</div>';
+  }
+  if(w.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppDetail) return sessionSupplementalMutationHTML(w) + '<p class="auth-lead" role="status" aria-busy="true">Loading the supplemental payroll…</p>' + back + '</div>';
+  const d = w.suppDetail.doc;
+  // Only the actions the matrix offers; an open commit intent replaces Commit by Retry commit.
+  const intentState = sessionSupplementalIntentState(w.suppIntent, d);
+  const actions = w.panel ? '' : sessionSupplementalActions(principal, d).filter(function(k){ return !(k === 'commit' && w.suppIntent); }).map(function(k){
+    const b = SESSION_SUPPLEMENTAL_ACTION_BUTTONS[k];
+    return '<button class="' + b.cls + '" type="button" id="' + b.id + '"' + dis + '>' + escapeHtml(b.label) + '</button>';
+  }).join('') + (!w.panel && intentState === 'unresolved' ? '<button class="btn btn-accent" type="button" id="swpSuppRetryCommitBtn"' + dis + '>Retry commit</button>' : '');
+  const conflict = w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.ERROR && w.mutation.error && w.mutation.error.kind === 'CONFLICT';
+  const reload = (conflict || w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) && !w.panel ? '<button class="btn" type="button" id="swpSuppReloadBtn"' + dis + '>Reload supplemental payroll</button>' : '';
+  const rows = [
+    ['Employee code', d.employeeCode], ['Employee', d.employeeName], ['Department', d.department], ['Month', sessionPayrollMonthLabel(d.monthKey)],
+    ['Status', sessionPayrollStatusText(d.status)], ['Overtime hours', d.overtimeHours], ['Overtime records', String(d.overtimeCount)],
+    ['Amount (Rp)', d.overtimeAmount], ['Version', String(d.version)]
+  ];
+  return '<h2 class="section-title">' + escapeHtml(d.employeeName) + ' — ' + escapeHtml(sessionPayrollMonthLabel(d.monthKey)) + '</h2>'
+    + '<p class="hint">A separate payroll obligation for overtime approved after this employee\'s payroll for the month was committed. The committed payroll is not changed.</p>'
+    + (w.panel ? '' : sessionSupplementalMutationHTML(w))
+    + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    + '<section class="card" aria-labelledby="swpSuppOvertimeTitle"><h2 class="section-title" id="swpSuppOvertimeTitle">Approved overtime settled here</h2>' + sessionSupplementalLinesHTML(d, w.suppDetail.overtime) + '</section>'
+    + back + reload + actions + '</div>'
+    + (w.panel && w.panel.id === d.id ? sessionSupplementalPanelHTML(w, null) : '');
+}
+
+// The Employee's own Committed Supplemental documents of the month — separate rows, never added
+// to the payroll above (D-AFI4d-2 = A).
+function sessionSupplementalMineListHTML(w, dis){
+  const head = '<h2 class="section-title">' + escapeHtml(SESSION_SUPPLEMENTAL_MINE_TITLE) + '</h2>';
+  if(w.suppListStatus === SESSION_PAYROLL_STATUS.ERROR && w.suppListError) return head + sessionSupplementalReadErrorHTML(w.suppListError, dis);
+  if(w.suppListStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppList || w.suppListMonth !== w.month) return head + '<p class="auth-lead" role="status" aria-busy="true">Loading your supplemental payroll…</p>';
+  if(!w.suppList.length) return head + '<div class="empty">No supplemental payroll for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '.</div>';
+  const rows = w.suppList.map(function(d, i){
+    return '<tr><td>' + escapeHtml(sessionPayrollMonthLabel(d.monthKey)) + '</td><td>' + escapeHtml(sessionPayrollStatusText(d.status)) + '</td>'
+      + '<td>' + escapeHtml(d.overtimeHours) + '</td><td>' + escapeHtml(d.overtimeAmount) + '</td>'
+      + '<td><button class="btn" type="button" id="swpSuppOpen' + i + '"' + dis + '>View</button></td></tr>';
+  }).join('');
+  return head + '<div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col">Status</th><th scope="col">Overtime hours</th>'
+    + '<th scope="col">Amount (Rp)</th><th scope="col" aria-label="Open supplemental payroll"></th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>';
+}
+
+// The Employee's read-only card of one own Committed Supplemental document — the server's fields.
+function sessionSupplementalMineDetailHTML(w){
+  const back = '<div class="auth-actions"><button class="btn" type="button" id="swpBackBtn">Back to my payroll</button>';
+  if(w.suppDetailStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'suppDetail'){
+    const retry = (w.error.kind === 'DENIED' || w.error.kind === 'NOT_FOUND') ? '' : '<button class="btn btn-accent" type="button" id="swpRetryBtn">Retry</button>';
+    return sessionPayrollErrorHTML(w.error) + back + retry + '</div>';
+  }
+  if(w.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppDetail) return '<p class="auth-lead" role="status" aria-busy="true">Loading your supplemental payroll…</p>' + back + '</div>';
+  const d = w.suppDetail.doc;
+  const rows = [
+    ['Employee', d.employeeName], ['Code', d.employeeCode], ['Department', d.department], ['Month', sessionPayrollMonthLabel(d.monthKey)],
+    ['Status', sessionPayrollStatusText(d.status)], ['Overtime hours', d.overtimeHours], ['Overtime records', String(d.overtimeCount)], ['Amount (Rp)', d.overtimeAmount]
+  ];
+  return '<section class="card" id="swpSuppCard" aria-labelledby="swpSuppCardTitle"><h2 class="section-title" id="swpSuppCardTitle">' + escapeHtml(SESSION_SUPPLEMENTAL_TITLE + ' — ' + sessionPayrollMonthLabel(d.monthKey)) + '</h2>'
+    + '<p class="hint">A separate payroll obligation for overtime approved after your payroll for this month was committed.</p>'
+    + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    + '<h3 class="section-title">Approved overtime settled here</h3>' + sessionSupplementalLinesHTML(d, w.suppDetail.overtime) + '</section>'
+    + back + '</div>';
 }
 
 function bindSessionPayroll(app){
@@ -369,6 +665,14 @@ function bindSessionPayroll(app){
   click('swpRetryCommitBtn', function(){ SessionPayroll.retryCommit(); });
   const w = SessionPayrollStore.snapshot();
   (w.list || []).forEach(function(row, i){ click('swpOpen' + i, function(){ SessionPayroll.openDetail(row.id); }); });
+  // AFI-4d: Supplemental payroll — rows open by position, as the plans do.
+  click('swpSuppRetryBtn', function(){ SessionPayroll.retrySupplemental(); });
+  click('swpSuppReloadBtn', function(){ SessionPayroll.reloadSupplemental(); });
+  click('swpSuppRetryCommitBtn', function(){ SessionPayroll.retrySupplementalCommit(); });
+  Object.keys(SESSION_SUPPLEMENTAL_ACTION_BUTTONS).forEach(function(k){ const b = SESSION_SUPPLEMENTAL_ACTION_BUTTONS[k]; click(b.id, function(){ SessionPayroll.openPanel(b.panel); }); });
+  (w.elig || []).forEach(function(e, i){ click('swpSuppPrep' + i, function(){ SessionPayroll.openPanel('suppGenerate', e.payrollPlanId); }); });
+  (w.suppList || []).forEach(function(d, i){ click('swpSuppOpen' + i, function(){ SessionPayroll.openSupplemental(d.id); }); });
+  sessionSupplementalRelated(w, w.detail && w.detail.plan).forEach(function(d, i){ click('swpSuppLink' + i, function(){ SessionPayroll.openSupplemental(d.id); }); });
 }
 
 // After a render: the element the section asked for, else null (the workspace decides).
