@@ -223,7 +223,7 @@ return [
         }
         $invariants($w['db']);
     },
-    'C4 race: two reviews of the same version — one wins, the stale one is 409; one version step, one review row (M20)' => static function () use ($world, $committed, $late, $gen, $data, $raceHold, $holdEmployees, $blockedOnSupplementalEmployee, $doc, $ops): void {
+    'C4 race: two transitions of the same version — one wins, the stale one is 409 even where its transition would still exist; one version step, one row (M20)' => static function () use ($world, $committed, $late, $gen, $data, $raceHold, $holdEmployees, $blockedOnSupplementalEmployee, $doc, $ops): void {
         $w = $world();
         $p = $committed($w, 'e_1');
         $late($w);
@@ -234,6 +234,20 @@ return [
         assertSame(['200 ok', '409 conflict'], $out);
         assertSame(['Reviewed', '2'], array_slice(array_values($doc($w['db'], $d['id'])), 0, 2));
         assertSame(['create', 'review'], $ops($w['db'], $d['id']));
+        // review and cancel of one version: cancel is a transition from Draft and from Reviewed, so
+        // only the version guard refuses the loser — whichever runs second.
+        $p2 = $committed($w, 'e_2');
+        $late($w, 'e_2');
+        $e = $data($gen($w, $p2['id']), 'generate')['supplementalPayroll'];
+        $body = ['id' => $e['id'], 'expectedVersion' => $e['version']];
+        $out = $raceHold($w, [['review', $body], ['cancel', $body]], $holdEmployees(['e_2']), $blockedOnSupplementalEmployee, static fn () => null);
+        $after = $doc($w['db'], $e['id']);
+        if ($out === ['200 ok', '409 conflict']) {
+            assertSame(['Reviewed', '2', ['create', 'review']], [$after['status'], $after['version'], $ops($w['db'], $e['id'])], 'review won; the stale cancel changed nothing');
+        } else {
+            assertSame(['409 conflict', '200 ok'], $out, 'exactly one winner (M20)');
+            assertSame(['Cancelled', '2', ['create', 'cancel']], [$after['status'], $after['version'], $ops($w['db'], $e['id'])], 'cancel won; the stale review changed nothing');
+        }
     },
     'C5 race: the same commit twice is one commit and one replay; one key on two documents at once is one commit and one 409 — the key is held once (M23, M24, M25)' => static function () use ($world, $committed, $late, $readyDoc, $commitBody, $raceHold, $holdEmployees, $blockedOnSupplementalEmployee, $blockedOnAnyEmployee, $doc, $ops): void {
         $w = $world();
