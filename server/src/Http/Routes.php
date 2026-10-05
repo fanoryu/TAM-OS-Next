@@ -9,6 +9,7 @@ use TamOs\Controller\HealthController;
 use TamOs\Controller\OvertimeController;
 use TamOs\Controller\PayrollController;
 use TamOs\Controller\ReadyController;
+use TamOs\Controller\SupplementalController;
 use TamOs\Data\Readiness;
 use TamOs\Policy\Action;
 
@@ -43,6 +44,13 @@ use TamOs\Policy\Action;
  * read adds no Action (CEO only, decided by the handler). The two plan reads become role-aware: an
  * Employee reads their own Committed plans. ACTIONS stay 21.
  *
+ * BF-4d: the Supplemental Payroll writes — generate, review, approve, return, cancel and commit —
+ * each declare the existing supplemental.manage, which is record-free and so decided by the kernel
+ * before the handler (an Employee is 403 before any lookup). The two document reads and the CEO
+ * eligibility read add no Action (role and Scope decide them; an Employee reads their own
+ * Committed documents). There is no generic status, payment, posting or execution route. ACTIONS
+ * stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -62,7 +70,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -112,6 +120,16 @@ final class Routes
             // BF-4c2: Commit (an immutable obligation — never a payment) and the CEO drift read.
             new Route('POST', '/api/payroll-plans/commit', $payroll->commit(...), [], RouteAuth::Required, Action::PayrollManage),
             new Route('GET', '/api/payroll-plan/drift', $payroll->drift(...), ['id'], RouteAuth::Required),
+            // BF-4d: Supplemental Payroll — late Approved overtime of a Committed base plan, under supplemental.manage.
+            new Route('GET', '/api/supplemental-payrolls', $supplemental->month(...), ['month'], RouteAuth::Required),
+            new Route('GET', '/api/supplemental-payroll', $supplemental->find(...), ['id'], RouteAuth::Required),
+            new Route('GET', '/api/supplemental-payrolls/eligibility', $supplemental->eligibility(...), ['month'], RouteAuth::Required),
+            new Route('POST', '/api/supplemental-payrolls/generate', $supplemental->generate(...), [], RouteAuth::Required, Action::SupplementalManage),
+            new Route('POST', '/api/supplemental-payrolls/review', $supplemental->review(...), [], RouteAuth::Required, Action::SupplementalManage),
+            new Route('POST', '/api/supplemental-payrolls/approve', $supplemental->approve(...), [], RouteAuth::Required, Action::SupplementalManage),
+            new Route('POST', '/api/supplemental-payrolls/return', $supplemental->returnToDraft(...), [], RouteAuth::Required, Action::SupplementalManage),
+            new Route('POST', '/api/supplemental-payrolls/cancel', $supplemental->cancel(...), [], RouteAuth::Required, Action::SupplementalManage),
+            new Route('POST', '/api/supplemental-payrolls/commit', $supplemental->commit(...), [], RouteAuth::Required, Action::SupplementalManage),
         ]);
     }
 

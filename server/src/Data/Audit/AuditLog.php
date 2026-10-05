@@ -41,6 +41,14 @@ use TamOs\Policy\Scope;
  *
  * BF-4c2 (migration 0028): Commit is payroll.manage with operation 'commit' — one row per plan,
  * written with the commit; an idempotent replay writes none. No new Action (ACTIONS stay 21).
+ *
+ * BF-4d (migration 0031): a Supplemental Payroll row is supplemental.manage against entity
+ * supplementalPayroll and always names its operation — create or recalculate (generate), review,
+ * approve, return, cancel or commit, the Payroll vocabulary. supplemental.manage is record-free, so
+ * the row names the document by its id rather than through an authorized record. It names no field
+ * and carries no value — never an overtime amount or the total; the document row is the evidence.
+ * CEO company scope only. A no-op generate and an idempotent commit replay write none. No new
+ * Action (ACTIONS stay 21).
  */
 final class AuditLog
 {
@@ -54,6 +62,8 @@ final class AuditLog
     public const OVERTIME_OPERATIONS = ['submit' => Action::OvertimeSubmitSelf, 'review' => Action::OvertimeManage, 'reject' => Action::OvertimeManage, 'approve' => Action::OvertimeManage];
     /** BF-4c1 + BF-4c2: the payroll.manage operations appendPayroll() audits (migration 0028's CHECK). */
     public const PAYROLL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'];
+    /** BF-4d: the supplemental.manage operations appendSupplemental() audits (migration 0031's CHECK). */
+    public const SUPPLEMENTAL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
@@ -61,6 +71,7 @@ final class AuditLog
     /** BF-4b1: the first audited Employee-principal writes. Under a self scope the row is written only for the actor's own record. */
     public const APPEND_OVERTIME_SELF_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) SELECT :company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields FROM DUAL WHERE :owner_employee_id = :self_employee_id';
     public const APPEND_PAYROLL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
+    public const APPEND_SUPPLEMENTAL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_ACCOUNT_SQL ='INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
 
     public function __construct(private readonly ScopedDatabase $db)
@@ -181,6 +192,33 @@ final class AuditLog
             'action' => $auth->action->value,
             'entity' => $auth->record->entity,
             'id' => $auth->record->id,
+            'operation' => $operation,
+            'request_id' => $requestId,
+        ]);
+    }
+
+    /**
+     * BF-4d: appends one supplemental.manage row for the Supplemental document $id, naming the
+     * operation and no field. supplemental.manage is record-free, so the Authorization carries no
+     * record: the row is written only under that Action, in company scope, for a server document id.
+     * Must run inside the transaction of the change.
+     */
+    public function appendSupplemental(Authorization $auth, Principal $actor, string $operation, string $id, string $requestId): void
+    {
+        if ($auth->action !== Action::SupplementalManage || $auth->record !== null || $auth->scope->isSelf()
+            || preg_match('/^[0-9a-f]{32}$/', $id) !== 1) {
+            throw new \LogicException('a supplemental audit row is written only under supplemental.manage, for its document, in company scope');
+        }
+        if (!in_array($operation, self::SUPPLEMENTAL_OPERATIONS, true)) {
+            throw new \LogicException('unknown supplemental operation');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $this->db->execute($auth, self::APPEND_SUPPLEMENTAL_SQL, [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => 'supplementalPayroll',
+            'id' => $id,
             'operation' => $operation,
             'request_id' => $requestId,
         ]);
