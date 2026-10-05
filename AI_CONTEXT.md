@@ -260,7 +260,7 @@ profile | My overtime | My payroll): their own Committed plans by month and a re
 fields only — no control, no drift read, no write, no statutory or bank concept. The four existing Payroll and workspace
 modules are extended (no new module, no ApiClient, AuthBoot, backend or migration change); the package keeps 100 files with
 a new digest; the dedicated Payroll harness is extended (CI stays at ten harnesses). `AUTH_MODE` stays LOCAL.
-**BF-4d — Supplemental Payroll** (local candidate on `feature/bf-4d-supplemental-payroll`; not pushed, not merged, not
+**BF-4d — Supplemental Payroll** (merged as source, PR #48, canonical merge `ab5e10c1e02a251e701c05c52574a8c86d838120`; not
 deployed; owner decisions D-SPAY-1 = A, D-SPAY-2 = A, D-SPAY-3 = A, D-SPAY-4 = A, 2026-10-05) is the server's Supplemental
 Payroll, **backend only**. It keeps the meaning LOCAL v2.7.0 gave the term: a **separate** CEO-managed document for one
 employee and one month that settles the **Approved overtime of that month which the employee's already-Committed base plan
@@ -291,6 +291,32 @@ document is its own twelve-key projection; the base plan keeps exactly its thirt
 **0031**; `0031` admits the Payroll operations under `supplemental.manage` on `supplementalPayroll`). No frontend or package
 change (100 files, `16e06b7e…`), no Finance, payment or statutory effect, `AUTH_MODE` stays LOCAL. D-SPAY-4 = A: the CEO
 Supplemental screens and the Employee's My payroll presentation are AFI-4d; Finance posting comes later.
+**AFI-4d — SESSION Supplemental Payroll** (local candidate on `feature/afi-4d-session-supplemental`; not pushed, not
+merged, not deployed; owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A, 2026-10-05) is the SESSION frontend of BF-4d.
+D-AFI4d-1 = A: the CEO's Supplemental payroll lives **on the Payroll month page** (no new section): a Supplemental payroll
+card lists the month's eligibility — each Committed plan named from that plan's own snapshot (same `payrollPlanId`, never
+the Employee list), its record count, hours and amount as sent — with **Prepare supplemental payroll** (`{ payrollPlanId }`;
+not offered for an amount of `"0.00"`, a presentation choice — the server decides), and the month's documents, each opening
+its own detail in the section with its frozen overtime lines; a Committed plan's detail links its documents (several waves,
+each separate). Generate's answer is the plan's open document — a new or recalculated Draft, or an open Reviewed / Ready one
+returned unchanged, which the page says; it never claims a new Draft. The controls are BF-4d's linear graph: Draft —
+Review, Cancel (**no Draft → Ready**); Reviewed — Approve, Return to draft, Cancel; Ready — Commit supplemental, Return to
+draft, Cancel; nothing on Committed or Cancelled. Commit reuses D-AFI4c2-1 exactly: one in-memory intent
+`{ id, version, total, key }` whose total is the document's own `overtimeAmount` string and whose key is the one Web Crypto
+`payrollIdempotencyKey()`; an unknown outcome is re-read and never resent, and "Retry commit" re-sends the same body and key
+only on a deliberate click while the document is still Ready at the same version and amount. Any 409 is generic (its cause
+is never claimed) and re-reads; an unknown transition or generate outcome re-reads and is never resent. D-AFI4d-2 = A: an
+Employee's My payroll lists their own Committed Supplemental documents as **separate rows** under "Supplemental payroll —
+overtime approved after payroll was committed", each opening its own read-only card (employee snapshot, month, status,
+hours, record count, amount, frozen lines); the payroll card links them; a payroll and a Supplemental amount are **never
+added** (no combined total anywhere); an Employee never reads the eligibility and never writes. Committed reads "Committed —
+final, not paid"; the confirmations say it is not a payment and nothing is posted to Finance. Frontend only:
+`core/payroll-api.js` (`SupplementalDecoders`, `SupplementalRequests`, `SupplementalApi` — strict 12 / 3 / 5-key decoding,
+over the same wire as `PayrollApi`), `core/session-payroll.js` (the same `SessionPayrollStore`, generation, `clear()` and one
+write in flight) and `ui/session-payroll-view.js` are extended — no new module, no backend, migration, ApiClient or AuthBoot
+change; the SESSION names never collide with the LOCAL Supplemental engine's; the package keeps 100 files with a new digest;
+the dedicated Payroll harness is extended (CI stays at ten harnesses). AFI-4d needs BF-4d deployed first or with it.
+`AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
