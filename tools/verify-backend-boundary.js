@@ -156,6 +156,19 @@ const PAYROLL_INPUT = 'server/src/Payroll/PayrollInput.php';
 const PAYROLL_ROUTES = ['/api/payroll-plans/generate', '/api/payroll-plans/review', '/api/payroll-plans/approve', '/api/payroll-plans/return', '/api/payroll-plans/cancel', '/api/payroll-plans/commit'];
 const PAYROLL_COMMIT_ROUTE = '/api/payroll-plans/commit';
 const COMMIT_STATEMENT = "UPDATE payroll_plans SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'";
+// BF-4d (owner decisions D-SPAY-1..4 = A): the Supplemental Payroll document and its overtime links
+// have one writer; Supplemental reads Approved overtime and the Committed base plan and never values
+// or writes either (no base Payroll, Overtime or Employee store call, and those tables keep their own
+// single writers); it has no finance, payment, posting, execution or statutory side effect; it sums
+// money only in PHP (no SQL money arithmetic); exactly one statement — SUPPLEMENTAL_COMMIT_STATEMENT —
+// writes 'Committed', committed_at and the commit key; each write route declares the existing,
+// record-free supplemental.manage (ACTIONS stay 21); its inputs take no identity, money or overtime key.
+const SUPPLEMENTAL_STORE = 'server/src/Data/Supplemental/SupplementalStore.php';
+const SUPPLEMENTAL_DIR = 'server/src/Supplemental/';
+const SUPPLEMENTAL_CONTROLLER = 'server/src/Controller/SupplementalController.php';
+const SUPPLEMENTAL_INPUT = 'server/src/Supplemental/SupplementalInput.php';
+const SUPPLEMENTAL_ROUTES = ['/api/supplemental-payrolls/generate', '/api/supplemental-payrolls/review', '/api/supplemental-payrolls/approve', '/api/supplemental-payrolls/return', '/api/supplemental-payrolls/cancel', '/api/supplemental-payrolls/commit'];
+const SUPPLEMENTAL_COMMIT_STATEMENT = "UPDATE supplemental_payrolls SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'";
 const ACTION_COUNT = 21;
 
 // ---------------------------------------------------------------------------------------------
@@ -282,6 +295,12 @@ const STRING_RULES = [
   { id: 'payroll-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?payroll_plans\b/i, msg: 'a payroll plan is never deleted (cancel is a status) and payroll_plans is never truncated' },
   { id: 'payroll-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE },
   { id: 'payroll-link-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is never truncated' },
+  // BF-4d: supplemental_payrolls and supplemental_payroll_overtime have one writer; a document is
+  // never deleted (cancel is a status) and neither table is ever truncated.
+  { id: 'supplemental-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payrolls\b/i, msg: 'supplemental_payrolls is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE },
+  { id: 'supplemental-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?supplemental_payrolls\b/i, msg: 'a Supplemental document is never deleted (cancel is a status) and supplemental_payrolls is never truncated' },
+  { id: 'supplemental-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE },
+  { id: 'supplemental-link-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is never truncated' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -326,7 +345,7 @@ function checkMigrationSql(src, file) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -388,7 +407,19 @@ function checkRouteActions(src) {
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
     if (/\bAction::PayrollManage\b/.test(m[3]) && (!PAYROLL_ROUTES.includes(m[2]) || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a payroll write and must not declare Action::PayrollManage');
     const commitRoute = m[1] === 'POST' && m[2] === PAYROLL_COMMIT_ROUTE;
-    if (/payroll/i.test(m[2]) && !commitRoute && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no payroll status, payment or payslip route (the one commit route is POST ' + PAYROLL_COMMIT_ROUTE + ')');
+    // BF-4d authorized revision: the Supplemental routes are governed below. Was: every /payroll/ path here.
+    if (/payroll/i.test(m[2]) && !/^\/api\/supplemental-payroll/.test(m[2]) && !commitRoute && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no payroll status, payment or payslip route (the one commit route is POST ' + PAYROLL_COMMIT_ROUTE + ')');
+  }
+  // BF-4d: exactly the six Supplemental writes declare supplemental.manage; no Supplemental status,
+  // payment, posting, execution or payslip route.
+  for (const path of SUPPLEMENTAL_ROUTES) {
+    const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
+    if (!line) out.push('Routes.php: Supplemental route POST ' + path + ' is missing');
+    else if (!/\bAction::SupplementalManage\)/.test(line)) out.push('Routes.php: Supplemental route POST ' + path + ' must declare Action::SupplementalManage');
+  }
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    if (/\bAction::SupplementalManage\b/.test(m[3]) && (!SUPPLEMENTAL_ROUTES.includes(m[2]) || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a Supplemental write and must not declare Action::SupplementalManage');
+    if (/^\/api\/supplemental-payroll/.test(m[2]) && /status|paid|pay\b|payslip|post|execut|finance|bank/i.test(m[2])) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no Supplemental status, payment, posting, execution or payslip route');
   }
   return out;
 }
@@ -411,7 +442,7 @@ function checkAuditInTransaction(lex) {
     ranges.push([m.index, i]);
   }
   const out = [];
-  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll)?\s*\(/g;
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll|Supplemental)?\s*\(/g;
   while ((m = append.exec(code))) {
     const at = m.index;
     if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
@@ -519,6 +550,10 @@ function checkPhp(file, src) {
   if (file === PAYROLL_CALCULATION) for (const v of checkIntegerPayroll(lex)) out.push(v);
   if (file.startsWith(PAYROLL_DIR) || file === PAYROLL_STORE || file === PAYROLL_CONTROLLER) for (const v of checkPayrollFirewall(lex)) out.push(v);
   if (file === PAYROLL_INPUT) for (const v of checkPayrollInput(lex)) out.push(v);
+  for (const v of checkSupplementalStatements(file, lex)) out.push(v);
+  if (file.startsWith(SUPPLEMENTAL_DIR) || file === SUPPLEMENTAL_STORE || file === SUPPLEMENTAL_CONTROLLER) for (const v of checkSupplementalFirewall(lex)) out.push(v);
+  if (file.startsWith(SUPPLEMENTAL_DIR)) for (const v of checkIntegerSupplemental(lex)) out.push(v);
+  if (file === SUPPLEMENTAL_INPUT) for (const v of checkSupplementalInput(lex)) out.push(v);
   return out;
 }
 
@@ -606,6 +641,90 @@ function checkPayrollInput(lex) {
   const out = [];
   if (lists.length !== 3 || lists[0] !== 'month' || lists[1] !== 'id,expectedVersion' || lists[2] !== 'id,expectedVersion,expectedTotal,idempotencyKey') out.push('the payroll inputs allow exactly { month }, { id, expectedVersion } and (commit) { id, expectedVersion, expectedTotal, idempotencyKey }');
   if (lex.strings.some((s) => /^(employeeId|companyId|role|salary|baseSalary|amount|totalAmount|total|status|overtimeAmount)$/.test(s))) out.push('a payroll input never names an identity, money or status key');
+  return out;
+}
+
+// BF-4d: every statement that writes a Supplemental document is an open-status compare-and-swap: an
+// UPDATE names the company, the expected version and an open status (status = 'Draft', or status IN
+// ('Draft', 'Reviewed', 'Ready')) and no OR; the INSERT writes a 'Draft'. Exactly one statement,
+// SUPPLEMENTAL_COMMIT_STATEMENT (Ready → Committed at the expected version), writes 'Committed',
+// committed_at or the commit idempotency key. Every Employee (:self_employee_id) read is a plain
+// SELECT of Committed documents only. The only link DELETE names the company and its document (:id)
+// and requires that document to be open, so a Committed document's links are frozen. Overtime is read
+// Approved only and never by a valuation column or a salary; rows are locked only by primary key; SQL
+// never adds or sums money (the exact sum is PayrollCalculation::overtime, in PHP).
+const OPEN_STATUS = /\bstatus = 'Draft'|\bstatus IN \('Draft', 'Reviewed', 'Ready'\)/;
+const SQL_MONEY_ARITHMETIC = /\b(SUM|AVG)\s*\(|\b(approved_amount|overtime_amount|total_amount|base_salary)\s*[-+*\/]|[-+*\/]\s*(\w+\.)?(approved_amount|overtime_amount|total_amount|base_salary)\b/i;
+function checkSupplementalStatements(file, lex) {
+  const out = [];
+  let commits = 0;
+  for (const s of lex.strings) {
+    if (file === SUPPLEMENTAL_STORE && s === SUPPLEMENTAL_COMMIT_STATEMENT) {
+      commits++;
+      continue;
+    }
+    const writesDoc = /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?supplemental_payrolls\b/i.test(s);
+    if (writesDoc && /'Committed'|\bcommitted_at\s*=|\bcommit_idempotency_key\s*=/.test(s)) out.push("only the one Supplemental COMMIT_SQL statement writes 'Committed', committed_at or the commit idempotency key (Ready → Committed at the expected version, in company scope)");
+    if (file === SUPPLEMENTAL_STORE && /:self_employee_id\b/.test(s) && (!/^SELECT\b/.test(s) || !/\b(s\.)?status = 'Committed'/.test(s) || /\bFOR\s+UPDATE\b|\bOR\b/i.test(s))) {
+      out.push("an Employee Supplemental read is a plain SELECT of their own Committed documents only (status = 'Committed', no lock, no OR)");
+    }
+    if (/^\s*UPDATE\s+`?supplemental_payrolls\b/i.test(s)) {
+      const where = s.split(/\bWHERE\b/i)[1] || '';
+      if (!/\bcompany_id = :company_id\b/.test(where) || !/\bversion = :expected_version\b/.test(where) || !OPEN_STATUS.test(where) || /\bOR\b/i.test(where)) {
+        out.push('a Supplemental document UPDATE is an open-status compare-and-swap: its WHERE names company_id = :company_id, version = :expected_version and an open status (and no OR), so a Committed or Cancelled document never changes');
+      }
+    }
+    if (/^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO)\s+`?supplemental_payrolls\b/i.test(s) && !/, 'Draft', /.test(s)) out.push("a Supplemental document is inserted only as a 'Draft'");
+    if (/^\s*DELETE\s+FROM\s+`?supplemental_payroll_overtime\b/i.test(s)) {
+      const where = s.split(/\bWHERE\b/i).slice(1).join(' WHERE ');
+      if (!/\bcompany_id = :company_id\b/.test(where) || !/\bsupplemental_payroll_id = :id\b/.test(where) || !/\bs\.status IN \('Draft', 'Reviewed', 'Ready'\)/.test(where) || /\bOR\b/i.test(where)) {
+        out.push("a Supplemental link DELETE releases only the links of one open document: company_id = :company_id, supplemental_payroll_id = :id and s.status IN ('Draft', 'Reviewed', 'Ready') (and no OR)");
+      }
+    }
+    if (file === SUPPLEMENTAL_STORE && /\bovertime_records\b/.test(s) && (!/status = 'Approved'/.test(s) || /\bvaluation_|\bmonthly_base_salary\b/.test(s))) {
+      out.push('Supplemental reads only Approved overtime and only its frozen approved_amount (never a valuation column or a salary)');
+    }
+    if (file === SUPPLEMENTAL_STORE && /\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s)
+      && (!/^SELECT [^;]* FROM (employees|payroll_plans|supplemental_payrolls) WHERE id = :\w+ AND company_id = :company_id FOR UPDATE$/.test(s) || /\bJOIN\b|\bOR\b|overtime_records/i.test(s))) {
+      out.push('Supplemental locks rows only by primary key (WHERE id = :x AND company_id = :company_id FOR UPDATE on employees, payroll_plans or supplemental_payrolls) — never a range, a join or an overtime record');
+    }
+    if (file === SUPPLEMENTAL_STORE && SQL_MONEY_ARITHMETIC.test(s)) out.push('Supplemental never adds or sums money in SQL (the exact sum is PayrollCalculation::overtime, in PHP)');
+  }
+  if (file === SUPPLEMENTAL_STORE && commits !== 1) out.push('SupplementalStore has exactly one Commit statement (COMMIT_SQL, Ready → Committed at the expected version); found ' + commits);
+  return out;
+}
+
+// BF-4d: the Supplemental domain is integer and string arithmetic only, as the payroll calculation it reuses.
+function checkIntegerSupplemental(lex) {
+  return FLOAT_AUTHORITY.test(lex.code) ? ['the Supplemental code is integer arithmetic only (no float, BCMath, GMP, rounding helper or division operator)'] : [];
+}
+
+// BF-4d: the Supplemental code (domain, store, controller) never values overtime and never calls the
+// base Payroll, Overtime or Employee store (it reads them through its own SELECTs only); it has no
+// finance, payment, posting, execution, bank or statutory vocabulary — no LOCAL postSupplemental port.
+const SUPPLEMENTAL_STORE_CALLS = /->\s*(payroll|overtime|employees)\s*\(\s*\)/;
+const SUPPLEMENTAL_FINANCE = /\bexecuted\b|\bposted\b|postSupplemental|companyAccount|company_account|\bpaid_at\b/i;
+const SUPPLEMENTAL_COMPONENT = /reimburs|commission/i;
+function checkSupplementalFirewall(lex) {
+  const out = [];
+  const code = lex.code.replace(/->\s*atomically\s*\(/g, '');
+  const any = (re) => re.test(code) || lex.strings.some((s) => re.test(s));
+  if (any(PAYROLL_OVERTIME_AUTHORITY)) out.push('Supplemental never values overtime: it consumes the frozen approved_amount (no OvertimeValuation, OvertimeService, OvertimeStore, TAM-OT-1 or valuation identifier)');
+  if (SUPPLEMENTAL_STORE_CALLS.test(code)) out.push('Supplemental never calls the base Payroll, Overtime or Employee store — it reads them through its own statements and never writes them');
+  if (any(PAYROLL_FINANCE_SIDE_EFFECT) || any(SUPPLEMENTAL_FINANCE)) out.push('the Supplemental code has no finance side effect (no payment, ledger, journal, finance, bank, cash, paid, posted or executed identifier or statement)');
+  if (any(PAYROLL_STATUTORY) || any(SUPPLEMENTAL_COMPONENT)) out.push('the Supplemental code has no statutory or component payroll (no tax, PPh, BPJS, THR, allowance, deduction, bonus, benefit, loan, reimbursement or commission identifier)');
+  return out;
+}
+
+// BF-4d: the Supplemental inputs take exactly { payrollPlanId } (generate), { id, expectedVersion }
+// (the transitions) and { id, expectedVersion, expectedTotal, idempotencyKey } (commit) — no
+// employee, company, role, amount, overtime, month or status key.
+function checkSupplementalInput(lex) {
+  const lists = [...lex.code.matchAll(/self::onlyKeys\(\$json, \[[^\]]*\]\)/g)]
+    .map((m) => lex.spans.filter((sp) => sp.start >= m.index && sp.end <= m.index + m[0].length).map((sp) => sp.value).join(','));
+  const out = [];
+  if (lists.length !== 3 || lists[0] !== 'payrollPlanId' || lists[1] !== 'id,expectedVersion' || lists[2] !== 'id,expectedVersion,expectedTotal,idempotencyKey') out.push('the Supplemental inputs allow exactly { payrollPlanId }, { id, expectedVersion } and (commit) { id, expectedVersion, expectedTotal, idempotencyKey }');
+  if (lex.strings.some((s) => /^(employeeId|companyId|role|amount|overtimeAmount|overtimeIds|overtimeHours|total|totalAmount|status|month|monthKey)$/.test(s))) out.push('a Supplemental input never names an identity, money, overtime or status key');
   return out;
 }
 
@@ -1126,6 +1245,15 @@ function selftest() {
   tenant('payroll_plans without its tenant UNIQUE is caught', m24.replace('  UNIQUE KEY payroll_plans_company_id (company_id, id),\n', ''), 'UNIQUE KEY (company_id, id)');
   tenant('payroll_plan_overtime without its company FK is caught', m25.replace('  CONSTRAINT payroll_plan_overtime_company_fk FOREIGN KEY (company_id) REFERENCES companies (id),\n', ''), 'REFERENCES companies (id)');
   tenant('a cascading payroll link FK is caught', m25.replace('REFERENCES payroll_plans (company_id, id)', 'REFERENCES payroll_plans (company_id, id) ON DELETE CASCADE'), 'CASCADE');
+  // BF-4d: the two Supplemental tables are registered company tables with the tenant key.
+  const m29 = fs.readFileSync(path.join(root, 'server/migrations/0029_create_supplemental_payrolls.sql'), 'utf8');
+  const m30 = fs.readFileSync(path.join(root, 'server/migrations/0030_create_supplemental_payroll_overtime.sql'), 'utf8');
+  tenant('the real supplemental_payrolls migration passes', m29, 0);
+  tenant('the real supplemental_payroll_overtime migration passes', m30, 0);
+  tenant('supplemental_payrolls without its tenant UNIQUE is caught', m29.replace('  UNIQUE KEY supplemental_payrolls_company_id (company_id, id),\n', ''), 'UNIQUE KEY (company_id, id)');
+  tenant('supplemental_payroll_overtime without its company FK is caught', m30.replace('  CONSTRAINT supplemental_payroll_overtime_company_fk FOREIGN KEY (company_id) REFERENCES companies (id),\n', ''), 'REFERENCES companies (id)');
+  tenant('a cascading Supplemental base-plan FK is caught', m29.replace('REFERENCES payroll_plans (company_id, id)', 'REFERENCES payroll_plans (company_id, id) ON DELETE CASCADE'), 'CASCADE');
+  tenant('a set-null Supplemental link FK is caught', m30.replace('REFERENCES supplemental_payrolls (company_id, id)', 'REFERENCES supplemental_payrolls (company_id, id) ON DELETE SET NULL'), 'CASCADE');
   tenant('the real employees migration passes', realEmployees, 0);
   tenant('the real binding FK migration passes', realBinding, 0);
   tenant('an auth/system table is exempt', 'CREATE TABLE sessions (\n  token_hash CHAR(64) NOT NULL\n) ENGINE=InnoDB;\n', 0);
@@ -1387,6 +1515,65 @@ function selftest() {
   dirty('a commit without its idempotency key is caught (M13)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal']);"), 'idempotencyKey');
   dirty('a browser salary key on commit is caught', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey', 'baseSalary']);"), 'idempotencyKey');
   dirty('an employeeId key on generate is caught (identity)', PAYROLL_INPUT, realPayrollInput.replace("self::onlyKeys($json, ['month']);", "self::onlyKeys($json, ['employeeId']);"), 'never names an identity');
+  // BF-4d: Supplemental has one writer, open-status compare-and-swaps only, exactly one Commit, frozen
+  // links, Approved overtime only, PK locks, no SQL money arithmetic, no base Payroll / overtime write,
+  // no valuation, finance, posting, execution or statutory code, strict inputs.
+  const realSupp = fs.readFileSync(path.join(root, SUPPLEMENTAL_STORE), 'utf8');
+  const inSupp = (extra) => realSupp.replace('    public const ENTITY', '    ' + extra + '\n    public const ENTITY');
+  const suppSwap = (from, to) => { if (!realSupp.includes(from)) throw new Error('selftest fixture drift: ' + from); return realSupp.replace(from, to); };
+  clean('the real SupplementalStore passes', SUPPLEMENTAL_STORE, realSupp);
+  dirty('a Supplemental document write outside SupplementalStore is caught', PAYROLL_STORE, inPayroll("public const S_SQL = \"UPDATE supplemental_payrolls SET status = 'Draft' WHERE company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), 'written only by ' + SUPPLEMENTAL_STORE);
+  dirty('a Supplemental link write outside SupplementalStore is caught', PAYROLL_STORE, inPayroll("public const S_SQL = 'INSERT INTO supplemental_payroll_overtime (id, company_id) VALUES (:id, :company_id)';"), 'supplemental_payroll_overtime is written only by');
+  dirty('a base plan write from SupplementalStore is caught (M4)', SUPPLEMENTAL_STORE, inSupp("public const P_SQL = \"UPDATE payroll_plans SET total_amount = :t, version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), 'written only by ' + PAYROLL_STORE);
+  dirty('a base plan link write from SupplementalStore is caught (M5)', SUPPLEMENTAL_STORE, inSupp("public const P_SQL = 'INSERT INTO payroll_plan_overtime (id, company_id, payroll_plan_id, created_at) VALUES (:overtime_id, :company_id, :id, UTC_TIMESTAMP(6))';"), 'payroll_plan_overtime is written only by');
+  dirty('an overtime write from SupplementalStore is caught (M6)', SUPPLEMENTAL_STORE, inSupp("public const O_SQL = \"UPDATE overtime_records SET approved_amount = :a WHERE id = :id AND company_id = :company_id\";"), 'overtime_records is written only by');
+  dirty('a Supplemental document DELETE is caught', SUPPLEMENTAL_STORE, inSupp("public const D_SQL = \"DELETE FROM supplemental_payrolls WHERE id = :id AND company_id = :company_id AND status = 'Draft'\";"), 'never deleted');
+  dirty('a Supplemental link TRUNCATE is caught', SUPPLEMENTAL_STORE, inSupp("public const T_SQL = 'TRUNCATE TABLE supplemental_payroll_overtime';"), 'never truncated');
+  dirty('a second write of Committed is caught (M18)', SUPPLEMENTAL_STORE, inSupp("public const C_SQL = \"UPDATE supplemental_payrolls SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), "writes 'Committed'");
+  dirty('a commit from Draft is caught (M17)', SUPPLEMENTAL_STORE, suppSwap("AND version = :expected_version AND status = 'Ready'\";", "AND version = :expected_version AND status = 'Draft'\";"), "writes 'Committed'");
+  dirty('a commit without its version predicate is caught', SUPPLEMENTAL_STORE, suppSwap("WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'\";", "WHERE id = :id AND company_id = :company_id AND status = 'Ready'\";"), "writes 'Committed'");
+  dirty('a second write of the commit key is caught', SUPPLEMENTAL_STORE, inSupp("public const K_SQL = \"UPDATE supplemental_payrolls SET commit_idempotency_key = :k, version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), 'commit idempotency key');
+  dirty('an Employee read of a non-Committed document is caught (M29)', SUPPLEMENTAL_STORE, suppSwap("AND employee_id = :self_employee_id AND status = 'Committed' ORDER BY", "AND employee_id = :self_employee_id ORDER BY"), 'own Committed documents only');
+  dirty('an Employee read widened with OR is caught (M28)', SUPPLEMENTAL_STORE, suppSwap("WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id AND status = 'Committed'\";", "WHERE id = :id AND company_id = :company_id AND (employee_id = :self_employee_id OR status = 'Committed')\";"), 'own Committed documents only');
+  dirty('a transition without its open-status predicate is caught (M18, M19)', SUPPLEMENTAL_STORE, suppSwap(" AND status = :from_status AND status IN ('Draft', 'Reviewed', 'Ready')\";", " AND status = :from_status\";"), 'open-status compare-and-swap');
+  dirty('a transition without its version predicate is caught (M20)', SUPPLEMENTAL_STORE, suppSwap("WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status", "WHERE id = :id AND company_id = :company_id AND status = :from_status"), 'open-status compare-and-swap');
+  dirty('a recalculation of a frozen document is caught (M13, M14)', SUPPLEMENTAL_STORE, suppSwap("AND version = :expected_version AND status = 'Draft'\";\n    public const TRANSITION_SQL", "AND version = :expected_version AND status IN ('Draft', 'Reviewed', 'Ready', 'Committed')\";\n    public const TRANSITION_SQL"), 'open-status compare-and-swap');
+  dirty('a Supplemental insert of a non-Draft is caught', SUPPLEMENTAL_STORE, suppSwap(":month_key, 'Draft', :employee_code_snapshot", ":month_key, 'Ready', :employee_code_snapshot"), "inserted only as a 'Draft'");
+  dirty('a link release of a Committed document is caught', SUPPLEMENTAL_STORE, suppSwap("AND s.status IN ('Draft', 'Reviewed', 'Ready'))\";", "AND s.status IN ('Draft', 'Reviewed', 'Ready', 'Committed'))\";"), 'releases only the links of one open document');
+  dirty('a link release of every document is caught', SUPPLEMENTAL_STORE, suppSwap("WHERE company_id = :company_id AND supplemental_payroll_id = :id AND EXISTS", "WHERE company_id = :company_id AND EXISTS"), 'releases only the links of one open document');
+  dirty('a Supplemental read of non-Approved overtime is caught', SUPPLEMENTAL_STORE, suppSwap("AND employee_id = :employee_id AND month_key = :month_key AND status = 'Approved' ORDER BY id LIMIT 2001\";", "AND employee_id = :employee_id AND month_key = :month_key AND status IN ('Approved', 'Reviewed') ORDER BY id LIMIT 2001\";"), 'reads only Approved overtime');
+  dirty('a Supplemental read of a valuation column is caught (M7)', SUPPLEMENTAL_STORE, suppSwap('employee_id AS owner_employee_id, hours, approved_amount FROM overtime_records WHERE company_id = :company_id AND employee_id', 'employee_id AS owner_employee_id, hours, valuation_salary, approved_amount FROM overtime_records WHERE company_id = :company_id AND employee_id'), 'never a valuation column');
+  dirty('a Supplemental range lock of employees is caught (deadlock)', SUPPLEMENTAL_STORE, inSupp("public const R_SQL = 'SELECT id, company_id, id AS owner_employee_id FROM employees WHERE company_id = :company_id ORDER BY id FOR UPDATE';"), 'only by primary key');
+  dirty('a Supplemental lock of overtime rows is caught (deadlock)', SUPPLEMENTAL_STORE, inSupp("public const R_SQL = \"SELECT id, company_id, employee_id AS owner_employee_id FROM overtime_records WHERE id = :id AND company_id = :company_id AND status = 'Approved' FOR UPDATE\";"), 'only by primary key');
+  dirty('an SQL money sum is caught (M2)', SUPPLEMENTAL_STORE, inSupp("public const S_SQL = \"SELECT SUM(approved_amount) AS t, company_id, employee_id AS owner_employee_id FROM overtime_records WHERE company_id = :company_id AND status = 'Approved'\";"), 'never adds or sums money in SQL');
+  dirty('an SQL money addition is caught (M2)', SUPPLEMENTAL_STORE, suppSwap("SET overtime_amount = :overtime_amount,", "SET overtime_amount = overtime_amount + :overtime_amount,"), 'never adds or sums money in SQL');
+  dirty('a missing Supplemental Commit statement is caught', SUPPLEMENTAL_STORE, suppSwap("AND version = :expected_version AND status = 'Ready'\";", "AND version = :expected_version AND status = 'Ready' \";"), 'exactly one Commit statement');
+  const SUPP_SERVICE = 'server/src/Supplemental/SupplementalService.php';
+  const realSuppService = fs.readFileSync(path.join(root, SUPP_SERVICE), 'utf8');
+  clean('the real SupplementalService passes the Supplemental firewalls', SUPP_SERVICE, realSuppService);
+  clean('the real SupplementalController passes the Supplemental firewalls', SUPPLEMENTAL_CONTROLLER, fs.readFileSync(path.join(root, SUPPLEMENTAL_CONTROLLER), 'utf8'));
+  for (const f of ['SupplementalStatus.php', 'SupplementalView.php', 'SupplementalInput.php']) clean('the real ' + f + ' passes', SUPPLEMENTAL_DIR + f, fs.readFileSync(path.join(root, SUPPLEMENTAL_DIR + f), 'utf8'));
+  dirty('a base Payroll store call from Supplemental is caught (M4)', SUPP_SERVICE, S + "$this->data->payroll()->commit($auth, 1, $k);\n", 'never calls the base Payroll');
+  dirty('an Overtime store call from Supplemental is caught (M6)', SUPP_SERVICE, S + "$this->data->overtime()->approve($auth);\n", 'never calls the base Payroll');
+  dirty('a TAM-OT-1 call from Supplemental is caught (M7)', SUPP_SERVICE, S + "$a = \\TamOs\\Overtime\\OvertimeValuation::value($salary, $hours);\n", 'never values overtime');
+  dirty('a finance posting in Supplemental is caught (M32)', SUPP_SERVICE, S + "$this->data->finance()->post($auth);\n", 'no finance side effect');
+  dirty('a LOCAL postSupplemental port is caught (M32)', SUPP_SERVICE, S + "$r = postSupplemental($id);\n", 'no finance side effect');
+  dirty('an Executed status in Supplemental is caught (M33)', SUPPLEMENTAL_DIR + 'SupplementalStatus.php', S + "$s = 'Executed';\n", 'no finance side effect');
+  dirty('a paid flag in the Supplemental controller is caught (M33)', SUPPLEMENTAL_CONTROLLER, S + "$out = ['paid' => true];\n", 'no finance side effect');
+  dirty('a company account snapshot in Supplemental is caught (M32)', SUPPLEMENTAL_STORE, inSupp("public const A_SQL = 'SELECT company_account_id, company_id, id AS owner_employee_id FROM supplemental_payrolls WHERE company_id = :company_id';"), 'no finance side effect');
+  dirty('a THR term in Supplemental is caught (M34)', SUPP_SERVICE, S + "$thr = 1;\n", 'no statutory');
+  dirty('a PPh term in Supplemental is caught (M34)', SUPPLEMENTAL_DIR + 'SupplementalView.php', S + "$k = 'pph21';\n", 'no statutory');
+  dirty('an allowance component in Supplemental is caught (M35)', SUPP_SERVICE, S + "$allowance = '0.00';\n", 'no statutory');
+  dirty('a reimbursement component in Supplemental is caught (M35)', SUPP_SERVICE, S + "$reimbursement = '0.00';\n", 'no statutory');
+  dirty('a bonus column in the Supplemental store is caught (M35)', SUPPLEMENTAL_STORE, inSupp("public const B_SQL = 'SELECT bonus_amount, company_id, employee_id AS owner_employee_id FROM supplemental_payrolls WHERE company_id = :company_id';"), 'no statutory');
+  dirty('a float in Supplemental is caught (M1)', SUPP_SERVICE, S + "$t = (float) $amount;\n", 'integer arithmetic only');
+  dirty('a division in Supplemental is caught (M1)', SUPP_SERVICE, S + "$t = $amount / 100;\n", 'integer arithmetic only');
+  dirty('a Supplemental audit append outside the transaction is caught (M31)', SUPP_SERVICE, realSuppService.replace("            $this->data->audit()->appendSupplemental($auth, $actor, $operation, $in['id'], $requestId);\n        });", "        });\n        $this->data->audit()->appendSupplemental($auth, $actor, $operation, $in['id'], $requestId);"), 'inside the transaction');
+  const realSuppInput = fs.readFileSync(path.join(root, SUPPLEMENTAL_INPUT), 'utf8');
+  dirty('a browser amount key on generate is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['payrollPlanId']);", "self::onlyKeys($json, ['payrollPlanId', 'overtimeAmount']);"), 'exactly { payrollPlanId }');
+  dirty('a browser overtime list on generate is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['payrollPlanId']);", "self::onlyKeys($json, ['payrollPlanId', 'overtimeIds']);"), 'exactly { payrollPlanId }');
+  dirty('a commit without its idempotency key is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal']);"), 'idempotencyKey');
+  dirty('an employeeId key on a transition is caught (identity)', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['id', 'expectedVersion']);", "self::onlyKeys($json, ['employeeId']);"), 'never names an identity');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
   clean('the real EmployeeService appends audit rows inside its transactions', SERVICE, realService);
@@ -1423,6 +1610,12 @@ function selftest() {
   cases.push({ name: 'a payroll status read is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/cancel',", "            new Route('GET', '/api/payroll-plan/status', $payroll->find(...), ['id'], RouteAuth::Required),\n            new Route('POST', '/api/payroll-plans/cancel',")), expect: 'no payroll status, payment or payslip route' });
   cases.push({ name: 'a missing commit route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/payroll-plans/commit', $payroll->commit(...), [], RouteAuth::Required, Action::PayrollManage),\n", '')), expect: 'payroll route POST /api/payroll-plans/commit is missing' });
   cases.push({ name: 'payroll.manage on the drift read is caught', run: () => checkRouteActions(realRoutes.replace("$payroll->drift(...), ['id'], RouteAuth::Required)", "$payroll->drift(...), ['id'], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
+  cases.push({ name: 'a Supplemental write under a weaker Action is caught (M37)', run: () => checkRouteActions(realRoutes.replace("$supplemental->cancel(...), [], RouteAuth::Required, Action::SupplementalManage)", "$supplemental->cancel(...), [], RouteAuth::Required, Action::PayrollManage)")), expect: 'must declare Action::SupplementalManage' });
+  cases.push({ name: 'a missing Supplemental route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/supplemental-payrolls/commit', $supplemental->commit(...), [], RouteAuth::Required, Action::SupplementalManage),\n", '')), expect: 'Supplemental route POST /api/supplemental-payrolls/commit is missing' });
+  cases.push({ name: 'a Supplemental posting route is caught (M32)', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/supplemental-payrolls/cancel',", "            new Route('POST', '/api/supplemental-payrolls/post', $supplemental->cancel(...), [], RouteAuth::Required, Action::SupplementalManage),\n            new Route('POST', '/api/supplemental-payrolls/cancel',")), expect: 'not a Supplemental write' });
+  cases.push({ name: 'a Supplemental execute read is caught (M33)', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/supplemental-payrolls/cancel',", "            new Route('GET', '/api/supplemental-payroll/execution', $supplemental->find(...), ['id'], RouteAuth::Required),\n            new Route('POST', '/api/supplemental-payrolls/cancel',")), expect: 'no Supplemental status, payment, posting, execution' });
+  cases.push({ name: 'supplemental.manage on the eligibility read is caught', run: () => checkRouteActions(realRoutes.replace("$supplemental->eligibility(...), ['month'], RouteAuth::Required)", "$supplemental->eligibility(...), ['month'], RouteAuth::Required, Action::SupplementalManage)")), expect: 'must not declare Action::SupplementalManage' });
+  cases.push({ name: 'supplemental.manage on a payroll route is caught', run: () => checkRouteActions(realRoutes.replace("$payroll->review(...), [], RouteAuth::Required, Action::PayrollManage)", "$payroll->review(...), [], RouteAuth::Required, Action::SupplementalManage)")), expect: 'must declare Action::PayrollManage' });
   cases.push({ name: 'payroll.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->reject(...), [], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 

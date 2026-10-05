@@ -50,15 +50,7 @@ final class PayrollCalculation
             throw new \LogicException('the payroll calculation needs signed 64-bit integers');
         }
         $baseSen = self::salarySen($baseSalary);
-        $overtimeRupiah = 0;
-        $quarters = 0;
-        foreach ($overtime as $record) {
-            if (!is_array($record) || array_keys($record) !== ['hours', 'amount']) {
-                throw new \LogicException('an overtime input is exactly its hours and its frozen amount');
-            }
-            $overtimeRupiah = self::add($overtimeRupiah, self::amountRupiah($record['amount']), self::MAX_AMOUNT_RUPIAH);
-            $quarters = self::add($quarters, self::quarters($record['hours']), self::MAX_HOURS_QUARTERS);
-        }
+        [$overtimeRupiah, $quarters] = self::sum($overtime);
         $totalSen = $baseSen + $overtimeRupiah * self::SEN_PER_RUPIAH;
         $totalRupiah = intdiv($totalSen, self::SEN_PER_RUPIAH);
         if (2 * ($totalSen % self::SEN_PER_RUPIAH) >= self::SEN_PER_RUPIAH) {
@@ -73,6 +65,25 @@ final class PayrollCalculation
             'overtimeHours' => self::hoursString($quarters),
             'overtimeCount' => count($overtime),
             'totalAmount' => $totalRupiah . '.00',
+        ];
+    }
+
+    /**
+     * BF-4d: the frozen overtime alone, as exact canonical strings — the Supplemental Payroll amount
+     * (no base salary, so no sen and no rounding). The same parsing, bounds and integer sum as
+     * calculate(): one overtime sum for base Payroll and Supplemental Payroll.
+     *
+     * @param list<array{hours: string, amount: string}> $overtime the Approved overtime: hours "N.NN", frozen amount "N.00"
+     * @return array{overtimeAmount: string, overtimeHours: string, overtimeCount: int}
+     * @throws PayrollOutOfBounds
+     */
+    public static function overtime(array $overtime): array
+    {
+        [$overtimeRupiah, $quarters] = self::sum($overtime);
+        return [
+            'overtimeAmount' => $overtimeRupiah . '.00',
+            'overtimeHours' => self::hoursString($quarters),
+            'overtimeCount' => count($overtime),
         ];
     }
 
@@ -95,6 +106,30 @@ final class PayrollCalculation
             return false;
         }
         return ((int) $m[2]) % self::HUNDREDTHS_PER_QUARTER === 0;
+    }
+
+    /**
+     * The overtime in whole Rupiah and quarter hours, each summed with an explicit overflow check.
+     *
+     * @param list<array{hours: string, amount: string}> $overtime
+     * @return array{0: int, 1: int}
+     * @throws PayrollOutOfBounds
+     */
+    private static function sum(array $overtime): array
+    {
+        if (PHP_INT_SIZE !== 8) {
+            throw new \LogicException('the payroll calculation needs signed 64-bit integers');
+        }
+        $overtimeRupiah = 0;
+        $quarters = 0;
+        foreach ($overtime as $record) {
+            if (!is_array($record) || array_keys($record) !== ['hours', 'amount']) {
+                throw new \LogicException('an overtime input is exactly its hours and its frozen amount');
+            }
+            $overtimeRupiah = self::add($overtimeRupiah, self::amountRupiah($record['amount']), self::MAX_AMOUNT_RUPIAH);
+            $quarters = self::add($quarters, self::quarters($record['hours']), self::MAX_HOURS_QUARTERS);
+        }
+        return [$overtimeRupiah, $quarters];
     }
 
     /** $a + $b, refused above $max (both are non-negative and already within bounds). */

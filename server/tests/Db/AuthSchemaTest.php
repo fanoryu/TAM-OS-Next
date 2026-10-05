@@ -43,7 +43,9 @@ $insertUser = 'INSERT INTO users (id, email, password_hash, status, created_at, 
 $insertMembership = 'INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))';
 
 return [
-    'production migrations 0001–0028 apply in order, create exactly the auth tables, the employees, the mail outbox, the audit trail, the overtime records and the payroll plans with their overtime links, and seed nothing' => static function () use ($tables, $authTables): void {
+    // BF-4d authorized revision: 0029–0031 follow and create the Supplemental Payroll document and
+    // its overtime links (head 0031). Was: 0001–0028, fourteen tables.
+    'production migrations 0001–0031 apply in order, create exactly the auth tables, the employees, the mail outbox, the audit trail, the overtime records, the payroll plans with their overtime links and the Supplemental Payroll documents with theirs, and seed nothing' => static function () use ($tables, $authTables): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events',
@@ -53,9 +55,12 @@ return [
             '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation',
             '0020_create_overtime_records', '0021_replace_audit_events_overtime_checks',
             '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve',
-            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'],
+            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit',
+            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'],
             array_map(static fn ($m): string => $m->label(), $applied));
-        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'users'], $tables($db));
+        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
+        assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM supplemental_payrolls')[0]['n'], 'no Supplemental document');
+        assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM supplemental_payroll_overtime')[0]['n'], 'no Supplemental link');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans')[0]['n'], 'no payroll plan');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plan_overtime')[0]['n'], 'no payroll link');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM overtime_records')[0]['n'], 'no overtime record');
@@ -84,7 +89,8 @@ return [
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
             $files[basename($path)] = (string) file_get_contents($path);
         }
-        assertSame(28, count($files), 'the production set through 0028 (BF-4c2)');
+        // BF-4d authorized revision: through 0031. Was: 28 files through 0028 (BF-4c2).
+        assertSame(31, count($files), 'the production set through 0031 (BF-4d)');
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());
@@ -101,8 +107,10 @@ return [
         // columns are pinned in EmployeeSchemaTest. Every other table keeps the identifier rule.
         // BF-4c1 authorized revision: payroll_plans (snapshot text and money) is pinned in
         // PayrollSchemaTest; payroll_plan_overtime keeps the identifier rule (4 columns). Was: 63.
-        $columns = $db->select("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS type, CHARACTER_SET_NAME AS cs, COLLATION_NAME AS coll, DATETIME_PRECISION AS prec FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME NOT IN ('schema_migrations', 'employees', 'overtime_records', 'payroll_plans')");
-        assertTrue(count($columns) === 67, 'expected 67 columns (42 auth, 9 mail outbox, 12 audit, 4 payroll link), got ' . count($columns));
+        // BF-4d authorized revision: supplemental_payrolls (snapshot text and money) is pinned in
+        // SupplementalSchemaTest; supplemental_payroll_overtime keeps the identifier rule (4 columns). Was: 67.
+        $columns = $db->select("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS type, CHARACTER_SET_NAME AS cs, COLLATION_NAME AS coll, DATETIME_PRECISION AS prec FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME NOT IN ('schema_migrations', 'employees', 'overtime_records', 'payroll_plans', 'supplemental_payrolls')");
+        assertTrue(count($columns) === 71, 'expected 71 columns (42 auth, 9 mail outbox, 12 audit, 4 payroll link, 4 supplemental link), got ' . count($columns));
         foreach ($columns as $c) {
             $label = $c['t'] . '.' . $c['c'];
             if (in_array($c['type'], ['char', 'varchar'], true)) {
@@ -114,18 +122,24 @@ return [
             }
         }
     },
+    // BF-4d authorized revision: 0031 replaces the audit action, entity and action-operation CHECKs
+    // (v5, v4, v5) and 0029–0030 add the Supplemental CHECKs and six foreign keys. Was: action_v4,
+    // entity_v3, action_operation_v4 and no Supplemental constraint.
     'the named CHECK constraints and foreign keys exist' => static function (): void {
         $db = authDatabase();
         $checks = array_map(static fn (array $r): string => (string) $r['n'],
             $db->select('SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY CONSTRAINT_NAME'));
         assertSame(['account_tokens_expiry', 'account_tokens_final', 'account_tokens_purpose_v2', 'account_tokens_used_in_time',
-            'audit_events_account_target', 'audit_events_action_operation_v4', 'audit_events_action_v4', 'audit_events_entity_id', 'audit_events_entity_v3', 'audit_events_fields', 'audit_events_operation_v5',
+            'audit_events_account_target', 'audit_events_action_operation_v5', 'audit_events_action_v5', 'audit_events_entity_id', 'audit_events_entity_v4', 'audit_events_fields', 'audit_events_operation_v5',
             'auth_events_event_v3', 'employees_code', 'employees_employment_status', 'employees_full_name', 'employees_id', 'employees_salary', 'employees_version',
             'mail_outbox_attempts', 'mail_outbox_kind_v2', 'mail_outbox_status', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
             'overtime_records_approved_amount', 'overtime_records_date_in_month', 'overtime_records_hours', 'overtime_records_id', 'overtime_records_month_key', 'overtime_records_status_v2',
             'overtime_records_valuation', 'overtime_records_valuation_hours', 'overtime_records_valuation_method', 'overtime_records_valuation_salary', 'overtime_records_version',
             'payroll_plans_base_salary', 'payroll_plans_committed', 'payroll_plans_commit_key_committed', 'payroll_plans_commit_key_format', 'payroll_plans_id', 'payroll_plans_month_key', 'payroll_plans_overtime', 'payroll_plans_snapshot', 'payroll_plans_status',
             'payroll_plans_total', 'payroll_plans_version', 'payroll_plan_overtime_id',
+            'supplemental_payrolls_amount', 'supplemental_payrolls_committed', 'supplemental_payrolls_commit_key_committed', 'supplemental_payrolls_commit_key_format', 'supplemental_payrolls_count',
+            'supplemental_payrolls_hours', 'supplemental_payrolls_id', 'supplemental_payrolls_month_key', 'supplemental_payrolls_snapshot', 'supplemental_payrolls_status', 'supplemental_payrolls_version',
+            'supplemental_payroll_overtime_id',
             'users_email_normalized', 'users_password_hash', 'users_status'], $checks);
         $fks = array_map(static fn (array $r): string => $r['t'] . '.' . $r['n'] . '->' . $r['r'],
             $db->select('SELECT TABLE_NAME AS t, CONSTRAINT_NAME AS n, REFERENCED_TABLE_NAME AS r FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY TABLE_NAME, CONSTRAINT_NAME'));
@@ -137,7 +151,10 @@ return [
             'overtime_records.overtime_records_company_fk->companies', 'overtime_records.overtime_records_employee_fk->employees',
             'payroll_plans.payroll_plans_company_fk->companies', 'payroll_plans.payroll_plans_employee_fk->employees',
             'payroll_plan_overtime.payroll_plan_overtime_company_fk->companies', 'payroll_plan_overtime.payroll_plan_overtime_plan_fk->payroll_plans', 'payroll_plan_overtime.payroll_plan_overtime_record_fk->overtime_records',
-            'sessions.sessions_user_fk->users'], $fks, 'auth_events has no FK');
+            'sessions.sessions_user_fk->users',
+            'supplemental_payrolls.supplemental_payrolls_company_fk->companies', 'supplemental_payrolls.supplemental_payrolls_employee_fk->employees', 'supplemental_payrolls.supplemental_payrolls_plan_fk->payroll_plans',
+            'supplemental_payroll_overtime.supplemental_payroll_overtime_company_fk->companies', 'supplemental_payroll_overtime.supplemental_payroll_overtime_record_fk->overtime_records',
+            'supplemental_payroll_overtime.supplemental_payroll_overtime_supplemental_fk->supplemental_payrolls'], $fks, 'auth_events has no FK');
     },
     'CHECK constraints are enforced by MariaDB' => static function () use ($refused, $id, $insertUser, $insertMembership): void {
         $db = authDatabase();

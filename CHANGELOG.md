@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **BF-4d Supplemental Payroll (backend only, not shipped).** Overtime that is approved after an employee's payroll for
+  that month was committed can now be settled on the server as a separate Supplemental Payroll document, exactly as the
+  LOCAL Supplemental Payments do it — the committed payroll itself is never changed. The CEO prepares it from the
+  committed payroll; it holds only the overtime the payroll did not include, at the exact amounts approved, and goes
+  through Draft, Reviewed, Ready and Committed like payroll. Committing it makes it a fixed obligation that is still not a
+  payment and posts nothing to Finance; sending the same commit twice never commits twice. Overtime approved later goes
+  into a new Supplemental document. It settles overtime only — no allowances, deductions, bonuses, THR, tax or BPJS.
+  Employees can read their own committed Supplemental documents, never one in preparation and never a colleague's. No
+  screens yet; the shipped `AUTH_MODE` stays **LOCAL**.
 - **AFI-4c2 SESSION Payroll Commit and My payroll (frontend; SESSION mode only, not shipped).** The CEO can commit a
   payroll plan that is Ready: "Commit payroll" shows the plan's exact amounts and explains that committing makes it the
   final payroll obligation for the month — it can no longer be returned or cancelled — and that it is not a payment and

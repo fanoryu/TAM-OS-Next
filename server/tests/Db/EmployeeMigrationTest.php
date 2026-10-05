@@ -76,9 +76,11 @@ return [
         assertSame(['0014_extend_employees_profile', '0015_backfill_legacy_employees', '0016_enforce_employees_profile', '0017_create_audit_events',
             '0018_replace_mail_outbox_kind_check', '0019_add_audit_events_account_operation', '0020_create_overtime_records', '0021_replace_audit_events_overtime_checks',
             '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve',
-            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit'],
-            array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2, BF-4b1, BF-4b2, BF-4c1 and BF-4c2');
-        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 28)), $history($db), 'every marker complete — none stranded');
+            '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit',
+            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'],
+            array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2, BF-4b1, BF-4b2, BF-4c1, BF-4c2 and BF-4d');
+        // BF-4d authorized revision: markers through 0031. Was: range(1, 28).
+        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 31)), $history($db), 'every marker complete — none stranded');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'status: current');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->apply(), 'a second apply is a no-op');
 

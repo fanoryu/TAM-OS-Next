@@ -241,7 +241,8 @@ and another company's are 404; every write and the drift read are 403), proven w
 proof for Payroll). The CEO plan projection keeps exactly its thirteen keys, so AFI-4c1 is unaffected and BF-4c2 can be
 deployed behind it; migrations `0027`–`0028` (head **0028**; `0028` adds the `commit` audit operation). No frontend or
 package change (100 files, `a0a95b13…`), no Finance, payment or statutory effect, `AUTH_MODE` stays LOCAL. The Commit
-and My Payroll screens are AFI-4c2. **AFI-4c2** (local candidate on `feature/afi-4c2-session-payroll`; not pushed, not merged, not deployed; owner
+and My Payroll screens are AFI-4c2. **AFI-4c2** (merged to `main` as source, PR #47, canonical merge
+`0ae3ef828349db8167e6bc7c858394c689f83bf5`, 2026-10-05; not deployed; AFI-4c2 needs BF-4c2 deployed first or with it; owner
 decisions D-AFI4c2-1 = A, D-AFI4c2-2 = A, D-AFI4c2-3 = A) is the SESSION frontend of BF-4c2, frontend only. The CEO's
 Payroll section offers **Commit payroll** on a Ready plan: an inline confirmation shows the plan's own server strings and
 says Commit makes it the final payroll obligation — no later return or cancel — and is not a payment and posts nothing to
@@ -259,6 +260,37 @@ profile | My overtime | My payroll): their own Committed plans by month and a re
 fields only — no control, no drift read, no write, no statutory or bank concept. The four existing Payroll and workspace
 modules are extended (no new module, no ApiClient, AuthBoot, backend or migration change); the package keeps 100 files with
 a new digest; the dedicated Payroll harness is extended (CI stays at ten harnesses). `AUTH_MODE` stays LOCAL.
+**BF-4d — Supplemental Payroll** (local candidate on `feature/bf-4d-supplemental-payroll`; not pushed, not merged, not
+deployed; owner decisions D-SPAY-1 = A, D-SPAY-2 = A, D-SPAY-3 = A, D-SPAY-4 = A, 2026-10-05) is the server's Supplemental
+Payroll, **backend only**. It keeps the meaning LOCAL v2.7.0 gave the term: a **separate** CEO-managed document for one
+employee and one month that settles the **Approved overtime of that month which the employee's already-Committed base plan
+does not contain** — overtime that became Approved after Commit. Before Commit, late overtime stays the Payroll drift path
+(`overtime_changed` → return to Draft → prepare again). Supplemental never writes the base plan, its links or any overtime
+record, and it is late overtime only: no allowance, deduction, bonus, commission, reimbursement, manual adjustment, loan,
+THR, PPh, BPJS or other component, and no statutory formula. D-SPAY-1 = A: the canonical Payroll vocabulary — Draft →
+Reviewed → Ready → Committed, plus Cancelled, operations `review`, `approve`, `return`, `cancel`, `commit` — on the owner's
+linear graph (approve only from Reviewed; there is no Draft → Ready); Committed is terminal, a final obligation, never paid,
+posted or executed. `POST /api/supplemental-payrolls/generate` (`{ payrollPlanId }`) needs a Committed base plan (409
+otherwise) and captures the employee's Approved overtime of that month held by no base plan and no other document: it
+creates a Draft (409 when nothing, or only a zero total, is eligible), recalculates an open Draft (no write and no audit
+when nothing differs) and returns a Reviewed or Ready document untouched. At most one document per base plan is open (a
+generated open key in the database); later approvals become further documents (waves). Return keeps the captured overtime;
+Cancel releases it. D-SPAY-2 = A: the employee's current archive, employment status and salary do not matter — the work was
+already approved. The amount is the exact sum of the frozen `approved_amount` strings (`PayrollCalculation::overtime`, the
+same integer parser as base Payroll; whole Rupiah, no rounding step, no float, no SQL arithmetic). Commit
+(`{ id, expectedVersion, expectedTotal, idempotencyKey }`) follows BF-4c2: a key stored on the document (unique within a
+company), an exact replay answering the original document with no write and no audit, every mismatch 409, a refused or
+failed commit consuming no key; it re-verifies the frozen links (still the employee's Approved overtime of the month, held
+by no base plan, summing exactly to the stored amount) and never absorbs overtime approved after the document froze. Every
+write is CEO-only under the **existing, record-free `supplemental.manage`** (the kernel refuses an Employee with 403 before
+any lookup; **ACTIONS stay 21**) and locks employee → base plan → document by primary key, at READ COMMITTED for generate
+and commit; C1–C8 races are proven against MariaDB with no deadlock. D-SPAY-3 = A: an Employee reads only their own
+Committed documents with their frozen overtime lines (any other document — their own Draft, Reviewed, Ready or Cancelled
+included — is 404; the CEO eligibility read `GET /api/supplemental-payrolls/eligibility` and every write are 403). The
+document is its own twelve-key projection; the base plan keeps exactly its thirteen keys. Migrations `0029`–`0031` (head
+**0031**; `0031` admits the Payroll operations under `supplemental.manage` on `supplementalPayroll`). No frontend or package
+change (100 files, `16e06b7e…`), no Finance, payment or statutory effect, `AUTH_MODE` stays LOCAL. D-SPAY-4 = A: the CEO
+Supplemental screens and the Employee's My payroll presentation are AFI-4d; Finance posting comes later.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

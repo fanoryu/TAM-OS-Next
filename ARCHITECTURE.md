@@ -1746,7 +1746,8 @@ and approval); its valuation inputs and exact-decimal method were deferred to BF
 `78ec019d5820241d89fc518f0c6bf24a405a4738`), and AFI-4b2 is merged (PR #43, canonical `58e1127a0e44b60bf771e2d399ea15336b6f9610`).
 Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`), AFI-4c1 is merged (PR #45, canonical
 `6834a572485e0057f01897283f006ccaa00769c6`), BF-4c2 is merged (PR #46, canonical `df15b41a9097411eabde39be175f2b38c0809a04`), and
-AFI-4c2 (below) is a local candidate.
+AFI-4c2 is merged (PR #47, canonical `0ae3ef828349db8167e6bc7c858394c689f83bf5`). Supplemental Payroll follows: BF-4d (below)
+is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2093,10 +2094,10 @@ read, terminality, self-read, MU-4, rollback, firewalls; `PayrollConcurrencyTest
 duplicate-key race), the boundary tool (exactly one `'Committed'` write, Employee reads Committed-only, the commit
 allowlist and route) and the verifier's BF-4c2 section.
 
-### SESSION Payroll Commit and My payroll — AFI-4c2 (local candidate; frontend; SESSION mode only)
+### SESSION Payroll Commit and My payroll — AFI-4c2 (merged as PR #47, canonical `0ae3ef82`; frontend; SESSION mode only)
 
-AFI-4c2 is the SESSION frontend of BF-4c2 (owner decisions D-AFI4c2-1 = A, D-AFI4c2-2 = A, D-AFI4c2-3 = A). It is a local
-candidate on `feature/afi-4c2-session-payroll`; not pushed, merged or deployed. Frontend only: no backend change, no
+AFI-4c2 is the SESSION frontend of BF-4c2 (owner decisions D-AFI4c2-1 = A, D-AFI4c2-2 = A, D-AFI4c2-3 = A). It is merged
+to `main` as source (PR #47, canonical merge `0ae3ef828349db8167e6bc7c858394c689f83bf5`), not deployed. Frontend only: no backend change, no
 migration, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, no CSS change, no new module — `core/payroll-api.js`,
 `core/session-payroll.js`, `ui/session-payroll-view.js` and `ui/session-workspace-view.js` are extended, so the package
 keeps 100 files (its digest changes). ApiClient and AuthBoot are unchanged: the commit body has no forbidden key, and
@@ -2145,6 +2146,109 @@ Overtime harnesses were revised narrowly to admit the Employee's "My payroll" bu
 BF-4c2 for browser QA (commit with key replay and mismatch, drift, the Employee's self-scope; `/__stub/drift-payroll`,
 `/__stub/fail-next-commit` — applied, then answered 503). AFI-4c2 needs BF-4c2 at runtime and adds no deploy-together
 constraint of its own.
+
+### Supplemental Payroll — BF-4d (local candidate; backend only, not deployed)
+
+BF-4d is the server's Supplemental Payroll (Phase 0 owner decisions D-SPAY-1 = A, D-SPAY-2 = A, D-SPAY-3 = A,
+D-SPAY-4 = A, 2026-10-05). It is a local candidate on `feature/bf-4d-supplemental-payroll`; not pushed, merged or deployed.
+Backend only: no frontend change, the package is unchanged (100 files, digest `16e06b7e…`), ACTIONS stay **21**,
+`AUTH_MODE` stays LOCAL.
+
+**Meaning.** The canonical meaning is the one LOCAL v2.7.0 gave the term (§17 below) and BF-4c1 deferred to it: a
+**separate** document for one employee and one month that settles the **Approved overtime of that month which the
+employee's already-Committed base plan does not contain**. Overtime approval is never blocked by Payroll, and a Committed
+plan is never recalculated, so without Supplemental such overtime had no payment path. Before Commit nothing changes: late
+overtime is the Payroll drift path (`overtime_changed` → return to Draft → prepare again). Supplemental is late overtime
+only — no allowance, deduction, bonus, commission, reimbursement, manual adjustment, loan, THR, PPh, BPJS or other
+component, no statutory formula and no generic component engine. Base Payroll stays Base Salary + Approved Overtime.
+
+**Model.** `supplemental_payrolls` (migration `0029`, company-scoped): the base plan (`payroll_plan_id`, composite FK), its
+employee and month, the base plan's frozen code, name and department (copied at generation — never the current employee),
+the five canonical statuses, `overtime_amount DECIMAL(17,2)` (> 0, whole Rupiah), `overtime_hours DECIMAL(9,2)` (> 0,
+quarter hours), `overtime_count` (> 0), `calculated_at`, `committed_at` and `commit_idempotency_key` (each present if and
+only if Committed), `version`, and a stored generated `open_key` (1 for Draft, Reviewed and Ready, NULL otherwise) with
+`UNIQUE (company_id, payroll_plan_id, open_key)` — **at most one open document per base plan**, in the database; Committed
+and Cancelled documents never block, so later approvals become further documents. `supplemental_payroll_overtime`
+(migration `0030`): one row per captured overtime record, **keyed by that record's id**, so the database refuses a second
+capture; a cancelled document releases its rows, a Committed one's rows are frozen. The base Payroll tables have no
+Supplemental column and their thirteen-key projection is unchanged.
+
+**Eligibility and generate.** `POST /api/supplemental-payrolls/generate` takes exactly `{ payrollPlanId }`. The base plan
+must be Committed (409 otherwise; absent or another company's is 404). Eligible overtime is the employee's Approved overtime
+of the plan month **minus** the base plan's links **minus** every overtime captured by a non-cancelled document (D-SPAY-2 =
+A: the employee's current archive, employment status and salary are not consulted — the work was already approved).
+No open document → a Draft of the eligible set (409 when it is empty or totals zero); an open Draft → recalculated to the
+current eligible set (its own captured overtime stays eligible), links replaced, version + 1 — or nothing at all when nothing
+differs; an open Reviewed or Ready document → returned untouched (frozen: an approval attests to its set and total). One
+`supplemental.manage` audit row, `create` or `recalculate`. No idempotency key: the open key makes generate naturally
+idempotent (SDR-0002 §10 names commit, not generate).
+
+**Money.** The amount is the exact sum of the captured records' frozen `approved_amount` strings —
+`PayrollCalculation::overtime`, the integer parser and overflow-checked sum base Payroll already uses (extracted from
+`calculate()` without changing it). Approved amounts are whole Rupiah, so there is no rounding step; hours are summed in
+quarter hours for display only. No float, no BCMath or GMP, no SQL money arithmetic (`SUM`, `+`), never TAM-OT-1 and never a
+current salary.
+
+**Lifecycle (D-SPAY-1 = A).** The canonical Payroll vocabulary on the owner's linear graph: `review` Draft → Reviewed,
+`approve` Reviewed → Ready, `return` Reviewed / Ready → Draft (keeps the captured overtime; the next generate recalculates),
+`cancel` Draft / Reviewed / Ready → Cancelled (releases it). There is no Draft → Ready shortcut. Each transition takes
+exactly `{ id, expectedVersion }`, is a compare-and-swap on the version and an open status (409 otherwise), bumps the version
+once and writes one audit row. Committed and Cancelled are terminal.
+
+**Commit.** `POST /api/supplemental-payrolls/commit` takes exactly `{ id, expectedVersion, expectedTotal, idempotencyKey }`
+and follows BF-4c2 (SDR-0002 §10): the key (`^[0-9a-f]{32}$`) is stored permanently on the document (`UNIQUE (company_id,
+commit_idempotency_key)`; a separate namespace from base Payroll keys); the same key, document, `expectedVersion` and
+`expectedTotal` replays the original Committed document with no write and no audit; any other reuse is 409; a refused or
+failed commit stores no key. Under its locks Commit requires Ready (409), the expected version (409) and `expectedTotal`
+equal to the stored `overtime_amount` as an exact string (409), and **re-verifies the frozen links**: every link is still
+the employee's Approved overtime of the month held by no base plan, and their exact sum is still the stored amount, hours
+and count (409 otherwise). Overtime approved after the document froze is never absorbed; it belongs to the next document.
+Exactly one statement writes `'Committed'` — a compare-and-swap from `'Ready'` at the expected version that sets
+`committed_at` and the key. Committed is a final obligation: never paid, executed, posted or ledgered.
+
+**Reads.** `GET /api/supplemental-payrolls?month=` → `{ supplementalPayrolls: [S…] }`; `GET /api/supplemental-payroll?id=` →
+`{ supplementalPayroll: S, supplementalPayrollOvertime: [{ id, hours, amount }…] }`, where S is exactly `{ id,
+payrollPlanId, employeeId, monthKey, status, employeeCode, employeeName, department, overtimeAmount, overtimeHours,
+overtimeCount, version }` (never the company, the open key, the commit key, `committed_at` or an audit detail). The CEO reads
+every document of the company (Cancelled included). D-SPAY-3 = A: an Employee reads **only their own Committed** documents
+and their frozen lines; their own Draft, Reviewed, Ready or Cancelled document, a colleague's and another company's are 404.
+`GET /api/supplemental-payrolls/eligibility?month=` (CEO only; 403 for an Employee) answers, per Committed base plan with
+uncaptured late overtime, `{ payrollPlanId, employeeId, eligibleCount, eligibleHours, eligibleAmount }`.
+
+**Authorization.** Every write declares the existing **`supplemental.manage`** (CEO-only; already in the 21 ACTIONS and
+the LOCAL engine's gate). It is record-free in both vocabularies, so the kernel decides it before the handler: an Employee
+is 403 before any body validation or lookup (unlike Payroll's record-bearing 404-before-403). The store and the audit writer
+accept only a record-free `supplemental.manage` Authorization in company scope, and name each document by its server id.
+
+**Locks and concurrency.** Every write locks in the global order **employee → base plan → document**, each by primary key
+(`WHERE id = :x AND company_id = :company_id FOR UPDATE`) — the order base Payroll and the overtime approval already use — so
+holding the employee lock freezes the employee's Approved set and the captured set; generate and commit run at READ
+COMMITTED (the BF-4c1/BF-4c2 lesson), the transitions at the default level. C1–C8 (generate against generate, against an
+overtime approval, commit against return, two stale transitions, the duplicate commit and the duplicate-key race, the base
+Payroll generate against a Supplemental generate, generate against cancel, two waves opening at once) are proven against
+MariaDB with no deadlock.
+
+**Audit.** One `supplemental.manage` row on entity `supplementalPayroll` per successful mutation — `create`,
+`recalculate`, `review`, `approve`, `return`, `cancel`, `commit` (migration `0031` replaces the action, entity and
+action-operation CHECKs; every earlier rule is kept) — in the same transaction; no row for a read, a no-op generate, a
+replay or a failed transaction. No field and no value.
+
+**Firewalls.** Supplemental never writes `payroll_plans`, `payroll_plan_overtime`, `overtime_records` or `employees` (each
+keeps its single writer) and never calls their stores; no Finance, payment, posting, execution, bank or company-account
+concept (the LOCAL `postSupplemental` is not ported); no statutory or component vocabulary. The boundary tool and the
+verifier's BF-4d section pin all of this.
+
+**Compatibility and deployment.** BF-4d adds routes and tables and changes no existing DTO, so it can be deployed before
+AFI-4d and behind the AFI-4c2 frontend; its migrations must run before its routes are reachable. The CEO Supplemental
+screens and the Employee's My payroll presentation are AFI-4d (D-SPAY-4 = A). Finance posting comes later and will consume
+two kinds of Committed obligation: base plans and Supplemental documents.
+
+**Proof.** Unit (`SupplementalDomainTest`: the graph, inputs, the overtime sum, projections, statements, guards, Policy,
+audit vocabulary), HTTP (`SupplementalRoutingTest`), MariaDB (`SupplementalSchemaTest`: columns, CHECKs, the open key, the
+commit key, tenant keys, the link key, 0031 and the upgrade from 0028; `SupplementalWorkflowTest`: generate, refusals,
+recalculation, frozen states, D-SPAY-2, the lifecycle matrix, Return and Cancel, commit, replay, waves, revalidation,
+reads and privacy, eligibility, rollback, firewalls; `SupplementalConcurrencyTest`: the lock proofs and C1–C8), the
+boundary tool and its selftest, the verifier's BF-4d section, and a deterministic mutation campaign.
 
 ### Release engineering
 
