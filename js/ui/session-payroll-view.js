@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2, AFI-4d) — js/ui/session-payroll-view.js
+   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e) — js/ui/session-payroll-view.js
    ------------------------------------------------------------
    The Payroll section of the authenticated SESSION workspace — CEO only — rendered by
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js), its only caller, when the section
@@ -53,6 +53,18 @@
    commit"). An Employee's My payroll lists their own Committed Supplemental documents as separate
    rows, each opening its own read-only card; the payroll card links to them. A base plan and a
    Supplemental document are never added together — there is no combined total anywhere.
+
+   AFI-4e (owner decisions D-AFI4e-1..5 = A): FINANCE — on the CEO's detail of a Committed plan and
+   of a Committed Supplemental document only, a Finance card: "Not posted to Finance" with "Post to
+   Finance", or "Posted to Finance — Planned, not paid" with the posting's amount, as the month's
+   Finance read shows it; while that read loads or after it failed, its status (and a read retry)
+   and no Post. "Post to Finance" opens an inline confirmation that names the source and says:
+   "Records one Planned Finance posting of Rp {amount}. Nothing is paid or executed. A posting cannot
+   be reversed." — {amount} is the source's own server string; nothing here edits or computes it. An
+   unconfirmed posting whose reads still show the source unposted at the same amount offers "Retry
+   posting" (the same intent again). A posting 409 never claims its cause. No other Finance control,
+   no Finance screen or navigation, nothing for an Employee, and no non-Committed source shows a
+   Finance line.
 
    Classic shared global scope; existing CSS classes only.
    ============================================================ */
@@ -184,6 +196,31 @@ const SESSION_SUPPLEMENTAL_ACTION_BUTTONS = Object.freeze({
   commit: { id: 'swpSuppCommitBtn', label: 'Commit supplemental', cls: 'btn btn-accent', panel: 'suppCommit' }
 });
 
+// AFI-4e: Finance posting words (D-AFI4e-5 = A). Every message is fixed; a 409 never names its cause.
+const SESSION_FINANCE_TITLE = 'Finance';
+const SESSION_FINANCE_STATE_TEXT = Object.freeze({ unposted: 'Not posted to Finance', posted: 'Posted to Finance — Planned, not paid' });
+// The confirmation: the source's own amount string sits between the two parts, unchanged.
+const SESSION_FINANCE_CONFIRM = Object.freeze(['Records one Planned Finance posting of Rp ', '. Nothing is paid or executed. A posting cannot be reversed.']);
+const SESSION_FINANCE_PANELS = Object.freeze({
+  finPostPlan: { title: 'Post this payroll to Finance?', submit: 'Post to Finance', busy: 'Posting…', danger: true },
+  finPostSupp: { title: 'Post this supplemental payroll to Finance?', submit: 'Post to Finance', busy: 'Posting…', danger: true }
+});
+const SESSION_FINANCE_POST_BUTTONS = Object.freeze({ payrollPlan: { id: 'swpFinPostBtn', panel: 'finPostPlan' }, supplementalPayroll: { id: 'swpSuppFinPostBtn', panel: 'finPostSupp' } });
+const SESSION_FINANCE_MUTATION_ERRORS = Object.freeze({
+  VALIDATION: 'TAM OS could not accept this posting.',
+  DENIED: 'You do not have permission to post to Finance.',
+  NOT_FOUND: 'This payroll is no longer available. The month was read again.',
+  RATE_LIMITED: 'Too many requests.',
+  CLIENT_FAULT: 'TAM OS could not process this request.',
+  CRYPTO_UNAVAILABLE: 'This browser cannot create a secure posting key. Nothing was sent.'
+});
+const SESSION_FINANCE_CONFLICT = 'TAM OS did not record this posting (a conflict was reported). It and its Finance status were read again from TAM OS — check them before choosing again.';
+const SESSION_FINANCE_NOTICES = Object.freeze({
+  finRecorded: 'Posted to Finance — Planned, not paid.',
+  finPostConfirmed: 'TAM OS could not confirm the posting at first, but the Finance status read again shows it: Posted to Finance — Planned, not paid.',
+  finPostStale: 'TAM OS could not confirm the posting, and what was read again has changed. Check it before choosing again.'
+});
+
 function sessionPayrollValue(v){
   return (v === null || v === undefined || v === '') ? '—' : escapeHtml(String(v));
 }
@@ -221,6 +258,7 @@ function sessionPayrollAmbiguousText(w){
 
 // The one message about the write (or a notice), shown where that write is.
 function sessionPayrollMutationHTML(w){
+  if(sessionFinanceOwnsMessage(w)) return sessionFinanceMutationHTML(w);         // AFI-4e
   const m = w.mutation;
   let text = null, warn = true;
   if(m.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) text = sessionPayrollAmbiguousText(w);
@@ -242,6 +280,7 @@ function sessionPayrollMutationHTML(w){
 
 // The open confirmation: what it acts on, its explanation, Cancel and the action.
 function sessionPayrollPanelHTML(w){
+  if(SESSION_FINANCE_PANEL_KINDS.indexOf(w.panel.kind) !== -1) return sessionFinancePanelHTML(w);   // AFI-4e
   const panel = SESSION_PAYROLL_PANELS[w.panel.kind];
   const busy = sessionPayrollBusy(w);
   const dis = busy ? ' disabled' : '';
@@ -412,6 +451,7 @@ function sessionPayrollDetailHTML(principal, w){
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
     + '<section class="card" aria-labelledby="swpOvertimeTitle"><h2 class="section-title" id="swpOvertimeTitle">Approved overtime counted</h2>' + ot + '</section>'
     + sessionPayrollDriftHTML(w)
+    + (p.status === 'Committed' ? sessionFinanceHTML(w, 'payrollPlan', p, dis) : '')          // AFI-4e
     + (p.status === 'Committed' ? sessionSupplementalRelatedHTML(w, p, dis) : '')
     + back + reload + actions + '</div>'
     + (w.panel && w.panel.id === p.id ? sessionPayrollPanelHTML(w) : '');
@@ -493,6 +533,7 @@ function sessionSupplementalMutationHTML(w){
 
 // The open Supplemental confirmation: exactly the server strings it acts on.
 function sessionSupplementalPanelHTML(w, eligible){
+  if(SESSION_FINANCE_PANEL_KINDS.indexOf(w.panel.kind) !== -1) return sessionFinancePanelHTML(w);   // AFI-4e
   const panel = SESSION_SUPPLEMENTAL_PANELS[w.panel.kind];
   const busy = sessionPayrollBusy(w);
   const dis = busy ? ' disabled' : '';
@@ -585,9 +626,9 @@ function sessionSupplementalDetailHTML(principal, w){
   const back = '<div class="auth-actions"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';
   if(w.suppDetailStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'suppDetail'){
     const retry = (w.error.kind === 'DENIED' || w.error.kind === 'NOT_FOUND') ? '' : '<button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button>';
-    return sessionSupplementalMutationHTML(w) + sessionPayrollErrorHTML(w.error) + back + retry + '</div>';
+    return sessionSupplementalDetailMessageHTML(w) + sessionPayrollErrorHTML(w.error) + back + retry + '</div>';
   }
-  if(w.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppDetail) return sessionSupplementalMutationHTML(w) + '<p class="auth-lead" role="status" aria-busy="true">Loading the supplemental payroll…</p>' + back + '</div>';
+  if(w.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !w.suppDetail) return sessionSupplementalDetailMessageHTML(w) + '<p class="auth-lead" role="status" aria-busy="true">Loading the supplemental payroll…</p>' + back + '</div>';
   const d = w.suppDetail.doc;
   // Only the actions the matrix offers; an open commit intent replaces Commit by Retry commit.
   const intentState = sessionSupplementalIntentState(w.suppIntent, d);
@@ -604,9 +645,10 @@ function sessionSupplementalDetailHTML(principal, w){
   ];
   return '<h2 class="section-title">' + escapeHtml(d.employeeName) + ' — ' + escapeHtml(sessionPayrollMonthLabel(d.monthKey)) + '</h2>'
     + '<p class="hint">A separate payroll obligation for overtime approved after this employee\'s payroll for the month was committed. The committed payroll is not changed.</p>'
-    + (w.panel ? '' : sessionSupplementalMutationHTML(w))
+    + (w.panel ? '' : sessionSupplementalDetailMessageHTML(w))
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
     + '<section class="card" aria-labelledby="swpSuppOvertimeTitle"><h2 class="section-title" id="swpSuppOvertimeTitle">Approved overtime settled here</h2>' + sessionSupplementalLinesHTML(d, w.suppDetail.overtime) + '</section>'
+    + (d.status === 'Committed' ? sessionFinanceHTML(w, 'supplementalPayroll', d, dis) : '')   // AFI-4e
     + back + reload + actions + '</div>'
     + (w.panel && w.panel.id === d.id ? sessionSupplementalPanelHTML(w, null) : '');
 }
@@ -648,6 +690,95 @@ function sessionSupplementalMineDetailHTML(w){
     + back + '</div>';
 }
 
+/* ---------- AFI-4e: Finance posting ---------- */
+
+// The Supplemental detail's one message: a posting's when it owns it, else the Supplemental one.
+function sessionSupplementalDetailMessageHTML(w){
+  return sessionFinanceOwnsMessage(w) ? sessionFinanceMutationHTML(w) : sessionSupplementalMutationHTML(w);
+}
+// The posting confirmation and write messages, and the posting notices, belong to Finance.
+function sessionFinanceOwnsMessage(w){
+  return SESSION_FINANCE_PANEL_KINDS.indexOf(w.mutation.kind) !== -1
+    || (w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && !!w.notice && Object.prototype.hasOwnProperty.call(SESSION_FINANCE_NOTICES, w.notice));
+}
+// The confirmation sentence around the source's own amount string.
+function sessionFinanceConfirmText(amount){
+  return SESSION_FINANCE_CONFIRM[0] + amount + SESSION_FINANCE_CONFIRM[1];
+}
+// An unconfirmed posting, reported by what the reads that followed it show (never as a success).
+function sessionFinanceAmbiguousText(w){
+  const i = w.postIntent;
+  const source = i ? sessionFinanceSource(w, i.sourceKind) : null;
+  const status = source ? sessionFinanceStatus(w, i.sourceKind, source) : null;
+  if(i && sessionFinanceIntentState(i, i.sourceKind, source, status) === 'unresolved'){
+    return 'TAM OS could not confirm the posting. What was read again is still not posted to Finance, at the same amount. Retry posting sends the same posting again — it can never post it twice.';
+  }
+  if((status && status.state === 'error') || w.detailStatus === SESSION_PAYROLL_STATUS.ERROR || w.suppDetailStatus === SESSION_PAYROLL_STATUS.ERROR){
+    return 'TAM OS could not confirm the posting, and it could not be read again. Nothing is sent again — use Retry to read it.';
+  }
+  return 'TAM OS could not confirm the posting. It is being read again…';
+}
+function sessionFinanceMutationHTML(w){
+  const m = w.mutation;
+  let text = null, warn = true;
+  if(m.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) text = sessionFinanceAmbiguousText(w);
+  else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.ERROR && m.error){
+    const k = m.error.kind;
+    text = k === 'CONFLICT' ? SESSION_FINANCE_CONFLICT : (SESSION_FINANCE_MUTATION_ERRORS[k] || SESSION_FINANCE_MUTATION_ERRORS.CLIENT_FAULT);
+    if(k === 'RATE_LIMITED' && typeof authWaitText === 'function') text += authWaitText(m.error.retryAfter);
+  } else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && w.notice && SESSION_FINANCE_NOTICES[w.notice]){
+    text = SESSION_FINANCE_NOTICES[w.notice]; warn = w.notice === 'finPostStale';
+  }
+  if(!text) return '';
+  if(warn && m.error && m.error.requestId) text += ' Reference: ' + m.error.requestId + '.';
+  return '<p class="auth-message' + (warn ? ' auth-message-warn' : '') + '" id="swpMutationMessage" role="' + (warn ? 'alert' : 'status') + '" tabindex="-1">' + escapeHtml(text) + '</p>';
+}
+// The open posting confirmation: the source it posts and the source's own amount string.
+function sessionFinancePanelHTML(w){
+  const panel = SESSION_FINANCE_PANELS[w.panel.kind];
+  const sourceKind = SESSION_FINANCE_SOURCE_KIND[w.panel.kind];
+  const source = sessionFinanceSource(w, sourceKind);
+  const busy = sessionPayrollBusy(w);
+  const dis = busy ? ' disabled' : '';
+  const what = source ? [source.employeeName, ' (', source.employeeCode, ') — ', sessionPayrollMonthLabel(source.monthKey), '.'].join('') : '';
+  return '<section class="card" aria-labelledby="swpPanelTitle"' + (busy ? ' aria-busy="true"' : '') + '>'
+    + '<h2 class="section-title" id="swpPanelTitle" tabindex="-1">' + escapeHtml(panel.title) + '</h2>'
+    + '<p class="auth-lead">' + escapeHtml(what) + ' ' + escapeHtml(sessionFinanceConfirmText(financePostingSourceAmount(sourceKind, source))) + '</p>'
+    + sessionFinanceMutationHTML(w)
+    + '<div class="auth-actions"><button class="btn" type="button" id="swpPanelCancel"' + dis + '>Back</button>'
+    + '<button class="btn ' + (panel.danger ? 'btn-danger' : 'btn-accent') + '" type="button" id="swpPanelConfirm"' + dis + (busy ? ' aria-busy="true"' : '') + '>'
+    + escapeHtml(busy ? panel.busy : panel.submit) + '</button></div></section>';
+}
+// The Finance card of a Committed source shown to the CEO (D-AFI4e-4 = A: on its detail only).
+function sessionFinanceHTML(w, sourceKind, source, dis){
+  const status = sessionFinanceStatus(w, sourceKind, source);
+  if(!status || status.state === 'none') return '';
+  let body;
+  if(status.state === 'loading') body = '<p class="hint" role="status" aria-busy="true">Checking the Finance status…</p>';
+  else if(status.state === 'error'){
+    const e = w.finError || {};
+    let msg = 'TAM OS could not read the Finance status of this month, so posting is not offered.';
+    if(e.kind === 'RATE_LIMITED' && typeof authWaitText === 'function') msg += authWaitText(e.retryAfter);
+    if(e.requestId) msg += ' Reference: ' + e.requestId + '.';
+    body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(msg) + '</p>'
+      + (e.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn" type="button" id="swpFinRetryBtn"' + dis + '>Retry Finance status</button></div>');
+  } else if(status.state === 'posted'){
+    body = '<p class="auth-lead">' + escapeHtml(SESSION_FINANCE_STATE_TEXT.posted) + '</p>'
+      + '<div class="table-wrap"><table><tbody><tr><th scope="row">Planned amount (Rp)</th><td>' + escapeHtml(status.posting.amount) + '</td></tr></tbody></table></div>';
+  } else {
+    const intentState = sessionFinanceIntentState(w.postIntent, sourceKind, source, status);
+    const b = SESSION_FINANCE_POST_BUTTONS[sourceKind];
+    let control = '';
+    if(!w.panel){
+      if(intentState === 'unresolved') control = '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpFinRetryPostBtn"' + dis + '>Retry posting</button></div>';
+      else if(w.postIntent) control = '<p class="hint">Another Finance posting is not confirmed yet. Open it to check it before posting another.</p>';
+      else control = '<div class="auth-actions"><button class="btn btn-accent" type="button" id="' + b.id + '"' + dis + '>Post to Finance</button></div>';
+    }
+    body = '<p class="auth-lead">' + escapeHtml(SESSION_FINANCE_STATE_TEXT.unposted) + '</p>' + control;
+  }
+  return '<section class="card" id="swpFinance" aria-labelledby="swpFinanceTitle"><h2 class="section-title" id="swpFinanceTitle">' + escapeHtml(SESSION_FINANCE_TITLE) + '</h2>' + body + '</section>';
+}
+
 function bindSessionPayroll(app){
   const on = function(id, type, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener(type, fn); };
   const click = function(id, fn){ on(id, 'click', fn); };
@@ -673,6 +804,10 @@ function bindSessionPayroll(app){
   (w.elig || []).forEach(function(e, i){ click('swpSuppPrep' + i, function(){ SessionPayroll.openPanel('suppGenerate', e.payrollPlanId); }); });
   (w.suppList || []).forEach(function(d, i){ click('swpSuppOpen' + i, function(){ SessionPayroll.openSupplemental(d.id); }); });
   sessionSupplementalRelated(w, w.detail && w.detail.plan).forEach(function(d, i){ click('swpSuppLink' + i, function(){ SessionPayroll.openSupplemental(d.id); }); });
+  // AFI-4e: Finance posting.
+  Object.keys(SESSION_FINANCE_POST_BUTTONS).forEach(function(k){ const b = SESSION_FINANCE_POST_BUTTONS[k]; click(b.id, function(){ SessionPayroll.openPanel(b.panel); }); });
+  click('swpFinRetryPostBtn', function(){ SessionPayroll.retryPosting(); });
+  click('swpFinRetryBtn', function(){ SessionPayroll.retryFinance(); });
 }
 
 // After a render: the element the section asked for, else null (the workspace decides).
