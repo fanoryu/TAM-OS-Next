@@ -135,6 +135,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
         new \TamOs\Controller\OvertimeController(new \TamOs\Overtime\OvertimeService($business)),
         new \TamOs\Controller\PayrollController(new \TamOs\Payroll\PayrollService($business)),
         new \TamOs\Controller\SupplementalController(new \TamOs\Supplemental\SupplementalService($business)),
+        new \TamOs\Controller\FinanceController(new \TamOs\Finance\FinancePostingService($business)),
     );
 }
 
