@@ -190,7 +190,9 @@ return [
         assertSame(1, (int) $db->select('SELECT COUNT(*) AS n FROM supplemental_payroll_overtime WHERE id = ?', [$o])[0]['n']);
         $refused($db, 'DELETE FROM overtime_records WHERE id = ?', [$o], 'a captured overtime record cannot be removed (RESTRICT)');
     },
-    '0031: the audit vocabulary admits supplemental.manage on supplementalPayroll with the Payroll operations, and keeps every existing rule' => static function (): void {
+    // BF-4e authorized revision: 0033 admits post under supplemental.manage — the Finance posting of a
+    // Committed document is audited on the document (D-FIN-2 = A). Was: post refused.
+    '0031 + 0033: the audit vocabulary admits supplemental.manage on supplementalPayroll with the Payroll operations and post, and keeps every existing rule' => static function (): void {
         $db = authDatabase();
         $c = bin2hex(random_bytes(16));
         $db->execute('INSERT INTO companies (id, created_at) VALUES (?, UTC_TIMESTAMP(6))', [$c]);
@@ -204,10 +206,11 @@ return [
             $row('supplemental.manage', 'supplementalPayroll', $op);
             $row('payroll.manage', 'payrollPlan', $op);
         }
+        $row('supplemental.manage', 'supplementalPayroll', 'post');
         foreach ([
             'no operation' => ['supplemental.manage', 'supplementalPayroll', null],
             'a payment operation' => ['supplemental.manage', 'supplementalPayroll', 'pay'],
-            'a posting operation' => ['supplemental.manage', 'supplementalPayroll', 'post'],
+            'a posting operation on the wrong entity' => ['supplemental.manage', 'payrollPlan', 'post'],
             'an execution operation' => ['supplemental.manage', 'supplementalPayroll', 'execute'],
             'the wrong entity' => ['supplemental.manage', 'payrollPlan', 'create'],
             'the Supplemental entity under payroll.manage' => ['payroll.manage', 'supplementalPayroll', 'create'],
@@ -223,7 +226,7 @@ return [
         }
         $row('overtime.manage', 'overtime', 'approve');
         $row('employee.update', 'employee', null);
-        assertSame(16, (int) $db->select('SELECT COUNT(*) AS n FROM audit_events WHERE company_id = ?', [$c])[0]['n'], 'the existing vocabulary still holds');
+        assertSame(17, (int) $db->select('SELECT COUNT(*) AS n FROM audit_events WHERE company_id = ?', [$c])[0]['n'], 'the existing vocabulary still holds');
     },
     '0029–0031 migrate a schema-0028 database forward: Committed and open plans, their links, overtime and audit rows survive unchanged; nothing is seeded' => static function () use ($approved): void {
         $db = testDatabase();
@@ -244,8 +247,9 @@ return [
         $snapshot = static fn (): array => [$db->select('SELECT * FROM payroll_plans ORDER BY id'), $db->select('SELECT * FROM payroll_plan_overtime ORDER BY id'), $db->select('SELECT * FROM overtime_records ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4d migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0031, current');
+        // BF-4e authorized revision: 0032–0033 follow (head 0033). Was: through 0031.
+        assertSame(['0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4d and BF-4e migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0033, current');
         assertSame($before, $snapshot(), 'every payroll, link, overtime and audit row is unchanged');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM supplemental_payrolls')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM supplemental_payroll_overtime')[0]['n']], 'no Supplemental row is seeded');
     },

@@ -37,7 +37,9 @@ return [
     },
     // BF-4d authorized revision: the six Supplemental Payroll writes under the existing,
     // record-free supplemental.manage join. Was: no supplemental.manage route.
-    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) approve under overtime.manage (BF-4b2), the five payroll writes under payroll.manage (BF-4c1) and the six Supplemental writes under supplemental.manage (BF-4d)' => static function (): void {
+    // BF-4e authorized revision: the two Finance postings join under their source domain's Action
+    // (D-FIN-2 = A). Was: no Finance route.
+    'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) approve under overtime.manage (BF-4b2), the five payroll writes under payroll.manage (BF-4c1) and the six Supplemental writes under supplemental.manage (BF-4d), and the two Finance postings under payroll.manage and supplemental.manage (BF-4e)' => static function (): void {
         $routes = productionRoutes(testConfig());
         $selfService = [];
         $business = [];
@@ -84,6 +86,8 @@ return [
             'POST /api/supplemental-payrolls/return' => Action::SupplementalManage,
             'POST /api/supplemental-payrolls/cancel' => Action::SupplementalManage,
             'POST /api/supplemental-payrolls/commit' => Action::SupplementalManage,
+            'POST /api/finance-postings/payroll-plan' => Action::PayrollManage,
+            'POST /api/finance-postings/supplemental-payroll' => Action::SupplementalManage,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

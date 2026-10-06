@@ -175,7 +175,9 @@ return [
         foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(dirname(__DIR__, 2) . '/src', \FilesystemIterator::SKIP_DOTS)) as $f) {
             $all .= str_ends_with((string) $f, '.php') ? (string) file_get_contents((string) $f) : '';
         }
-        assertSame(4, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow; BF-4d: Supplemental generate and commit)');
+        // BF-4e authorized revision: the two Finance postings (one commit-class transaction per
+        // Committed source) follow it too (pinned in FinancePostingDomainTest). Was: exactly 4.
+        assertSame(6, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow; BF-4d: Supplemental generate and commit; BF-4e: the two Finance postings)');
         assertSame(2, substr_count((string) file_get_contents(dirname(__DIR__, 2) . '/src/Supplemental/SupplementalService.php'), 'readCommitted: true'), 'the other two are the Supplemental generate and commit');
         assertSame(['employee_code_snapshot', 'employee_name_snapshot', 'department_snapshot', 'base_salary', 'overtime_amount', 'overtime_hours', 'overtime_count', 'total_amount'], PayrollStore::VALUES);
     },
