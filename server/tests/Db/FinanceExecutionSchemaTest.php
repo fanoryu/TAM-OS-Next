@@ -158,6 +158,8 @@ return [
             'execute on an employee row' => ['employee.update', 'employee', 'execute'],
             'finance.execute on a plan' => ['finance.execute', 'payrollPlan', 'execute'],
             'finance.execute on a document' => ['finance.execute', 'supplementalPayroll', 'execute'],
+            'finance.execute on an employee row' => ['finance.execute', 'employee', 'execute'],
+            'a financePosting entity under employee.update' => ['employee.update', 'financePosting', null],
             'a financePosting entity under payroll.manage' => ['payroll.manage', 'financePosting', 'post'],
             'a financePosting entity under supplemental.manage' => ['supplemental.manage', 'financePosting', 'post'],
             'post under finance.execute' => ['finance.execute', 'financePosting', 'post'],
