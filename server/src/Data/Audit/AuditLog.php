@@ -55,6 +55,11 @@ use TamOs\Policy\Scope;
  * record-free supplemental.manage for the Supplemental document (entity supplementalPayroll) — with
  * operation 'post'. It names no field and carries no value — never the amount; the posting row is
  * the evidence. CEO company scope only. An idempotent replay writes none. No new Action.
+ *
+ * BF-4f (migration 0035): a Finance execution is audited on its POSTING, under the existing
+ * record-free finance.execute (D-FEX-4 = A) — entity financePosting, operation 'execute'. It names no
+ * field and carries no value — never the amount, the date or the payment method; the execution row is
+ * the evidence. CEO company scope only. An idempotent replay writes none. No new Action.
  */
 final class AuditLog
 {
@@ -72,6 +77,8 @@ final class AuditLog
     public const SUPPLEMENTAL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'];
     /** BF-4e: the one operation appendPosting() audits, under payroll.manage or supplemental.manage (migration 0033's CHECK). */
     public const POSTING_OPERATION = 'post';
+    /** BF-4f: the one operation appendExecution() audits, under finance.execute on financePosting (migration 0035's CHECK). */
+    public const EXECUTION_OPERATION = 'execute';
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
@@ -81,6 +88,7 @@ final class AuditLog
     public const APPEND_PAYROLL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_SUPPLEMENTAL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_POSTING_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
+    public const APPEND_EXECUTION_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_ACCOUNT_SQL ='INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
 
     public function __construct(private readonly ScopedDatabase $db)
@@ -260,6 +268,30 @@ final class AuditLog
             'entity' => $entity,
             'id' => $sourceId,
             'operation' => self::POSTING_OPERATION,
+            'request_id' => $requestId,
+        ]);
+    }
+
+    /**
+     * BF-4f: appends one finance.execute row for a Finance execution, on its posting $postingId
+     * (entity financePosting) — operation 'execute', no field. finance.execute is record-free, so the
+     * row names the posting by its id rather than through an authorized record. Must run inside the
+     * transaction of the execution.
+     */
+    public function appendExecution(Authorization $auth, Principal $actor, string $postingId, string $requestId): void
+    {
+        if ($auth->action !== Action::FinanceExecute || $auth->record !== null || $auth->scope->isSelf()
+            || preg_match('/^[0-9a-f]{32}$/', $postingId) !== 1) {
+            throw new \LogicException('an execution audit row is written only under finance.execute, for its posting, in company scope');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $this->db->execute($auth, self::APPEND_EXECUTION_SQL, [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => 'financePosting',
+            'id' => $postingId,
+            'operation' => self::EXECUTION_OPERATION,
             'request_id' => $requestId,
         ]);
     }

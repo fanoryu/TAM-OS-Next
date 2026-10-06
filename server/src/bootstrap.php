@@ -18,6 +18,7 @@ use TamOs\Config\ConfigLoader;
 use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\FinanceController;
+use TamOs\Controller\FinanceExecutionController;
 use TamOs\Controller\OvertimeController;
 use TamOs\Controller\PayrollController;
 use TamOs\Controller\SupplementalController;
@@ -26,6 +27,7 @@ use TamOs\Data\BusinessData;
 use TamOs\Data\Readiness;
 use TamOs\Employee\AccountService;
 use TamOs\Employee\EmployeeService;
+use TamOs\Finance\FinanceExecutionService;
 use TamOs\Finance\FinancePostingService;
 use TamOs\Http\ErrorCode;
 use TamOs\Http\Kernel;
@@ -123,6 +125,7 @@ function run(): void
         new PayrollController(new PayrollService($business)),
         new SupplementalController(new SupplementalService($business)),
         new FinanceController(new FinancePostingService($business)),
+        new FinanceExecutionController(new FinanceExecutionService($business)),
     );
     $kernel = new Kernel($routes, new SessionPrincipalResolver($auth), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');
