@@ -5,6 +5,7 @@ namespace TamOs\Http;
 
 use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
+use TamOs\Controller\FinanceController;
 use TamOs\Controller\HealthController;
 use TamOs\Controller\OvertimeController;
 use TamOs\Controller\PayrollController;
@@ -51,6 +52,13 @@ use TamOs\Policy\Action;
  * Committed documents). There is no generic status, payment, posting or execution route. ACTIONS
  * stay 21.
  *
+ * BF-4e: the two Finance posting writes declare the Action of their source domain (D-FIN-2 = A) —
+ * the base plan posting the existing payroll.manage (record-bearing, decided by the handler after
+ * its scoped load: an Employee is 403 before any lookup), the Supplemental posting the existing
+ * record-free supplemental.manage (decided by the kernel). The month read adds no Action and is
+ * CEO-only (decided by the handler). There is no execution, payment, actual, reversal or
+ * correction route. ACTIONS stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -70,7 +78,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -130,6 +138,10 @@ final class Routes
             new Route('POST', '/api/supplemental-payrolls/return', $supplemental->returnToDraft(...), [], RouteAuth::Required, Action::SupplementalManage),
             new Route('POST', '/api/supplemental-payrolls/cancel', $supplemental->cancel(...), [], RouteAuth::Required, Action::SupplementalManage),
             new Route('POST', '/api/supplemental-payrolls/commit', $supplemental->commit(...), [], RouteAuth::Required, Action::SupplementalManage),
+            // BF-4e: Finance posting — one Planned posting per Committed obligation, under its source's Action.
+            new Route('GET', '/api/finance-postings', $finance->month(...), ['month'], RouteAuth::Required),
+            new Route('POST', '/api/finance-postings/payroll-plan', $finance->postPayrollPlan(...), [], RouteAuth::Required, Action::PayrollManage),
+            new Route('POST', '/api/finance-postings/supplemental-payroll', $finance->postSupplementalPayroll(...), [], RouteAuth::Required, Action::SupplementalManage),
         ]);
     }
 

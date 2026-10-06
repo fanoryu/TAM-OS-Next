@@ -249,8 +249,10 @@ return [
         // an approval still writes none of them (their counts are compared above). Was: no payroll table at all.
         // BF-4d authorized revision: the two Supplemental Payroll tables exist too; an approval writes
         // neither. Was: only the BF-4c1 payroll tables.
+        // BF-4e authorized revision: the Finance posting table exists; an approval never writes it (its
+        // count is compared above). Was: no finance table at all.
         foreach (array_keys($after) as $t) {
-            assertTrue(preg_match('/payslip|payment|finance|transaction|ledger|journal/i', $t) !== 1, 'no finance table: ' . $t);
+            assertTrue($t === 'finance_postings' || preg_match('/payslip|payment|finance|transaction|ledger|journal/i', $t) !== 1, 'no other finance table: ' . $t);
             assertTrue(preg_match('/payroll/', $t) !== 1 || in_array($t, ['payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime'], true), 'only the BF-4c1 payroll and BF-4d Supplemental tables: ' . $t);
         }
     },

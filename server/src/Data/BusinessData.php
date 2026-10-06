@@ -5,13 +5,14 @@ namespace TamOs\Data;
 
 use TamOs\Data\Audit\AuditLog;
 use TamOs\Data\Employee\EmployeeStore;
+use TamOs\Data\Finance\FinancePostingStore;
 use TamOs\Data\Overtime\OvertimeStore;
 use TamOs\Data\Payroll\PayrollStore;
 use TamOs\Data\Scope\ScopedDatabase;
 use TamOs\Data\Supplemental\SupplementalStore;
 
 /**
- * The business data access point (BF-4a1; overtime BF-4b1; payroll BF-4c1; supplemental payroll BF-4d): the scoped business stores over one lazily opened,
+ * The business data access point (BF-4a1; overtime BF-4b1; payroll BF-4c1; supplemental payroll BF-4d; Finance posting BF-4e): the scoped business stores over one lazily opened,
  * request-scoped connection — shared with TamOs\Data\Auth\AuthData in production, so the
  * session lookup and the business statements of a request use the same connection — and
  * atomically() for the transaction boundaries the business services own. The stores receive
@@ -25,6 +26,7 @@ final class BusinessData
     private ?OvertimeStore $overtime = null;
     private ?PayrollStore $payroll = null;
     private ?SupplementalStore $supplemental = null;
+    private ?FinancePostingStore $finance = null;
     private ?AuditLog $audit = null;
 
     /** @param \Closure(): Database $connect */
@@ -64,6 +66,11 @@ final class BusinessData
         return $this->supplemental ??= new SupplementalStore($this->scoped());
     }
 
+    public function finance(): FinancePostingStore
+    {
+        return $this->finance ??= new FinancePostingStore($this->scoped());
+    }
+
     public function audit(): AuditLog
     {
         return $this->audit ??= new AuditLog($this->scoped());
@@ -73,7 +80,7 @@ final class BusinessData
      * Runs $fn in one database transaction: a business write and its audit row commit together
      * or not at all. Nested calls are refused (Database::transaction). $readCommitted runs that
      * one transaction at READ COMMITTED (payroll generate and commit, BF-4c1/BF-4c2; Supplemental
-     * Payroll generate and commit, BF-4d).
+     * Payroll generate and commit, BF-4d; a Finance posting, BF-4e).
      *
      * @template T
      * @param \Closure(): T $fn

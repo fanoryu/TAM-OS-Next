@@ -376,7 +376,9 @@ return [
             }
         }
         assertSame([2, 1, $before['audit_events'] + 4], [$after['payroll_plans'], $after['payroll_plan_overtime'], $after['audit_events']]);
-        assertSame([], array_values(array_filter(array_keys($after), static fn (string $t): bool => (bool) preg_match('/finance|transaction|ledger|journal|payment|payslip/', $t))), 'no finance table exists');
+        // BF-4e authorized revision: the Finance posting table exists; generate and the transitions never
+        // write it (its count is compared above). Was: no finance table at all.
+        assertSame([], array_values(array_filter(array_keys($after), static fn (string $t): bool => $t !== 'finance_postings' && (bool) preg_match('/finance|transaction|ledger|journal|payment|payslip/', $t))), 'no other finance table exists');
         assertSame('Ready', $p['status'], 'Ready is an approved obligation, not a payment');
     },
 ];

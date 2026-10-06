@@ -1,0 +1,350 @@
+<?php
+declare(strict_types=1);
+
+/*
+ * BF-4e Finance posting against the real MariaDB (owner decisions D-FIN-1..5 = A): real login → real
+ * session → production routes → FinancePostingService → FinancePostingStore / AuditLog. A base plan
+ * is committed through the real Payroll routes and a Supplemental document through the real
+ * Supplemental routes; each is then posted as one Planned posting. Proven: the posting (the source's
+ * employee, month and exact amount; Planned; one 'post' audit row on the source under its Action),
+ * Commit never posts, every refusal (a source that is not Committed, an absent or foreign source, a
+ * wrong expectedAmount, a second posting of a source) writing nothing and consuming no key, the
+ * idempotent replay and every key mismatch, the month read and the Employee's 403s, audit rollback,
+ * immutability, and the firewalls: the sources, their links, overtime and employees are never
+ * written, and nothing is executed, paid or given an actual amount. Fabricated data only.
+ */
+
+use TamOs\Data\Auth\AuthData;
+use TamOs\Data\Database;
+use TamOs\Finance\FinancePostingView;
+use TamOs\Http\Kernel;
+use TamOs\Http\Response;
+use TamOs\Payroll\PayrollView;
+use TamOs\Supplemental\SupplementalView;
+use function TamOs\Tests\assertNoLeak;
+use function TamOs\Tests\assertSame;
+use function TamOs\Tests\assertTrue;
+use function TamOs\Tests\authDatabase;
+use function TamOs\Tests\authFixture;
+use function TamOs\Tests\authKernel;
+use function TamOs\Tests\employeeAnchor;
+use function TamOs\Tests\envelope;
+use function TamOs\Tests\loginRequest;
+use function TamOs\Tests\productionMigrationsDir;
+use function TamOs\Tests\requestId;
+use function TamOs\Tests\sessionCookieToken;
+use function TamOs\Tests\sessionRequest;
+use function TamOs\Tests\testDbConfig;
+
+/**
+ * Company A: a CEO; e_a1 and e_a2 (Employee logins), e_a3. Company B: a CEO and e_b1 (an Employee
+ * login). Every salary is positive, so the Payroll generate makes a plan for each.
+ *
+ * @return array{db: Database, k: Kernel, a: string, b: string, s: array<string, array{token: string, csrf: string}>}
+ */
+$world = static function (): array {
+    $db = authDatabase();
+    $k = authKernel(testDbConfig(), AuthData::fromDatabase($db), productionMigrationsDir());
+    $ceoA = authFixture($db);
+    $a = $ceoA['companyId'];
+    $ceoB = authFixture($db);
+    $fixtures = ['ceoA' => $ceoA, 'empA1' => authFixture($db, ['companyId' => $a, 'role' => 'employee', 'employeeId' => 'e_a1']),
+        'empA2' => authFixture($db, ['companyId' => $a, 'role' => 'employee', 'employeeId' => 'e_a2']), 'ceoB' => $ceoB,
+        'empB1' => authFixture($db, ['companyId' => $ceoB['companyId'], 'role' => 'employee', 'employeeId' => 'e_b1'])];
+    employeeAnchor($db, $a, 'e_a3');
+    $db->execute("UPDATE employees SET monthly_base_salary = '3500000.00', department = 'Operations' WHERE id = 'e_a1'");
+    $db->execute("UPDATE employees SET monthly_base_salary = '2000000.00' WHERE id IN ('e_a2', 'e_a3', 'e_b1')");
+    $s = [];
+    foreach ($fixtures as $name => $f) {
+        $r = $k->handle(loginRequest($f['email'], (string) $f['password']), requestId());
+        assertSame(200, $r->status, 'login ' . $name);
+        $s[$name] = ['token' => (string) sessionCookieToken($r), 'csrf' => (string) envelope($r)['data']['csrfToken']];
+    }
+    return ['db' => $db, 'k' => $k, 'a' => $a, 'b' => $ceoB['companyId'], 's' => $s];
+};
+/** Test-only SQL: an Approved overtime record with a frozen snapshot and $amount — "approved now". */
+$overtime = static function (Database $db, string $company, string $employee, string $month, string $hours, string $amount): string {
+    $id = bin2hex(random_bytes(16));
+    $db->execute("INSERT INTO overtime_records (id, company_id, employee_id, month_key, overtime_date, hours, work_description, notes, status, version, created_at, updated_at, valuation_method, valuation_salary, valuation_standard_hours, approved_amount, approved_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, NULL, 'Approved', 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 'TAM-OT-1', '3200000.00', '160.00', ?, UTC_TIMESTAMP(6))",
+        [$id, $company, $employee, $month, $hours, $amount]);
+    return $id;
+};
+$get = static fn (array $w, string $who, string $path, string $query = ''): Response
+    => $w['k']->handle(sessionRequest('GET', $path, $w['s'][$who]['token'], null, '', ['query' => $query]), requestId());
+$post = static fn (array $w, string $who, string $path, array $body): Response
+    => $w['k']->handle(sessionRequest('POST', $path, $w['s'][$who]['token'], $w['s'][$who]['csrf'], json_encode($body, JSON_THROW_ON_ERROR)), requestId());
+$ok = static function (Response $r, string $label): array {
+    assertSame(200, $r->status, $label . ' (' . substr($r->body, 0, 300) . ')');
+    return envelope($r)['data'];
+};
+$code = static fn (Response $r): array => [$r->status, envelope($r)['error']['code'] ?? null];
+$newKey = static fn (): string => bin2hex(random_bytes(16));
+/** Every plan of $month, generated by $who through the real Payroll route, by employee. */
+$plans = static function (array $w, string $month = '2026-10', string $who = 'ceoA') use ($post, $ok): array {
+    $out = [];
+    foreach ($ok($post($w, $who, '/api/payroll-plans/generate', ['month' => $month]), 'payroll generate')['payrollPlans'] as $p) {
+        $out[$p['employeeId']] = $p;
+    }
+    return $out;
+};
+/** $employee's base plan of $month, generated, approved and committed through the real Payroll routes by $who. */
+$committed = static function (array $w, string $employee, string $month = '2026-10', string $who = 'ceoA') use ($plans, $post, $ok, $newKey): array {
+    $p = $plans($w, $month, $who)[$employee];
+    if ($p['status'] === 'Committed') {
+        return $p;
+    }
+    $p = $ok($post($w, $who, '/api/payroll-plans/approve', ['id' => $p['id'], 'expectedVersion' => $p['version']]), 'payroll approve')['payrollPlan'];
+    return $ok($post($w, $who, '/api/payroll-plans/commit', ['id' => $p['id'], 'expectedVersion' => $p['version'], 'expectedTotal' => $p['totalAmount'], 'idempotencyKey' => $newKey()]), 'payroll commit')['payrollPlan'];
+};
+/** A Committed Supplemental document of $plan's late overtime, through the real Supplemental routes. */
+$supplemental = static function (array $w, array $plan, string $who = 'ceoA') use ($post, $ok, $newKey): array {
+    $d = $ok($post($w, $who, '/api/supplemental-payrolls/generate', ['payrollPlanId' => $plan['id']]), 'supplemental generate')['supplementalPayroll'];
+    foreach (['review', 'approve'] as $op) {
+        $d = $ok($post($w, $who, '/api/supplemental-payrolls/' . $op, ['id' => $d['id'], 'expectedVersion' => $d['version']]), 'supplemental ' . $op)['supplementalPayroll'];
+    }
+    return $ok($post($w, $who, '/api/supplemental-payrolls/commit', ['id' => $d['id'], 'expectedVersion' => $d['version'], 'expectedTotal' => $d['overtimeAmount'], 'idempotencyKey' => $newKey()]), 'supplemental commit')['supplementalPayroll'];
+};
+$postPlan = static fn (array $w, array $plan, string $key, array $over = [], string $who = 'ceoA'): Response
+    => $post($w, $who, '/api/finance-postings/payroll-plan', $over + ['payrollPlanId' => $plan['id'], 'expectedAmount' => $plan['totalAmount'], 'idempotencyKey' => $key]);
+$postSupp = static fn (array $w, array $doc, string $key, array $over = [], string $who = 'ceoA'): Response
+    => $post($w, $who, '/api/finance-postings/supplemental-payroll', $over + ['supplementalPayrollId' => $doc['id'], 'expectedAmount' => $doc['overtimeAmount'], 'idempotencyKey' => $key]);
+$postings = static fn (Database $db): array => $db->select('SELECT * FROM finance_postings ORDER BY id');
+$audits = static fn (Database $db, string $id): array => array_map(static fn (array $r): string => $r['action'] . ' ' . $r['entity'] . ' ' . $r['operation'],
+    $db->select('SELECT action, entity, operation FROM audit_events WHERE entity_id = ? ORDER BY id', [$id]));
+/** Every table's row count. */
+$counts = static function (Database $db): array {
+    $out = [];
+    foreach ($db->select('SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME') as $t) {
+        $out[(string) $t['t']] = (int) $db->select('SELECT COUNT(*) AS n FROM `' . $t['t'] . '`')[0]['n'];
+    }
+    return $out;
+};
+/** The source state a posting must never write: base plans and their links, Supplemental documents and theirs, overtime and employees. */
+$sources = static fn (Database $db): array => [$db->select('SELECT * FROM payroll_plans ORDER BY id'), $db->select('SELECT * FROM payroll_plan_overtime ORDER BY id'),
+    $db->select('SELECT * FROM supplemental_payrolls ORDER BY id'), $db->select('SELECT * FROM supplemental_payroll_overtime ORDER BY id'),
+    $db->select('SELECT * FROM overtime_records ORDER BY id'), $db->select('SELECT * FROM employees ORDER BY id')];
+/** Asserts a refused request changed nothing at all: every table's rows. */
+$unchanged = static function (Database $db, Closure $fn) use ($counts, $postings, $sources): void {
+    $before = [$counts($db), $postings($db), $sources($db)];
+    $fn();
+    assertSame($before, [$counts($db), $postings($db), $sources($db)], 'nothing written');
+};
+
+return [
+    'a Committed base plan is posted as one Planned posting — its employee, month and exact total; one payroll.manage post audit row on the plan; Commit itself posted nothing; the sources are untouched' => static function () use ($world, $overtime, $committed, $postPlan, $ok, $postings, $audits, $sources, $counts, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '10.00', '218750.00');
+        $before = $counts($db);
+        $p = $committed($w, 'e_a1');
+        assertSame([0, 'Committed', '3718750.00'], [count($postings($db)), $p['status'], $p['totalAmount']], 'Commit is never a posting (D-FIN-3 = A)');
+        assertSame($before['finance_postings'], $counts($db)['finance_postings'], 'no posting row from Commit');
+        $src = $sources($db);
+        $key = $newKey();
+        $out = $ok($postPlan($w, $p, $key), 'post');
+        assertSame(['financePosting'], array_keys($out));
+        $f = $out['financePosting'];
+        assertSame(FinancePostingView::FIELDS, array_keys($f), 'exactly the seven posting keys');
+        assertSame(['payrollPlan', $p['id'], 'e_a1', '2026-10', '3718750.00', 'Planned'], [$f['sourceKind'], $f['sourceId'], $f['employeeId'], $f['monthKey'], $f['amount'], $f['status']], 'the source, its exact total, Planned');
+        $rows = $postings($db);
+        assertSame(1, count($rows));
+        $r = $rows[0];
+        assertSame([$f['id'], $w['a'], 'payrollPlan', $p['id'], null, 'e_a1', '2026-10', '3718750.00', 'Planned', $key],
+            [$r['id'], $r['company_id'], $r['source_kind'], $r['payroll_plan_id'], $r['supplemental_payroll_id'], $r['employee_id'], $r['month_key'], (string) $r['amount'], $r['status'], $r['idempotency_key']], 'the stored posting');
+        assertSame(['payroll.manage payrollPlan create', 'payroll.manage payrollPlan approve', 'payroll.manage payrollPlan commit', 'payroll.manage payrollPlan post'], $audits($db, $p['id']), 'one post row on the plan, after its Commit');
+        $a = $db->select("SELECT fields, target_user_id FROM audit_events WHERE entity_id = ? AND operation = 'post'", [$p['id']])[0];
+        assertSame([null, null], [$a['fields'], $a['target_user_id']], 'no field, no value');
+        assertSame([], $audits($db, $f['id']), 'the posting id itself is never an audit entity');
+        assertSame($src, $sources($db), 'no plan, link, document, overtime or employee write');
+    },
+    'a Committed Supplemental document is posted as one Planned posting of its exact amount; one supplemental.manage post audit row on the document; its base plan is posted separately' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $postings, $audits, $sources, $newKey, $get): void {
+        $w = $world();
+        $db = $w['db'];
+        $p = $committed($w, 'e_a1');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '2.50', '54688.00');
+        $d = $supplemental($w, $p);
+        $src = $sources($db);
+        $f = $ok($postSupp($w, $d, $newKey()), 'post supplemental')['financePosting'];
+        assertSame(['supplementalPayroll', $d['id'], 'e_a1', '2026-10', '54688.00', 'Planned'], [$f['sourceKind'], $f['sourceId'], $f['employeeId'], $f['monthKey'], $f['amount'], $f['status']]);
+        assertSame([null, $d['id']], [$postings($db)[0]['payroll_plan_id'], $postings($db)[0]['supplemental_payroll_id']], 'the Supplemental source column only');
+        assertSame(['supplemental.manage supplementalPayroll create', 'supplemental.manage supplementalPayroll review', 'supplemental.manage supplementalPayroll approve',
+            'supplemental.manage supplementalPayroll commit', 'supplemental.manage supplementalPayroll post'], $audits($db, $d['id']));
+        assertSame($src, $sources($db), 'no plan, link, document, overtime or employee write');
+        $g = $ok($postPlan($w, $p, $newKey()), 'post the base plan')['financePosting'];
+        assertSame(['payrollPlan', $p['id'], '3500000.00'], [$g['sourceKind'], $g['sourceId'], $g['amount']], 'the base plan is its own posting — never combined with its Supplemental document');
+        $list = $ok($get($w, 'ceoA', '/api/finance-postings', 'month=2026-10'), 'month')['financePostings'];
+        $ids = array_column($list, 'id');
+        sort($ids);
+        $want = [$f['id'], $g['id']];
+        sort($want);
+        assertSame($want, $ids, 'two postings of the month');
+        foreach ($list as $x) {
+            assertSame(FinancePostingView::FIELDS, array_keys($x));
+        }
+    },
+    'a source that is not Committed is 409 — Draft, Reviewed, Ready and Cancelled plans and documents — and an absent or foreign source is 404; nothing is written and no key is consumed' => static function () use ($world, $overtime, $plans, $committed, $postPlan, $postSupp, $post, $ok, $code, $unchanged, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $all = $plans($w);
+        $reviewed = $ok($post($w, 'ceoA', '/api/payroll-plans/review', ['id' => $all['e_a2']['id'], 'expectedVersion' => $all['e_a2']['version']]), 'review')['payrollPlan'];
+        $ready = $ok($post($w, 'ceoA', '/api/payroll-plans/approve', ['id' => $all['e_a3']['id'], 'expectedVersion' => $all['e_a3']['version']]), 'approve')['payrollPlan'];
+        $key = $newKey();
+        foreach (['Draft' => $all['e_a1'], 'Reviewed' => $reviewed, 'Ready' => $ready] as $label => $q) {
+            $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $q, $key)), $label . ' base plan'));
+        }
+        $cancelled = $ok($post($w, 'ceoA', '/api/payroll-plans/cancel', ['id' => $all['e_a1']['id'], 'expectedVersion' => $all['e_a1']['version']]), 'cancel')['payrollPlan'];
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $cancelled, $key)), 'Cancelled base plan'));
+        $p = $committed($w, 'e_a1');
+        $doc = static function (array $ops) use ($w, $db, $overtime, $p, $post, $ok): array {
+            $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+            $d = $ok($post($w, 'ceoA', '/api/supplemental-payrolls/generate', ['payrollPlanId' => $p['id']]), 'generate')['supplementalPayroll'];
+            foreach ($ops as $op) {
+                $d = $ok($post($w, 'ceoA', '/api/supplemental-payrolls/' . $op, ['id' => $d['id'], 'expectedVersion' => $d['version']]), $op)['supplementalPayroll'];
+            }
+            return $d;
+        };
+        foreach (['Draft' => [], 'Reviewed' => ['review'], 'Ready' => ['review', 'approve'], 'Cancelled' => ['cancel']] as $label => $ops) {
+            $d = $doc($ops);
+            $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postSupp($w, $d, $key)), $label . ' Supplemental document'));
+            if ($label !== 'Cancelled') {
+                $ok($post($w, 'ceoA', '/api/supplemental-payrolls/cancel', ['id' => $d['id'], 'expectedVersion' => $d['version']]), 'cancel ' . $label);
+            }
+        }
+        $absent = ['id' => bin2hex(random_bytes(16)), 'totalAmount' => '1.00', 'overtimeAmount' => '1.00'];
+        $unchanged($db, static fn () => assertSame([404, 'not_found'], $code($postPlan($w, $absent, $key)), 'absent plan'));
+        $unchanged($db, static fn () => assertSame([404, 'not_found'], $code($postSupp($w, $absent, $key)), 'absent document'));
+        $unchanged($db, static fn () => assertSame([404, 'not_found'], $code($postSupp($w, ['overtimeAmount' => $p['totalAmount']] + $p, $key)), 'a plan id is not a document id'));
+        $pb = $committed($w, 'e_b1', '2026-10', 'ceoB');
+        $unchanged($db, static fn () => assertSame([404, 'not_found'], $code($postPlan($w, $pb, $key)), "another company's plan is absent"));
+        assertSame('Planned', $ok($postPlan($w, $p, $key), 'the same key, never consumed by a refusal, posts the Committed plan')['financePosting']['status']);
+        assertSame('Planned', $ok($postPlan($w, $pb, $key, [], 'ceoB'), 'the same key in another company')['financePosting']['status']);
+    },
+    'expectedAmount is only a guard: any other amount is 409 and writes nothing; the stored amount is always the source own' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $code, $unchanged, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $p = $committed($w, 'e_a1');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $d = $supplemental($w, $p);
+        $key = $newKey();
+        foreach (['3499999.00', '3500001.00', '0.00', '21875.00', '7000000.00'] as $bad) {
+            $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $p, $key, ['expectedAmount' => $bad])), 'base plan at ' . $bad));
+        }
+        foreach (['21874.00', '3500000.00', '0.00'] as $bad) {
+            $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postSupp($w, $d, $key, ['expectedAmount' => $bad])), 'document at ' . $bad));
+        }
+        assertSame('3500000.00', $ok($postPlan($w, $p, $key), 'the exact amount')['financePosting']['amount']);
+        assertSame('21875.00', $ok($postSupp($w, $d, $newKey()), 'the exact amount')['financePosting']['amount']);
+    },
+    'exactly one posting per source: a second posting with another key is 409 and writes nothing; the same request with the same key replays the original — no write, no audit' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $code, $unchanged, $counts, $postings, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $p = $committed($w, 'e_a1');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $d = $supplemental($w, $p);
+        $k1 = $newKey();
+        $k2 = $newKey();
+        $first = $ok($postPlan($w, $p, $k1), 'post')['financePosting'];
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $p, $newKey())), 'a second posting of the plan'));
+        $before = [$counts($db), $postings($db)];
+        assertSame($first, $ok($postPlan($w, $p, $k1), 'replay')['financePosting'], 'the replay answers the original posting');
+        assertSame($before, [$counts($db), $postings($db)], 'a replay writes nothing — no posting, no audit row');
+        $f = $ok($postSupp($w, $d, $k2), 'post the document')['financePosting'];
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postSupp($w, $d, $newKey())), 'a second posting of the document'));
+        assertSame($f, $ok($postSupp($w, $d, $k2), 'replay')['financePosting']);
+        assertSame(2, (int) $db->select("SELECT COUNT(*) AS n FROM audit_events WHERE operation = 'post'")[0]['n'], 'one post row per source, ever');
+    },
+    'the idempotency key: reused on another source, another source kind or at another amount it is 409 and writes nothing — the key names one posting of one source' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $code, $unchanged, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $p1 = $committed($w, 'e_a1');
+        $p2 = $committed($w, 'e_a2');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $d = $supplemental($w, $p1);
+        $key = $newKey();
+        $ok($postPlan($w, $p1, $key), 'post p1');
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $p2, $key)), 'another plan'));
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postSupp($w, $d, $key)), 'a Supplemental document'));
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $p1, $key, ['expectedAmount' => '1.00'])), 'the same plan at another amount'));
+        $p3 = $committed($w, 'e_a3');
+        $k2 = $newKey();
+        assertSame($p2['totalAmount'], $p3['totalAmount'], 'two plans at one amount');
+        $ok($postPlan($w, $p2, $k2), 'post p2');
+        $unchanged($db, static fn () => assertSame([409, 'conflict'], $code($postPlan($w, $p3, $k2)), 'another plan at the same amount is never a replay (M8)'));
+        assertSame('Planned', $ok($postPlan($w, $p3, $newKey()), 'p3 with its own key')['financePosting']['status']);
+        assertSame('Planned', $ok($postSupp($w, $d, $newKey()), 'the document with its own key')['financePosting']['status']);
+    },
+    'reads: the CEO lists every posting of the month (company scope); an Employee is 403 on the month read and on both postings — their own Committed plan included; another company sees none' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $code, $get, $unchanged, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $p = $committed($w, 'e_a1');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $d = $supplemental($w, $p);
+        $ok($postPlan($w, $p, $newKey()), 'post');
+        assertSame(1, count($ok($get($w, 'ceoA', '/api/finance-postings', 'month=2026-10'), 'month')['financePostings']));
+        assertSame([], $ok($get($w, 'ceoA', '/api/finance-postings', 'month=2026-11'), 'another month')['financePostings']);
+        assertSame([], $ok($get($w, 'ceoB', '/api/finance-postings', 'month=2026-10'), 'another company')['financePostings'], 'company scope');
+        foreach (['empA1', 'empA2', 'empB1'] as $who) {
+            $r = $get($w, $who, '/api/finance-postings', 'month=2026-10');
+            assertSame([403, 'forbidden'], $code($r), $who . ' month read (D-FIN-4 = A)');
+            assertNoLeak($r->body, ['3500000.00', 'Fixture e_a']);
+            $unchanged($db, static fn () => assertSame([403, 'forbidden'], $code($postSupp($w, $d, $newKey(), [], $who)), $who . ' Supplemental posting'));
+        }
+        $p2 = $committed($w, 'e_a2');
+        $unchanged($db, static fn () => assertSame([403, 'forbidden'], $code($postPlan($w, $p2, $newKey(), [], 'empA2')), 'an Employee posting their own Committed plan'));
+        $unchanged($db, static fn () => assertSame([403, 'forbidden'], $code($postPlan($w, $p2, $newKey(), [], 'empA1')), "an Employee posting a colleague's plan"));
+        $unchanged($db, static fn () => assertSame([404, 'not_found'], $code($postSupp($w, $d, $newKey(), [], 'ceoB')), "another company's CEO"));
+    },
+    'a failing audit append rolls the posting back entirely; the same key then posts' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $code, $counts, $postings, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $p = $committed($w, 'e_a1');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $d = $supplemental($w, $p);
+        $block = static function (Closure $fn) use ($db): void {
+            $last = (string) $db->select('SELECT MAX(occurred_at) AS t FROM audit_events')[0]['t'];
+            usleep(2000);
+            // Test-only DDL: every further audit insert violates this CHECK — inside the posting's transaction.
+            $db->execute("ALTER TABLE audit_events ADD CONSTRAINT test_block_audit CHECK (occurred_at <= '" . $last . "')");
+            try {
+                $fn();
+            } finally {
+                $db->execute('ALTER TABLE audit_events DROP CONSTRAINT test_block_audit');
+            }
+        };
+        $k1 = $newKey();
+        $k2 = $newKey();
+        $before = [$counts($db), $postings($db)];
+        $block(static fn () => assertSame([500, 'internal_error'], $code($postPlan($w, $p, $k1)), 'base plan'));
+        $block(static fn () => assertSame([500, 'internal_error'], $code($postSupp($w, $d, $k2)), 'document'));
+        assertSame($before, [$counts($db), $postings($db)], 'rolled back: no posting, no key');
+        assertSame('Planned', $ok($postPlan($w, $p, $k1), 'the same key after the rollback')['financePosting']['status']);
+        assertSame('Planned', $ok($postSupp($w, $d, $k2), 'the same key after the rollback')['financePosting']['status']);
+    },
+    'firewalls: a posting writes exactly one posting row and one audit row — no plan, document, link, overtime or employee write; Planned only (no execution, payment, actual, account or category column); the posting is immutable; the source DTOs keep their keys' => static function () use ($world, $overtime, $committed, $supplemental, $postPlan, $postSupp, $ok, $get, $counts, $sources, $newKey): void {
+        $w = $world();
+        $db = $w['db'];
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $p = $committed($w, 'e_a1');
+        $overtime($db, $w['a'], 'e_a1', '2026-10', '1.00', '21875.00');
+        $d = $supplemental($w, $p);
+        foreach ([static fn () => $postPlan($w, $p, $newKey()), static fn () => $postSupp($w, $d, $newKey())] as $i => $fn) {
+            $before = $counts($db);
+            $src = $sources($db);
+            $ok($fn(), 'post ' . $i);
+            foreach ($counts($db) as $table => $n) {
+                assertSame(($before[$table] ?? 0) + (['finance_postings' => 1, 'audit_events' => 1][$table] ?? 0), $n, $table . ' after posting ' . $i);
+            }
+            assertSame($src, $sources($db), 'the sources are never written');
+        }
+        $cols = array_map(static fn (array $r): string => (string) $r['c'], $db->select("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'finance_postings' ORDER BY ORDINAL_POSITION"));
+        assertSame(['id', 'company_id', 'source_kind', 'payroll_plan_id', 'supplemental_payroll_id', 'employee_id', 'month_key', 'amount', 'status', 'idempotency_key', 'posted_at'], $cols, 'the minimal Planned posting');
+        assertSame([], array_values(array_filter($cols, static fn (string $c): bool => (bool) preg_match('/actual|execut|paid|payment|account|categor|monthly|bank|cash|revers|void|correct|version|updated/', $c))), 'no execution, payment, actual, account, category, monthly-plan or reversal column');
+        assertSame(['Planned'], array_values(array_unique(array_map(static fn (array $r): string => (string) $r['status'], $db->select('SELECT status FROM finance_postings')))));
+        $plan = $ok($get($w, 'ceoA', '/api/payroll-plan', 'id=' . $p['id']), 'base plan detail')['payrollPlan'];
+        assertSame([PayrollView::FIELDS, 'Committed'], [array_keys($plan), $plan['status']], 'the base plan DTO and status are unchanged');
+        $doc = $ok($get($w, 'ceoA', '/api/supplemental-payroll', 'id=' . $d['id']), 'document detail')['supplementalPayroll'];
+        assertSame([SupplementalView::FIELDS, 'Committed'], [array_keys($doc), $doc['status']], 'the Supplemental DTO and status are unchanged');
+        $mine = $ok($get($w, 'empA1', '/api/payroll-plan', 'id=' . $p['id']), 'own base plan')['payrollPlan'];
+        assertSame(PayrollView::FIELDS, array_keys($mine), 'the Employee base plan read is unchanged');
+    },
+];

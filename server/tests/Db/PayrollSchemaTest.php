@@ -160,7 +160,9 @@ return [
         }
     },
     // BF-4c2 authorized revision: 0028 admits commit. Was: commit refused (BF-4c1).
-    '0026 + 0028: the audit vocabulary admits create, recalculate, review, approve, return, cancel and commit under payroll.manage on payrollPlan only' => static function () use ($refused, $company): void {
+    // BF-4e authorized revision: 0033 admits post — the Finance posting of a Committed plan is audited
+    // on the plan, under payroll.manage (D-FIN-2 = A). Was: post refused.
+    '0026 + 0028 + 0033: the audit vocabulary admits create, recalculate, review, approve, return, cancel, commit and post under payroll.manage on payrollPlan only' => static function () use ($refused, $company): void {
         $db = authDatabase();
         $c = $company($db);
         $user = bin2hex(random_bytes(16));
@@ -169,10 +171,10 @@ return [
         $db->execute("INSERT INTO memberships (id, user_id, company_id, role, employee_id, status, created_at, updated_at) VALUES (?, ?, ?, 'ceo', NULL, 'active', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))", [$m, $user, $c['id']]);
         $ins = "INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (?, UTC_TIMESTAMP(6), ?, ?, ?, ?, 'p1', ?, NULL, ?, NULL)";
         $rid = str_repeat('a', 32);
-        foreach (['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'] as $op) {
+        foreach (['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post'] as $op) {
             $db->execute($ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', $op, $rid]);
         }
-        foreach (['pay', 'post', 'execute', 'submit'] as $op) {
+        foreach (['pay', 'execute', 'submit', 'reverse'] as $op) {
             $refused($db, $ins, [$c['id'], $user, $m, 'payroll.manage', 'payrollPlan', $op, $rid], 'no ' . $op . ' operation under payroll.manage');
         }
         $refused($db, $ins, [$c['id'], $user, $m, 'overtime.manage', 'overtime', 'commit', $rid], 'commit is only a payroll operation');
@@ -211,8 +213,9 @@ return [
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
-        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1, BF-4c2 and BF-4d migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0031, current');
+        // BF-4e authorized revision: 0032–0033 follow (head 0033). Was: through 0031.
+        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1, BF-4c2, BF-4d and BF-4e migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0033, current');
         assertSame($before, $snapshot(), 'every Employee, Overtime and audit row is unchanged');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plan_overtime')[0]['n']], 'no payroll row is seeded');
     },
@@ -267,8 +270,9 @@ return [
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
-        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2 and BF-4d migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0031, current');
+        // BF-4e authorized revision: 0032–0033 follow (head 0033). Was: through 0031.
+        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2, BF-4d and BF-4e migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0033, current');
         [$plans, $links, $audit] = $snapshot();
         $sorted = static function (array $r): array {
             ksort($r);

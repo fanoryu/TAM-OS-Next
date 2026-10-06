@@ -49,6 +49,12 @@ use TamOs\Policy\Scope;
  * and carries no value — never an overtime amount or the total; the document row is the evidence.
  * CEO company scope only. A no-op generate and an idempotent commit replay write none. No new
  * Action (ACTIONS stay 21).
+ *
+ * BF-4e (migration 0033): a Finance posting is audited on its SOURCE, under the Action of the source
+ * domain (D-FIN-2 = A) — payroll.manage against the base plan (entity payrollPlan) or the
+ * record-free supplemental.manage for the Supplemental document (entity supplementalPayroll) — with
+ * operation 'post'. It names no field and carries no value — never the amount; the posting row is
+ * the evidence. CEO company scope only. An idempotent replay writes none. No new Action.
  */
 final class AuditLog
 {
@@ -64,6 +70,8 @@ final class AuditLog
     public const PAYROLL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'];
     /** BF-4d: the supplemental.manage operations appendSupplemental() audits (migration 0031's CHECK). */
     public const SUPPLEMENTAL_OPERATIONS = ['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit'];
+    /** BF-4e: the one operation appendPosting() audits, under payroll.manage or supplemental.manage (migration 0033's CHECK). */
+    public const POSTING_OPERATION = 'post';
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
@@ -72,6 +80,7 @@ final class AuditLog
     public const APPEND_OVERTIME_SELF_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) SELECT :company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields FROM DUAL WHERE :owner_employee_id = :self_employee_id';
     public const APPEND_PAYROLL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_SUPPLEMENTAL_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
+    public const APPEND_POSTING_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_ACCOUNT_SQL ='INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
 
     public function __construct(private readonly ScopedDatabase $db)
@@ -220,6 +229,37 @@ final class AuditLog
             'entity' => 'supplementalPayroll',
             'id' => $id,
             'operation' => $operation,
+            'request_id' => $requestId,
+        ]);
+    }
+
+    /**
+     * BF-4e: appends one row for a Finance posting, on its source $sourceId and under the Action of
+     * the source domain: payroll.manage against the base plan the Authorization was decided on
+     * (entity payrollPlan), or the record-free supplemental.manage for a Supplemental document
+     * (entity supplementalPayroll) — operation 'post', no field. Must run inside the transaction of
+     * the posting.
+     */
+    public function appendPosting(Authorization $auth, Principal $actor, string $sourceId, string $requestId): void
+    {
+        if ($auth->scope->isSelf() || preg_match('/^[0-9a-f]{32}$/', $sourceId) !== 1) {
+            throw new \LogicException('a posting audit row is written in company scope, for its source');
+        }
+        if ($auth->action === Action::PayrollManage && $auth->record !== null && $auth->record->entity === 'payrollPlan' && $auth->record->id === $sourceId) {
+            $entity = 'payrollPlan';
+        } elseif ($auth->action === Action::SupplementalManage && $auth->record === null) {
+            $entity = 'supplementalPayroll';
+        } else {
+            throw new \LogicException('a posting audit row is written only under the Action of its source');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $this->db->execute($auth, self::APPEND_POSTING_SQL, [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => $entity,
+            'id' => $sourceId,
+            'operation' => self::POSTING_OPERATION,
             'request_id' => $requestId,
         ]);
     }

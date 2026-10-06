@@ -1747,7 +1747,8 @@ and approval); its valuation inputs and exact-decimal method were deferred to BF
 Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`), AFI-4c1 is merged (PR #45, canonical
 `6834a572485e0057f01897283f006ccaa00769c6`), BF-4c2 is merged (PR #46, canonical `df15b41a9097411eabde39be175f2b38c0809a04`), and
 AFI-4c2 is merged (PR #47, canonical `0ae3ef828349db8167e6bc7c858394c689f83bf5`). Supplemental Payroll follows: BF-4d (below)
-is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`). AFI-4d (below) is a local candidate.
+is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AFI-4d (below) is merged (PR #49, canonical
+`152eccab1973db28b9e86f87d9959aa507b0b5fe`). Finance posting follows: BF-4e (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2241,7 +2242,7 @@ verifier's BF-4d section pin all of this.
 **Compatibility and deployment.** BF-4d adds routes and tables and changes no existing DTO, so it can be deployed before
 AFI-4d and behind the AFI-4c2 frontend; its migrations must run before its routes are reachable. The CEO Supplemental
 screens and the Employee's My payroll presentation are AFI-4d (D-SPAY-4 = A). Finance posting comes later and will consume
-two kinds of Committed obligation: base plans and Supplemental documents.
+two kinds of Committed obligation: base plans and Supplemental documents (BF-4e, below).
 
 **Proof.** Unit (`SupplementalDomainTest`: the graph, inputs, the overtime sum, projections, statements, guards, Policy,
 audit vocabulary), HTTP (`SupplementalRoutingTest`), MariaDB (`SupplementalSchemaTest`: columns, CHECKs, the open key, the
@@ -2250,10 +2251,10 @@ recalculation, frozen states, D-SPAY-2, the lifecycle matrix, Return and Cancel,
 reads and privacy, eligibility, rollback, firewalls; `SupplementalConcurrencyTest`: the lock proofs and C1–C8), the
 boundary tool and its selftest, the verifier's BF-4d section, and a deterministic mutation campaign.
 
-### SESSION Supplemental Payroll — AFI-4d (local candidate; frontend; SESSION mode only)
+### SESSION Supplemental Payroll — AFI-4d (merged as PR #49, canonical `152eccab`; frontend; SESSION mode only)
 
-AFI-4d is the SESSION frontend of BF-4d (owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A). It is a local candidate on
-`feature/afi-4d-session-supplemental`; not pushed, merged or deployed. Frontend only: no backend change, no migration
+AFI-4d is the SESSION frontend of BF-4d (owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A). It is merged to `main` as source
+(PR #49, canonical merge `152eccab1973db28b9e86f87d9959aa507b0b5fe`), not deployed. Frontend only: no backend change, no migration
 (head `0031`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, no CSS change, no new module — `core/payroll-api.js`,
 `core/session-payroll.js` and `ui/session-payroll-view.js` are extended, so the package keeps 100 files (its digest
 changes). ApiClient, AuthBoot and the workspace view are unchanged: `{ payrollPlanId }` carries no forbidden key, and
@@ -2306,6 +2307,62 @@ the matrix (no Draft → Ready), every transition, Commit with a same-key Retry,
 firewall and the global-collision proof; a deterministic mutation campaign. `tools/serve-auth-stub.js` models BF-4d for
 browser QA (late Approved overtime fixtures, the Employee's two Committed waves, `/__stub/late-overtime`,
 `/__stub/bump-supplemental`, `/__stub/fail-next-supplemental-commit`). AFI-4d needs BF-4d deployed first or with it.
+
+### Finance posting — BF-4e (local candidate; backend only)
+
+BF-4e is a local candidate on `feature/bf-4e-finance-posting` (not pushed, merged or deployed), from the Phase 0 owner
+decisions D-FIN-1..5 = A (2026-10-06). It is the first server Finance record: one minimal, immutable, **Planned** posting
+made from exactly one Committed payroll obligation. Backend only: no frontend change, the package is unchanged (100 files,
+digest `7768d72b…`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
+
+**Sources.** The two Committed obligations Payroll produces: a Committed base plan (`payroll_plans`, its `total_amount`)
+and a Committed Supplemental document (`supplemental_payrolls`, its `overtime_amount`). Both are terminal and immutable, so a
+posting never drifts from its source. A base plan and its Supplemental documents are separate postings — never combined.
+
+**Schema.** `0032` creates `finance_postings`: `id`, `company_id`, `source_kind` (`payrollPlan` | `supplementalPayroll`),
+`payroll_plan_id` and `supplemental_payroll_id` (exactly one set, matching `source_kind` — a CHECK), the source's
+`employee_id` and `month_key`, `amount` (`DECIMAL(17,2)`, positive whole Rupiah), `status` (CHECK `= 'Planned'`),
+`idempotency_key` and `posted_at`. Unique keys: one posting per plan, one per document, each key once per company.
+Composite tenant FKs to the plan, the document, the employee and the company, none cascading — a posted source can never be
+removed. No version, no update column: a posting is immutable. `0033` admits the audit operation `post` under
+`payroll.manage` and `supplemental.manage` only; every earlier rule is kept. Head **0033**.
+
+**Post.** `POST /api/finance-postings/payroll-plan` (exactly `{ payrollPlanId, expectedAmount, idempotencyKey }`) and
+`POST /api/finance-postings/supplemental-payroll` (exactly `{ supplementalPayrollId, expectedAmount, idempotencyKey }`); any
+other key is a 400 naming it. Authorization follows the source domain (D-FIN-2 = A): the base plan posting declares
+`payroll.manage` and is decided after the scoped plan load (an Employee is 403 before any lookup, another company's plan
+404); the Supplemental posting declares the record-free `supplemental.manage`, decided by the kernel. One READ COMMITTED
+transaction (the commit-class extension of the BF-4c2 lesson) locks the source's employee, then the plan or the document,
+each by primary key — the global order employee → payroll_plan → supplemental_payroll, so a posting serializes with every
+Payroll and Supplemental write and cannot cycle — then, in order: the key (held by this source's posting at this amount → the
+original posting replayed, no write, no audit; held by any other posting → 409), the source is Committed (409), the
+`expectedAmount` equals the locked amount as an exact string (409), the source has no posting (409); then the INSERT of the
+Planned posting at the source's amount with the key, and one audit row on the source (operation `post`, no field, no value).
+A duplicate key raised by the INSERT is a concurrent posting of the same key or source: 409. A refused or failed posting
+stores nothing and consumes no key; a failed audit rolls everything back. The answer is `{ financePosting: P }`.
+
+**Read.** `GET /api/finance-postings?month=` → `{ financePostings: [P…] }`, CEO only (D-FIN-4 = A; an Employee is 403). P is
+exactly `{ id, sourceKind, sourceId, employeeId, monthKey, amount, status }` — never the company, the key, `posted_at` or an
+audit detail; `status` is always `Planned`. The base plan's thirteen-key and the Supplemental document's twelve-key
+projections are unchanged, so the strict AFI decoders are unaffected.
+
+**Firewalls.** Commit never posts (D-FIN-3 = A): Payroll and Supplemental never call Finance. Finance never writes a plan,
+a document, a link, an overtime or an employee row and never calls their stores (each keeps its single writer); it never
+computes money (the amount is copied as the stored string); and it has no execution, payment, actual, company account,
+category, monthly plan, manual transaction, reversal or correction (D-FIN-1 = A, D-FIN-5 = A). The boundary tool and the
+verifier's BF-4e section pin all of this.
+
+**Compatibility and deployment.** BF-4e adds three routes and one table and changes no existing row, route or DTO, so it can
+be deployed behind the current frontend (nothing calls it yet); its migrations must run before its routes are reachable, and
+it posts only what BF-4c2 and BF-4d commit. A posting screen and Finance execution are later, separately authorized slices.
+
+**Proof.** Unit (`FinancePostingDomainTest`), HTTP (`FinanceRoutingTest`), MariaDB (`FinancePostingSchemaTest`: columns,
+CHECKs, one posting per source, the company-scoped key, tenant FKs, 0033 and the upgrade from 0031;
+`FinancePostingWorkflowTest`: both source kinds, Commit never posting, every refusal, replay and key mismatch, reads and
+privacy, audit rollback, the firewalls; `FinancePostingConcurrencyTest`: the lock proofs and F1–F6 — the same posting twice,
+one source under two keys, one key on two sources, against the Payroll generate, against a Supplemental commit of the next
+wave, a plan and its own document at once), the boundary tool and its selftest, the verifier's BF-4e section, and a
+deterministic mutation campaign.
 
 ### Release engineering
 

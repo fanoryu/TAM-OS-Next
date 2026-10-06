@@ -135,9 +135,10 @@ return [
         [$beforeRecords, $beforeAudit] = [$records(), $audit()];
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
-        assertSame(['0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve', '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks'],
-            array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4b2 migrations run, then BF-4c1, BF-4c2 and BF-4d (which change no overtime row)');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0031, current');
+        // BF-4e authorized revision: 0032–0033 follow (head 0033). Was: through 0031.
+        assertSame(['0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve', '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post'],
+            array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4b2 migrations run, then BF-4c1, BF-4c2, BF-4d and BF-4e (which change no overtime row)');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0033, current');
         assertSame($beforeRecords, $records(), 'every BF-4b1 record is unchanged');
         assertSame($beforeAudit, $audit(), 'every overtime audit row is unchanged');
         assertSame(4, (int) $db->select('SELECT COUNT(*) AS n FROM overtime_records WHERE valuation_method IS NULL AND valuation_salary IS NULL AND valuation_standard_hours IS NULL AND approved_amount IS NULL AND approved_at IS NULL')[0]['n'], 'no snapshot on a pre-0022 row');

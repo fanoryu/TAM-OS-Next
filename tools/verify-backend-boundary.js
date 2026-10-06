@@ -51,6 +51,13 @@
  *     names a token primitive or a mail builder — it only queues delivery intent; an account
  *     route does not declare account.manage, or account.manage is declared by any other route;
  *     an audit append or an outbox enqueue sits outside ->atomically(...);
+ *   - (BF-4e) finance_postings is written outside server/src/Data/Finance/FinancePostingStore.php or
+ *     by anything but an INSERT of a 'Planned' posting (a posting is immutable: no UPDATE, DELETE,
+ *     REPLACE or TRUNCATE); the Finance code writes or calls the store of its Payroll or Supplemental
+ *     source, locks anything but one row by primary key, computes money, or names an execution,
+ *     payment, actual, account, category, monthly-plan, reversal or correction concept; a Finance
+ *     posting route declares anything but the Action of its source domain, or another Finance route
+ *     exists;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -169,6 +176,20 @@ const SUPPLEMENTAL_CONTROLLER = 'server/src/Controller/SupplementalController.ph
 const SUPPLEMENTAL_INPUT = 'server/src/Supplemental/SupplementalInput.php';
 const SUPPLEMENTAL_ROUTES = ['/api/supplemental-payrolls/generate', '/api/supplemental-payrolls/review', '/api/supplemental-payrolls/approve', '/api/supplemental-payrolls/return', '/api/supplemental-payrolls/cancel', '/api/supplemental-payrolls/commit'];
 const SUPPLEMENTAL_COMMIT_STATEMENT = "UPDATE supplemental_payrolls SET status = 'Committed', committed_at = UTC_TIMESTAMP(6), commit_idempotency_key = :commit_idempotency_key, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Ready'";
+// BF-4e (owner decisions D-FIN-1..5 = A): the Finance posting has one writer, which only inserts a
+// 'Planned' posting of one Committed source — a posting is immutable (no UPDATE, DELETE, REPLACE or
+// TRUNCATE anywhere). Finance reads and locks its source by primary key and never writes it or calls
+// its store (Payroll and Supplemental keep their single writers); it never computes money (the amount
+// is the source's stored string); it has no execution, payment, actual, account, category,
+// monthly-plan, reversal or correction vocabulary; each posting route declares the Action of its
+// source domain — the base plan posting payroll.manage, the Supplemental posting supplemental.manage
+// (ACTIONS stay 21) — and the month read none; its inputs take no identity, money, month or status key.
+const FINANCE_STORE = 'server/src/Data/Finance/FinancePostingStore.php';
+const FINANCE_DIR = 'server/src/Finance/';
+const FINANCE_CONTROLLER = 'server/src/Controller/FinanceController.php';
+const FINANCE_INPUT = 'server/src/Finance/FinancePostingInput.php';
+const FINANCE_ROUTES = { '/api/finance-postings/payroll-plan': 'PayrollManage', '/api/finance-postings/supplemental-payroll': 'SupplementalManage' };
+const FINANCE_READ_ROUTE = 'GET /api/finance-postings';
 const ACTION_COUNT = 21;
 
 // ---------------------------------------------------------------------------------------------
@@ -301,6 +322,9 @@ const STRING_RULES = [
   { id: 'supplemental-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?supplemental_payrolls\b/i, msg: 'a Supplemental document is never deleted (cancel is a status) and supplemental_payrolls is never truncated' },
   { id: 'supplemental-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE },
   { id: 'supplemental-link-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is never truncated' },
+  // BF-4e: finance_postings has one writer, which only inserts — a posting is immutable.
+  { id: 'finance-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_postings\b/i, msg: 'finance_postings is written only by ' + FINANCE_STORE, allow: (f) => f === FINANCE_STORE },
+  { id: 'finance-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_postings\b/i, msg: 'a Finance posting is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_postings' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -345,7 +369,7 @@ function checkMigrationSql(src, file) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -405,10 +429,13 @@ function checkRouteActions(src) {
     else if (!/\bAction::PayrollManage\)/.test(line)) out.push('Routes.php: payroll route POST ' + path + ' must declare Action::PayrollManage');
   }
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
-    if (/\bAction::PayrollManage\b/.test(m[3]) && (!PAYROLL_ROUTES.includes(m[2]) || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a payroll write and must not declare Action::PayrollManage');
+    // BF-4e authorized revision: the base plan posting route also declares payroll.manage (its source
+    // domain's Action, D-FIN-2 = A). Was: payroll.manage on the payroll writes only.
+    if (/\bAction::PayrollManage\b/.test(m[3]) && (!(PAYROLL_ROUTES.includes(m[2]) || FINANCE_ROUTES[m[2]] === 'PayrollManage') || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a payroll write and must not declare Action::PayrollManage');
     const commitRoute = m[1] === 'POST' && m[2] === PAYROLL_COMMIT_ROUTE;
     // BF-4d authorized revision: the Supplemental routes are governed below. Was: every /payroll/ path here.
-    if (/payroll/i.test(m[2]) && !/^\/api\/supplemental-payroll/.test(m[2]) && !commitRoute && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no payroll status, payment or payslip route (the one commit route is POST ' + PAYROLL_COMMIT_ROUTE + ')');
+    // BF-4e authorized revision: the Finance posting routes are governed below too.
+    if (/payroll/i.test(m[2]) && !/^\/api\/supplemental-payroll/.test(m[2]) && !/^\/api\/finance-postings\//.test(m[2]) && !commitRoute && /commit|status|paid|pay\b|payslip|post/i.test(m[2].replace('/api/payroll-plans', '').replace('/api/payroll-plan', ''))) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no payroll status, payment or payslip route (the one commit route is POST ' + PAYROLL_COMMIT_ROUTE + ')');
   }
   // BF-4d: exactly the six Supplemental writes declare supplemental.manage; no Supplemental status,
   // payment, posting, execution or payslip route.
@@ -418,8 +445,24 @@ function checkRouteActions(src) {
     else if (!/\bAction::SupplementalManage\)/.test(line)) out.push('Routes.php: Supplemental route POST ' + path + ' must declare Action::SupplementalManage');
   }
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
-    if (/\bAction::SupplementalManage\b/.test(m[3]) && (!SUPPLEMENTAL_ROUTES.includes(m[2]) || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a Supplemental write and must not declare Action::SupplementalManage');
+    // BF-4e authorized revision: the Supplemental posting route also declares supplemental.manage (its
+    // source domain's Action). Was: supplemental.manage on the Supplemental writes only.
+    if (/\bAction::SupplementalManage\b/.test(m[3]) && (!(SUPPLEMENTAL_ROUTES.includes(m[2]) || FINANCE_ROUTES[m[2]] === 'SupplementalManage') || m[1] !== 'POST')) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not a Supplemental write and must not declare Action::SupplementalManage');
     if (/^\/api\/supplemental-payroll/.test(m[2]) && /status|paid|pay\b|payslip|post|execut|finance|bank/i.test(m[2])) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' — no Supplemental status, payment, posting, execution or payslip route');
+  }
+  // BF-4e: exactly the two Finance posting writes, each under its source domain's Action, and the CEO
+  // month read with no Action — no execution, payment, actual, reversal, correction or other Finance route.
+  for (const [path, action] of Object.entries(FINANCE_ROUTES)) {
+    const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
+    if (!line) out.push('Routes.php: Finance posting route POST ' + path + ' is missing');
+    else if (!new RegExp('RouteAuth::Required, Action::' + action + '\\),$').test(line.trim())) out.push('Routes.php: Finance posting route POST ' + path + ' must declare exactly Action::' + action + ' (its source domain)');
+  }
+  if (!src.split('\n').some((l) => l.includes("new Route('GET', '/api/finance-postings', ") && /\['month'\], RouteAuth::Required\),$/.test(l.trim()))) out.push('Routes.php: the Finance month read GET /api/finance-postings (?month=, a session, no Action) is missing');
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    if (!/^\/api\/finance/.test(m[2])) continue;
+    const key = m[1] + ' ' + m[2];
+    if (key !== FINANCE_READ_ROUTE && !(m[1] === 'POST' && FINANCE_ROUTES[m[2]])) out.push('Routes.php: ' + key + ' — the only Finance routes are the two postings and the month read (no execution, payment, actual, reversal or correction route)');
+    if (key === FINANCE_READ_ROUTE && /\bAction::/.test(m[3])) out.push('Routes.php: ' + key + ' is a read and declares no Action');
   }
   return out;
 }
@@ -442,7 +485,7 @@ function checkAuditInTransaction(lex) {
     ranges.push([m.index, i]);
   }
   const out = [];
-  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll|Supplemental)?\s*\(/g;
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll|Supplemental|Posting)?\s*\(/g;
   while ((m = append.exec(code))) {
     const at = m.index;
     if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
@@ -554,6 +597,9 @@ function checkPhp(file, src) {
   if (file.startsWith(SUPPLEMENTAL_DIR) || file === SUPPLEMENTAL_STORE || file === SUPPLEMENTAL_CONTROLLER) for (const v of checkSupplementalFirewall(lex)) out.push(v);
   if (file.startsWith(SUPPLEMENTAL_DIR)) for (const v of checkIntegerSupplemental(lex)) out.push(v);
   if (file === SUPPLEMENTAL_INPUT) for (const v of checkSupplementalInput(lex)) out.push(v);
+  for (const v of checkFinanceStatements(file, lex)) out.push(v);
+  if (file.startsWith(FINANCE_DIR) || file === FINANCE_STORE || file === FINANCE_CONTROLLER) for (const v of checkFinanceFirewall(lex)) out.push(v);
+  if (file === FINANCE_INPUT) for (const v of checkFinanceInput(lex)) out.push(v);
   return out;
 }
 
@@ -725,6 +771,62 @@ function checkSupplementalInput(lex) {
   const out = [];
   if (lists.length !== 3 || lists[0] !== 'payrollPlanId' || lists[1] !== 'id,expectedVersion' || lists[2] !== 'id,expectedVersion,expectedTotal,idempotencyKey') out.push('the Supplemental inputs allow exactly { payrollPlanId }, { id, expectedVersion } and (commit) { id, expectedVersion, expectedTotal, idempotencyKey }');
   if (lex.strings.some((s) => /^(employeeId|companyId|role|amount|overtimeAmount|overtimeIds|overtimeHours|total|totalAmount|status|month|monthKey)$/.test(s))) out.push('a Supplemental input never names an identity, money, overtime or status key');
+  return out;
+}
+
+// BF-4e: the Finance store holds exactly two statements writing finance_postings — one INSERT per
+// source kind, each of a 'Planned' posting with its key, never IGNORE or ON DUPLICATE KEY UPDATE —
+// locks only one employee, base plan or Supplemental document row by primary key, names no Employee
+// scope (CEO only, D-FIN-4 = A) and never computes money in SQL (the amount is the source's string).
+const FINANCE_INSERT = /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?finance_postings\b/i;
+function checkFinanceStatements(file, lex) {
+  if (file !== FINANCE_STORE) return [];
+  const out = [];
+  let inserts = 0;
+  for (const s of lex.strings) {
+    if (FINANCE_INSERT.test(s)) {
+      inserts++;
+      if (/\bIGNORE\b|\bON\s+DUPLICATE\s+KEY\b/i.test(s) || !/, 'Planned', :idempotency_key, UTC_TIMESTAMP\(6\)\)$/.test(s)) out.push("a Finance posting is inserted only as 'Planned' with its idempotency key — never IGNORE or ON DUPLICATE KEY UPDATE");
+    }
+    if (/:self_employee_id\b/.test(s)) out.push('the Finance posting statements are CEO company scope only (no :self_employee_id)');
+    if (/\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s)
+      && (!/^SELECT [^;]* FROM (employees|payroll_plans|supplemental_payrolls) WHERE id = :\w+ AND company_id = :company_id FOR UPDATE$/.test(s) || /\bJOIN\b|\bOR\b/i.test(s))) {
+      out.push('Finance locks rows only by primary key (WHERE id = :x AND company_id = :company_id FOR UPDATE on employees, payroll_plans or supplemental_payrolls) — never a range, a join or a posting');
+    }
+    if (SQL_MONEY_ARITHMETIC.test(s) || /\bamount\s*[-+*\/]|[-+*\/]\s*:?amount\b/i.test(s)) out.push("Finance never computes money in SQL: the posted amount is the source's stored string");
+  }
+  if (inserts !== 2) out.push('FinancePostingStore has exactly two INSERT statements (one per source kind); found ' + inserts);
+  return out;
+}
+
+// BF-4e: the Finance code (domain, store, controller) never calls the Payroll, Supplemental, Overtime
+// or Employee store (it reads and locks its source through its own statements and never writes it),
+// posts Planned only (no execution, payment, actual, disbursement, company account, bank, cash,
+// category, monthly plan, reversal, refund or correction identifier or statement — D-FIN-1/5 = A),
+// never values overtime or names a statutory component, and never computes money (no float, BCMath,
+// GMP, rounding helper or division operator).
+const FINANCE_STORE_CALLS = /->\s*(payroll|supplemental|overtime|employees)\s*\(\s*\)/;
+const FINANCE_BEYOND_PLANNED = /(?<!->)\bexecut|payment|\bpaid\b|\bpay\b|\bactual|disburse|company_?account|companyAccount|\bbank|\bcash|\bcategor|monthly_?plan|monthlyPlan|\brevers|\brefund|\bcorrect|\bunpost|ledger|journal|\btxn|transaction_/i;
+function checkFinanceFirewall(lex) {
+  const out = [];
+  const code = lex.code.replace(/->\s*atomically\s*\(/g, '');
+  const any = (re) => re.test(code) || lex.strings.some((s) => re.test(s));
+  if (FINANCE_STORE_CALLS.test(code)) out.push('Finance never calls the Payroll, Supplemental, Overtime or Employee store — it reads and locks its source through its own statements and never writes it');
+  if (any(FINANCE_BEYOND_PLANNED)) out.push('BF-4e posts Planned only: no execution, payment, actual, account, category, monthly-plan, reversal or correction identifier or statement');
+  if (any(PAYROLL_OVERTIME_AUTHORITY) || any(PAYROLL_STATUTORY)) out.push('Finance never values overtime and has no statutory or component payroll');
+  if (FLOAT_AUTHORITY.test(lex.code)) out.push('the Finance code never computes money (no float, BCMath, GMP, rounding helper or division operator)');
+  return out;
+}
+
+// BF-4e: the posting inputs take exactly { payrollPlanId, expectedAmount, idempotencyKey } and
+// { supplementalPayrollId, expectedAmount, idempotencyKey } — no employee, company, role, amount,
+// month, status, source kind, account or category key.
+function checkFinanceInput(lex) {
+  const lists = [...lex.code.matchAll(/self::onlyKeys\(\$json, \[[^\]]*\]\)/g)]
+    .map((m) => lex.spans.filter((sp) => sp.start >= m.index && sp.end <= m.index + m[0].length).map((sp) => sp.value).join(','));
+  const out = [];
+  if (lists.length !== 2 || lists[0] !== 'payrollPlanId,expectedAmount,idempotencyKey' || lists[1] !== 'supplementalPayrollId,expectedAmount,idempotencyKey') out.push('the Finance posting inputs allow exactly { payrollPlanId, expectedAmount, idempotencyKey } and { supplementalPayrollId, expectedAmount, idempotencyKey }');
+  if (lex.strings.some((s) => /^(employeeId|companyId|role|amount|totalAmount|overtimeAmount|status|month|monthKey|sourceKind|companyAccountId|accountId|category)$/.test(s))) out.push('a Finance posting input never names an identity, money, month, status, account or category key');
   return out;
 }
 
@@ -1574,6 +1676,58 @@ function selftest() {
   dirty('a browser overtime list on generate is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['payrollPlanId']);", "self::onlyKeys($json, ['payrollPlanId', 'overtimeIds']);"), 'exactly { payrollPlanId }');
   dirty('a commit without its idempotency key is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal']);"), 'idempotencyKey');
   dirty('an employeeId key on a transition is caught (identity)', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['id', 'expectedVersion']);", "self::onlyKeys($json, ['employeeId']);"), 'never names an identity');
+  // BF-4e: one Finance writer that only inserts Planned postings, PK locks, no SQL money, no source
+  // write or store call, Planned only (no execution, payment, actual, account, category, reversal),
+  // strict inputs, routes under the source domain's Action.
+  const realFin = fs.readFileSync(path.join(root, FINANCE_STORE), 'utf8');
+  const inFin = (extra) => realFin.replace('    public const PAYROLL_PLAN', '    ' + extra + '\n    public const PAYROLL_PLAN');
+  const finSwap = (from, to) => { if (!realFin.includes(from)) throw new Error('selftest fixture drift: ' + from); return realFin.replace(from, to); };
+  clean('the real FinancePostingStore passes', FINANCE_STORE, realFin);
+  const FIN_SERVICE = FINANCE_DIR + 'FinancePostingService.php';
+  const realFinService = fs.readFileSync(path.join(root, FIN_SERVICE), 'utf8');
+  clean('the real FinancePostingService passes the Finance firewalls', FIN_SERVICE, realFinService);
+  clean('the real FinanceController passes the Finance firewalls', FINANCE_CONTROLLER, fs.readFileSync(path.join(root, FINANCE_CONTROLLER), 'utf8'));
+  for (const f of ['FinancePostingInput.php', 'FinancePostingView.php']) clean('the real ' + f + ' passes', FINANCE_DIR + f, fs.readFileSync(path.join(root, FINANCE_DIR + f), 'utf8'));
+  dirty('a posting UPDATE is caught (immutable)', FINANCE_STORE, inFin("public const U_SQL = \"UPDATE finance_postings SET status = 'Executed' WHERE id = :id AND company_id = :company_id\";"), 'immutable');
+  dirty('a posting DELETE is caught (immutable, no reversal)', FINANCE_STORE, inFin("public const D_SQL = 'DELETE FROM finance_postings WHERE id = :id AND company_id = :company_id';"), 'immutable');
+  dirty('a posting TRUNCATE is caught', FINANCE_STORE, inFin("public const T_SQL = 'TRUNCATE TABLE finance_postings';"), 'immutable');
+  dirty('a posting write outside FinancePostingStore is caught', PAYROLL_STORE, inPayroll("public const F_SQL = \"INSERT INTO finance_postings (id, company_id, status) VALUES (:id, :company_id, 'Planned')\";"), 'written only by ' + FINANCE_STORE);
+  dirty('a posting insert of a non-Planned status is caught', FINANCE_STORE, finSwap(":id, NULL, :employee_id, :month_key, :amount, 'Planned', :idempotency_key", ":id, NULL, :employee_id, :month_key, :amount, 'Executed', :idempotency_key"), "inserted only as 'Planned'");
+  dirty('an INSERT IGNORE posting is caught', FINANCE_STORE, finSwap("\"INSERT INTO finance_postings (id, company_id, source_kind, payroll_plan_id, supplemental_payroll_id, employee_id, month_key, amount, status, idempotency_key, posted_at) VALUES (:posting_id, :company_id, 'payrollPlan'", "\"INSERT IGNORE INTO finance_postings (id, company_id, source_kind, payroll_plan_id, supplemental_payroll_id, employee_id, month_key, amount, status, idempotency_key, posted_at) VALUES (:posting_id, :company_id, 'payrollPlan'"), "never IGNORE");
+  dirty('an upserting posting is caught', FINANCE_STORE, finSwap("'Planned', :idempotency_key, UTC_TIMESTAMP(6))\";\n    public const INSERT_SUPPLEMENTAL_SQL", "'Planned', :idempotency_key, UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE amount = VALUES(amount)\";\n    public const INSERT_SUPPLEMENTAL_SQL"), 'inserted only');
+  dirty('a third posting INSERT is caught', FINANCE_STORE, inFin("public const M_SQL = \"INSERT INTO finance_postings (id, company_id, source_kind, payroll_plan_id, supplemental_payroll_id, employee_id, month_key, amount, status, idempotency_key, posted_at) VALUES (:posting_id, :company_id, 'manual', NULL, NULL, :employee_id, :month_key, :amount, 'Planned', :idempotency_key, UTC_TIMESTAMP(6))\";"), 'exactly two INSERT statements');
+  dirty('a base plan write from the Finance store is caught', FINANCE_STORE, inFin("public const P_SQL = \"UPDATE payroll_plans SET status = 'Posted' WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), 'written only by ' + PAYROLL_STORE);
+  dirty('a Supplemental write from the Finance store is caught', FINANCE_STORE, inFin("public const S_SQL = \"UPDATE supplemental_payrolls SET status = 'Posted' WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'\";"), 'written only by ' + SUPPLEMENTAL_STORE);
+  dirty('a Finance range lock is caught (deadlock)', FINANCE_STORE, inFin("public const R_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM payroll_plans WHERE company_id = :company_id AND month_key = :month_key FOR UPDATE';"), 'only by primary key');
+  dirty('a lock of a posting row is caught', FINANCE_STORE, inFin("public const L_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM finance_postings WHERE id = :id AND company_id = :company_id FOR UPDATE';"), 'only by primary key');
+  dirty('an Employee Finance statement is caught (CEO only)', FINANCE_STORE, inFin("public const MONTH_SELF_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM finance_postings WHERE company_id = :company_id AND employee_id = :self_employee_id';"), 'CEO company scope only');
+  dirty('an SQL money computation is caught', FINANCE_STORE, finSwap(":month_key, :amount, 'Planned', :idempotency_key, UTC_TIMESTAMP(6))\";\n    public const INSERT_SUPPLEMENTAL_SQL", ":month_key, :amount + 0, 'Planned', :idempotency_key, UTC_TIMESTAMP(6))\";\n    public const INSERT_SUPPLEMENTAL_SQL"), 'never computes money in SQL');
+  dirty('an SQL sum is caught', FINANCE_STORE, inFin("public const S_SQL = 'SELECT SUM(amount) AS t, company_id, employee_id AS owner_employee_id FROM finance_postings WHERE company_id = :company_id';"), 'never computes money in SQL');
+  dirty('a Payroll store call from Finance is caught', FIN_SERVICE, S + "$this->data->payroll()->commit($auth, 1, $k);\n", 'never calls the Payroll');
+  dirty('a Supplemental store call from Finance is caught', FIN_SERVICE, S + "$this->data->supplemental()->lock($auth, $id);\n", 'never calls the Payroll');
+  dirty('an execution in Finance is caught (D-FIN-1)', FIN_SERVICE, S + "$r = executeTransaction($id);\n", 'Planned only');
+  dirty('an Executed status in the Finance view is caught', FINANCE_DIR + 'FinancePostingView.php', S + "$s = 'Executed';\n", 'Planned only');
+  dirty('an actual amount in Finance is caught', FIN_SERVICE, S + "$actualAmount = $x;\n", 'Planned only');
+  dirty('a paid flag in the Finance controller is caught', FINANCE_CONTROLLER, S + "$out = ['paid' => true];\n", 'Planned only');
+  dirty('a company account in Finance is caught', FINANCE_STORE, inFin("public const A_SQL = 'SELECT company_account_id, company_id, employee_id AS owner_employee_id FROM finance_postings WHERE company_id = :company_id';"), 'Planned only');
+  dirty('a category in Finance is caught', FIN_SERVICE, S + "$category = 'Gaji';\n", 'Planned only');
+  dirty('a monthly plan link in Finance is caught', FIN_SERVICE, S + "$monthlyPlanId = $p;\n", 'Planned only');
+  dirty('a reversal in Finance is caught (D-FIN-5)', FIN_SERVICE, S + "$this->reverse($id);\n", 'Planned only');
+  dirty('a correction in Finance is caught (D-FIN-5)', FIN_SERVICE, S + "$correction = 1;\n", 'Planned only');
+  dirty('a float in Finance is caught', FIN_SERVICE, S + "$t = (float) $amount;\n", 'never computes money');
+  dirty('a division in Finance is caught', FIN_SERVICE, S + "$t = $amount / 100;\n", 'never computes money');
+  dirty('a statutory term in Finance is caught', FIN_SERVICE, S + "$pph21 = 0;\n", 'no statutory');
+  dirty('a Finance audit append outside the transaction is caught', FIN_SERVICE, realFinService.replace("            $this->data->audit()->appendPosting($auth, $actor, $in['sourceId'], $requestId);\n            return $postingId;\n        }, readCommitted: true);\n        return $store->record($scope, $id) ?? throw new \\LogicException('posting not readable');\n    }\n\n    /**\n     * Posts one Committed Supplemental",
+    "            return $postingId;\n        }, readCommitted: true);\n        $this->data->audit()->appendPosting($auth, $actor, $in['sourceId'], $requestId);\n        return $store->record($scope, $id) ?? throw new \\LogicException('posting not readable');\n    }\n\n    /**\n     * Posts one Committed Supplemental"), 'inside the transaction');
+  const realFinInput = fs.readFileSync(path.join(root, FINANCE_INPUT), 'utf8');
+  dirty('a browser amount key on a posting is caught', FINANCE_INPUT, realFinInput.replace("self::onlyKeys($json, ['payrollPlanId', 'expectedAmount', 'idempotencyKey']);", "self::onlyKeys($json, ['payrollPlanId', 'expectedAmount', 'idempotencyKey', 'amount']);"), 'exactly { payrollPlanId');
+  dirty('a posting without its idempotency key is caught', FINANCE_INPUT, realFinInput.replace("self::onlyKeys($json, ['supplementalPayrollId', 'expectedAmount', 'idempotencyKey']);", "self::onlyKeys($json, ['supplementalPayrollId', 'expectedAmount']);"), 'exactly { payrollPlanId');
+  dirty('an employeeId key on a posting is caught (identity)', FINANCE_INPUT, realFinInput.replace("self::onlyKeys($json, ['payrollPlanId', 'expectedAmount', 'idempotencyKey']);", "self::onlyKeys($json, ['employeeId', 'expectedAmount', 'idempotencyKey']);"), 'never names an identity');
+  const m32 = fs.readFileSync(path.join(root, 'server/migrations/0032_create_finance_postings.sql'), 'utf8');
+  tenant('the real finance_postings migration passes', m32, 0);
+  tenant('finance_postings without its tenant UNIQUE is caught', m32.replace('  UNIQUE KEY finance_postings_company_id (company_id, id),\n', ''), 'UNIQUE KEY (company_id, id)');
+  tenant('a cascading posting source FK is caught', m32.replace('REFERENCES payroll_plans (company_id, id)', 'REFERENCES payroll_plans (company_id, id) ON DELETE CASCADE'), 'CASCADE');
+  tenant('a set-null posting FK is caught', m32.replace('REFERENCES supplemental_payrolls (company_id, id)', 'REFERENCES supplemental_payrolls (company_id, id) ON DELETE SET NULL'), 'CASCADE');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
   clean('the real EmployeeService appends audit rows inside its transactions', SERVICE, realService);
@@ -1616,6 +1770,14 @@ function selftest() {
   cases.push({ name: 'a Supplemental execute read is caught (M33)', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/supplemental-payrolls/cancel',", "            new Route('GET', '/api/supplemental-payroll/execution', $supplemental->find(...), ['id'], RouteAuth::Required),\n            new Route('POST', '/api/supplemental-payrolls/cancel',")), expect: 'no Supplemental status, payment, posting, execution' });
   cases.push({ name: 'supplemental.manage on the eligibility read is caught', run: () => checkRouteActions(realRoutes.replace("$supplemental->eligibility(...), ['month'], RouteAuth::Required)", "$supplemental->eligibility(...), ['month'], RouteAuth::Required, Action::SupplementalManage)")), expect: 'must not declare Action::SupplementalManage' });
   cases.push({ name: 'supplemental.manage on a payroll route is caught', run: () => checkRouteActions(realRoutes.replace("$payroll->review(...), [], RouteAuth::Required, Action::PayrollManage)", "$payroll->review(...), [], RouteAuth::Required, Action::SupplementalManage)")), expect: 'must declare Action::PayrollManage' });
+  cases.push({ name: 'a Finance base plan posting under supplemental.manage is caught', run: () => checkRouteActions(realRoutes.replace("$finance->postPayrollPlan(...), [], RouteAuth::Required, Action::PayrollManage)", "$finance->postPayrollPlan(...), [], RouteAuth::Required, Action::SupplementalManage)")), expect: 'must declare exactly Action::PayrollManage' });
+  cases.push({ name: 'a Finance Supplemental posting under finance.manage is caught', run: () => checkRouteActions(realRoutes.replace("$finance->postSupplementalPayroll(...), [], RouteAuth::Required, Action::SupplementalManage)", "$finance->postSupplementalPayroll(...), [], RouteAuth::Required, Action::FinanceManage)")), expect: 'must declare exactly Action::SupplementalManage' });
+  cases.push({ name: 'a missing Finance posting route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/finance-postings/payroll-plan', $finance->postPayrollPlan(...), [], RouteAuth::Required, Action::PayrollManage),\n", '')), expect: 'Finance posting route POST /api/finance-postings/payroll-plan is missing' });
+  cases.push({ name: 'a missing Finance month read is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-postings', $finance->month(...), ['month'], RouteAuth::Required),\n", '')), expect: 'Finance month read' });
+  cases.push({ name: 'a Finance execution route is caught (D-FIN-1)', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-postings',", "            new Route('POST', '/api/finance-postings/execute', $finance->postPayrollPlan(...), [], RouteAuth::Required, Action::FinanceExecute),\n            new Route('GET', '/api/finance-postings',")), expect: 'the only Finance routes' });
+  cases.push({ name: 'a Finance reversal route is caught (D-FIN-5)', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-postings',", "            new Route('POST', '/api/finance-postings/reverse', $finance->postPayrollPlan(...), [], RouteAuth::Required, Action::FinanceManage),\n            new Route('GET', '/api/finance-postings',")), expect: 'the only Finance routes' });
+  cases.push({ name: 'a Finance transaction route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-postings',", "            new Route('GET', '/api/finance-transactions', $finance->month(...), ['month'], RouteAuth::Required),\n            new Route('GET', '/api/finance-postings',")), expect: 'the only Finance routes' });
+  cases.push({ name: 'an Action on the Finance month read is caught', run: () => checkRouteActions(realRoutes.replace("$finance->month(...), ['month'], RouteAuth::Required)", "$finance->month(...), ['month'], RouteAuth::Required, Action::FinanceManage)")), expect: 'Finance month read' });
   cases.push({ name: 'payroll.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->reject(...), [], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 

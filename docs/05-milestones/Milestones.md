@@ -399,7 +399,12 @@ Employee's read of their own Committed documents; migrations `0029`–`0031`) is
 `ab5e10c1e02a251e701c05c52574a8c86d838120`), backend only, not deployed. **AFI-4d** (the CEO's Supplemental payroll on the Payroll month page —
 eligibility, Prepare, the month's documents and their detail, the linear lifecycle with no Draft → Ready, Commit with one
 intent and a same-key Retry — and the Employee's own Committed documents as separate rows of My payroll; *D-AFI4d-1..2 = A*)
-is a local candidate on a feature branch, frontend only; it needs BF-4d deployed first or with it. Finance posting comes after. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+is merged as source (PR #49, canonical merge `152eccab1973db28b9e86f87d9959aa507b0b5fe`), frontend only, not deployed; it needs BF-4d deployed first
+or with it. Finance posting follows (*D-FIN-1..5 = A, 2026-10-06*). **BF-4e** (one immutable, Planned Finance posting made
+from exactly one Committed base plan or Committed Supplemental document, by an explicit CEO command per obligation —
+never on Commit — under the Action of its source domain, `payroll.manage` or `supplemental.manage`, idempotent on an
+SDR-0002 §10 key, at most one posting per source, CEO-only reads, no execution, payment, account, category, monthly plan,
+reversal or correction; migrations `0032`–`0033`) is a local candidate on a feature branch, backend only, not deployed. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.
