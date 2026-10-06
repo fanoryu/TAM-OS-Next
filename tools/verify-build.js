@@ -5554,9 +5554,12 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4b1/AFI-4c1: only session-identity.js, auth-boot.js, auth-flow.js, employee-api.js, overtime-api.js and payroll-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
   // AFI-4c1 authorized revision: payroll-api.js names exactly the seven BF-4c1 Payroll paths. Was:
   // no /api/ path outside the AFI-4b2 set of session modules. AFI-4c2 authorized revision: plus the
-  // two BF-4c2 paths (the commit and the drift read). Was: seven.
+  // two BF-4c2 paths (the commit and the drift read). Was: seven. AFI-4d authorized revision: plus
+  // exactly the nine BF-4d Supplemental Payroll paths (SupplementalApi, the same module and wire —
+  // no new API caller). Was: the nine Payroll paths only.
   check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js', 'core/payroll-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
-    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/payroll-plan','/api/payroll-plan/drift','/api/payroll-plans','/api/payroll-plans/approve','/api/payroll-plans/cancel','/api/payroll-plans/commit','/api/payroll-plans/generate','/api/payroll-plans/return','/api/payroll-plans/review'"
+    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/payroll-plan','/api/payroll-plan/drift','/api/payroll-plans','/api/payroll-plans/approve','/api/payroll-plans/cancel','/api/payroll-plans/commit','/api/payroll-plans/generate','/api/payroll-plans/return','/api/payroll-plans/review',"
+      + "'/api/supplemental-payroll','/api/supplemental-payrolls','/api/supplemental-payrolls/approve','/api/supplemental-payrolls/cancel','/api/supplemental-payrolls/commit','/api/supplemental-payrolls/eligibility','/api/supplemental-payrolls/generate','/api/supplemental-payrolls/return','/api/supplemental-payrolls/review'"
     // AFI-4b1 authorized revision: overtime-api.js names exactly the eight BF-4b1 Overtime paths.
     // AFI-4b2 authorized revision: plus the two BF-4b2 paths (valuation read, approve). Was: eight.
     && ((prodCode['core/overtime-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/overtime-record','/api/overtime-record/valuation','/api/overtime-records','/api/overtime-records/approve','/api/overtime-records/create','/api/overtime-records/delete','/api/overtime-records/reject','/api/overtime-records/review','/api/overtime-records/submit','/api/overtime-records/update'"
@@ -5567,7 +5570,7 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/disable-account','/api/employees/enable-account','/api/employees/provision-account','/api/employees/reissue-activation','/api/employees/update'"
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1/AFI-4c1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve), payroll-api.js only the seven BF-4c1 Payroll routes');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1/AFI-4c1: /api/ paths are named only by the session modules; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve), payroll-api.js only the nine BF-4c1/BF-4c2 Payroll routes and (AFI-4d) the nine BF-4d Supplemental routes');
   check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
@@ -6766,10 +6769,16 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
   const jsFiles = [];
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
   walkJs(path.join(root, 'js'));
-  check(jsFiles.every((f) => !/\/api\/supplemental/.test(read(f))), 'BF-4d: backend only — no frontend module names a Supplemental API route (AFI-4d is not implemented)');
+  // AFI-4d authorized revision: AFI-4d is the frontend of these routes — exactly one module,
+  // core/payroll-api.js, names them (pinned to the nine, in the AFI-4d section). Was: no frontend
+  // module names a Supplemental API route (BF-4d backend only).
+  check(jsFiles.filter((f) => /\/api\/supplemental/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js',
+    'BF-4d/AFI-4d: exactly one frontend module — core/payroll-api.js (AFI-4d SupplementalApi) — names a Supplemental API route');
+  // AFI-4d authorized revision: the package changed with AFI-4d (frontend only) and its new digest is
+  // pinned in the AFI-4d section. Was: 100 files at digest 16e06b7e… (BF-4d left the package unchanged).
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(manifest.files.length === 100 && manifest.packageDigest === '16e06b7e8cacb75c1efbc5b482149d8b79e4a84ee06c9a40a178757532eed1a0' && manifest.actions === 21,
-    'BF-4d: the production package is unchanged — 100 files at digest 16e06b7e… (the AFI-4c2 package; the LOCAL supplemental engine and the SESSION Payroll modules untouched), ACTIONS 21');
+  check(manifest.files.length === 100 && manifest.actions === 21,
+    'BF-4d/AFI-4d: the production package keeps 100 files and ACTIONS 21 (BF-4d added no frontend; AFI-4d added no module)');
   check(['Unit/SupplementalDomainTest.php', 'Http/SupplementalRoutingTest.php', 'Db/SupplementalSchemaTest.php', 'Db/SupplementalWorkflowTest.php', 'Db/SupplementalConcurrencyTest.php', 'Support/supplemental-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /C8 race/.test(srv('tests/Db/SupplementalConcurrencyTest.php')),
     'BF-4d: the domain, routing, schema, workflow and C1–C8 concurrency tests exist');
@@ -6777,6 +6786,119 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
   check(/D-SPAY-1 = A/.test(ctx) && /D-SPAY-4 = A/.test(ctx) && /BF-4d/.test(read(path.join(root, 'ARCHITECTURE.md'))) && /BF-4d/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md')))
     && /BF-4d/.test(read(path.join(root, 'docs', '05-milestones', 'Milestones.md'))) && !/AFI-4c2[^.]*local candidate/.test(ctx + read(path.join(root, 'ARCHITECTURE.md')) + read(path.join(root, 'docs', '05-milestones', 'Milestones.md'))),
     'BF-4d: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the deployment note (DEPLOYMENT) and the milestone; AFI-4c2 is no longer described as a local candidate');
+  // AFI-4d (N8): BF-4d is merged as PR #48 at its canonical merge, not deployed — no longer a local candidate.
+  const n8 = [ctx, read(path.join(root, 'ARCHITECTURE.md')), read(path.join(root, 'docs', '05-milestones', 'Milestones.md'))];
+  check(n8.every((t) => !/BF-4d[^.]*local candidate|local candidate on `feature\/bf-4d/.test(t) && /PR #48/.test(t) && /ab5e10c1e02a251e701c05c52574a8c86d838120/.test(t)),
+    'BF-4d (N8): AI_CONTEXT, ARCHITECTURE and the milestone record BF-4d as merged (PR #48, canonical ab5e10c1…) — never as a local candidate');
+}
+
+// ===== AFI-4d — SESSION SUPPLEMENTAL PAYROLL =====
+// Owner decisions D-AFI4d-1 = A (the CEO's Supplemental payroll lives on the Payroll month page:
+// eligibility, Prepare, the month's documents, their detail; a Committed plan links its documents)
+// and D-AFI4d-2 = A (an Employee's own Committed documents are separate rows of My payroll, each its
+// own read-only card; never added to the payroll). Frontend only, over the canonical BF-4d (PR #48):
+// the three Payroll modules extended — no new module, no backend, migration, ApiClient or AuthBoot
+// change; ACTIONS 21; AUTH_MODE LOCAL; the Payroll harness extended (CI stays at ten).
+console.log('== AFI-4d — SESSION SUPPLEMENTAL PAYROLL ==');
+{
+  const rd = (f) => read(path.join(root, 'js', f));
+  const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1');
+  const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
+  const apiC = code(rd('core/payroll-api.js')), storeC = code(rd('core/session-payroll.js')), viewC = code(rd('ui/session-payroll-view.js'));
+  const all = apiC + '\n' + storeC + '\n' + viewC;
+  const phpList = (src, name) => { const m = new RegExp('const ' + name + " = \\[([^\\]]*)\\]").exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  const jsList = (src, name) => { const m = new RegExp('const ' + name + ' = Object\\.freeze\\(\\[([^\\]]*)\\]\\)').exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  const view = srv('Supplemental/SupplementalView.php');
+  const fields = phpList(view, 'FIELDS'), lineFields = phpList(view, 'OVERTIME_FIELDS'), eligFields = phpList(view, 'ELIGIBILITY_FIELDS');
+  check(!!fields && fields.length === 12 && JSON.stringify(jsList(apiC, 'SUPPLEMENTAL_API_DOC_KEYS')) === JSON.stringify(fields.slice().sort())
+    && !!lineFields && lineFields.length === 3 && JSON.stringify(jsList(apiC, 'SUPPLEMENTAL_API_LINE_KEYS')) === JSON.stringify(lineFields.slice().sort())
+    && !!eligFields && eligFields.length === 5 && JSON.stringify(jsList(apiC, 'SUPPLEMENTAL_API_ELIGIBILITY_KEYS')) === JSON.stringify(eligFields.slice().sort()),
+    'AFI-4d: contract = BF-4d — the document is exactly SupplementalView::FIELDS (12), a captured line OVERTIME_FIELDS (3), an eligibility entry ELIGIBILITY_FIELDS (5)');
+  const status = srv('Supplemental/SupplementalStatus.php');
+  check(JSON.stringify(jsList(apiC, 'SUPPLEMENTAL_API_STATUSES')) === JSON.stringify(['Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled'])
+    && /public const VALUES = \[self::DRAFT, self::REVIEWED, self::READY, self::COMMITTED, self::CANCELLED\];/.test(status)
+    && JSON.stringify(jsList(apiC, 'SUPPLEMENTAL_API_OPEN')) === JSON.stringify(['Draft', 'Reviewed', 'Ready']),
+    'AFI-4d: the five BF-4d statuses (SupplementalStatus::VALUES) and the three open ones — never the LOCAL Review / Approved / Posted / Executed');
+  // The routes: SupplementalApi names exactly the nine BF-4d routes of Routes.php.
+  const routes = srv('Http/Routes.php');
+  const serverPaths = (routes.match(/new Route\('[A-Z]+', '(\/api\/supplemental-payroll[^']*)'/g) || []).map((l) => l.replace(/^.*'(\/api\/[^']*)'$/, '$1')).sort();
+  const clientPaths = (apiC.match(/'\/api\/supplemental-payroll[^']*'/g) || []).map((x) => x.slice(1, -1)).sort();
+  check(serverPaths.length === 9 && JSON.stringify(clientPaths) === JSON.stringify(serverPaths),
+    'AFI-4d: SupplementalApi names exactly the nine BF-4d Supplemental routes of server/src/Http/Routes.php, each once');
+  // The lifecycle: the server's graph, linear — NO Draft → Ready.
+  check(/review: Object\.freeze\(\['\/api\/supplemental-payrolls\/review', 'Reviewed'\]\),\s*approve: Object\.freeze\(\['\/api\/supplemental-payrolls\/approve', 'Ready'\]\),\s*return: Object\.freeze\(\['\/api\/supplemental-payrolls\/return', 'Draft'\]\),\s*cancel: Object\.freeze\(\['\/api\/supplemental-payrolls\/cancel', 'Cancelled'\]\)/.test(apiC)
+    && /'review' => \[\[self::DRAFT\], self::REVIEWED\],\s*'approve' => \[\[self::REVIEWED\], self::READY\],\s*'return' => \[\[self::REVIEWED, self::READY\], self::DRAFT\],\s*'cancel' => \[\[self::DRAFT, self::REVIEWED, self::READY\], self::CANCELLED\],/.test(status),
+    'AFI-4d: the four transitions and their targets are SupplementalStatus::TRANSITIONS (approve only from Reviewed)');
+  const matrix = (/const SESSION_SUPPLEMENTAL_ACTIONS = [\s\S]*?\}\);/.exec(storeC) || [''])[0];
+  check(/Draft: Object\.freeze\(\['review', 'cancel'\]\),\s*Reviewed: Object\.freeze\(\['approve', 'return', 'cancel'\]\),\s*Ready: Object\.freeze\(\['commit', 'return', 'cancel'\]\)\s*\}\)/.test(matrix)
+    && !/Draft: Object\.freeze\(\[[^\]]*approve/.test(matrix) && !/Committed:|Cancelled:/.test(matrix),
+    'AFI-4d: the control matrix is Draft: review / cancel; Reviewed: approve / return / cancel; Ready: commit / return / cancel — NO Draft → Ready; Committed and Cancelled offer nothing');
+  // Exact bodies and strictly confirming answers.
+  check(/body: \{ payrollPlanId: planId \}/.test(apiC) && /target\(id, expectedVersion\)\{ return PayrollRequests\.target\(id, expectedVersion\); \}/.test(apiC)
+    && /commit\(intent\)\{ return PayrollRequests\.commit\(intent\); \}/.test(apiC),
+    'AFI-4d: the request bodies are exactly { payrollPlanId }, { id, expectedVersion } and the commit four (PayrollInput\'s grammars, one encoder) — no employee, company, amount, status or key on generate');
+  check(/\(d\) => d\.id === id && d\.status === t\[1\] && d\.version === expectedVersion \+ 1/.test(apiC)
+    && /\(d\) => d\.payrollPlanId === planId && d\.monthKey === monthKey && SUPPLEMENTAL_API_OPEN\.indexOf\(d\.status\) !== -1/.test(apiC)
+    && /\(d\) => d\.id === intent\.id && d\.status === 'Committed' && d\.version === intent\.version \+ 1 && d\.overtimeAmount === intent\.total/.test(apiC),
+    'AFI-4d: a success counts only when it confirms — a transition: same document, target status, version + 1; generate: the plan\'s open document of that month; commit: Committed, version + 1, the same amount');
+  // Commit: one intent from the document's own amount string and the one Web Crypto key.
+  check(/setSuppIntent\(\{ id: d\.doc\.id, version: d\.doc\.version, total: d\.doc\.overtimeAmount, key: key \}\)/.test(storeC)
+    && (storeC.match(/SupplementalApi\.commit\(/g) || []).length === 1 && (all.match(/getRandomValues\(/g) || []).length === 1 && (storeC.match(/payrollIdempotencyKey\(\)/g) || []).length === 2
+    && /sessionSupplementalIntentState\(s\.suppIntent, d\.doc\) !== 'unresolved'\) return;/.test(storeC)
+    && /if\(COMMIT_AMBIGUOUS\.indexOf\(out\.kind\) !== -1\)\{[\s\S]*?failMutation\(token, SESSION_PAYROLL_MUTATION_STATUS\.AMBIGUOUS, out\);[\s\S]*?if\(id && id === s\.suppDetailId\) loadSuppDetail\(id\);/.test(storeC),
+    'AFI-4d: Commit follows D-AFI4c2-1 — one intent (the document\'s own overtimeAmount, the one Web Crypto key), one send path, an unknown outcome re-read and never resent, a same-key Retry only while unresolved');
+  // The SESSION firewall: memory only; cleared with the identity; never the LOCAL engine.
+  check(/function clear\(\)\{\s*forgetDrift\(\); commitIntent = null;\s*forgetSupplementalMonth\(\); forgetSupplementalDetail\(\); suppIntent = null;/.test(storeC)
+    && /SessionPayrollStore\.clear\(\);/.test(rd('core/auth-boot.js')),
+    'AFI-4d: clear() (logout, session loss, a new principal — AuthBoot unchanged) destroys every Supplemental datum, the intent and its key');
+  check(!/\b(State|localStorage|sessionStorage|indexedDB|document\.cookie|history\.|location\.|TransportAdapter|ApplicationGateway|StorageAdapter|PayrollRepository)\b/.test(all)
+    && !/\b(generateSupplementalForPlan|refreshSupplemental|transitionSupplemental|postSupplemental|persistSupplementalPayments|linkSupplementalExecution|supplementalById|supplementalsForPlan|supplementalEligibleOvertime|SUPPLEMENTAL_STATUSES|SUPPLEMENTAL_TRANSITIONS|SUPPLEMENTAL_OPEN_STATUSES|supplementalPayments|tam_supplemental_payments_v1)\b/.test(all),
+    'AFI-4d: the SESSION Supplemental code uses no State, storage, cookie, URL / history, Transport, Gateway, repository or LOCAL Supplemental engine — memory only');
+  // The Employee: own Committed documents only; never the eligibility, never a write.
+  check(/if\(sessionPayrollIsEmployee\(p\)\) reads\.push\(run\('suppList', key, \(\) => SupplementalApi\.myMonth\(key, p\.employeeId\)\)\);\s*else if\(sessionPayrollIsCeo\(p\)\)\{\s*reads\.push\(run\('suppList', key, \(\) => SupplementalApi\.month\(key\)\)\);\s*reads\.push\(run\('elig', key, \(\) => SupplementalApi\.eligibility\(key\)\)\);/.test(storeC)
+    && /sessionPayrollIsEmployee\(p\) \? SupplementalApi\.myGet\(id, p\.employeeId\) : SupplementalApi\.get\(id\)/.test(storeC)
+    && /return \(d && d\.status === 'Committed' && typeof employeeId === 'string' && d\.employeeId === employeeId\) \? d : null;/.test(apiC)
+    && /if\(SESSION_SUPPLEMENTAL_PANEL_KINDS\.indexOf\(kind\) !== -1\) return openSupplementalPanel\(kind, planId\);/.test(storeC) && /openPanel\(kind, planId\)\{\s*if\(!canAct\(\)\) return;/.test(storeC),
+    'AFI-4d: an Employee reads only their own Committed documents (myMonth / myGet, refused whole otherwise) — never the eligibility; every Supplemental write is behind canAct() (CEO only)');
+  // Money: exact strings only; nothing adds a payroll and a Supplemental amount.
+  check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\.|BigInt/.test(all)
+    && !/(overtimeAmount|eligibleAmount|totalAmount|baseSalary|overtimeHours|eligibleHours)\s*[-+*\/]|[-+*\/]\s*[a-z.]*\.(overtimeAmount|eligibleAmount|totalAmount|baseSalary)\b(?!\s*[,)'])/.test(all.replace(/'[^'\n]*'/g, "''"))
+    && !/Total compensation|Grand total/i.test(viewC),
+    'AFI-4d: no number conversion, Math, formatter or arithmetic on any amount or hours — a payroll and a Supplemental amount are never added (no combined total)');
+  // Eligibility is named from the base plan's own snapshot — never the Employee list.
+  check(/function sessionSupplementalPlanOf\(listStatus, list, planId\)\{[\s\S]*?list\.filter\(\(p\) => p\.id === planId\)/.test(storeC) && !/EmployeeApi/.test(viewC)
+    && (storeC.match(/EmployeeApi\./g) || []).length === 1,
+    'AFI-4d: an eligibility entry is named from its own Committed plan snapshot (payrollPlanId) — never from EmployeeApi');
+  // No global collision: no top-level name of the three modules is declared by any other module.
+  const decl = (src) => (src.match(/^(?:const|let|var|function|async function) +([A-Za-z_$][A-Za-z0-9_$]*)/gm) || []).map((l) => l.split(/\s+/).pop());
+  const mine = decl(rd('core/payroll-api.js')).concat(decl(rd('core/session-payroll.js')), decl(rd('ui/session-payroll-view.js')));
+  const others = new Set();
+  jsFiles.filter((f) => ['core/payroll-api.js', 'core/session-payroll.js', 'ui/session-payroll-view.js'].indexOf(f) === -1).forEach((f) => decl(rd(f)).forEach((n) => others.add(n)));
+  const clash = mine.filter((n) => others.has(n));
+  const localSupp = decl(rd('people/supplemental-engine.js'));
+  check(clash.length === 0 && new Set(mine).size === mine.length && localSupp.length > 20 && ['SUPPLEMENTAL_STATUSES', 'SUPPLEMENTAL_TRANSITIONS', 'generateSupplementalForPlan'].every((n) => localSupp.indexOf(n) !== -1),
+    'AFI-4d: no global collision — no top-level name of the SESSION Payroll modules is declared by any other module (the LOCAL Supplemental engine keeps its own)' + (clash.length ? ' >> ' + clash.join(', ') : ''));
+  // The words: a separate obligation; Committed is final, not paid; nothing is posted to Finance.
+  check(/Committed: 'Committed — final, not paid'/.test(viewC) && /submit: 'Commit supplemental', busy: 'Committing…', danger: true/.test(viewC)
+    && /text: 'It can no longer be changed, returned or cancelled\. It is not a payment — nothing is paid and nothing is posted to Finance\.',\s*submit: 'Commit supplemental'/.test(viewC)
+    && /Supplemental payroll — overtime approved after payroll was committed/.test(viewC) && !/Supplemental Payments|Supplements\b|overtime_drift|\bPaid\b|Mark paid/.test(viewC),
+    'AFI-4d: "Commit supplemental" says final obligation, no return or cancel, not a payment, nothing posted to Finance; Committed reads "Committed — final, not paid"; never the LOCAL wording');
+  // Package and module order: no new module; 100 files; the AFI-4d digest.
+  const mods = require(path.join(root, 'tools', 'module-order.js'));
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') < mods.indexOf('core/session-payroll.js') && mods.indexOf('core/session-payroll.js') < mods.indexOf('ui/session-payroll-view.js')
+    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 100 && pkg.actions === 21
+    && pkg.packageDigest === '7768d72b54f2265b2ac024d6dfb0c95c5044d181f2167199e16e5a14f0cdcb4e',
+    'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files at digest 7768d72b…, ACTIONS 21');
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0031_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'AFI-4d: frontend only — migration head 0031, AUTH_MODE LOCAL');
+  const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js'));
+  check(['S. ', 'S1. ', 'S2. ', 'S3. ', 'S4. ', 'S5. ', 'S6. ', 'S7. ', 'S8. '].every((t) => harness.indexOf("'" + t) !== -1) && /\/__stub\/fail-next-supplemental-commit/.test(read(path.join(root, 'tools', 'serve-auth-stub.js'))),
+    'AFI-4d: the Payroll runtime harness proves Supplemental (sections S–S8) and the auth stub models BF-4d for the browser');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md'));
+  check(/D-AFI4d-1 = A/.test(ctx) && /D-AFI4d-2 = A/.test(ctx) && /AFI-4d/.test(read(path.join(root, 'ARCHITECTURE.md'))) && /AFI-4d/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md')))
+    && /AFI-4d/.test(read(path.join(root, 'docs', '05-milestones', 'Milestones.md'))) && /AFI-4d/.test(read(path.join(root, 'CHANGELOG.md'))),
+    'AFI-4d: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the deployment note (DEPLOYMENT), the milestone and the changelog');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

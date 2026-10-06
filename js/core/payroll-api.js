@@ -1,5 +1,5 @@
 /* ============================================================
-   PAYROLL API (AFI-4c1, AFI-4c2) — js/core/payroll-api.js
+   PAYROLL API (AFI-4c1, AFI-4c2, AFI-4d) — js/core/payroll-api.js
    ------------------------------------------------------------
    The SESSION-mode client for the server payroll plan (BF-4c1, PR #44; BF-4c2, PR #46): three
    reads over ApiClient and six writes over authSessionMutation (js/core/auth-boot.js), each
@@ -53,6 +53,9 @@
    confirms it (generate: every plan of the month asked for; a transition: the same plan in the
    target status at expectedVersion + 1) — otherwise INVALID_RESPONSE. Nothing is persisted,
    cached, logged or resent here.
+
+   AFI-4d: SupplementalDecoders, SupplementalRequests and SupplementalApi (end of this file) are the
+   client of the BF-4d Supplemental Payroll routes, over the same wire.
 
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
@@ -262,36 +265,39 @@ const PayrollRequests = Object.freeze({
   }
 });
 
-const PayrollApi = (function(){
-  // ApiResult -> { ok: true, data } | { ok: false, kind, fields?, retryAfter?, requestId? }.
-  function outcome(res, decode){
-    if(!res.ok){
-      const failed = { ok: false, kind: res.kind };
-      if(res.fields) failed.fields = res.fields;
-      if(res.retryAfter !== undefined) failed.retryAfter = res.retryAfter;
-      if(res.requestId) failed.requestId = res.requestId;
-      return Object.freeze(failed);
-    }
-    const data = decode(res.data);
-    if(data === null){
-      const invalid = { ok: false, kind: PAYROLL_API_INVALID };
-      if(res.requestId) invalid.requestId = res.requestId;
-      return Object.freeze(invalid);
-    }
-    return Object.freeze({ ok: true, data: data });
+// The wire of PayrollApi and (AFI-4d) SupplementalApi — one implementation for both.
+// ApiResult -> { ok: true, data } | { ok: false, kind, fields?, retryAfter?, requestId? }.
+function payrollApiOutcome(res, decode){
+  if(!res.ok){
+    const failed = { ok: false, kind: res.kind };
+    if(res.fields) failed.fields = res.fields;
+    if(res.retryAfter !== undefined) failed.retryAfter = res.retryAfter;
+    if(res.requestId) failed.requestId = res.requestId;
+    return Object.freeze(failed);
   }
-  const refused = Object.freeze({ ok: false, kind: PAYROLL_API_INVALID });
+  const data = decode(res.data);
+  if(data === null){
+    const invalid = { ok: false, kind: PAYROLL_API_INVALID };
+    if(res.requestId) invalid.requestId = res.requestId;
+    return Object.freeze(invalid);
+  }
+  return Object.freeze({ ok: true, data: data });
+}
+const PAYROLL_API_REFUSED = Object.freeze({ ok: false, kind: PAYROLL_API_INVALID });
 
-  // One write through the established CSRF path. A refused request is never sent; an answer
-  // carries authSessionMutation's recovery, and only a strictly decoded answer that `confirms`
-  // the write is a success.
-  async function write(route, prepared, decode, confirms){
-    if(!prepared.ok) return Object.freeze({ ok: false, kind: API_RESULT_KINDS.VALIDATION, fields: prepared.fields, local: true, recovery: 'none' });
-    const sent = await authSessionMutation(route, prepared.body);
-    let out = outcome(sent.result, decode);
-    if(out.ok && !confirms(out.data)) out = refused;
-    return Object.freeze(Object.assign({}, out, { recovery: sent.recovery }));
-  }
+// One write through the established CSRF path. A refused request is never sent; an answer
+// carries authSessionMutation's recovery, and only a strictly decoded answer that `confirms`
+// the write is a success.
+async function payrollApiWrite(route, prepared, decode, confirms){
+  if(!prepared.ok) return Object.freeze({ ok: false, kind: API_RESULT_KINDS.VALIDATION, fields: prepared.fields, local: true, recovery: 'none' });
+  const sent = await authSessionMutation(route, prepared.body);
+  let out = payrollApiOutcome(sent.result, decode);
+  if(out.ok && !confirms(out.data)) out = PAYROLL_API_REFUSED;
+  return Object.freeze(Object.assign({}, out, { recovery: sent.recovery }));
+}
+
+const PayrollApi = (function(){
+  const outcome = payrollApiOutcome, write = payrollApiWrite, refused = PAYROLL_API_REFUSED;
   // A transition: confirmed only by the same plan, in the target status, one version on.
   function transition(operation){
     const t = PAYROLL_TRANSITIONS[operation];
@@ -337,6 +343,224 @@ const PayrollApi = (function(){
     async myGet(id, employeeId){
       const out = await PayrollApi.get(id);
       return out.ok && !PayrollDecoders.ownCommitted(out.data.plan, employeeId) ? refused : out;
+    }
+  });
+})();
+
+/* ============================================================
+   AFI-4d — SUPPLEMENTAL PAYROLL (over BF-4d, PR #48; owner decisions D-AFI4d-1/2 = A)
+   ------------------------------------------------------------
+   The SESSION client of the server Supplemental Payroll document: a separate obligation for one
+   employee and month that settles Approved overtime NOT contained in the employee's
+   already-Committed base payroll plan. Three reads over ApiClient and six writes over
+   authSessionMutation, each answer strictly decoded:
+
+     month(monthKey)        GET /api/supplemental-payrolls?month=        every document of the month,
+                                                                         Cancelled included (CEO)
+     get(id)                GET /api/supplemental-payroll?id=            one document and its captured
+                                                                         overtime (frozen amounts)
+     eligibility(monthKey)  GET /api/supplemental-payrolls/eligibility?month=   the month's Committed
+                                                                         base plans with Approved overtime
+                                                                         no plan or document holds (CEO)
+     generate(planId, monthKey)      POST …/generate   exactly { payrollPlanId }: the base plan's open
+                                     document — a new or recalculated Draft, or an open Reviewed /
+                                     Ready document returned untouched. No idempotency key: at most
+                                     one document per plan is open (BF-4d).
+     review / approve / returnToDraft / cancel(id, expectedVersion)
+                                     POST …/review | approve | return | cancel   exactly { id,
+                                     expectedVersion }: Draft → Reviewed; Reviewed → Ready (there is
+                                     NO Draft → Ready); Reviewed / Ready → Draft; Draft / Reviewed /
+                                     Ready → Cancelled
+     commit(intent)         POST …/commit   exactly { id, expectedVersion, expectedTotal,
+                                     idempotencyKey } of one intent — the document's own decoded
+                                     overtimeAmount string, unchanged, and payrollIdempotencyKey()
+     myMonth / myGet        the Employee's reads: every document must be Committed and their own
+
+   The grammars of an id, a version, a month, an amount and the key are BF-4d's, which are
+   PayrollInput's — so the request encoders are PayrollRequests' own. Money is the server's exact
+   strings: nothing here adds, rounds, compares as numbers or converts it.
+   ============================================================ */
+
+// server/src/Supplemental/SupplementalView.php FIELDS, OVERTIME_FIELDS (PayrollView's line shape),
+// ELIGIBILITY_FIELDS — sorted for the exact-key comparison; SupplementalStatus::VALUES and OPEN.
+const SUPPLEMENTAL_API_DOC_KEYS = Object.freeze(['department', 'employeeCode', 'employeeId', 'employeeName', 'id', 'monthKey',
+  'overtimeAmount', 'overtimeCount', 'overtimeHours', 'payrollPlanId', 'status', 'version']);
+const SUPPLEMENTAL_API_LINE_KEYS = Object.freeze(['amount', 'hours', 'id']);
+const SUPPLEMENTAL_API_ELIGIBILITY_KEYS = Object.freeze(['eligibleAmount', 'eligibleCount', 'eligibleHours', 'employeeId', 'payrollPlanId']);
+const SUPPLEMENTAL_API_STATUSES = Object.freeze(['Draft', 'Reviewed', 'Ready', 'Committed', 'Cancelled']);
+const SUPPLEMENTAL_API_OPEN = Object.freeze(['Draft', 'Reviewed', 'Ready']);
+// The transitions (SupplementalStatus::TRANSITIONS): operation → [route, target status].
+const SUPPLEMENTAL_API_TRANSITIONS = Object.freeze({
+  review: Object.freeze(['/api/supplemental-payrolls/review', 'Reviewed']),
+  approve: Object.freeze(['/api/supplemental-payrolls/approve', 'Ready']),
+  return: Object.freeze(['/api/supplemental-payrolls/return', 'Draft']),
+  cancel: Object.freeze(['/api/supplemental-payrolls/cancel', 'Cancelled'])
+});
+
+const SupplementalDecoders = (function(){
+  function isPlain(v){
+    return !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+  }
+  function exactKeys(o, keys){
+    const k = Object.keys(o).sort();
+    if(k.length !== keys.length) return false;
+    for(let i = 0; i < k.length; i++){ if(k[i] !== keys[i]) return false; }
+    return true;
+  }
+  const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+  function text(v, max){ return typeof v === 'string' && v.length > 0 && Array.from(v).length <= max && !CONTROL.test(v); }
+  const isId = (v) => typeof v === 'string' && PAYROLL_ID_PATTERN.test(v);
+  const validEmployeeId = (v) => typeof v === 'string' && PAYROLL_EMPLOYEE_ID_PATTERN.test(v);
+  const isCount = (v) => Number.isInteger(v) && v >= 1 && v <= PAYROLL_MAX_VERSION;
+  // A document captures at least one record, so its hours and its amount are never zero
+  // (SupplementalView: a positive whole-Rupiah amount, a count of at least one).
+  const checks = {
+    id: isId,
+    payrollPlanId: isId,
+    employeeId: validEmployeeId,
+    monthKey: (v) => OvertimeCalendar.isMonth(v),
+    status: (v) => SUPPLEMENTAL_API_STATUSES.indexOf(v) !== -1,
+    employeeCode: (v) => text(v, 32),
+    employeeName: (v) => text(v, 160),
+    department: (v) => v === null || text(v, 120),
+    overtimeAmount: (v) => payrollIsAmount(v) && v !== '0.00',
+    overtimeHours: (v) => payrollIsHoursTotal(v) && v !== '0.00',
+    overtimeCount: isCount,
+    version: (v) => Number.isInteger(v) && v >= 1 && v <= PAYROLL_MAX_VERSION
+  };
+  // A frozen copy holding exactly the twelve document keys, or null.
+  function doc(o){
+    if(!isPlain(o) || !exactKeys(o, SUPPLEMENTAL_API_DOC_KEYS)) return null;
+    const out = {};
+    for(let i = 0; i < SUPPLEMENTAL_API_DOC_KEYS.length; i++){
+      const k = SUPPLEMENTAL_API_DOC_KEYS[i];
+      if(!checks[k](o[k])) return null;
+      out[k] = o[k];
+    }
+    return Object.freeze(out);
+  }
+  // A captured overtime line: { id, hours, amount } — the record, its hours, its frozen amount.
+  function line(o){
+    if(!isPlain(o) || !exactKeys(o, SUPPLEMENTAL_API_LINE_KEYS) || !isId(o.id) || !payrollIsRecordHours(o.hours) || !payrollIsAmount(o.amount)) return null;
+    return Object.freeze({ id: o.id, hours: o.hours, amount: o.amount });
+  }
+  // An eligibility entry; its amount may be "0.00" (generate then refuses: nothing to settle).
+  function eligible(o){
+    if(!isPlain(o) || !exactKeys(o, SUPPLEMENTAL_API_ELIGIBILITY_KEYS) || !isId(o.payrollPlanId) || !validEmployeeId(o.employeeId)
+      || !isCount(o.eligibleCount) || !payrollIsHoursTotal(o.eligibleHours) || o.eligibleHours === '0.00' || !payrollIsAmount(o.eligibleAmount)) return null;
+    return Object.freeze({ payrollPlanId: o.payrollPlanId, employeeId: o.employeeId, eligibleCount: o.eligibleCount, eligibleHours: o.eligibleHours, eligibleAmount: o.eligibleAmount });
+  }
+  return Object.freeze({
+    doc: doc,
+    line: line,
+    eligible: eligible,
+    // { supplementalPayrolls: [doc…] } of exactly `monthKey` -> frozen array, or null.
+    monthResponse(data, monthKey){
+      if(!isPlain(data) || !exactKeys(data, ['supplementalPayrolls']) || !Array.isArray(data.supplementalPayrolls)) return null;
+      const out = [];
+      for(let i = 0; i < data.supplementalPayrolls.length; i++){
+        const d = doc(data.supplementalPayrolls[i]);
+        if(!d || d.monthKey !== monthKey) return null;
+        out.push(d);
+      }
+      return Object.freeze(out);
+    },
+    // { supplementalPayroll, supplementalPayrollOvertime: [line…] } -> { doc, overtime }, or null.
+    detailResponse(data){
+      if(!isPlain(data) || !exactKeys(data, ['supplementalPayroll', 'supplementalPayrollOvertime']) || !Array.isArray(data.supplementalPayrollOvertime)) return null;
+      const d = doc(data.supplementalPayroll);
+      if(!d) return null;
+      const rows = [];
+      for(let i = 0; i < data.supplementalPayrollOvertime.length; i++){
+        const r = line(data.supplementalPayrollOvertime[i]);
+        if(!r) return null;
+        rows.push(r);
+      }
+      return Object.freeze({ doc: d, overtime: Object.freeze(rows) });
+    },
+    // { supplementalPayroll } -> the document, or null.
+    docResponse(data){
+      return (isPlain(data) && exactKeys(data, ['supplementalPayroll'])) ? doc(data.supplementalPayroll) : null;
+    },
+    // { supplementalEligibility: [entry…] } -> frozen array (one entry per base plan), or null.
+    eligibilityResponse(data){
+      if(!isPlain(data) || !exactKeys(data, ['supplementalEligibility']) || !Array.isArray(data.supplementalEligibility)) return null;
+      const out = [];
+      for(let i = 0; i < data.supplementalEligibility.length; i++){
+        const e = eligible(data.supplementalEligibility[i]);
+        if(!e || out.some((x) => x.payrollPlanId === e.payrollPlanId)) return null;
+        out.push(e);
+      }
+      return Object.freeze(out);
+    },
+    // The Employee's own Committed document, or null (defence in depth; the server scopes).
+    ownCommitted(d, employeeId){
+      return (d && d.status === 'Committed' && typeof employeeId === 'string' && d.employeeId === employeeId) ? d : null;
+    }
+  });
+})();
+
+// The allowlisted request mirror of SupplementalInput: { ok: true, body } or { ok: false, fields }.
+// The transition and commit grammars are PayrollInput's, so they are PayrollRequests' own.
+const SupplementalRequests = Object.freeze({
+  // POST /api/supplemental-payrolls/generate: exactly { payrollPlanId }.
+  generate(planId){
+    return (typeof planId === 'string' && PAYROLL_ID_PATTERN.test(planId)) ? Object.freeze({ ok: true, body: { payrollPlanId: planId } })
+      : Object.freeze({ ok: false, fields: Object.freeze(['payrollPlanId']) });
+  },
+  // review / approve / return / cancel: exactly { id, expectedVersion }.
+  target(id, expectedVersion){ return PayrollRequests.target(id, expectedVersion); },
+  // commit: exactly { id, expectedVersion, expectedTotal, idempotencyKey } of one intent.
+  commit(intent){ return PayrollRequests.commit(intent); }
+});
+
+const SupplementalApi = (function(){
+  const outcome = payrollApiOutcome, write = payrollApiWrite, refused = PAYROLL_API_REFUSED;
+  // A transition: confirmed only by the same document, in the target status, one version on.
+  function transition(operation){
+    const t = SUPPLEMENTAL_API_TRANSITIONS[operation];
+    return (id, expectedVersion) => write(t[0], SupplementalRequests.target(id, expectedVersion), (d) => SupplementalDecoders.docResponse(d),
+      (d) => d.id === id && d.status === t[1] && d.version === expectedVersion + 1);
+  }
+  return Object.freeze({
+    async month(monthKey){
+      if(!OvertimeCalendar.isMonth(monthKey)) return refused;
+      const res = await ApiClient.request('/api/supplemental-payrolls', { method: 'GET', query: { month: monthKey } });
+      return outcome(res, (d) => SupplementalDecoders.monthResponse(d, monthKey));
+    },
+    async get(id){
+      if(typeof id !== 'string' || !PAYROLL_ID_PATTERN.test(id)) return refused;
+      const res = await ApiClient.request('/api/supplemental-payroll', { method: 'GET', query: { id: id } });
+      const out = outcome(res, (d) => SupplementalDecoders.detailResponse(d));
+      return out.ok && out.data.doc.id !== id ? refused : out;
+    },
+    async eligibility(monthKey){
+      if(!OvertimeCalendar.isMonth(monthKey)) return refused;
+      const res = await ApiClient.request('/api/supplemental-payrolls/eligibility', { method: 'GET', query: { month: monthKey } });
+      return outcome(res, (d) => SupplementalDecoders.eligibilityResponse(d));
+    },
+    // Confirmed by the base plan's open document of that month — whatever its open status.
+    generate(planId, monthKey){
+      return write('/api/supplemental-payrolls/generate', SupplementalRequests.generate(planId), (d) => SupplementalDecoders.docResponse(d),
+        (d) => d.payrollPlanId === planId && d.monthKey === monthKey && SUPPLEMENTAL_API_OPEN.indexOf(d.status) !== -1);
+    },
+    review: transition('review'),
+    approve: transition('approve'),
+    returnToDraft: transition('return'),
+    cancel: transition('cancel'),
+    // One commit intent { id, version, total, key }, sent once per deliberate click.
+    commit(intent){
+      return write('/api/supplemental-payrolls/commit', SupplementalRequests.commit(intent), (d) => SupplementalDecoders.docResponse(d),
+        (d) => d.id === intent.id && d.status === 'Committed' && d.version === intent.version + 1 && d.overtimeAmount === intent.total);
+    },
+    // The Employee's reads — every document Committed and their own, else INVALID_RESPONSE.
+    async myMonth(monthKey, employeeId){
+      const out = await SupplementalApi.month(monthKey);
+      return out.ok && !out.data.every((d) => SupplementalDecoders.ownCommitted(d, employeeId)) ? refused : out;
+    },
+    async myGet(id, employeeId){
+      const out = await SupplementalApi.get(id);
+      return out.ok && !SupplementalDecoders.ownCommitted(out.data.doc, employeeId) ? refused : out;
     }
   });
 })();

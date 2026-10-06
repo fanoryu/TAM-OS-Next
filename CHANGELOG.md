@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- **AFI-4d SESSION Supplemental Payroll (frontend; SESSION mode only, not shipped).** The CEO's Payroll month page now shows
+  Supplemental payroll: the committed payrolls with overtime approved after they were committed — named from the payroll
+  itself, with the number of records, hours and amount exactly as TAM OS reports them — and "Prepare supplemental payroll",
+  plus the month's Supplemental documents. A document opens with its overtime and only the steps TAM OS allows: Review and
+  Cancel on a Draft (it must be reviewed before it can be approved), Approve, Return to draft and Cancel once reviewed, and
+  Commit supplemental, Return to draft and Cancel when Ready. Committing works like committing payroll: it shows the exact
+  amount, explains that it becomes a final obligation that is not paid and posts nothing to Finance, and can never commit
+  twice — if TAM OS cannot confirm it, the page reads it again and offers "Retry commit". A committed payroll lists its
+  Supplemental documents, and later overtime goes into the next one. Employees see their own committed Supplemental
+  payroll in My payroll as separate rows, each with its own card — never added to their payroll. The shipped `AUTH_MODE`
+  stays **LOCAL**.
 - **BF-4d Supplemental Payroll (backend only, not shipped).** Overtime that is approved after an employee's payroll for
   that month was committed can now be settled on the server as a separate Supplemental Payroll document, exactly as the
   LOCAL Supplemental Payments do it — the committed payroll itself is never changed. The CEO prepares it from the

@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL DATA (AFI-4c1, AFI-4c2) — js/core/session-payroll.js
+   SESSION PAYROLL DATA (AFI-4c1, AFI-4c2, AFI-4d) — js/core/session-payroll.js
    ------------------------------------------------------------
    The SESSION-mode Payroll section of the authenticated workspace — CEO only — over BF-4c1:
    one month's payroll plans, a plan's detail with its contributing overtime, "Prepare payroll"
@@ -72,6 +72,27 @@
    drift, driftId, driftSeq, driftStatus belong to the detail; commitIntent survives a re-read
    and is destroyed by clear() (logout, session loss, a different principal).
 
+   AFI-4d (over BF-4d; owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A): SUPPLEMENTAL PAYROLL — a
+   separate obligation settling Approved overtime of a month that the employee's already-Committed
+   base plan does not contain. It lives in this same store, so it shares the generation, clear(),
+   the principal binding and the one write in flight:
+     suppList, suppListMonth, suppListSeq, suppListStatus, suppListError   the month's documents
+     elig, eligMonth, eligSeq, eligStatus, eligError   the CEO's eligibility of the month (one entry
+                   per Committed base plan), named from that plan's own snapshot in `list` — never
+                   from the Employee list
+     suppDetail, suppDetailId, suppDetailSeq, suppDetailStatus   one document: { doc, overtime };
+                   exclusive with the plan detail (opening one closes the other)
+     suppIntent    the one Supplemental commit intent { id, version, total, key } — total is the
+                   document's own overtimeAmount string; destroyed by clear()
+   The CEO's month reads the plans, the Supplemental documents and the eligibility; "Prepare
+   supplemental payroll" (generate, { payrollPlanId }) answers the plan's open document — a new or
+   recalculated Draft, or an open Reviewed / Ready document untouched; the lifecycle is linear
+   (Draft: review / cancel; Reviewed: approve / return / cancel; Ready: commit / return / cancel —
+   there is no Draft → Ready); Commit follows D-AFI4c2-1 exactly (one intent, a re-read after an
+   unknown outcome, a deliberate same-key "Retry commit"). An Employee's My payroll also reads their
+   own Committed documents (SupplementalApi.myMonth / myGet) — never the eligibility, never a write.
+   Nothing here adds a base plan and a Supplemental document together.
+
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
 
@@ -107,6 +128,39 @@ function sessionPayrollActions(principal, plan){
   return Object.prototype.hasOwnProperty.call(SESSION_PAYROLL_ACTIONS, plan.status) ? SESSION_PAYROLL_ACTIONS[plan.status] : SESSION_PAYROLL_NONE;
 }
 
+// AFI-4d: the Supplemental control matrix (BF-4d SupplementalStatus::TRANSITIONS; Commit from
+// Ready) — UX only; the server decides every write again. CEO only. There is no Draft → Ready:
+// a Draft is reviewed before it is approved. Committed and Cancelled offer nothing.
+const SESSION_SUPPLEMENTAL_ACTIONS = Object.freeze({
+  Draft: Object.freeze(['review', 'cancel']),
+  Reviewed: Object.freeze(['approve', 'return', 'cancel']),
+  Ready: Object.freeze(['commit', 'return', 'cancel'])
+});
+// The Supplemental confirmations and writes, and the operation each one is.
+const SESSION_SUPPLEMENTAL_PANEL_KINDS = Object.freeze(['suppGenerate', 'suppReview', 'suppApprove', 'suppReturn', 'suppCancel', 'suppCommit']);
+const SESSION_SUPPLEMENTAL_OPERATION = Object.freeze({ suppReview: 'review', suppApprove: 'approve', suppReturn: 'return', suppCancel: 'cancel', suppCommit: 'commit' });
+function sessionSupplementalActions(principal, doc){
+  if(!sessionPayrollIsCeo(principal) || !doc) return SESSION_PAYROLL_NONE;
+  return Object.prototype.hasOwnProperty.call(SESSION_SUPPLEMENTAL_ACTIONS, doc.status) ? SESSION_SUPPLEMENTAL_ACTIONS[doc.status] : SESSION_PAYROLL_NONE;
+}
+// AFI-4d: the reconciling read of a Supplemental commit intent — 'committed' (Committed at
+// version + 1 with the same amount), 'unresolved' (still Ready at the same version and amount:
+// Retry commit may send the same intent) or 'stale' (anything else).
+function sessionSupplementalIntentState(intent, doc){
+  if(!intent || !doc || doc.id !== intent.id) return null;
+  if(doc.status === 'Committed' && doc.version === intent.version + 1 && doc.overtimeAmount === intent.total) return 'committed';
+  if(doc.status === 'Ready' && doc.version === intent.version && doc.overtimeAmount === intent.total) return 'unresolved';
+  return 'stale';
+}
+// AFI-4d: the name of an eligibility entry — the snapshot of its own base plan (same payrollPlanId)
+// in the month's plan list: { employeeName, employeeCode }, or null while that list is not there
+// or does not hold the plan. Never the Employee list, never a guess.
+function sessionSupplementalPlanOf(listStatus, list, planId){
+  if(listStatus !== SESSION_PAYROLL_STATUS.READY || !list) return null;
+  const hits = list.filter((p) => p.id === planId);
+  return hits.length === 1 ? hits[0] : null;
+}
+
 // The month the section opens on: the local calendar month of `now` (injectable; a Date by default).
 function sessionPayrollCurrentMonth(now){
   return OvertimeCalendar.monthOf(now || new Date());
@@ -134,20 +188,36 @@ const SessionPayrollStore = (function(){
   let panel = null, notice = null, focus = null;
   let drift = null, driftId = null, driftSeq = 0, driftStatus = SESSION_PAYROLL_STATUS.IDLE;   // AFI-4c2
   let commitIntent = null;                                                                        // AFI-4c2
+  // AFI-4d: Supplemental Payroll.
+  let suppList = null, suppListMonth = null, suppListSeq = 0, suppListStatus = SESSION_PAYROLL_STATUS.IDLE, suppListError = null;
+  let elig = null, eligMonth = null, eligSeq = 0, eligStatus = SESSION_PAYROLL_STATUS.IDLE, eligError = null;
+  let suppDetail = null, suppDetailId = null, suppDetailSeq = 0, suppDetailStatus = SESSION_PAYROLL_STATUS.IDLE;
+  let suppIntent = null;
 
   function keyOf(p){
     return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null;
   }
   function seqOf(kind){
-    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'mutation' ? mutationSeq : kind === 'drift' ? driftSeq : -1;
+    return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'mutation' ? mutationSeq : kind === 'drift' ? driftSeq
+      : kind === 'suppList' ? suppListSeq : kind === 'elig' ? eligSeq : kind === 'suppDetail' ? suppDetailSeq : -1;
   }
   function isLive(token){ return !!token && token.gen === generation; }
   function isCurrent(token){
     return isLive(token) && token.seq === seqOf(token.kind);
   }
   function forgetDrift(){ driftSeq++; drift = null; driftId = null; driftStatus = SESSION_PAYROLL_STATUS.IDLE; }
+  // AFI-4d: the month's Supplemental reads, and the Supplemental detail (a pending answer is dropped).
+  function forgetSupplementalMonth(){
+    suppList = null; suppListMonth = null; suppListStatus = SESSION_PAYROLL_STATUS.IDLE; suppListError = null; suppListSeq++;
+    elig = null; eligMonth = null; eligStatus = SESSION_PAYROLL_STATUS.IDLE; eligError = null; eligSeq++;
+  }
+  function forgetSupplementalDetail(){
+    suppDetailSeq++; suppDetail = null; suppDetailId = null; suppDetailStatus = SESSION_PAYROLL_STATUS.IDLE;
+    if(error && error.scope === 'suppDetail') error = null;
+  }
   function clear(){
     forgetDrift(); commitIntent = null;
+    forgetSupplementalMonth(); forgetSupplementalDetail(); suppIntent = null;      // AFI-4d: and its key
     open = false; month = null;
     list = null; listMonth = null; listStatus = SESSION_PAYROLL_STATUS.IDLE; listStale = false; listSeq++;
     detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; detailSeq++;
@@ -188,6 +258,7 @@ const SessionPayrollStore = (function(){
       list = null; listMonth = null; listStatus = SESSION_PAYROLL_STATUS.IDLE; listStale = false; listSeq++; clearError('list');
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; clearError('detail');
       forgetDrift();
+      forgetSupplementalMonth(); forgetSupplementalDetail();                      // AFI-4d
       excluded = null; excludedMonth = null; panel = null;
     },
     // A request token; the new request supersedes any earlier one of its kind.
@@ -208,6 +279,19 @@ const SessionPayrollStore = (function(){
       if(kind === 'labels'){
         labelsSeq++; people = null; labelsStatus = SESSION_PAYROLL_STATUS.LOADING; labelsError = null;
         return Object.freeze({ gen: generation, kind: kind, seq: labelsSeq });
+      }
+      // AFI-4d: the month's Supplemental documents, its eligibility, one Supplemental document.
+      if(kind === 'suppList'){
+        suppListSeq++; suppListMonth = arg; suppList = null; suppListStatus = SESSION_PAYROLL_STATUS.LOADING; suppListError = null;
+        return Object.freeze({ gen: generation, kind: kind, seq: suppListSeq });
+      }
+      if(kind === 'elig'){
+        eligSeq++; eligMonth = arg; elig = null; eligStatus = SESSION_PAYROLL_STATUS.LOADING; eligError = null;
+        return Object.freeze({ gen: generation, kind: kind, seq: eligSeq });
+      }
+      if(kind === 'suppDetail'){
+        suppDetailSeq++; suppDetailId = arg; suppDetail = null; suppDetailStatus = SESSION_PAYROLL_STATUS.LOADING; clearError('suppDetail');
+        return Object.freeze({ gen: generation, kind: kind, seq: suppDetailSeq });
       }
       throw new Error('unknown session payroll request kind');
     },
@@ -235,9 +319,33 @@ const SessionPayrollStore = (function(){
       drift = item; driftStatus = SESSION_PAYROLL_STATUS.READY;
       return true;
     },
+    // AFI-4d: only for the month they were read for.
+    applySuppList(token, items){
+      if(!isCurrent(token) || token.kind !== 'suppList' || suppListMonth !== month) return false;
+      suppList = items; suppListStatus = SESSION_PAYROLL_STATUS.READY;
+      return true;
+    },
+    applyElig(token, items){
+      if(!isCurrent(token) || token.kind !== 'elig' || eligMonth !== month) return false;
+      elig = items; eligStatus = SESSION_PAYROLL_STATUS.READY;
+      return true;
+    },
+    // AFI-4d: only for the document it was asked for, while that document is still the detail.
+    applySuppDetail(token, item){
+      if(!isCurrent(token) || token.kind !== 'suppDetail' || !item || item.doc.id !== suppDetailId) return false;
+      suppDetail = item; suppDetailStatus = SESSION_PAYROLL_STATUS.READY;
+      return true;
+    },
     applyError(token, failed){
       if(!isCurrent(token)) return false;
       if(token.kind === 'drift'){ drift = null; driftStatus = SESSION_PAYROLL_STATUS.ERROR; return true; }
+      if(token.kind === 'suppList'){ suppList = null; suppListStatus = SESSION_PAYROLL_STATUS.ERROR; suppListError = failure(failed); return true; }
+      if(token.kind === 'elig'){ elig = null; eligStatus = SESSION_PAYROLL_STATUS.ERROR; eligError = failure(failed); return true; }
+      if(token.kind === 'suppDetail'){
+        suppDetail = null; suppDetailStatus = SESSION_PAYROLL_STATUS.ERROR;
+        error = Object.freeze(Object.assign({ scope: 'suppDetail' }, failure(failed)));
+        return true;
+      }
       if(token.kind === 'labels'){ people = null; labelsStatus = SESSION_PAYROLL_STATUS.ERROR; labelsError = failure(failed); return true; }
       if(token.kind === 'list'){ list = null; listStatus = SESSION_PAYROLL_STATUS.ERROR; }
       else { detail = null; detailStatus = SESSION_PAYROLL_STATUS.ERROR; }
@@ -248,7 +356,12 @@ const SessionPayrollStore = (function(){
     closeDetail(){
       detailSeq++; detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; clearError('detail');
       forgetDrift();
-      if(panel && panel.kind !== 'generate') panel = null;
+      if(panel && panel.kind !== 'generate' && panel.kind !== 'suppGenerate') panel = null;
+    },
+    // AFI-4d: leaves the Supplemental detail; its confirmation goes.
+    closeSuppDetail(){
+      forgetSupplementalDetail();
+      if(panel && panel.kind !== 'generate' && panel.kind !== 'suppGenerate') panel = null;
     },
 
     /* ---------- writes ---------- */
@@ -259,7 +372,7 @@ const SessionPayrollStore = (function(){
     closePanel(){ mutationSeq++; mutation = SESSION_PAYROLL_MUTATION_IDLE; panel = null; },
     resetMutation(){ mutation = SESSION_PAYROLL_MUTATION_IDLE; notice = null; },
     beginMutation(kind, target){
-      if(SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1) throw new Error('unknown session payroll mutation kind');
+      if(SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1 && SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) === -1) throw new Error('unknown session payroll mutation kind');
       mutationSeq++;
       mutation = Object.freeze({ kind: kind, status: SESSION_PAYROLL_MUTATION_STATUS.PENDING, error: null, fields: null, target: target || null });
       notice = null;
@@ -291,6 +404,27 @@ const SessionPayrollStore = (function(){
       panel = null; mutation = SESSION_PAYROLL_MUTATION_IDLE; listStale = true; notice = noticeKey;
       return true;
     },
+    // AFI-4d: a confirmed generate for the month shown: the base plan's open document. The month is
+    // read again (documents and eligibility); the notice says whether it is a Draft or an open
+    // Reviewed / Ready document returned unchanged — never that a new Draft was made.
+    applySuppGenerated(token, forMonth, doc){
+      if(!isCurrent(token) || token.kind !== 'mutation' || forMonth !== month || !doc) return false;
+      panel = null; mutation = SESSION_PAYROLL_MUTATION_IDLE; listStale = true;
+      notice = doc.status === 'Draft' ? 'suppGeneratedDraft' : 'suppGeneratedOpen';
+      return true;
+    },
+    // AFI-4d: a confirmed Supplemental transition: the document answered becomes the detail's at
+    // once; the detail is read again for its captured overtime (a cancel releases it).
+    applySuppTransitioned(token, doc, noticeKey){
+      if(!isCurrent(token) || token.kind !== 'mutation' || !doc || doc.id !== suppDetailId) return false;
+      suppDetail = Object.freeze({ doc: doc, overtime: suppDetail ? suppDetail.overtime : Object.freeze([]) });
+      suppDetailStatus = SESSION_PAYROLL_STATUS.READY;
+      panel = null; mutation = SESSION_PAYROLL_MUTATION_IDLE; listStale = true; notice = noticeKey;
+      return true;
+    },
+    // AFI-4d: the one Supplemental commit intent (frozen; memory only) and its end.
+    setSuppIntent(intent){ suppIntent = Object.freeze({ id: intent.id, version: intent.version, total: intent.total, key: intent.key }); },
+    dropSuppIntent(){ suppIntent = null; },
     markListStale(){ listStale = true; },
     // AFI-4c2: the one commit intent (frozen; memory only) and its end.
     setIntent(intent){ commitIntent = Object.freeze({ id: intent.id, version: intent.version, total: intent.total, key: intent.key }); },
@@ -309,7 +443,10 @@ const SessionPayrollStore = (function(){
         excluded: excluded, excludedMonth: excludedMonth,
         people: people, labelsStatus: labelsStatus, labelsError: labelsError, error: error,
         mutation: mutation, panel: panel, notice: notice,
-        drift: drift, driftId: driftId, driftStatus: driftStatus, commitIntent: commitIntent
+        drift: drift, driftId: driftId, driftStatus: driftStatus, commitIntent: commitIntent,
+        suppList: suppList, suppListMonth: suppListMonth, suppListStatus: suppListStatus, suppListError: suppListError,
+        elig: elig, eligMonth: eligMonth, eligStatus: eligStatus, eligError: eligError,
+        suppDetail: suppDetail, suppDetailId: suppDetailId, suppDetailStatus: suppDetailStatus, suppIntent: suppIntent
       });
     }
   });
@@ -332,8 +469,12 @@ const SessionPayroll = (function(){
     else if(kind === 'list') applied = SessionPayrollStore.applyList(token, out.data);
     else if(kind === 'detail') applied = SessionPayrollStore.applyDetail(token, out.data);
     else if(kind === 'drift') applied = SessionPayrollStore.applyDrift(token, out.data);
+    else if(kind === 'suppList') applied = SessionPayrollStore.applySuppList(token, out.data);
+    else if(kind === 'elig') applied = SessionPayrollStore.applyElig(token, out.data);
+    else if(kind === 'suppDetail') applied = SessionPayrollStore.applySuppDetail(token, out.data);
     else applied = SessionPayrollStore.applyLabels(token, out.data);
     if(applied && kind === 'detail' && out.ok) afterDetail(out.data.plan);
+    if(applied && kind === 'suppDetail' && out.ok) afterSuppDetail(out.data.doc);
     if(applied) paint();
   }
 
@@ -355,15 +496,43 @@ const SessionPayroll = (function(){
     if(plan.status === 'Ready') loadDrift(plan.id);
   }
 
+  // AFI-4d: a Supplemental document the CEO now sees — reconcile an open commit intent with it.
+  function afterSuppDetail(doc){
+    if(!sessionPayrollIsCeo(principalNow())) return;
+    const s = SessionPayrollStore.snapshot();
+    const state = s.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING ? null : sessionSupplementalIntentState(s.suppIntent, doc);
+    if(state === 'committed'){
+      SessionPayrollStore.dropSuppIntent();
+      SessionPayrollStore.resolveMutation('suppCommitConfirmed');
+      SessionPayrollStore.markListStale();
+    } else if(state === 'stale'){
+      SessionPayrollStore.dropSuppIntent();
+      if(s.mutation.kind === 'suppCommit') SessionPayrollStore.resolveMutation('suppCommitStale');
+    }
+  }
+
   function principalNow(){
     const a = AuthBoot.snapshot();
     return a.state === AUTH_STATES.AUTHENTICATED ? a.principal : null;
   }
 
-  // AFI-4c2: an Employee reads only their own Committed plans; the CEO the company's.
+  // AFI-4c2: an Employee reads only their own Committed plans; the CEO the company's. AFI-4d: and
+  // the month's Supplemental documents (an Employee: their own Committed ones) and, for the CEO
+  // only, the eligibility — three independent reads, each applied only while current.
   function loadMonth(key){
     const p = principalNow();
-    return run('list', key, () => sessionPayrollIsEmployee(p) ? PayrollApi.myMonth(key, p.employeeId) : PayrollApi.month(key));
+    const reads = [run('list', key, () => sessionPayrollIsEmployee(p) ? PayrollApi.myMonth(key, p.employeeId) : PayrollApi.month(key))];
+    if(sessionPayrollIsEmployee(p)) reads.push(run('suppList', key, () => SupplementalApi.myMonth(key, p.employeeId)));
+    else if(sessionPayrollIsCeo(p)){
+      reads.push(run('suppList', key, () => SupplementalApi.month(key)));
+      reads.push(run('elig', key, () => SupplementalApi.eligibility(key)));
+    }
+    return Promise.all(reads);
+  }
+  // AFI-4d: one Supplemental document — an Employee: their own Committed one only.
+  function loadSuppDetail(id){
+    const p = principalNow();
+    return run('suppDetail', id, () => sessionPayrollIsEmployee(p) ? SupplementalApi.myGet(id, p.employeeId) : SupplementalApi.get(id));
   }
   function loadDetail(id){
     const p = principalNow();
@@ -410,6 +579,7 @@ const SessionPayroll = (function(){
     const kind = s.mutation.kind;
     const generate = kind === 'generate';
     if(kind === 'commit') return settleCommit(token, out, s);
+    if(SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) !== -1) return settleSupplemental(token, out, s);   // AFI-4d
     if(out.ok){
       if(generate){
         const target = s.mutation.target;
@@ -482,6 +652,147 @@ const SessionPayroll = (function(){
     paint();
   }
 
+  // AFI-4d: a Supplemental write's outcome — the Payroll rules: only a confirming answer changes the
+  // data; ANY 409 closes the confirmation and reads the document (generate: the month) again; an
+  // outcome that cannot be known re-reads the same way and is NEVER sent again. Commit: below.
+  const SUPP_NOTICES = Object.freeze({ suppReview: 'suppReviewed', suppApprove: 'suppApproved', suppReturn: 'suppReturned', suppCancel: 'suppCancelled', suppCommit: 'suppCommitted' });
+  function settleSupplemental(token, out, s){
+    const kind = s.mutation.kind;
+    if(kind === 'suppCommit') return settleSuppCommit(token, out, s);
+    const generate = kind === 'suppGenerate';
+    if(out.ok){
+      if(generate){
+        const target = s.mutation.target;
+        if(SessionPayrollStore.applySuppGenerated(token, target.month, out.data)){
+          SessionPayrollStore.setFocus('message');
+          loadMonth(target.month);
+        }
+      } else if(SessionPayrollStore.applySuppTransitioned(token, out.data, SUPP_NOTICES[kind])){
+        SessionPayrollStore.setFocus('message');
+        loadSuppDetail(out.data.id);
+      }
+      paint();
+      return;
+    }
+    if(AMBIGUOUS.indexOf(out.kind) !== -1){
+      SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS, out);
+      SessionPayrollStore.markListStale();
+      SessionPayrollStore.setFocus('message');
+      if(generate) loadMonth(s.month);
+      else if(s.suppDetailId) loadSuppDetail(s.suppDetailId);
+      paint();
+      return;
+    }
+    SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, out);
+    SessionPayrollStore.setFocus('message');
+    if(out.kind === API_RESULT_KINDS.CONFLICT || (out.kind === API_RESULT_KINDS.NOT_FOUND && generate)){
+      SessionPayrollStore.markListStale();
+      if(generate) loadMonth(s.month);
+      else if(s.suppDetailId) loadSuppDetail(s.suppDetailId);
+    } else if(out.kind === API_RESULT_KINDS.NOT_FOUND){
+      SessionPayrollStore.closeSuppDetail();
+      SessionPayrollStore.markListStale();
+      loadMonth(s.month);
+    }
+    paint();
+  }
+
+  // AFI-4d: a Supplemental commit's outcome — exactly the AFI-4c2 rules over suppIntent.
+  function settleSuppCommit(token, out, s){
+    const intent = s.suppIntent;
+    if(out.ok){
+      if(SessionPayrollStore.applySuppTransitioned(token, out.data, SUPP_NOTICES.suppCommit)){
+        SessionPayrollStore.dropSuppIntent();
+        SessionPayrollStore.setFocus('message');
+        loadSuppDetail(out.data.id);
+      }
+      paint();
+      return;
+    }
+    const id = intent ? intent.id : s.suppDetailId;
+    if(COMMIT_AMBIGUOUS.indexOf(out.kind) !== -1){
+      SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS, out);
+      SessionPayrollStore.markListStale();
+      SessionPayrollStore.setFocus('message');
+      if(id && id === s.suppDetailId) loadSuppDetail(id);
+      paint();
+      return;
+    }
+    SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, out);
+    SessionPayrollStore.dropSuppIntent();
+    SessionPayrollStore.setFocus('message');
+    SessionPayrollStore.markListStale();
+    if(out.kind === API_RESULT_KINDS.NOT_FOUND){ SessionPayrollStore.closeSuppDetail(); loadMonth(s.month); }
+    else if(s.suppDetailId) loadSuppDetail(s.suppDetailId);
+    paint();
+  }
+
+  // AFI-4d: sends the Supplemental commit intent once.
+  async function sendSuppCommit(intent, retry){
+    const token = SessionPayrollStore.beginMutation('suppCommit', { id: intent.id, version: intent.version, retry: retry === true });
+    paint();
+    return settle(token, await SupplementalApi.commit(intent));
+  }
+  const SUPP_TRANSITION_CALLS = Object.freeze({
+    review: (id, v) => SupplementalApi.review(id, v),
+    approve: (id, v) => SupplementalApi.approve(id, v),
+    return: (id, v) => SupplementalApi.returnToDraft(id, v),
+    cancel: (id, v) => SupplementalApi.cancel(id, v)
+  });
+  // AFI-4d: opens a Supplemental confirmation — generate on an eligibility entry of the month shown
+  // (not for a "0.00" amount: UX only, the server decides), the others on the document shown, as
+  // the matrix offers. Nothing is sent.
+  function openSupplementalPanel(kind, planId){
+    const s = SessionPayrollStore.snapshot();
+    if(s.panel) return;
+    if(kind === 'suppGenerate'){
+      if(s.detailId || s.suppDetailId || s.eligStatus !== SESSION_PAYROLL_STATUS.READY || s.eligMonth !== s.month) return;
+      const e = (s.elig || []).filter((x) => x.payrollPlanId === planId)[0];
+      if(!e || e.eligibleAmount === '0.00') return;
+      SessionPayrollStore.openPanel('suppGenerate', planId);
+    } else {
+      const d = s.suppDetail;
+      if(s.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.doc.id !== s.suppDetailId) return;
+      if(sessionSupplementalActions(principalNow(), d.doc).indexOf(SESSION_SUPPLEMENTAL_OPERATION[kind]) === -1) return;
+      if(kind === 'suppCommit' && s.suppIntent) return;       // an unresolved intent: Retry commit, never a second intent
+      SessionPayrollStore.openPanel(kind, d.doc.id);
+    }
+    SessionPayrollStore.setFocus('panel');
+    paint();
+  }
+  // AFI-4d: sends the open Supplemental action once — generate { payrollPlanId } for the entry it was
+  // opened on; a transition for the document shown, at the version now held; commit: ONE intent.
+  async function confirmSupplemental(s, a){
+    if(a.kind === 'suppGenerate'){
+      const e = s.eligMonth === s.month ? (s.elig || []).filter((x) => x.payrollPlanId === a.id)[0] : null;
+      if(s.detailId || s.suppDetailId || !e || !OvertimeCalendar.isMonth(s.month)){ SessionPayrollStore.closePanel(); paint(); return; }
+      const forMonth = s.month;
+      const token = SessionPayrollStore.beginMutation('suppGenerate', { month: forMonth });
+      paint();
+      return settle(token, await SupplementalApi.generate(a.id, forMonth));
+    }
+    const d = s.suppDetail;
+    if(s.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.doc.id !== a.id) return;
+    const op = SESSION_SUPPLEMENTAL_OPERATION[a.kind];
+    if(sessionSupplementalActions(principalNow(), d.doc).indexOf(op) === -1){ SessionPayrollStore.closePanel(); paint(); return; }
+    if(op === 'commit'){
+      if(s.suppIntent){ SessionPayrollStore.closePanel(); paint(); return; }
+      const key = payrollIdempotencyKey();
+      if(key === null){
+        const token = SessionPayrollStore.beginMutation('suppCommit', { id: d.doc.id, version: d.doc.version, retry: false });
+        SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, { kind: 'CRYPTO_UNAVAILABLE' });
+        SessionPayrollStore.setFocus('message');
+        paint();
+        return;
+      }
+      SessionPayrollStore.setSuppIntent({ id: d.doc.id, version: d.doc.version, total: d.doc.overtimeAmount, key: key });
+      return sendSuppCommit(SessionPayrollStore.snapshot().suppIntent, false);
+    }
+    const token = SessionPayrollStore.beginMutation(a.kind, { id: d.doc.id, version: d.doc.version });
+    paint();
+    return settle(token, await SUPP_TRANSITION_CALLS[op](d.doc.id, d.doc.version));
+  }
+
   // AFI-4c2: sends the commit intent once. A missing Web Crypto key sends nothing.
   async function sendCommit(intent, retry){
     const token = SessionPayrollStore.beginMutation('commit', { id: intent.id, version: intent.version, retry: retry === true });
@@ -492,7 +803,7 @@ const SessionPayroll = (function(){
   // The month field and Previous / Next: another month's plans, read from the server.
   function setMonth(key){
     const s = SessionPayrollStore.snapshot();
-    if(!canRead() || s.detailId || s.panel || !OvertimeCalendar.isMonth(key) || key === s.month) return;
+    if(!canRead() || s.detailId || s.suppDetailId || s.panel || !OvertimeCalendar.isMonth(key) || key === s.month) return;
     SessionPayrollStore.resetMutation();
     SessionPayrollStore.setMonth(key);
     const loading = loadMonth(key);
@@ -509,7 +820,7 @@ const SessionPayroll = (function(){
       SessionPayrollStore.bindPrincipal(principal);
       const s = SessionPayrollStore.snapshot();
       if(!s.open || !(sessionPayrollIsCeo(principal) || sessionPayrollIsEmployee(principal))) return;
-      if(s.listStatus === SESSION_PAYROLL_STATUS.IDLE || (s.listStale && !s.detailId && s.listStatus !== SESSION_PAYROLL_STATUS.LOADING)) loadMonth(s.month);
+      if(s.listStatus === SESSION_PAYROLL_STATUS.IDLE || (s.listStale && !s.detailId && !s.suppDetailId && s.listStatus !== SESSION_PAYROLL_STATUS.LOADING)) loadMonth(s.month);
     },
     // The section switch of the workspace view: the CEO's Payroll, an Employee's My payroll
     // (AFI-4c2). Nothing changes while a write is in flight.
@@ -524,7 +835,7 @@ const SessionPayroll = (function(){
     // Previous / Next (delta -1 / +1) and the month field ("YYYY-MM").
     shiftMonth(delta){
       const s = SessionPayrollStore.snapshot();
-      if(!canRead() || s.detailId || s.panel || (delta !== 1 && delta !== -1)) return;
+      if(!canRead() || s.detailId || s.suppDetailId || s.panel || (delta !== 1 && delta !== -1)) return;
       return setMonth(OvertimeCalendar.shift(s.month, delta));
     },
     setMonth: setMonth,
@@ -538,9 +849,23 @@ const SessionPayroll = (function(){
       paint();
       return loading;
     },
+    // AFI-4d: a Supplemental document of the month (CEO), or an own Committed one (Employee). A plan
+    // detail gives way: one detail at a time.
+    openSupplemental(id){
+      if(!canRead() || typeof id !== 'string') return;
+      const s = SessionPayrollStore.snapshot();
+      if(s.panel) return;
+      if(s.suppDetailId === id && s.suppDetailStatus === SESSION_PAYROLL_STATUS.LOADING) return;
+      SessionPayrollStore.closeDetail();
+      SessionPayrollStore.resetMutation();
+      const loading = loadSuppDetail(id);
+      paint();
+      return loading;
+    },
     back(){
       if(pending()) return;
       SessionPayrollStore.closeDetail();
+      SessionPayrollStore.closeSuppDetail();             // AFI-4d
       SessionPayrollStore.resetMutation();
       paint();
     },
@@ -550,6 +875,30 @@ const SessionPayroll = (function(){
       let loading;
       if(s.error && s.error.scope === 'list') loading = loadMonth(s.month);
       else if(s.error && s.error.scope === 'detail' && s.detailId) loading = loadDetail(s.detailId);
+      else if(s.error && s.error.scope === 'suppDetail' && s.suppDetailId) loading = loadSuppDetail(s.suppDetailId);   // AFI-4d
+      paint();
+      return loading;
+    },
+    // AFI-4d: the month's Supplemental reads again after one of them failed.
+    retrySupplemental(){
+      const s = SessionPayrollStore.snapshot();
+      if(!canRead() || s.detailId || s.suppDetailId) return;
+      const p = principalNow();
+      const reads = [];
+      if(s.suppListStatus === SESSION_PAYROLL_STATUS.ERROR) reads.push(run('suppList', s.month, () => sessionPayrollIsEmployee(p) ? SupplementalApi.myMonth(s.month, p.employeeId) : SupplementalApi.month(s.month)));
+      if(sessionPayrollIsCeo(p) && s.eligStatus === SESSION_PAYROLL_STATUS.ERROR) reads.push(run('elig', s.month, () => SupplementalApi.eligibility(s.month)));
+      if(!reads.length) return;
+      paint();
+      return Promise.all(reads);
+    },
+    // AFI-4d: after a conflict (or to check an unconfirmed write): the document again.
+    reloadSupplemental(){
+      if(!canAct()) return;
+      const s = SessionPayrollStore.snapshot();
+      if(!s.suppDetailId) return;
+      if(s.panel) SessionPayrollStore.closePanel();
+      SessionPayrollStore.resetMutation();
+      const loading = loadSuppDetail(s.suppDetailId);
       paint();
       return loading;
     },
@@ -573,8 +922,10 @@ const SessionPayroll = (function(){
     },
     // Every write asks first: this only opens the confirmation; nothing is sent. Generate is a
     // list action; the transitions act on the plan shown, as the matrix offers.
-    openPanel(kind){
-      if(!canAct() || SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1) return;
+    openPanel(kind, planId){
+      if(!canAct()) return;
+      if(SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) !== -1) return openSupplementalPanel(kind, planId);   // AFI-4d
+      if(SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1) return;
       const s = SessionPayrollStore.snapshot();
       if(s.panel) return;
       if(kind === 'generate'){
@@ -602,6 +953,7 @@ const SessionPayroll = (function(){
       const s = SessionPayrollStore.snapshot();
       const a = s.panel;
       if(!a) return;
+      if(SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(a.kind) !== -1) return confirmSupplemental(s, a);         // AFI-4d
       if(a.kind === 'generate'){
         if(s.detailId || !OvertimeCalendar.isMonth(s.month)){ SessionPayrollStore.closePanel(); paint(); return; }
         const forMonth = s.month;
@@ -641,6 +993,16 @@ const SessionPayroll = (function(){
       if(s.panel || s.detailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.plan.id !== s.detailId) return;
       if(sessionPayrollIntentState(s.commitIntent, d.plan) !== 'unresolved') return;
       return sendCommit(s.commitIntent, true);
+    },
+    // AFI-4d: the same, for an unresolved Supplemental commit — the SAME intent, body and key, on a
+    // deliberate click only.
+    retrySupplementalCommit(){
+      if(!canAct()) return;
+      const s = SessionPayrollStore.snapshot();
+      const d = s.suppDetail;
+      if(s.panel || s.suppDetailStatus !== SESSION_PAYROLL_STATUS.READY || !d || d.doc.id !== s.suppDetailId) return;
+      if(sessionSupplementalIntentState(s.suppIntent, d.doc) !== 'unresolved') return;
+      return sendSuppCommit(s.suppIntent, true);
     }
   });
 })();

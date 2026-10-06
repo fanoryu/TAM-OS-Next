@@ -1747,7 +1747,7 @@ and approval); its valuation inputs and exact-decimal method were deferred to BF
 Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c882492dc4858f1815c`), AFI-4c1 is merged (PR #45, canonical
 `6834a572485e0057f01897283f006ccaa00769c6`), BF-4c2 is merged (PR #46, canonical `df15b41a9097411eabde39be175f2b38c0809a04`), and
 AFI-4c2 is merged (PR #47, canonical `0ae3ef828349db8167e6bc7c858394c689f83bf5`). Supplemental Payroll follows: BF-4d (below)
-is a local candidate.
+is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`). AFI-4d (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2147,11 +2147,11 @@ BF-4c2 for browser QA (commit with key replay and mismatch, drift, the Employee'
 `/__stub/fail-next-commit` — applied, then answered 503). AFI-4c2 needs BF-4c2 at runtime and adds no deploy-together
 constraint of its own.
 
-### Supplemental Payroll — BF-4d (local candidate; backend only, not deployed)
+### Supplemental Payroll — BF-4d (merged as PR #48, canonical `ab5e10c1`; backend only, not deployed)
 
 BF-4d is the server's Supplemental Payroll (Phase 0 owner decisions D-SPAY-1 = A, D-SPAY-2 = A, D-SPAY-3 = A,
-D-SPAY-4 = A, 2026-10-05). It is a local candidate on `feature/bf-4d-supplemental-payroll`; not pushed, merged or deployed.
-Backend only: no frontend change, the package is unchanged (100 files, digest `16e06b7e…`), ACTIONS stay **21**,
+D-SPAY-4 = A, 2026-10-05). It is merged to `main` as source (PR #48, canonical merge `ab5e10c1e02a251e701c05c52574a8c86d838120`), not
+deployed. Backend only: no frontend change, the package was unchanged (100 files, digest `16e06b7e…`), ACTIONS stay **21**,
 `AUTH_MODE` stays LOCAL.
 
 **Meaning.** The canonical meaning is the one LOCAL v2.7.0 gave the term (§17 below) and BF-4c1 deferred to it: a
@@ -2249,6 +2249,63 @@ commit key, tenant keys, the link key, 0031 and the upgrade from 0028; `Suppleme
 recalculation, frozen states, D-SPAY-2, the lifecycle matrix, Return and Cancel, commit, replay, waves, revalidation,
 reads and privacy, eligibility, rollback, firewalls; `SupplementalConcurrencyTest`: the lock proofs and C1–C8), the
 boundary tool and its selftest, the verifier's BF-4d section, and a deterministic mutation campaign.
+
+### SESSION Supplemental Payroll — AFI-4d (local candidate; frontend; SESSION mode only)
+
+AFI-4d is the SESSION frontend of BF-4d (owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A). It is a local candidate on
+`feature/afi-4d-session-supplemental`; not pushed, merged or deployed. Frontend only: no backend change, no migration
+(head `0031`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL, no CSS change, no new module — `core/payroll-api.js`,
+`core/session-payroll.js` and `ui/session-payroll-view.js` are extended, so the package keeps 100 files (its digest
+changes). ApiClient, AuthBoot and the workspace view are unchanged: `{ payrollPlanId }` carries no forbidden key, and
+`SessionPayrollStore.clear()` (already called on logout, session loss and a principal change) destroys the new state.
+
+**Client.** `SupplementalDecoders` decode exactly BF-4d's projections — the twelve-key document (`SupplementalView::FIELDS`;
+a positive whole-Rupiah amount, positive hours, a count of at least one, the five BF-4d statuses), the three-key captured
+line and the five-key eligibility entry (whose amount may be `"0.00"`; one entry per plan) — and every list is refused whole
+on one bad item. `SupplementalRequests` is `{ payrollPlanId }` for generate and `PayrollRequests`' own encoders for the
+transitions and commit (BF-4d's grammars are PayrollInput's). `SupplementalApi` names exactly the nine BF-4d routes and
+shares `PayrollApi`'s wire (`payrollApiOutcome`, `payrollApiWrite` over `authSessionMutation`); a write counts only when its
+decoded answer confirms it — a transition: the same document in the target status at version + 1; generate: the plan's
+open document of that month; commit: Committed at version + 1 with exactly the confirmed amount. `myMonth` / `myGet` refuse
+any document that is not Committed and the principal's own (defence in depth; the server scopes them).
+
+**CEO (D-AFI4d-1 = A).** The Payroll month page reads the plans, the Supplemental documents and the eligibility — three
+independent reads, each under its own sequence token and applied only for the month shown. A Supplemental payroll card
+lists the eligibility (each entry named from the snapshot of its own plan in the month list — never the Employee list —
+or "Name not available"; "Prepare supplemental payroll" is not offered for `"0.00"`), then the month's documents (every
+status, server order, opened by position — no id in the page). Generate asks first and sends `{ payrollPlanId }` once; its
+answer is the plan's open document, so the notice says either that its Draft holds the overtime eligible now or that an
+open Reviewed / Ready document was returned unchanged — never "a new Draft". The detail (exclusive with the plan detail)
+shows the snapshot, status, hours, count, amount, version and the frozen lines (a Cancelled document explains that its
+overtime was released); its controls follow the linear graph — Draft: Review, Cancel (no Draft → Ready); Reviewed:
+Approve, Return to draft, Cancel; Ready: Commit supplemental, Return to draft, Cancel; Committed / Cancelled: nothing. A
+Committed plan's detail lists its Supplemental documents ("1 of 2"…), each separate.
+
+**Outcomes.** Exactly the Payroll rules: only a confirming answer changes the data; any 409 (one generic wire code — the
+page never names a cause) closes the confirmation and reads the document (or the month) again; 404 closes the detail and
+reads the month; an unknown outcome (503, network, timeout, a malformed or non-confirming answer) re-reads and is never
+resent. Commit is D-AFI4c2-1: one frozen intent `{ id, version, total, key }` — `total` the document's own
+`overtimeAmount` string, `key` the one `payrollIdempotencyKey()` — sent once; a definite refusal drops it; an unknown outcome
+(500 included) keeps it and re-reads: Committed at version + 1 with the same amount is the success, still Ready at the same
+version and amount offers "Retry commit" (the same body and key, on a deliberate click, for that document only), anything
+else drops it as stale.
+
+**Employee (D-AFI4d-2 = A).** My payroll also reads their own Committed documents of the month (never the eligibility) and
+lists them as separate rows under "Supplemental payroll — overtime approved after payroll was committed"; each opens a
+read-only card (snapshot, month, status, hours, count, amount, frozen lines); the payroll card links its documents. No
+amount is ever added to another — there is no combined total. No control, no version, no write.
+
+**Firewalls.** Memory only (no `State`, storage, cookie, URL or history); never the LOCAL Supplemental engine
+(`js/people/supplemental-engine.js`), its store or its vocabulary (Review / Approved / Posted / Executed, "Supplemental
+Payments"); no top-level SESSION name collides with a LOCAL one (verifier-pinned); no Finance, payment or statutory concept;
+money is the server's exact strings (no conversion or arithmetic).
+
+**Proof.** `tools/verify-session-payroll-runtime.js` (still the tenth CI harness) adds sections S–S8: the decoders and
+encoders, the month card, generate (Draft, recalculated, the open Reviewed / Ready answer, refusals and unknown outcomes),
+the matrix (no Draft → Ready), every transition, Commit with a same-key Retry, the Employee's separate rows and refusals, the
+firewall and the global-collision proof; a deterministic mutation campaign. `tools/serve-auth-stub.js` models BF-4d for
+browser QA (late Approved overtime fixtures, the Employee's two Committed waves, `/__stub/late-overtime`,
+`/__stub/bump-supplemental`, `/__stub/fail-next-supplemental-commit`). AFI-4d needs BF-4d deployed first or with it.
 
 ### Release engineering
 

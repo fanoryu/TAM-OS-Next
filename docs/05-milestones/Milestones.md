@@ -395,8 +395,11 @@ the drift explanation, and the Employee's My payroll; *D-AFI4c2-1..3 = A*) is me
 follows (*D-SPAY-1..4 = A, 2026-10-05*), split into BF-4d → AFI-4d. **BF-4d** (a separate document settling Approved
 overtime of a month that the employee's Committed base plan does not contain — late overtime only, never another payroll
 component; the canonical Payroll lifecycle with an idempotent Commit under the existing `supplemental.manage`; the
-Employee's read of their own Committed documents; migrations `0029`–`0031`) is a local candidate on a feature branch,
-backend only; the CEO Supplemental screens and the Employee's presentation are AFI-4d, and Finance posting comes after. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+Employee's read of their own Committed documents; migrations `0029`–`0031`) is merged as source (PR #48, canonical merge
+`ab5e10c1e02a251e701c05c52574a8c86d838120`), backend only, not deployed. **AFI-4d** (the CEO's Supplemental payroll on the Payroll month page —
+eligibility, Prepare, the month's documents and their detail, the linear lifecycle with no Draft → Ready, Commit with one
+intent and a same-key Retry — and the Employee's own Committed documents as separate rows of My payroll; *D-AFI4d-1..2 = A*)
+is a local candidate on a feature branch, frontend only; it needs BF-4d deployed first or with it. Finance posting comes after. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

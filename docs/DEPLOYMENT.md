@@ -148,6 +148,11 @@ existing DTO — the base payroll plan keeps exactly its thirteen keys — so it
 frontend and behind the AFI-4c2 frontend, with no deploy-together constraint of its own. Its migrations must run before its
 routes are reachable. AFI-4d, the Supplemental screens, will need it deployed first (or with it). It is not deployed.
 
+**Deployment note — SESSION Supplemental Payroll (AFI-4d).** AFI-4d calls the nine BF-4d Supplemental routes (the CEO's
+month list, detail, eligibility and writes; the Employee's own Committed reads), so BF-4d — its routes and migrations
+`0029`–`0031` — must be deployed before AFI-4d or with it. It changes no backend contract and no existing frontend contract,
+and adds no other deploy-together constraint. It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |
