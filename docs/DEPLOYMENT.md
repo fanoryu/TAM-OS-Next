@@ -155,9 +155,14 @@ and adds no other deploy-together constraint. It is not deployed.
 
 **Deployment note — Finance posting (BF-4e).** BF-4e adds the three Finance posting routes and migrations `0032`–`0033` (one
 new table, `finance_postings`, and the `post` audit operation); it changes no existing table's rows, no existing route and no
-existing DTO, and no frontend calls it yet, so it can be deployed behind the current frontend with no deploy-together
-constraint of its own. Its migrations must run before its routes are reachable, and it posts only obligations committed by
+existing DTO, so it can be deployed behind a frontend that does not call it (any release before AFI-4e) with no
+deploy-together constraint of its own; AFI-4e calls it (below). Its migrations must run before its routes are reachable, and it posts only obligations committed by
 BF-4c2 and BF-4d, which must already be deployed. It is not deployed.
+
+**Deployment note — SESSION Finance posting (AFI-4e).** AFI-4e calls the three BF-4e Finance posting routes (the CEO's
+month read and the two posting commands), so BF-4e — its routes and migrations `0032`–`0033` — must be deployed before
+AFI-4e or with it. It changes no backend contract and no existing frontend contract, and adds no other deploy-together
+constraint. It is not deployed.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 

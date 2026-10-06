@@ -5556,9 +5556,12 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   // no /api/ path outside the AFI-4b2 set of session modules. AFI-4c2 authorized revision: plus the
   // two BF-4c2 paths (the commit and the drift read). Was: seven. AFI-4d authorized revision: plus
   // exactly the nine BF-4d Supplemental Payroll paths (SupplementalApi, the same module and wire —
-  // no new API caller). Was: the nine Payroll paths only.
+  // no new API caller). Was: the nine Payroll paths only. AFI-4e authorized revision: plus exactly the
+  // three BF-4e Finance posting paths (FinancePostingApi, the same module and wire — D-AFI4e-2 = A).
+  // Was: the eighteen Payroll and Supplemental paths only.
   check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js', 'core/payroll-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
-    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/payroll-plan','/api/payroll-plan/drift','/api/payroll-plans','/api/payroll-plans/approve','/api/payroll-plans/cancel','/api/payroll-plans/commit','/api/payroll-plans/generate','/api/payroll-plans/return','/api/payroll-plans/review',"
+    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/finance-postings','/api/finance-postings/payroll-plan','/api/finance-postings/supplemental-payroll',"
+      + "'/api/payroll-plan','/api/payroll-plan/drift','/api/payroll-plans','/api/payroll-plans/approve','/api/payroll-plans/cancel','/api/payroll-plans/commit','/api/payroll-plans/generate','/api/payroll-plans/return','/api/payroll-plans/review',"
       + "'/api/supplemental-payroll','/api/supplemental-payrolls','/api/supplemental-payrolls/approve','/api/supplemental-payrolls/cancel','/api/supplemental-payrolls/commit','/api/supplemental-payrolls/eligibility','/api/supplemental-payrolls/generate','/api/supplemental-payrolls/return','/api/supplemental-payrolls/review'"
     // AFI-4b1 authorized revision: overtime-api.js names exactly the eight BF-4b1 Overtime paths.
     // AFI-4b2 authorized revision: plus the two BF-4b2 paths (valuation read, approve). Was: eight.
@@ -6529,7 +6532,10 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
     'AFI-4c1: no Overtime authority (only the pure OvertimeCalendar helper); contributing overtime comes from the Payroll detail answer');
   // AFI-4c2 authorized revision: Commit, expectedTotal and the idempotency key exist (pinned in the
   // AFI-4c2 section). Was: none of them. The confirmations alone say it is not a payment.
-  check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|payslip)\b/i.test(all) && !/ledger|journal|payment|execut|\/finance|markPaid|\bpay\(/i.test(all.replace(/posted to Finance|It is not a payment/g, '')),
+  // AFI-4e authorized revision: the three BF-4e Finance posting routes and the approved posting
+  // confirmation (D-AFI4e-5 = A: "… Nothing is paid or executed. A posting cannot be reversed.")
+  // exist (pinned in the AFI-4e section). Was: no /finance route and no "executed" at all.
+  check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|payslip)\b/i.test(all) && !/ledger|journal|payment|execut|\/finance|markPaid|\bpay\(/i.test(all.replace(/posted to Finance|It is not a payment|Nothing is paid or executed\. A posting cannot be reversed\.|'\/api\/finance-postings(\/payroll-plan|\/supplemental-payroll)?'/g, '')),
     'AFI-4c1: no statutory payroll, payslip, Finance, payment or execution code');
   check(/const PAYROLL_TRANSITIONS = Object\.freeze\(\{\s*review:[\s\S]*approve:[\s\S]*return:[\s\S]*cancel:[^}]*\}\)/.test(apiC) && !/commit/i.test((/const PAYROLL_TRANSITIONS = [\s\S]*?\}\);/.exec(apiC) || [''])[0])
     // AFI-4c2 authorized revision: Ready also offers commit (BF-4c2). Was: Ready: return / cancel.
@@ -6554,7 +6560,9 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
     && /sessionPayrollIsEmployee\(p\) \? PayrollApi\.myGet\(id, p\.employeeId\) : PayrollApi\.get\(id\)/.test(storeC)
     && /function loadDrift\(id\)\{\s*if\(!sessionPayrollIsCeo\(principalNow\(\)\)\) return;/.test(storeC),
     'AFI-4c1/AFI-4c2: every write and the drift read are the CEO\'s; an Employee only reads their own Committed plans');
-  check(/Ready: 'Ready — approved, not paid'/.test(viewC) && !/'Approved'|Posted|Executed|\bPaid\b/.test(viewC.replace(/Approved overtime counted/g, '')),
+  // AFI-4e authorized revision: the approved Finance status "Posted to Finance — Planned, not paid"
+  // (D-AFI4e-5 = A; pinned in the AFI-4e section). Was: never Posted at all.
+  check(/Ready: 'Ready — approved, not paid'/.test(viewC) && !/'Approved'|Posted|Executed|\bPaid\b/.test(viewC.replace(/Approved overtime counted|Posted to Finance — Planned, not paid/g, '')),
     'AFI-4c1: the server status words are shown (D-AFI4c1-3 = A) — Ready reads "Ready — approved, not paid"; never the LOCAL Approved, Posted or Executed');
   check(/escapeHtml\(p\.baseSalary\)/.test(viewC) && /escapeHtml\(p\.totalAmount\)/.test(viewC) && /id="swpOpen' \+ i \+ '"/.test(viewC) && !/escapeHtml\(p\.id\)|escapeHtml\(row\.id\)/.test(viewC),
     'AFI-4c1: amounts are the escaped server strings; rows open by position (no plan id in the page)');
@@ -6679,8 +6687,10 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
   check(/const PAYROLL_DRIFT_REASONS = Object\.freeze\(\['employee_archived', 'employee_not_active', 'salary_missing', 'salary_changed', 'overtime_changed'\]\);/.test(apiC)
     && /if\(plan\.status === 'Ready'\) loadDrift\(plan\.id\);/.test(storeC) && !/drift[^;\n]*(current|reasons)[^;\n]*(openPanel|confirmPanel|COMMIT|commit\()/i.test(storeC),
     'AFI-4c2: drift is the closed BF-4c2 reason set, read for a Ready detail, and never decides Commit (D-AFI4c2-2 = A)');
+  // AFI-4e authorized revision: "Post to Finance" is the approved posting control and confirmation
+  // (D-AFI4e-5 = A; pinned in the AFI-4e section). Was: never Post to Finance.
   check(/Committed: 'Committed — final, not paid'/.test(viewC) && /label: 'Commit payroll'/.test(viewC) && /submit: 'Commit payroll', busy: 'Committing…', danger: true/.test(viewC)
-    && />Retry commit</.test(viewC) && !/\bPaid\b|Mark paid|Execute payment|Post to Finance/.test(viewC),
+    && />Retry commit</.test(viewC) && !/\bPaid\b|Mark paid|Execute payment|Post to Finance/.test(viewC.replace(/submit: 'Post to Finance'|>Post to Finance</g, '')),
     'AFI-4c2: the words are D-AFI4c2-3 = A — "Commit payroll", "Committing…", "Retry commit", "Committed — final, not paid"; never Paid or Post to Finance');
   check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\./.test(all), 'AFI-4c2: still no number conversion, Math, formatter or Intl in the Payroll modules');
   check(/tab\('swSectionPayroll', ceo \? 'Payroll' : 'My payroll', payroll === true\)/.test(wsC) && /function sessionPayrollMineDetailHTML\(w\)/.test(viewC)
@@ -6898,9 +6908,10 @@ console.log('== AFI-4d — SESSION SUPPLEMENTAL PAYROLL ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') < mods.indexOf('core/session-payroll.js') && mods.indexOf('core/session-payroll.js') < mods.indexOf('ui/session-payroll-view.js')
-    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 100 && pkg.actions === 21
-    && pkg.packageDigest === '7768d72b54f2265b2ac024d6dfb0c95c5044d181f2167199e16e5a14f0cdcb4e',
-    'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files at digest 7768d72b…, ACTIONS 21');
+    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 100 && pkg.actions === 21,
+    // AFI-4e authorized revision: the package changed with AFI-4e (frontend only) and its new digest
+    // is pinned in the AFI-4e section. Was: digest 7768d72b… (AFI-4d).
+    'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files, ACTIONS 21 (its digest: the AFI-4e section)');
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0033_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'AFI-4d: frontend only — migration head 0033 after BF-4e, AUTH_MODE LOCAL');
@@ -6986,9 +6997,13 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
   walkJs(path.join(root, 'js'));
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(!jsFiles.some((f) => /\/api\/finance/.test(read(f))) && manifest.files.length === 100 && manifest.actions === 21
-    && manifest.packageDigest === '7768d72b54f2265b2ac024d6dfb0c95c5044d181f2167199e16e5a14f0cdcb4e',
-    'BF-4e: backend only — no frontend module names a Finance posting route; the package is unchanged (100 files, digest 7768d72b…, ACTIONS 21)');
+  // AFI-4e authorized revision: AFI-4e is the frontend of these routes — exactly one module,
+  // core/payroll-api.js, names them (pinned to the three, in the AFI-4e section), and the package
+  // changed with it (its digest: the AFI-4e section). Was: no frontend module names a Finance posting
+  // route; the package unchanged at digest 7768d72b… (BF-4e backend only).
+  check(jsFiles.filter((f) => /\/api\/finance/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
+    && manifest.files.length === 100 && manifest.actions === 21,
+    'BF-4e/AFI-4e: exactly one frontend module — core/payroll-api.js (AFI-4e FinancePostingApi) — names a Finance posting route; the package keeps 100 files, ACTIONS 21');
   check(['Unit/FinancePostingDomainTest.php', 'Http/FinanceRoutingTest.php', 'Db/FinancePostingSchemaTest.php', 'Db/FinancePostingWorkflowTest.php', 'Db/FinancePostingConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /F6 race/.test(srv('tests/Db/FinancePostingConcurrencyTest.php')),
     'BF-4e: the domain, routing, schema, workflow and F1–F6 concurrency tests exist');
@@ -7001,6 +7016,115 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   // N9 (resolved in BF-4e's docs commit): AFI-4d is merged as PR #49 at its canonical merge, not deployed — no longer a local candidate.
   check([ctx, arch, ms].every((t) => !/AFI-4d[^.]*local candidate|local candidate on `feature\/afi-4d|AFI-4d \(below\) is a local candidate/.test(t) && /PR #49/.test(t) && /152eccab1973db28b9e86f87d9959aa507b0b5fe/.test(t)),
     'AFI-4d (N9): AI_CONTEXT, ARCHITECTURE and the milestone record AFI-4d as merged (PR #49, canonical 152eccab…) — never as a local candidate');
+}
+
+// ===== AFI-4e — SESSION FINANCE POSTING (CEO) =====
+// Owner decisions D-AFI4e-1 = A (the posting lives on the CEO's SESSION Payroll details — a Committed
+// plan and a Committed Supplemental document — with no Finance screen or navigation), D-AFI4e-2 = A
+// (the three Payroll modules extended, no new module), D-AFI4e-3 = A (an unknown outcome is re-read,
+// never resent automatically; still Committed and unposted at the same amount offers a deliberate
+// "Retry posting" with the same body and key), D-AFI4e-4 = A (the Finance status on the details only;
+// the month's postings read with the month, again on opening a detail and after every posting
+// outcome) and D-AFI4e-5 = A (the words). Frontend only, over the canonical BF-4e (PR #50): no
+// backend, migration, ApiClient, AuthBoot, CSS or LOCAL change; ACTIONS 21; AUTH_MODE LOCAL; the
+// Payroll harness extended (CI stays at ten).
+console.log('== AFI-4e — SESSION FINANCE POSTING (CEO) ==');
+{
+  const rd = (f) => read(path.join(root, 'js', f));
+  const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1');
+  const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
+  const apiC = code(rd('core/payroll-api.js')), storeC = code(rd('core/session-payroll.js')), viewC = code(rd('ui/session-payroll-view.js'));
+  const all = apiC + '\n' + storeC + '\n' + viewC;
+  const phpList = (src, name) => { const m = new RegExp('const ' + name + " = \\[([^\\]]*)\\]").exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  const jsList = (src, name) => { const m = new RegExp('const ' + name + ' = Object\\.freeze\\(\\[([^\\]]*)\\]\\)').exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  // The contract is BF-4e's: the seven-key projection, the two source kinds, Planned, the list cap.
+  const fview = srv('Finance/FinancePostingView.php');
+  const fields = phpList(fview, 'FIELDS');
+  check(!!fields && fields.length === 7 && JSON.stringify(jsList(apiC, 'FINANCE_POSTING_KEYS')) === JSON.stringify(fields.slice().sort())
+    && JSON.stringify(jsList(apiC, 'FINANCE_POSTING_SOURCE_KINDS')) === JSON.stringify(phpList(fview, 'SOURCE_KINDS'))
+    && /public const PLANNED = 'Planned';/.test(fview) && /const FINANCE_POSTING_PLANNED = 'Planned';/.test(apiC)
+    && /public const LIST_CAP = 2000;/.test(srv('Data/Finance/FinancePostingStore.php')) && /const FINANCE_POSTING_LIST_CAP = 2000;/.test(apiC),
+    'AFI-4e: contract = BF-4e — a posting is exactly FinancePostingView::FIELDS (7), its kind one of SOURCE_KINDS, its status Planned; a month answer never above FinancePostingStore::LIST_CAP');
+  // The routes: FinancePostingApi names exactly the three BF-4e routes of Routes.php.
+  const routes = srv('Http/Routes.php');
+  const serverPaths = (routes.match(/new Route\('[A-Z]+', '(\/api\/finance-postings[^']*)'/g) || []).map((l) => l.replace(/^.*'(\/api\/[^']*)'$/, '$1')).sort();
+  const clientPaths = (apiC.match(/'\/api\/finance-postings[^']*'/g) || []).map((x) => x.slice(1, -1)).sort();
+  check(serverPaths.length === 3 && JSON.stringify(clientPaths) === JSON.stringify(serverPaths)
+    && /payrollPlan: '\/api\/finance-postings\/payroll-plan', supplementalPayroll: '\/api\/finance-postings\/supplemental-payroll'/.test(apiC),
+    'AFI-4e: FinancePostingApi names exactly the three BF-4e Finance routes of server/src/Http/Routes.php — the month read and one posting route per source kind');
+  // Exact bodies — the FinancePostingInput allowlists — and strictly confirming answers.
+  const input = srv('Finance/FinancePostingInput.php');
+  check(/self::onlyKeys\(\$json, \['payrollPlanId', 'expectedAmount', 'idempotencyKey'\]\);/.test(input) && /self::onlyKeys\(\$json, \['supplementalPayrollId', 'expectedAmount', 'idempotencyKey'\]\);/.test(input)
+    && /const FINANCE_POSTING_SOURCE_FIELDS = Object\.freeze\(\{ payrollPlan: 'payrollPlanId', supplementalPayroll: 'supplementalPayrollId' \}\);/.test(apiC)
+    && /body\[field\] = i\.sourceId;\s*body\.expectedAmount = i\.amount;\s*body\.idempotencyKey = i\.key;/.test(apiC)
+    && (/post\(intent\)\{[\s\S]*?\n  \}/.exec(apiC.slice(apiC.indexOf('const FinancePostingRequests'))) || [''])[0].match(/body(\[[^\]]+\]|\.[A-Za-z]+) =/g).length === 3,
+    'AFI-4e: a posting body is exactly { payrollPlanId | supplementalPayrollId, expectedAmount, idempotencyKey } — never an employee, month, status, company, account or category');
+  check(/\(p\) => p\.sourceKind === i\.sourceKind && p\.sourceId === i\.sourceId && p\.amount === i\.amount && p\.monthKey === i\.monthKey && p\.employeeId === i\.employeeId/.test(apiC)
+    && /o\.status !== FINANCE_POSTING_PLANNED/.test(apiC) && /o\.amount === '0\.00'/.test(apiC)
+    && /x\.sourceKind === p\.sourceKind && x\.sourceId === p\.sourceId/.test(apiC) && /p\.monthKey !== monthKey/.test(apiC),
+    'AFI-4e: a success counts only for a Planned posting of the same source at the same amount, employee and month; a month answer is refused whole for another month, a second posting of one source, a non-Planned or zero amount');
+  // One intent per deliberate confirmation: the source's own amount string, the one Web Crypto key.
+  check(/return sourceKind === 'payrollPlan' \? source\.totalAmount : sourceKind === 'supplementalPayroll' \? source\.overtimeAmount : null;/.test(apiC)
+    && /const key = payrollIdempotencyKey\(\);\s*if\(key === null\) return null;/.test(apiC) && (all.match(/getRandomValues\(/g) || []).length === 1
+    && (storeC.match(/financePostingIntent\(/g) || []).length === 1 && (storeC.match(/FinancePostingApi\.post\(/g) || []).length === 1
+    && /if\(sessionFinanceIntentState\(i, i\.sourceKind, source, sessionFinanceStatus\(s, i\.sourceKind, source\)\) !== 'unresolved'\) return;\s*return sendPost\(i, true\);/.test(storeC),
+    'AFI-4e: one intent per confirmation (the source\'s own totalAmount / overtimeAmount string and the one Web Crypto key), one send path, Retry posting only while the re-read is unresolved (D-AFI4e-3 = A)');
+  check(/if\(COMMIT_AMBIGUOUS\.indexOf\(out\.kind\) !== -1\)\{\s*SessionPayrollStore\.failMutation\(token, SESSION_PAYROLL_MUTATION_STATUS\.AMBIGUOUS, out\);\s*SessionPayrollStore\.setFocus\('message'\);\s*reread\(\);/.test(storeC)
+    && /SessionPayrollStore\.failMutation\(token, SESSION_PAYROLL_MUTATION_STATUS\.ERROR, out\);\s*SessionPayrollStore\.dropPostIntent\(\);/.test(storeC)
+    && /if\(state === 'posted'\)\{\s*SessionPayrollStore\.dropPostIntent\(\);[\s\S]*?\} else if\(state === 'stale'\)\{\s*SessionPayrollStore\.dropPostIntent\(\);/.test(storeC),
+    'AFI-4e: an unknown outcome keeps the intent and re-reads (never resent); a definite refusal drops it and re-reads; the reads decide posted / unresolved / stale');
+  // Post is offered only for a Committed, unposted source whose Finance status is known.
+  check(/if\(source\.status !== 'Committed'\) return Object\.freeze\(\{ state: 'none' \}\);/.test(storeC)
+    && /const hits = s\.fin\.filter\(\(p\) => p\.sourceKind === sourceKind && p\.sourceId === source\.id\);/.test(storeC)
+    && /if\(s\.panel \|\| s\.postIntent\) return;[\s\S]*?if\(!status \|\| status\.state !== 'unposted'\) return;/.test(storeC)
+    && /\(p\.status === 'Committed' \? sessionFinanceHTML\(w, 'payrollPlan', p, dis\) : ''\)/.test(viewC) && /\(d\.status === 'Committed' \? sessionFinanceHTML\(w, 'supplementalPayroll', d, dis\) : ''\)/.test(viewC),
+    'AFI-4e: a source matches its posting by sourceKind + sourceId; Post opens only for a Committed source the month\'s Finance read shows unposted, never while another intent is unresolved; non-Committed sources show no Finance line');
+  // CEO only: the Employee never reads or writes Finance.
+  check(/function loadFinance\(key\)\{\s*if\(!sessionPayrollIsCeo\(principalNow\(\)\) \|\| !OvertimeCalendar\.isMonth\(key\)\) return;/.test(storeC)
+    && /openPanel\(kind, planId\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /retryPosting\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /retryFinance\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC)
+    && !/sessionFinanceHTML\(/.test((/function sessionPayrollMineDetailHTML[\s\S]*?\n\}/.exec(viewC) || [''])[0] + (/function sessionSupplementalMineDetailHTML[\s\S]*?\n\}/.exec(viewC) || [''])[0]),
+    'AFI-4e: CEO only — the Finance read is the CEO\'s, every posting entry point is behind canAct(), and an Employee\'s cards carry no Finance (the server decides regardless)');
+  // The words (D-AFI4e-5 = A) and nothing that executes, pays, reverses or corrects.
+  check(/unposted: 'Not posted to Finance', posted: 'Posted to Finance — Planned, not paid'/.test(viewC)
+    && /const SESSION_FINANCE_CONFIRM = Object\.freeze\(\['Records one Planned Finance posting of Rp ', '\. Nothing is paid or executed\. A posting cannot be reversed\.'\]\);/.test(viewC)
+    && /submit: 'Post to Finance', busy: 'Posting…', danger: true/.test(viewC) && />Retry posting</.test(viewC)
+    && /'TAM OS did not record this posting \(a conflict was reported\)\./.test(viewC) && !/finance_(posted|amount|source_state|duplicate)|idempotency_mismatch/.test(all),
+    'AFI-4e: the words are D-AFI4e-5 = A — "Not posted to Finance", "Posted to Finance — Planned, not paid", "Post to Finance", the approved confirmation, "Retry posting"; a 409 never names its cause');
+  check(!/\b(execute|executePosting|pay|payPosting|reverse|reversePosting|correct|correction|markPaid|actualAmount|account|category)\s*\(/i.test(all)
+    && !/Execute|Mark paid|Reverse posting|Correct posting|\bPaid\b/.test(viewC) && !/<input[^>]*(amount|Amount)|contenteditable/.test(viewC),
+    'AFI-4e: no execution, payment, reversal, correction, account or category function or control; no editable amount');
+  // Money: exact strings only.
+  check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\.|BigInt/.test(all) && !/\bamount\s*[-+*\/]\s*[a-z0-9]|[-+*\/]\s*[a-z.]*\.amount\b(?!\s*[,)'])/.test(all.replace(/'[^'\n]*'/g, "''")),
+    'AFI-4e: no number conversion, Math, formatter or arithmetic on a posting amount — the source\'s own string is shown and sent');
+  // The SESSION firewall: memory only; cleared with the identity; LOCAL untouched.
+  check(/forgetFinance\(\); postIntent = null;/.test(storeC) && /function clear\(\)\{\s*forgetDrift\(\); commitIntent = null;\s*forgetSupplementalMonth\(\); forgetSupplementalDetail\(\); suppIntent = null;\s*forgetFinance\(\); postIntent = null;/.test(storeC),
+    'AFI-4e: clear() (logout, session loss, a new principal) destroys the postings, the intent and its key');
+  const localOnly = [];
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walk(q); else if (e.name.endsWith('.js')) localOnly.push(q); } };
+  walk(path.join(root, 'js'));
+  const touching = localOnly.map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).filter((f) => /FinancePosting|financePosting|sessionFinance|SESSION_FINANCE|finance-postings/.test(read(path.join(root, 'js', f))));
+  check(touching.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
+    && !/FinancePosting|finance-postings/.test(rd('people/payroll-ops-engine.js') + rd('people/supplemental-engine.js') + rd('finance/execution-center.js') + rd('finance/transactions.js')),
+    'AFI-4e: only the three SESSION Payroll modules know the Finance posting client — the LOCAL payroll engine, Supplemental engine, Execution Center and transactions are untouched');
+  // Package and module order: no new module; 100 files; the AFI-4e digest.
+  const mods = require(path.join(root, 'tools', 'module-order.js'));
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 100 && pkg.actions === 21
+    && pkg.packageDigest === 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files at digest e3e56858…, ACTIONS 21');
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0033_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    'AFI-4e: frontend only — migration head 0033, ACTIONS 21, AUTH_MODE LOCAL');
+  const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js'));
+  check(['F. ', 'F1. ', 'F2. ', 'F3. ', 'F4. ', 'F5. ', 'F6. ', 'F7. ', 'F8. ', 'F9. '].every((t) => harness.indexOf("'" + t) !== -1) && /\/__stub\/fail-next-posting/.test(read(path.join(root, 'tools', 'serve-auth-stub.js'))),
+    'AFI-4e: the Payroll runtime harness proves Finance posting (sections F–F9) and the auth stub models BF-4e for the browser');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md')), arch = read(path.join(root, 'ARCHITECTURE.md')), ms = read(path.join(root, 'docs', '05-milestones', 'Milestones.md'));
+  check(['D-AFI4e-1 = A', 'D-AFI4e-2 = A', 'D-AFI4e-3 = A', 'D-AFI4e-4 = A', 'D-AFI4e-5 = A'].every((d) => ctx.includes(d)) && /AFI-4e/.test(arch) && /AFI-4e/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md')))
+    && /AFI-4e/.test(ms) && /AFI-4e/.test(read(path.join(root, 'CHANGELOG.md'))),
+    'AFI-4e: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the deployment note (DEPLOYMENT), the milestone and the changelog');
+  // N10 (resolved in AFI-4e's docs commit): BF-4e is merged as PR #50 at its canonical merge, not deployed — no longer a local candidate.
+  check([ctx, arch, ms].every((t) => !/BF-4e[^.]*local candidate|local candidate on `feature\/bf-4e|BF-4e \(below\) is a local candidate/.test(t) && /PR #50/.test(t) && /e6ce440c1ea1e71d2d921a1119543592f4113d56/.test(t)),
+    'BF-4e (N10): AI_CONTEXT, ARCHITECTURE and the milestone record BF-4e as merged (PR #50, canonical e6ce440c…) — never as a local candidate');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

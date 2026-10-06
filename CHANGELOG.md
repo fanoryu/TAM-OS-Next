@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **AFI-4e SESSION Finance posting (frontend; SESSION mode only, not shipped).** In SESSION mode the CEO can now post a
+  committed payroll — or a committed Supplemental payroll — to Finance from its own Payroll detail. The detail shows "Not
+  posted to Finance" with "Post to Finance", or "Posted to Finance — Planned, not paid" with the amount posted. Posting
+  asks first and says exactly what it records: one Planned Finance posting of the amount shown, with nothing paid or
+  executed, and no way to reverse it. The amount is always TAM OS's own and cannot be edited. A double click posts once;
+  if TAM OS cannot confirm a posting, the page reads it again and offers "Retry posting", which can never post twice.
+  Post is not offered while the Finance status is unknown. Employees see nothing of Finance, and there is still no
+  Finance screen, payment or execution in SESSION mode. LOCAL mode is unchanged. The shipped `AUTH_MODE` stays
+  **LOCAL**.
 - **BF-4e Finance posting of Committed payroll obligations (backend only, not shipped).** The CEO can now post a
   committed payroll — or a committed Supplemental payroll — to Finance on the server, one obligation at a time. Each
   posting is a Planned record of exactly that obligation's amount; it is never a payment, nothing is executed, and it

@@ -148,7 +148,20 @@
  *   /__stub/late-overtime                  one more Approved record of EMP-006 (the next wave)
  *   /__stub/bump-supplemental              bumps every open document's version (a stale view)
  *   /__stub/fail-next-supplemental-commit  the next Supplemental commit is APPLIED, then answered 503
- * Nothing here pays, posts or touches Finance.
+ *
+ * AFI-4e Finance posting (a test-only model of BF-4e): GET /api/finance-postings?month= (CEO only,
+ * an Employee 403; every Planned posting of the month: { id, sourceKind, sourceId, employeeId,
+ * monthKey, amount, status }); POST /api/finance-postings/payroll-plan exactly { payrollPlanId,
+ * expectedAmount, idempotencyKey } and POST /api/finance-postings/supplemental-payroll exactly
+ * { supplementalPayrollId, expectedAmount, idempotencyKey } (CEO only, CSRF; any other key 400
+ * naming it) in the BF-4e order: the source (404), the key (held by this source's posting at this
+ * amount: that posting replayed; held by any other: 409), Committed (409), expectedAmount equal to
+ * the source's own amount string (409), not yet posted (409); then one Planned posting at the
+ * source's amount. Every 409 is the generic conflict. The write-* scenarios apply. No posting exists
+ * at a scenario switch.
+ *   /__stub/fail-next-posting   the next posting is APPLIED, then answered 503: an unknown outcome
+ *                               the page must reconcile by reading the source and the postings again
+ * Nothing here pays, executes, reverses or corrects anything.
  */
 'use strict';
 const http = require('http');
@@ -301,6 +314,10 @@ const SP_OPEN = ['Draft', 'Reviewed', 'Ready'];
 let supplemental = [];         // AFI-4d: this scenario's Supplemental documents (each with its links)
 let failNextSuppCommit = false;
 let lateSeq = 0;
+// AFI-4e: this scenario's Finance postings (test-only model of BF-4e) — Planned only, immutable.
+const FP_VIEW = ['id', 'sourceKind', 'sourceId', 'employeeId', 'monthKey', 'amount', 'status'];
+let finance = [];
+let failNextPosting = false;
 // The exact sum of some Approved records (test-only mirror of PayrollCalculation::overtime).
 function spSum(records){
   let rupiah = 0n, quarters = 0n;
@@ -347,6 +364,7 @@ function reset(name){
   failNextCommit = false;
   supplemental = stubSupplemental();   // AFI-4d
   failNextSuppCommit = false; lateSeq = 0;
+  finance = []; failNextPosting = false;   // AFI-4e
   session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
@@ -499,6 +517,20 @@ async function handleApi(req, res, p, query){
     });
     return api(res, 200, { supplementalEligibility: out });
   }
+  // AFI-4e: the Finance posting read — CEO only.
+  if(p === '/api/finance-postings' && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    if([...query.keys()].join() !== 'month' || !otMonth(query.get('month'))) return api(res, 400, 'invalid_query');
+    if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+    const month = query.get('month');
+    return api(res, 200, { financePostings: finance.filter((x) => x.monthKey === month)
+      .sort((a, c) => (a.employeeId < c.employeeId ? -1 : a.employeeId > c.employeeId ? 1 : a.sourceKind < c.sourceKind ? -1 : a.sourceKind > c.sourceKind ? 1 : a.seq - c.seq))
+      .map((x) => pick(x, FP_VIEW)) });
+  }
+  const fpWrite = { '/api/finance-postings/payroll-plan': 'payrollPlan', '/api/finance-postings/supplemental-payroll': 'supplementalPayroll' }[p];
+  if(fpWrite && req.method === 'POST') return handleFinanceWrite(req, res, fpWrite);
   const spWrite = { '/api/supplemental-payrolls/generate': 'generate', '/api/supplemental-payrolls/review': 'review', '/api/supplemental-payrolls/approve': 'approve',
     '/api/supplemental-payrolls/return': 'return', '/api/supplemental-payrolls/cancel': 'cancel', '/api/supplemental-payrolls/commit': 'commit' }[p];
   if(spWrite && req.method === 'POST') return handleSupplementalWrite(req, res, spWrite);
@@ -838,6 +870,48 @@ async function handleSupplementalWrite(req, res, kind){
   return done(x);
 }
 
+/* ---------- AFI-4e: the Finance postings (test-only model of BF-4e) ---------- */
+async function handleFinanceWrite(req, res, kind){
+  const b = await readJson(req);
+  if(!session) return api(res, 401, 'unauthenticated');
+  if(scenario === 'write-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+  if(scenario === 'write-stale-csrf' && !session.rotated){ session.rotated = true; session.csrf = token(); return api(res, 403, 'forbidden'); }
+  if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
+  if(!b) return api(res, 400, 'validation_failed');
+  const field = kind === 'payrollPlan' ? 'payrollPlanId' : 'supplementalPayrollId';
+  const unknown = Object.keys(b).filter((k) => [field, 'expectedAmount', 'idempotencyKey'].indexOf(k) === -1);
+  if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
+  const bad = [];
+  if(typeof b[field] !== 'string' || !/^[0-9a-f]{32}$/.test(b[field])) bad.push(field);
+  if(typeof b.expectedAmount !== 'string' || !/^(0|[1-9][0-9]{0,14})\.00$/.test(b.expectedAmount)) bad.push('expectedAmount');
+  if(typeof b.idempotencyKey !== 'string' || !/^[0-9a-f]{32}$/.test(b.idempotencyKey)) bad.push('idempotencyKey');
+  if(bad.length) return api(res, 400, 'validation_failed', null, bad);
+  if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, [field]);
+  if(scenario === 'write-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '45' });
+  if(scenario === 'write-error') return api(res, 500, 'internal_error');
+  if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
+  if(scenario === 'write-conflict') return api(res, 409, 'conflict');
+  if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
+  const done = (x) => (scenario === 'write-malformed' ? api(res, 200, { financePosting: Object.assign(pick(x, FP_VIEW), { idempotencyKey: x.key }) }) : api(res, 200, { financePosting: pick(x, FP_VIEW) }));
+  const source = kind === 'payrollPlan' ? payroll.find((x) => x.id === b[field]) : supplemental.find((x) => x.id === b[field]);
+  if(!source) return api(res, 404, 'not_found');
+  const amount = kind === 'payrollPlan' ? source.totalAmount : source.overtimeAmount;
+  // The BF-4e order: the key first (replay or mismatch), then Committed, the amount, one per source.
+  const holder = finance.find((x) => x.key === b.idempotencyKey);
+  if(holder){
+    if(holder.sourceKind === kind && holder.sourceId === source.id && holder.amount === b.expectedAmount) return done(holder);
+    return api(res, 409, 'conflict');
+  }
+  if(source.status !== 'Committed' || amount !== b.expectedAmount || finance.some((x) => x.sourceKind === kind && x.sourceId === source.id)) return api(res, 409, 'conflict');
+  const x = { id: crypto.randomBytes(16).toString('hex'), sourceKind: kind, sourceId: source.id, employeeId: source.employeeId, monthKey: source.monthKey,
+    amount: amount, status: 'Planned', key: b.idempotencyKey, seq: finance.length + 1 };
+  finance.push(x);
+  // Applied, then answered 503: an outcome the page must reconcile by reading again.
+  if(failNextPosting){ failNextPosting = false; return api(res, 503, 'service_unavailable'); }
+  return done(x);
+}
+
 // AFI-4a3: the account operations (test-only model of AccountService's guards).
 function accountWrite(res, kind, b, done){
   if(typeof b.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(b.id)) return api(res, 400, 'validation_failed', null, ['id']);
@@ -920,6 +994,12 @@ http.createServer((req, res) => {
     failNextSuppCommit = true;
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('the next supplemental commit answer will be dropped');
+  }
+  if(urlPath === '/__stub/fail-next-posting' && req.method === 'GET'){
+    // AFI-4e: the next Finance posting is applied, then its answer is dropped.
+    failNextPosting = true;
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('the next posting answer will be dropped');
   }
   if(urlPath === '/__stub/bump-payroll' && req.method === 'GET'){
     // AFI-4c1: another change to the live plans (no scenario switch, the session stays).

@@ -317,8 +317,8 @@ write in flight) and `ui/session-payroll-view.js` are extended — no new module
 change; the SESSION names never collide with the LOCAL Supplemental engine's; the package keeps 100 files with a new digest;
 the dedicated Payroll harness is extended (CI stays at ten harnesses). AFI-4d needs BF-4d deployed first or with it.
 `AUTH_MODE` stays LOCAL.
-**BF-4e — Finance posting of Committed payroll obligations** (local candidate on `feature/bf-4e-finance-posting`; not
-pushed, not merged, not deployed; owner decisions D-FIN-1 = A, D-FIN-2 = A, D-FIN-3 = A, D-FIN-4 = A, D-FIN-5 = A,
+**BF-4e — Finance posting of Committed payroll obligations** (merged as source, PR #50, canonical merge
+`e6ce440c1ea1e71d2d921a1119543592f4113d56`, 2026-10-06; not deployed; owner decisions D-FIN-1 = A, D-FIN-2 = A, D-FIN-3 = A, D-FIN-4 = A, D-FIN-5 = A,
 2026-10-06) is the server's first Finance record, **backend only**. D-FIN-1 = A: a new, minimal, **Planned** posting made
 from exactly one Committed obligation — a Committed base payroll plan or a Committed Supplemental Payroll document — and
 nothing else: no execution or payment, no actual amount, no company account, no category, no monthly-plan link, no manual
@@ -339,8 +339,35 @@ reads and locks the source and never writes it. D-FIN-4 = A: reads are CEO-only 
 answers `{ financePostings: [{ id, sourceKind, sourceId, employeeId, monthKey, amount, status }…] }` (status always
 `Planned`); an Employee is 403 on every Finance route. D-FIN-5 = A: a posting is immutable — no reversal and no correction.
 Migrations `0032`–`0033` (head **0033**). The base plan (thirteen keys) and Supplemental (twelve keys) projections are
-unchanged. No frontend or package change (100 files, `7768d72b…`), `AUTH_MODE` stays LOCAL; Finance execution and any
-posting screen are later, separately authorized slices.
+unchanged. BF-4e itself changed no frontend or package (100 files, `7768d72b…`), `AUTH_MODE` stays LOCAL; its CEO posting
+screen is AFI-4e (below); Finance execution is a later, separately authorized slice.
+**AFI-4e — SESSION Finance posting (CEO)** (local candidate on `feature/afi-4e-session-finance-posting`; not pushed, not
+merged, not deployed; owner decisions D-AFI4e-1 = A, D-AFI4e-2 = A, D-AFI4e-3 = A, D-AFI4e-4 = A, D-AFI4e-5 = A,
+2026-10-06) is the SESSION frontend of BF-4e. D-AFI4e-1 = A: posting lives **on the CEO's SESSION Payroll details** — a
+Committed base plan's detail and a Committed Supplemental document's detail each carry a Finance card; there is no Finance
+screen, section or navigation, and no non-Committed source shows a Finance line. D-AFI4e-4 = A: the CEO's month load also
+reads `GET /api/finance-postings?month=`; it is read again whenever a plan or a document is opened and after every posting
+outcome, and a source matches its posting by `sourceKind` + `sourceId` only. The card reads "Not posted to Finance" with
+**Post to Finance**, or "Posted to Finance — Planned, not paid" with the posting's amount; while the read loads, or after it
+failed (with "Retry Finance status"), Post is not offered. D-AFI4e-5 = A: Post opens an inline confirmation naming the
+source and saying "Records one Planned Finance posting of Rp {amount}. Nothing is paid or executed. A posting cannot be
+reversed." — `{amount}` is the source's own server string (a plan's `totalAmount`, a document's `overtimeAmount`), sent
+unchanged as the required `expectedAmount`; nothing edits or computes it. D-AFI4e-3 = A: a deliberate confirmation makes
+ONE in-memory intent `{ sourceKind, sourceId, employeeId, monthKey, amount, key }` with the one Web Crypto
+`payrollIdempotencyKey()`, sent once (one write in flight; a double click sends nothing more); success counts only for a
+Planned posting of the same source at the same amount, employee and month; any 409 is the server's generic conflict — its
+cause is never claimed — and like every definite refusal drops the intent and reads the source and the postings again; an
+unknown outcome (503, 500, network, timeout, a malformed or non-confirming answer) keeps the intent, re-reads both and is
+never resent automatically: posted at the intent's amount is the success, still Committed and unposted at the same amount
+offers "Retry posting" (the same body and key — the server replays the original posting), anything else drops it as stale;
+while an intent is unresolved no other source can be posted, and logout, session loss or another principal destroy it. An
+Employee never reads or writes Finance and sees no Finance (server-enforced regardless; ACTIONS stay **21**). Nothing
+executes, pays, reverses or corrects; LOCAL is unchanged (its Commit still posts Planned transactions to the local Finance,
+executed in the Execution Center). Frontend only: `core/payroll-api.js` (`FinancePostingDecoders`,
+`FinancePostingRequests`, `FinancePostingApi`, `financePostingIntent` — strict seven-key decoding), `core/session-payroll.js`
+and `ui/session-payroll-view.js` are extended — no new module, no backend, migration, ApiClient, AuthBoot or CSS change; the
+package keeps 100 files with a new digest; the dedicated Payroll harness is extended (CI stays at ten harnesses). AFI-4e
+needs BF-4e deployed first or with it. `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
@@ -1021,9 +1048,9 @@ eligible/skipped/reason. Posted/Executed payroll is immutable. See the payroll d
 Approved payroll is **posted** to finance as **planned** transactions (one per employee; no
 duplicates, never auto-executed). Payments are then **executed** in the Execution Center, recording
 the actual amount separately from the planned amount. Cash Flow and Budget views aggregate across
-transactions; Reports export locally as CSV. On the server (BF-4e, backend only, not deployed) a Committed
+transactions; Reports export locally as CSV. On the server (BF-4e, not deployed) a Committed
 base plan or Supplemental document is posted, by an explicit CEO command per obligation, as one immutable
-Planned posting; there is no server execution yet.
+Planned posting — in SESSION mode from the CEO's Payroll details (AFI-4e); there is no server execution yet.
 
 ## 11. Overtime Workflow
 

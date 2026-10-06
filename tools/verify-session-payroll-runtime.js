@@ -29,6 +29,14 @@
    lifecycle with NO Draft → Ready, Commit with one intent and a same-key Retry, the Employee's own
    Committed documents as separate rows, and the firewall (memory only, cleared, no LOCAL engine,
    no global collision). Supplemental amounts deliberately differ from their lines' sum.
+
+   AFI-4e (owner decisions D-AFI4e-1..5 = A): sections F–F9 prove the SESSION Finance posting over
+   BF-4e — the strict seven-key decoders and the request mirror, the CEO's Finance card on a
+   Committed plan and a Committed Supplemental document only (matched by sourceKind + sourceId), the
+   exact bodies with the source's own amount string, one intent and one Web Crypto key per deliberate
+   confirmation, the unknown outcome re-read and never resent, the same-key "Retry posting", a 409
+   that never claims its cause, the Finance read failure (no Post), the Employee's isolation and no
+   execution semantics. The Committed plan posted here has a total that is NOT base + overtime.
    ============================================================ */
 
 const fs = require('fs');
@@ -112,6 +120,10 @@ const ELIG0 = { payrollPlanId: ID8, employeeId: 'e_8', eligibleCount: 1, eligibl
 const ELIGX = { payrollPlanId: '0'.repeat(32), employeeId: 'e_0', eligibleCount: 1, eligibleHours: '1.00', eligibleAmount: '500.00' };
 const SELIGS = { supplementalEligibility: [ELIG, ELIG0, ELIGX] };
 const ME_CEO_PRINCIPAL = { id: 'u_ceo_x', principalType: 'ceo', employeeId: null };
+// AFI-4e: a Committed plan (total 999.00, NOT base + overtime) and the postings of it and of SCOM.
+const IDPC = 'ab'.repeat(16), FID1 = 'f1'.repeat(16), FID2 = 'f2'.repeat(16), FID3 = 'f3'.repeat(16), FID4 = 'f4'.repeat(16);
+const PCX = plan(IDPC, 'e_c', 'EMP-0C', 'Committed', 4, { baseSalary: '8000000.50', overtimeAmount: '12345.00', overtimeHours: '7.50', overtimeCount: 1, totalAmount: '999.00' });
+const MONTH_F = { payrollPlans: [P1, P2, P3, P4, P5, PCX] };
 
 const LIST = (m) => '/api/payroll-plans?month=' + m;
 const DET = (id) => '/api/payroll-plan?id=' + id;
@@ -142,6 +154,15 @@ const one = (p) => ({ payrollPlan: p });
 const driftOk = (id, reasons) => ok({ payrollPlanDrift: { id: id, current: reasons.length === 0, reasons: reasons } });
 const sone = (d) => ({ supplementalPayroll: d });
 const sdet = (d, lines) => ({ supplementalPayroll: d, supplementalPayrollOvertime: lines || [] });
+// AFI-4e: the BF-4e Finance posting routes, a Committed plan whose total is NOT base + overtime,
+// and its postings.
+const FIN = (m) => '/api/finance-postings?month=' + m;
+const FW = { plan: '/api/finance-postings/payroll-plan', supp: '/api/finance-postings/supplemental-payroll' };
+const FIN_PLAN_KEYS = 'expectedAmount,idempotencyKey,payrollPlanId';
+const FIN_SUPP_KEYS = 'expectedAmount,idempotencyKey,supplementalPayrollId';
+const finOk = (list) => ok({ financePostings: list });
+const fone = (p) => ok({ financePosting: p });
+const posting = (id, kind, src, amount) => ({ id: id, sourceKind: kind, sourceId: src.id, employeeId: src.employeeId, monthKey: MONTH, amount: amount, status: 'Planned' });
 function deferred(){ let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise: promise, resolve: resolve }; }
 
 /* ---------- a recording #app (the SESSION harnesses' element) ---------- */
@@ -217,7 +238,9 @@ function loadRuntime(routes, opts){
     + ' sessionPayrollIntentState: sessionPayrollIntentState, payrollIdempotencyKey: payrollIdempotencyKey, PAYROLL_DRIFT_REASONS: PAYROLL_DRIFT_REASONS,'
     + ' SupplementalApi: SupplementalApi, SupplementalDecoders: SupplementalDecoders, SupplementalRequests: SupplementalRequests,'
     + ' sessionSupplementalActions: sessionSupplementalActions, sessionSupplementalIntentState: sessionSupplementalIntentState,'
-    + ' LOCAL_SUPPLEMENTAL_STATUSES: SUPPLEMENTAL_STATUSES };';
+    + ' LOCAL_SUPPLEMENTAL_STATUSES: SUPPLEMENTAL_STATUSES,'
+    + ' FinancePostingApi: FinancePostingApi, FinancePostingDecoders: FinancePostingDecoders, FinancePostingRequests: FinancePostingRequests,'
+    + ' financePostingIntent: financePostingIntent, sessionFinanceStatus: sessionFinanceStatus, sessionFinanceIntentState: sessionFinanceIntentState };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => {
@@ -312,7 +335,8 @@ const suppButtons = (html) => ['swpSuppReviewBtn', 'swpSuppApproveBtn', 'swpSupp
   .filter((b) => html.indexOf('id="' + b + '"') !== -1).sort((a, b) => html.indexOf('id="' + a + '"') - html.indexOf('id="' + b + '"')).map((b) => b.slice(7, -3)).join();
 
 async function boot(me, routes, opts){
-  const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1] })] } : { '/api/employee?id=emp_srv_1': [ok({ employee: { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active', joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' } })] };
+  // AFI-4e: the CEO's Finance read of the month answers no posting unless a test says otherwise.
+  const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1] })], [FIN(MONTH)]: [finOk([])] } : { '/api/employee?id=emp_srv_1': [ok({ employee: { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active', joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' } })] };
   const rt = loadRuntime(Object.assign({ '/api/auth/me': [ok(me)] }, base, routes || {}), opts);
   await flush();
   return rt;
@@ -352,6 +376,15 @@ async function suppDetail(doc, lines, routes, opts){
   return rt;
 }
 
+// AFI-4e: signed in as the CEO, the Committed plan PCX open (no posting unless `routes` says so).
+async function openFin(routes, opts){
+  const rt = await boot(ME_CEO, Object.assign({ [LIST(MONTH)]: [ok(MONTH_F)], [DET(IDPC)]: [ok(det(PCX, [OT1]))] }, routes || {}), opts);
+  rt.app.fire('swSectionPayroll', 'click'); await flush();
+  rt.app.fire('swpOpen5', 'click'); await flush();
+  return rt;
+}
+const finPosts = (rt, route) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && (route ? c.url === route : /^\/api\/finance/.test(c.url)));
+
 // The SESSION firewall, after every phase.
 function firewall(rt, label, overtimeOpened){
   check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0,
@@ -367,14 +400,28 @@ function firewall(rt, label, overtimeOpened){
   // AFI-4d authorized revision: the Supplemental preparation and Commit confirmations say so too.
   // Was: the payroll preparation and Commit confirmations only.
   const outsideGenerate = html.replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>(Prepare payroll for this month|Commit this payroll plan|Prepare supplemental payroll|Commit this supplemental payroll)\?<\/h2>[\s\S]*?<\/section>/, '');
-  check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(outsideGenerate) && !/\bPaid\b|Mark paid|\bPay\b/.test(html),
-    label + ': no Finance, payment, execution or posting wording (only the preparation and Commit confirmations say nothing is posted to Finance)');
+  // AFI-4e authorized revision: the CEO's Finance card of a Committed source, the posting
+  // confirmation ("… Nothing is paid or executed. …") and the posting messages speak of Finance and
+  // Posted (pinned below and in sections F–F9). Was: no Finance wording outside those confirmations.
+  const sp = rt.pr();
+  const finOwned = ['finPostPlan', 'finPostSupp'].indexOf(sp.mutation.kind) !== -1 || /^fin/.test(sp.notice || '');
+  let finFree = outsideGenerate.replace(/<section class="card" id="swpFinance"[\s\S]*?<\/section>/g, '')
+    .replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Post this (payroll|supplemental payroll) to Finance\?<\/h2>[\s\S]*?<\/section>/, '');
+  if(finOwned) finFree = finFree.replace(/<p class="auth-message[^"]*" id="swpMutationMessage"[^>]*>[^<]*<\/p>/, '');
+  check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(finFree) && !/\bPaid\b|Mark paid|\bPay\b/.test(html),
+    label + ': no Finance, payment, execution or posting wording (only the preparation and Commit confirmations say nothing is posted to Finance; AFI-4e: the Finance card, the posting confirmation and its messages)');
   // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Commit payroll / Retry commit exist, on a Ready
   // plan of the CEO only. Was: no Commit control or wording at all.
   const who = rt.AuthBoot.snapshot().principal;
   const d = rt.pr().detail;
-  check(!/expectedTotal|idempotency/i.test(html) && (!/id="swp(Commit|RetryCommit)Btn"/.test(html) || (!!who && who.principalType === 'ceo' && !!d && d.plan.status === 'Ready')),
-    label + ': a Commit control appears only on a Ready plan shown to the CEO; no key or total field in the page');
+  check(!/expectedTotal|expectedAmount|idempotency/i.test(html) && (!/id="swp(Commit|RetryCommit)Btn"/.test(html) || (!!who && who.principalType === 'ceo' && !!d && d.plan.status === 'Ready')),
+    label + ': a Commit control appears only on a Ready plan shown to the CEO; no key, total or expected amount field in the page');
+  // AFI-4e: the Finance card, its controls and the posting confirmation only on a Committed plan or
+  // Supplemental document shown to the CEO.
+  const sd = sp.suppDetail;
+  const committedShown = (!!d && !!sp.detailId && d.plan.status === 'Committed') || (!!sd && !!sp.suppDetailId && sd.doc.status === 'Committed');
+  const finShown = /id="swpFinance"|id="swp(Fin|SuppFin)(Post|RetryPost)Btn"|id="swpFinRetryBtn"|Post this (payroll|supplemental payroll) to Finance\?/.test(html);
+  check(!finShown || (!!who && who.principalType === 'ceo' && committedShown), label + ': Finance appears only on a Committed plan or Supplemental document shown to the CEO');
   // AFI-4d authorized revision: a Supplemental document's captured overtime record ids too. Was: IDO only.
   check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO + '|' + IDO2 + '|' + IDO3, 'g'), '')), label + ': no opaque plan or document id in the page (only an overtime record id, by design)');
   check(rt.State.employees.length === 0 && rt.State.payrollPlans.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
@@ -387,12 +434,20 @@ function firewall(rt, label, overtimeOpened){
   });
   check(bad.length === 0, label + ': every Payroll write is a CSRF POST of exactly { month }, { id, expectedVersion } or (commit) { id, expectedVersion, expectedTotal, idempotencyKey } — no employee, company, role, status or other money');
   // AFI-4c2 authorized revision: POST /api/payroll-plans/commit exists (CEO). Was: never a commit request.
-  check(rt.net.calls.every((c) => !(overtimeOpened ? /^\/api\/(finance|transactions|payments)/ : /^\/api\/(overtime|finance|transactions|payments)/).test(c.url) && !/^\/api\/payroll-plans\/(status|pay|post)/.test(c.url)),
-    label + ': no Overtime, Finance, status or payment request is ever made by the Payroll section');
+  // AFI-4e authorized revision: the CEO's Finance month read and the two BF-4e posting commands
+  // exist (an Employee makes none: below). Was: no Finance request at all.
+  check(rt.net.calls.every((c) => !(overtimeOpened ? /^\/api\/(transactions|payments)/ : /^\/api\/(overtime|transactions|payments)/).test(c.url) && !/^\/api\/payroll-plans\/(status|pay|post)/.test(c.url)
+      && (!/^\/api\/finance/.test(c.url) || (/^\/api\/finance-postings\?month=[0-9]{4}-[0-9]{2}$/.test(c.url) && (!c.init || !c.init.method || c.init.method === 'GET'))
+        || ((c.url === FW.plan || c.url === FW.supp) && !!c.init && c.init.method === 'POST'))),
+    label + ': no Overtime, status or payment request is ever made by the Payroll section; Finance only as the month read and the two posting commands');
+  const badFin = finPosts(rt).filter((c) => keys(bodyOf(c)) !== (c.url === FW.plan ? FIN_PLAN_KEYS : FIN_SUPP_KEYS) || c.init.headers['X-CSRF-Token'] === undefined);
+  check(badFin.length === 0, label + ': every Finance posting is a CSRF POST of exactly { payrollPlanId | supplementalPayrollId, expectedAmount, idempotencyKey }');
   if(who && who.principalType === 'employee'){
     check(posts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/payroll-plan\/drift/.test(c.url)), label + ': an Employee never writes Payroll and never reads drift');
     // AFI-4d: nor writes Supplemental payroll or reads its eligibility.
     check(suppPosts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/supplemental-payrolls\/eligibility/.test(c.url)), label + ': an Employee never writes Supplemental payroll and never reads its eligibility');
+    // AFI-4e: nor reads or writes Finance.
+    check(rt.net.calls.every((c) => !/^\/api\/finance/.test(c.url)) && sp.fin === null && sp.postIntent === null, label + ': an Employee never reads or writes Finance');
   }
   // AFI-4d: every Supplemental write is a CSRF POST of exactly { payrollPlanId }, { id, expectedVersion }
   // or (commit) { id, expectedVersion, expectedTotal, idempotencyKey }; the LOCAL engine's words never appear.
@@ -404,7 +459,7 @@ function firewall(rt, label, overtimeOpened){
 }
 
 (async function main(){
-  console.log('== AFI-4c1 + AFI-4c2 + AFI-4d SESSION PAYROLL — RUNTIME VERIFICATION ==');
+  console.log('== AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e SESSION PAYROLL — RUNTIME VERIFICATION ==');
 
   /* ---------- 0. the harness itself ---------- */
   {
@@ -1516,6 +1571,408 @@ function firewall(rt, label, overtimeOpened){
     check(localNames.length > 20 && mine.every((n) => localNames.indexOf(n) === -1), 'S8. no top-level SESSION name equals a LOCAL supplemental-engine name');
   }
 
+  /* ---------- F. AFI-4e Finance posting: strict decoders, request encoders, the intent ---------- */
+  {
+    const rt = loadRuntime({});
+    const D0 = rt.FinancePostingDecoders, R = rt.FinancePostingRequests;
+    // Every answer is parsed inside the page's realm, as ApiClient's JSON.parse would make it.
+    const inPage = (x) => (x === undefined ? x : rt.parse(JSON.stringify(x)));
+    const D = { posting: (o) => D0.posting(inPage(o)), monthResponse: (o, m) => D0.monthResponse(inPage(o), m), postingResponse: (o) => D0.postingResponse(inPage(o)) };
+    const good = posting(FID1, 'payrollPlan', PCX, '999.00');
+    const g2 = posting(FID2, 'supplementalPayroll', SCOM, '4321.00');
+    const d = D.posting(good);
+    check(!!d && Object.isFrozen(d) && keys(d) === 'amount,employeeId,id,monthKey,sourceId,sourceKind,status' && d.amount === '999.00' && d.status === 'Planned',
+      'F. a posting decodes to exactly its seven keys (FinancePostingView::FIELDS), frozen, the amount verbatim');
+    const missing = Object.assign({}, good); delete missing.employeeId;
+    [['an extra key', Object.assign({}, good, { companyId: 'c_1' })], ['the idempotency key', Object.assign({}, good, { idempotencyKey: 'a'.repeat(32) })],
+     ['a missing key', missing], ['an unknown source kind', Object.assign({}, good, { sourceKind: 'payroll' })], ['a bad source id', Object.assign({}, good, { sourceId: 'X'.repeat(32) })],
+     ['a bad id', Object.assign({}, good, { id: '1' })], ['a bad employee id', Object.assign({}, good, { employeeId: 'a b' })], ['a bad month', Object.assign({}, good, { monthKey: '2031-13' })],
+     ['a zero amount', Object.assign({}, good, { amount: '0.00' })], ['a fractional amount', Object.assign({}, good, { amount: '999.50' })], ['a number amount', Object.assign({}, good, { amount: 999 })],
+     ['an Executed status', Object.assign({}, good, { status: 'Executed' })], ['a Paid status', Object.assign({}, good, { status: 'Paid' })], ['a null', null], ['an array', [good]]]
+      .forEach(([label, o]) => check(D.posting(o) === null, 'F. a posting with ' + label + ' is refused'));
+    const two = D.monthResponse({ financePostings: [good, g2] }, MONTH);
+    check(Array.isArray(two) && two.length === 2 && Object.isFrozen(two), 'F. a month answer of two postings of the month decodes, frozen');
+    const sameIdOtherKind = posting(FID3, 'supplementalPayroll', { id: IDPC, employeeId: 'e_c' }, '4321.00');
+    check(Array.isArray(D.monthResponse({ financePostings: [good, sameIdOtherKind] }, MONTH)), 'F. a plan and a document are distinct sources even with the same id (sourceKind + sourceId)');
+    const many = [];
+    for(let i = 0; i < 2001; i++){ const h = ('00000000' + i.toString(16)).slice(-8); many.push(posting(h.repeat(4), 'payrollPlan', { id: 'ffffffff' + h.repeat(3), employeeId: 'e_' + i }, '1.00')); }
+    [['a posting of another month', { financePostings: [Object.assign({}, good, { monthKey: '2031-05' })] }], ['two postings of one source', { financePostings: [good, Object.assign({}, good, { id: FID3 })] }],
+     ['two postings with one id', { financePostings: [good, Object.assign({}, g2, { id: FID1 })] }], ['one bad item', { financePostings: [good, Object.assign({}, g2, { status: 'Reversed' })] }],
+     ['an extra wrapper key', { financePostings: [], total: '1.00' }], ['no array', { financePostings: {} }], ['more postings than the server cap (2001)', { financePostings: many }]]
+      .forEach(([label, data]) => check(D.monthResponse(data, MONTH) === null, 'F. a month answer with ' + label + ' is refused whole'));
+    check(D.monthResponse({ financePostings: many.slice(0, 2000) }, MONTH) !== null, 'F. a month answer of exactly the server cap (2000) decodes');
+    check(D.postingResponse({ financePosting: good }) !== null && D.postingResponse({ financePosting: good, extra: 1 }) === null && D.postingResponse({ financePostings: [good] }) === null,
+      'F. a posting answer is exactly { financePosting }');
+    const intentP = { sourceKind: 'payrollPlan', sourceId: IDPC, employeeId: 'e_c', monthKey: MONTH, amount: '999.00', key: 'a'.repeat(32) };
+    const rp = R.post(intentP);
+    check(rp.ok && keys(rp.body) === FIN_PLAN_KEYS && rp.body.payrollPlanId === IDPC && rp.body.expectedAmount === '999.00' && rp.body.idempotencyKey === 'a'.repeat(32),
+      'F. the plan posting body is exactly { payrollPlanId, expectedAmount, idempotencyKey } — never the employee, month, status or a company');
+    const rs = R.post(Object.assign({}, intentP, { sourceKind: 'supplementalPayroll', sourceId: SID_COM, amount: '4321.00' }));
+    check(rs.ok && keys(rs.body) === FIN_SUPP_KEYS && rs.body.supplementalPayrollId === SID_COM && rs.body.expectedAmount === '4321.00',
+      'F. the Supplemental posting body is exactly { supplementalPayrollId, expectedAmount, idempotencyKey }');
+    [['an unknown kind', { sourceKind: 'finance' }, 'sourceKind'], ['a bad source id', { sourceId: 'x' }, 'payrollPlanId'], ['a zero amount', { amount: '0.00' }, 'expectedAmount'],
+     ['a number amount', { amount: 999 }, 'expectedAmount'], ['a bad key', { key: 'A'.repeat(32) }, 'idempotencyKey']]
+      .forEach(([label, patch, field]) => { const r = R.post(Object.assign({}, intentP, patch)); check(!r.ok && r.fields.indexOf(field) !== -1, 'F. a request with ' + label + ' is refused locally (' + field + ')'); });
+    const it = rt.financePostingIntent('payrollPlan', PCX);
+    check(!!it && Object.isFrozen(it) && it.amount === '999.00' && it.sourceId === IDPC && it.employeeId === 'e_c' && it.monthKey === MONTH && /^[0-9a-f]{32}$/.test(it.key) && rt.crypto.calls === 1,
+      'F. a posting intent of a Committed plan: its own totalAmount string (999.00, not base + overtime) and one Web Crypto key, frozen');
+    check(rt.financePostingIntent('supplementalPayroll', SCOM).amount === '4321.00', 'F. a Supplemental intent carries the document\'s own overtimeAmount (not its lines\' sum)');
+    const calls = rt.crypto.calls;
+    check(rt.financePostingIntent('payrollPlan', P3) === null && rt.financePostingIntent('supplementalPayroll', SREADY) === null && rt.financePostingIntent('other', PCX) === null && rt.crypto.calls === calls,
+      'F. no intent (and no key) for a non-Committed source or an unknown kind');
+    check(loadRuntime({}, { noCrypto: true }).financePostingIntent('payrollPlan', PCX) === null, 'F. without Web Crypto there is no intent');
+    check(Object.keys(rt.FinancePostingApi).sort().join() === 'month,post', 'F. the Finance client has exactly the month read and the post — no execute, pay, reverse or correct');
+  }
+
+  /* ---------- F1. AFI-4e CEO: base payroll posting — the card, the confirmation, the exact body ---------- */
+  {
+    const rt = await openFin();
+    let html = rt.appHTML();
+    check(countOf(rt, FIN(MONTH)) === 2 && /id="swpFinance"/.test(html) && /<p class="auth-lead">Not posted to Finance<\/p>/.test(html) && /id="swpFinPostBtn"/.test(html),
+      'F1. a Committed plan with no posting: "Not posted to Finance" and Post to Finance; the postings are read with the month and again on opening the plan');
+    rt.app.fire('swpFinPostBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(!!rt.pr().panel && rt.pr().panel.kind === 'finPostPlan' && finPosts(rt).length === 0 && rt.crypto.calls === 0 && rt.pr().postIntent === null,
+      'F1. Post to Finance asks first (an inline confirmation): nothing sent, no key, no intent yet');
+    check(html.indexOf('Records one Planned Finance posting of Rp 999.00. Nothing is paid or executed. A posting cannot be reversed.') !== -1
+      && /Post this payroll to Finance\?/.test(html) && /Fabricated EMP-0C \(EMP-0C\) — April 2031\./.test(html),
+      'F1. the confirmation is the approved wording with the plan\'s own total 999.00 (never base + overtime)');
+    check(/btn btn-danger" type="button" id="swpPanelConfirm"[^>]*>Post to Finance</.test(html) && !/<input|<select|<textarea|contenteditable/.test(html),
+      'F1. a deliberate, danger-styled "Post to Finance"; no editable amount anywhere');
+    rt.net.routes[FW.plan] = [fone(posting(FID1, 'payrollPlan', PCX, '999.00'))];
+    rt.net.routes[FIN(MONTH)] = [finOk([posting(FID1, 'payrollPlan', PCX, '999.00')])];
+    rt.app.fire('swpPanelConfirm', 'click');
+    const second = rt.app.fire('swpPanelConfirm', 'click');
+    await rt.SessionPayroll.confirmPanel(); await flush();
+    const sent = finPosts(rt, FW.plan);
+    check(sent.length === 1 && finPosts(rt).length === 1 && rt.crypto.calls === 1 && second !== 'fired', 'F1. one confirmation, double-clicked and invoked again: exactly one key and one POST');
+    const b = sent.length ? bodyOf(sent[0]) : {};
+    check(keys(b) === FIN_PLAN_KEYS && b.payrollPlanId === IDPC && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+      'F1. the body is exactly { payrollPlanId, expectedAmount, idempotencyKey }, a CSRF POST to /api/finance-postings/payroll-plan');
+    check(b.expectedAmount === '999.00' && typeof b.expectedAmount === 'string' && b.expectedAmount === PCX.totalAmount,
+      'F1. expectedAmount is the plan\'s exact totalAmount string 999.00 — never base + overtime, never a number');
+    check(/^[0-9a-f]{32}$/.test(b.idempotencyKey) && b.idempotencyKey === rt.crypto.last, 'F1. the key is the 16 Web Crypto bytes as 32 lowercase hex characters');
+    html = rt.appHTML();
+    check(rt.pr().postIntent === null && rt.pr().panel === null && /<p class="auth-lead">Posted to Finance — Planned, not paid<\/p>/.test(html)
+      && /Planned amount \(Rp\)<\/th><td>999\.00</.test(html) && !/id="swpFinPostBtn"/.test(html) && countOf(rt, FIN(MONTH)) === 3,
+      'F1. confirmed: the intent ends, the postings are read again — "Posted to Finance — Planned, not paid" with the posted amount, and no Post');
+    check(/id="swpMutationMessage"[^>]*>Posted to Finance — Planned, not paid\.</.test(html), 'F1. the notice says Posted to Finance — Planned, not paid');
+    check(rt.pr().detail.plan.status === 'Committed' && rt.pr().detail.plan.version === 4 && posts(rt).length === 0, 'F1. posting changes nothing in Payroll (no Payroll write)');
+    firewall(rt, 'F1. posted');
+    for(const [label, p] of [['another source', Object.assign(posting(FID1, 'payrollPlan', PCX, '999.00'), { sourceId: ID4 })], ['another kind', Object.assign(posting(FID1, 'payrollPlan', PCX, '999.00'), { sourceKind: 'supplementalPayroll' })],
+      ['another amount', posting(FID1, 'payrollPlan', PCX, '1000.00')], ['another employee', Object.assign(posting(FID1, 'payrollPlan', PCX, '999.00'), { employeeId: 'e_x' })],
+      ['another month', Object.assign(posting(FID1, 'payrollPlan', PCX, '999.00'), { monthKey: '2031-05' })], ['an Executed status', Object.assign(posting(FID1, 'payrollPlan', PCX, '999.00'), { status: 'Executed' })]]){
+      const r = await openFin({ [FW.plan]: [fone(p)] });
+      r.app.fire('swpFinPostBtn', 'click'); await flush();
+      r.app.fire('swpPanelConfirm', 'click'); await flush();
+      check(r.pr().mutation.status === 'ambiguous' && finPosts(r).length === 1 && r.pr().postIntent !== null && /id="swpFinRetryPostBtn"/.test(r.appHTML()),
+        'F1. a success answer with ' + label + ' is not a success: unknown outcome, re-read (still unposted), the intent kept, Retry posting offered, nothing resent');
+    }
+  }
+
+  {
+    // The intent ends with the confirming answer itself — not only once the postings are read again.
+    const r = await openFin({ [FW.plan]: [fone(posting(FID1, 'payrollPlan', PCX, '999.00'))] });
+    r.app.fire('swpFinPostBtn', 'click'); await flush();
+    r.net.routes[FIN(MONTH)] = ['HANG'];
+    r.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(r.pr().postIntent === null && r.pr().mutation.status === 'idle' && r.pr().notice === 'finRecorded' && /Checking the Finance status…/.test(r.appHTML()) && !/id="swpFinPostBtn"/.test(r.appHTML()),
+      'F1. a confirming answer ends the intent at once; while the postings are read again, Post is not offered');
+  }
+
+  /* ---------- F2. AFI-4e CEO: Supplemental posting ---------- */
+  {
+    const FSC = posting(FID2, 'supplementalPayroll', SCOM, '4321.00');
+    const rt = await suppDetail(SCOM, [SLINE]);
+    let html = rt.appHTML();
+    check(/id="swpFinance"/.test(html) && /<p class="auth-lead">Not posted to Finance<\/p>/.test(html) && /id="swpSuppFinPostBtn"/.test(html) && countOf(rt, FIN(MONTH)) === 2,
+      'F2. a Committed Supplemental document with no posting: "Not posted to Finance" and Post to Finance (its postings read again on opening it)');
+    rt.app.fire('swpSuppFinPostBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(!!rt.pr().panel && rt.pr().panel.kind === 'finPostSupp' && /Post this supplemental payroll to Finance\?/.test(html)
+      && html.indexOf('Records one Planned Finance posting of Rp 4321.00. Nothing is paid or executed. A posting cannot be reversed.') !== -1 && finPosts(rt).length === 0 && rt.pr().postIntent === null,
+      'F2. the confirmation: the approved wording with the document\'s own amount 4321.00; nothing sent yet');
+    rt.net.routes[FW.supp] = [fone(FSC)];
+    rt.net.routes[FIN(MONTH)] = [finOk([FSC])];
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    const sent = finPosts(rt, FW.supp);
+    const b = sent.length ? bodyOf(sent[0]) : {};
+    check(sent.length === 1 && finPosts(rt).length === 1 && keys(b) === FIN_SUPP_KEYS && b.supplementalPayrollId === SID_COM && b.expectedAmount === '4321.00' && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+      'F2. exactly one CSRF POST of { supplementalPayrollId, expectedAmount, idempotencyKey } — the document\'s amount 4321.00, never its lines\' 1234.00');
+    html = rt.appHTML();
+    check(rt.pr().postIntent === null && /<p class="auth-lead">Posted to Finance — Planned, not paid<\/p>/.test(html) && /Planned amount \(Rp\)<\/th><td>4321\.00</.test(html) && !/id="swpSuppFinPostBtn"/.test(html)
+      && suppPosts(rt).length === 0, 'F2. confirmed: Posted to Finance — Planned, not paid, with the posted amount; no Supplemental write');
+    firewall(rt, 'F2. supplemental posted');
+  }
+
+  /* ---------- F3. AFI-4e already posted; matched by sourceKind + sourceId ---------- */
+  {
+    const FPC = posting(FID1, 'payrollPlan', PCX, '999.00'), FSC = posting(FID2, 'supplementalPayroll', SCOM, '4321.00');
+    const rt = await openFin({ [FIN(MONTH)]: [finOk([FPC, FSC])] });
+    const html = rt.appHTML();
+    check(/<p class="auth-lead">Posted to Finance — Planned, not paid<\/p>/.test(html) && /Planned amount \(Rp\)<\/th><td>999\.00</.test(html) && !/id="swpFinPostBtn"|id="swpFinRetryPostBtn"/.test(html),
+      'F3. an already-posted plan: Posted to Finance — Planned, not paid, its amount, and no Post');
+    rt.SessionPayroll.openPanel('finPostPlan'); await flush();
+    await rt.SessionPayroll.confirmPanel(); await rt.SessionPayroll.retryPosting(); await flush();
+    check(rt.pr().panel === null && finPosts(rt).length === 0 && rt.crypto.calls === 0, 'F3. called directly: no confirmation, no key and nothing sent for a posted plan');
+    firewall(rt, 'F3. posted plan');
+    const amt = await openFin({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', PCX, '1000.00')])] });
+    check(/Planned amount \(Rp\)<\/th><td>1000\.00</.test(amt.appHTML()) && !/Planned amount \(Rp\)<\/th><td>999\.00</.test(amt.appHTML()),
+      'F3. the posted card shows the posting\'s own amount as the server sent it — never the source\'s');
+    const o = await openFin({ [FIN(MONTH)]: [finOk([posting(FID3, 'payrollPlan', P4, '5000000.00'), posting(FID4, 'supplementalPayroll', { id: IDPC, employeeId: 'e_c' }, '4321.00')])] });
+    check(/Not posted to Finance/.test(o.appHTML()) && /id="swpFinPostBtn"/.test(o.appHTML()),
+      'F3. another plan\'s posting, or a Supplemental posting whose id equals this plan\'s, does not post this plan (sourceKind + sourceId)');
+    const s = await suppDetail(SCOM, [SLINE], { [FIN(MONTH)]: [finOk([FSC])] });
+    check(/Posted to Finance — Planned, not paid<\/p>/.test(s.appHTML()) && /<td>4321\.00<\/td>/.test(s.appHTML()) && !/id="swpSuppFinPostBtn"/.test(s.appHTML()),
+      'F3. an already-posted Supplemental document: Posted, its amount, no Post');
+    firewall(s, 'F3. posted supplemental');
+  }
+
+  /* ---------- F4. AFI-4e ineligible sources: no Finance line, no Post ---------- */
+  {
+    for(const p of [P1, P2, P3, P5]){
+      const r = await detail(p.id, det(p), { [DRIFT(p.id)]: [driftOk(p.id, [])], [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', p, '5000000.00')])] });
+      r.SessionPayroll.openPanel('finPostPlan'); await flush();
+      check(!/id="swpFinance"|swpFinPostBtn/.test(r.appHTML()) && r.pr().panel === null && finPosts(r).length === 0,
+        'F4. a ' + p.status + ' plan shows no Finance line and no Post (even with a hypothetical posting of it), and cannot open one');
+    }
+    for(const doc of [SDRAFT, SREV, SREADY, SCAN]){
+      const r = await suppDetail(doc, []);
+      r.SessionPayroll.openPanel('finPostSupp'); await flush();
+      check(!/id="swpFinance"|swpSuppFinPostBtn/.test(r.appHTML()) && r.pr().panel === null && finPosts(r).length === 0, 'F4. a ' + doc.status + ' Supplemental document shows no Finance line and no Post');
+    }
+    const c = await detail(ID4, det(P4));
+    check(/id="swpFinance"/.test(c.appHTML()) && /id="swpFinPostBtn"/.test(c.appHTML()), 'F4. a Committed plan does show its Finance line');
+    const l = await open();
+    check(!/swpFinance|Not posted to Finance|Post to Finance/.test(l.appHTML()) && countOf(l, FIN(MONTH)) === 1, 'F4. the month list shows no Finance status (D-AFI4e-4 = A: details only), though the month\'s postings are read');
+  }
+
+  /* ---------- F5. AFI-4e the unknown outcome and Retry posting (D-AFI4e-3 = A) ---------- */
+  {
+    const FPC = posting(FID1, 'payrollPlan', PCX, '999.00');
+    // A: the posting was recorded — the re-read resolves it.
+    const a = await openFin({ [FW.plan]: [NETFAIL()] });
+    a.app.fire('swpFinPostBtn', 'click'); await flush();
+    a.net.routes[FIN(MONTH)] = [finOk([FPC])];
+    a.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(finPosts(a).length === 1 && a.pr().postIntent === null && countOf(a, DET(IDPC)) === 2
+      && /could not confirm the posting at first, but the Finance status read again shows it: Posted to Finance — Planned, not paid\./.test(a.appHTML()) && /Posted to Finance — Planned, not paid<\/p>/.test(a.appHTML()),
+      'F5. A: a network failure, then the re-read shows the posting at the same amount — resolved as the success, nothing resent');
+    firewall(a, 'F5. A');
+    // B: still unposted at the same amount — Retry posting, the same body and key, only on a click.
+    const b = await openFin({ [FW.plan]: [NETFAIL(), fone(FPC)] });
+    b.app.fire('swpFinPostBtn', 'click'); await flush();
+    b.app.fire('swpPanelConfirm', 'click'); await flush();
+    const first = bodyOf(finPosts(b, FW.plan)[0]);
+    let html = b.appHTML();
+    check(finPosts(b).length === 1 && !!b.pr().postIntent && b.pr().postIntent.key === first.idempotencyKey && /id="swpFinRetryPostBtn"/.test(html) && !/id="swpFinPostBtn"/.test(html)
+      && /still not posted to Finance, at the same amount\. Retry posting sends the same posting again/.test(html),
+      'F5. B: still Committed and unposted at the same amount — the intent is kept and Retry posting offered; nothing was resent');
+    b.render(); await flush(); b.SessionPayroll.ensureLoaded(b.AuthBoot.snapshot().principal); await flush();
+    b.SessionPayroll.openPanel('finPostPlan'); await flush();
+    check(finPosts(b).length === 1 && b.pr().panel === null && b.crypto.calls === 1, 'F5. B: a re-render, a reload of state or another Post never sends or makes a new key');
+    b.app.fire('swpBackBtn', 'click'); await flush();
+    b.app.fire('swpOpen5', 'click'); await flush();
+    check(!!b.pr().postIntent && /id="swpFinRetryPostBtn"/.test(b.appHTML()) && finPosts(b).length === 1, 'F5. B: leaving and reopening the plan keeps the unresolved intent (Retry posting, never a new key)');
+    b.net.routes[FIN(MONTH)] = [finOk([FPC])];
+    b.app.fire('swpFinRetryPostBtn', 'click');
+    const again = b.app.fire('swpFinRetryPostBtn', 'click');
+    await b.SessionPayroll.retryPosting(); await flush();
+    const retried = finPosts(b, FW.plan);
+    check(retried.length === 2 && again !== 'fired' && JSON.stringify(bodyOf(retried[1])) === JSON.stringify(first) && b.crypto.calls === 1,
+      'F5. B: Retry posting (double-clicked) sends exactly one POST with the SAME payrollPlanId, expectedAmount and key — no new key');
+    check(b.pr().postIntent === null && /Posted to Finance — Planned, not paid<\/p>/.test(b.appHTML()), 'F5. B: the retried posting (the server\'s replay) is confirmed');
+    firewall(b, 'F5. B');
+    // C: the re-read shows a posting at another amount — the intent is dropped as stale.
+    const c = await openFin({ [FW.plan]: [NETFAIL()] });
+    c.app.fire('swpFinPostBtn', 'click'); await flush();
+    c.net.routes[FIN(MONTH)] = [finOk([posting(FID1, 'payrollPlan', PCX, '1000.00')])];
+    c.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c.pr().postIntent === null && !/id="swpFinRetryPostBtn"/.test(c.appHTML()) && /what was read again has changed/.test(c.appHTML()) && finPosts(c).length === 1,
+      'F5. C: the re-read does not match the intent — dropped as stale; no Retry; nothing resent');
+    // C2: the source read again carries another amount (still unposted) — stale, never Retry.
+    const c2 = await openFin({ [FW.plan]: [NETFAIL()], [DET(IDPC)]: [ok(det(PCX, [OT1])), ok(det(Object.assign({}, PCX, { totalAmount: '1000.00' }), [OT1]))] });
+    c2.app.fire('swpFinPostBtn', 'click'); await flush();
+    c2.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c2.pr().postIntent === null && !/id="swpFinRetryPostBtn"/.test(c2.appHTML()) && /what was read again has changed/.test(c2.appHTML()) && finPosts(c2).length === 1,
+      'F5. C2: the plan read again carries another amount — the intent is stale: dropped, no Retry, nothing resent');
+    // P: while the re-read is pending, Retry posting (called directly) sends nothing.
+    const pend = await openFin({ [FW.plan]: [NETFAIL()] });
+    pend.app.fire('swpFinPostBtn', 'click'); await flush();
+    pend.net.routes[FIN(MONTH)] = ['HANG'];
+    pend.app.fire('swpPanelConfirm', 'click'); await flush();
+    await pend.SessionPayroll.retryPosting(); await flush();
+    check(!!pend.pr().postIntent && finPosts(pend).length === 1 && !/id="swpFinRetryPostBtn"/.test(pend.appHTML()) && /It is being read again…/.test(pend.appHTML()),
+      'F5. P: while the Finance status is read again, the outcome is undecided — no Retry posting, and calling it sends nothing');
+    // D: the Finance re-read fails — the intent is kept, nothing is sent, no Retry until it is read.
+    const d = await openFin({ [FW.plan]: [NETFAIL()] });
+    d.app.fire('swpFinPostBtn', 'click'); await flush();
+    d.net.routes[FIN(MONTH)] = [err(500, 'internal_error'), finOk([])];
+    d.app.fire('swpPanelConfirm', 'click'); await flush();
+    html = d.appHTML();
+    check(!!d.pr().postIntent && /could not be read again\. Nothing is sent again/.test(html) && !/id="swpFinRetryPostBtn"|id="swpFinPostBtn"/.test(html) && /id="swpFinRetryBtn"/.test(html) && finPosts(d).length === 1,
+      'F5. D: the Finance re-read fails — the intent is kept, nothing sent, neither Post nor Retry posting until it is read');
+    d.app.fire('swpFinRetryBtn', 'click'); await flush();
+    check(/id="swpFinRetryPostBtn"/.test(d.appHTML()) && finPosts(d).length === 1, 'F5. D: reading the Finance status again (still unposted) offers Retry posting — still nothing sent');
+    // E: 500, 503, a malformed answer and a timeout are unknown outcomes too.
+    for(const [label, answer] of [['a 500', err(500, 'internal_error')], ['a 503', err(503, 'service_unavailable')], ['a malformed answer', fone(Object.assign({}, FPC, { idempotencyKey: 'a'.repeat(32) }))], ['a timeout', 'HANG']]){
+      const e = await openFin({ [FW.plan]: [answer] });
+      e.app.fire('swpFinPostBtn', 'click'); await flush();
+      e.app.fire('swpPanelConfirm', 'click'); await flush();
+      if(answer === 'HANG'){ e.net.timers.splice(0).forEach((fn) => fn()); await flush(); }
+      check(e.pr().mutation.status === 'ambiguous' && !!e.pr().postIntent && finPosts(e).length === 1 && /id="swpFinRetryPostBtn"/.test(e.appHTML()),
+        'F5. ' + label + ' to a posting is an unknown outcome: the intent is kept, re-read, never resent automatically');
+    }
+    // F: session loss destroys the intent and its key.
+    const f = await openFin({ [FW.plan]: [NETFAIL()] });
+    f.app.fire('swpFinPostBtn', 'click'); await flush();
+    f.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(!!f.pr().postIntent, 'F5. (an unresolved posting intent is held in memory)');
+    f.AuthBoot.sessionLost(); await flush();
+    check(f.pr().postIntent === null && f.pr().fin === null && f.access.local.length === 0 && f.access.session.length === 0, 'F5. session loss destroys the intent, its key and the postings; nothing was ever stored');
+    // G: no Web Crypto — nothing is sent.
+    const g = await openFin({}, { noCrypto: true });
+    g.app.fire('swpFinPostBtn', 'click'); await flush();
+    g.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(finPosts(g).length === 0 && g.pr().postIntent === null && /cannot create a secure posting key\. Nothing was sent\./.test(g.appHTML()), 'F5. without Web Crypto the posting fails closed: nothing sent');
+    // H: while one intent is unresolved, no other source can be posted.
+    const h = await openFin({ [FW.plan]: [NETFAIL()], [SDET(SID_COM)]: [ok(sdet(SCOM, [SLINE]))] });
+    h.app.fire('swpFinPostBtn', 'click'); await flush();
+    h.app.fire('swpPanelConfirm', 'click'); await flush();
+    h.app.fire('swpBackBtn', 'click'); await flush();
+    await h.SessionPayroll.openSupplemental(SID_COM); await flush();
+    h.SessionPayroll.openPanel('finPostSupp'); await flush();
+    check(/Another Finance posting is not confirmed yet\./.test(h.appHTML()) && !/id="swpSuppFinPostBtn"/.test(h.appHTML()) && h.pr().panel === null && finPosts(h).length === 1 && h.crypto.calls === 1,
+      'F5. H: while a posting is unresolved another source offers no Post (one posting command at a time)');
+  }
+
+  /* ---------- F6. AFI-4e definite refusals: a generic 409, a stale amount, 400 / 401 / 403 / 404 ---------- */
+  {
+    const FPC = posting(FID1, 'payrollPlan', PCX, '999.00');
+    const rt = await openFin({ [FW.plan]: [err(409, 'conflict')] });
+    rt.app.fire('swpFinPostBtn', 'click'); await flush();
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    let html = rt.appHTML();
+    check(rt.pr().panel === null && rt.pr().postIntent === null && finPosts(rt).length === 1 && countOf(rt, DET(IDPC)) === 2 && countOf(rt, FIN(MONTH)) === 3,
+      'F6. a 409: definitely refused — the confirmation closes, the intent is dropped, the plan and the postings are read again, nothing resent');
+    check(html.indexOf('TAM OS did not record this posting (a conflict was reported). It and its Finance status were read again from TAM OS — check them before choosing again.') !== -1
+      && !/finance_(posted|amount|source_state|duplicate)|idempotency_mismatch|already posted|amount (changed|no longer)/i.test(html), 'F6. the conflict message never claims which cause it was');
+    check(/id="swpFinPostBtn"/.test(html), 'F6. the re-read still shows it unposted: a new deliberate Post may follow');
+    rt.app.fire('swpFinPostBtn', 'click'); await flush();
+    rt.net.routes[FW.plan] = [fone(FPC)]; rt.net.routes[FIN(MONTH)] = [finOk([FPC])];
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    const both = finPosts(rt);
+    check(both.length === 2 && bodyOf(both[1]).idempotencyKey !== bodyOf(both[0]).idempotencyKey && rt.crypto.calls === 2 && /Posted to Finance — Planned, not paid<\/p>/.test(rt.appHTML()),
+      'F6. that new deliberate posting is a new command with a fresh key, and it is confirmed');
+    firewall(rt, 'F6. 409');
+    // A 409 whose re-read shows the posting (recorded elsewhere): shown as posted, no Post.
+    const p2 = await openFin({ [FW.plan]: [err(409, 'conflict')] });
+    p2.app.fire('swpFinPostBtn', 'click'); await flush();
+    p2.net.routes[FIN(MONTH)] = [finOk([FPC])];
+    p2.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(/Posted to Finance — Planned, not paid<\/p>/.test(p2.appHTML()) && !/id="swpFinPostBtn"/.test(p2.appHTML()) && /a conflict was reported/.test(p2.appHTML()) && p2.pr().postIntent === null,
+      'F6. a 409 whose re-read shows a posting of the plan: it is shown posted, no Post, and the conflict is not explained');
+    // Stale expected amount: the server refuses (409); the client sent exactly what it showed and
+    // shows what is read again — never an amount it computed.
+    const st = await openFin({ [FW.plan]: [err(409, 'conflict')], [DET(IDPC)]: [ok(det(PCX, [OT1])), ok(det(Object.assign({}, PCX, { totalAmount: '1000.00' }), [OT1]))] });
+    st.app.fire('swpFinPostBtn', 'click'); await flush();
+    st.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(bodyOf(finPosts(st)[0]).expectedAmount === '999.00' && /Total \(Rp\)<\/th><td>1000\.00</.test(st.appHTML()) && st.pr().postIntent === null,
+      'F6. a stale expected amount: refused (409), the plan read again with the server\'s amount');
+    st.app.fire('swpFinPostBtn', 'click'); await flush();
+    check(st.appHTML().indexOf('Records one Planned Finance posting of Rp 1000.00.') !== -1, 'F6. a new confirmation shows the amount read again (1000.00), as sent by the server');
+    // Other definite answers.
+    for(const [label, answer, text] of [['a 400', err(400, 'validation_failed'), 'TAM OS could not accept this posting.'], ['a 403', err(403, 'forbidden'), 'You do not have permission to post to Finance.']]){
+      const r = await openFin({ [FW.plan]: [answer] });
+      r.app.fire('swpFinPostBtn', 'click'); await flush();
+      r.app.fire('swpPanelConfirm', 'click'); await flush();
+      check(r.pr().postIntent === null && finPosts(r).length === 1 && r.appHTML().indexOf(text) !== -1 && countOf(r, DET(IDPC)) === 2, 'F6. ' + label + ': definitely refused — "' + text + '", the intent dropped, read again, nothing resent');
+    }
+    const nf = await openFin({ [FW.plan]: [err(404, 'not_found')] });
+    nf.app.fire('swpFinPostBtn', 'click'); await flush();
+    nf.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(nf.pr().postIntent === null && nf.pr().detailId === null && countOf(nf, LIST(MONTH)) === 2 && /This payroll is no longer available\. The month was read again\./.test(nf.appHTML()),
+      'F6. a 404: the intent is dropped, the detail closes, the month is read again');
+    const ua = await openFin({ [FW.plan]: [err(401, 'unauthenticated')] });
+    ua.app.fire('swpFinPostBtn', 'click'); await flush();
+    ua.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(ua.pr().postIntent === null && ua.pr().fin === null && ua.state() !== ua.AUTH_STATES.AUTHENTICATED, 'F6. a 401 ends the session: the intent, its key and the postings are destroyed');
+  }
+
+  /* ---------- F7. AFI-4e the Finance read: failure, malformed, denied, loading — never Post ---------- */
+  {
+    const rt = await openFin({ [FIN(MONTH)]: [err(503, 'service_unavailable')] });
+    let html = rt.appHTML();
+    check(/could not read the Finance status of this month, so posting is not offered\./.test(html) && /id="swpFinRetryBtn"/.test(html) && !/id="swpFinPostBtn"/.test(html),
+      'F7. the Finance read failed: its status is unknown, Retry Finance status is offered, and Post is not');
+    rt.SessionPayroll.openPanel('finPostPlan'); await flush();
+    check(rt.pr().panel === null && finPosts(rt).length === 0, 'F7. Post cannot be opened while the Finance status is unknown');
+    rt.net.routes[FIN(MONTH)] = [finOk([])];
+    rt.app.fire('swpFinRetryBtn', 'click'); await flush();
+    check(/id="swpFinPostBtn"/.test(rt.appHTML()) && countOf(rt, FIN(MONTH)) === 3, 'F7. Retry Finance status reads it again; unposted, Post is offered');
+    firewall(rt, 'F7. retried');
+    const m = await openFin({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', PCX, '999.00'), posting(FID2, 'payrollPlan', PCX, '999.00')])] });
+    check(/could not read the Finance status/.test(m.appHTML()) && !/id="swpFinPostBtn"|Posted to Finance/.test(m.appHTML()), 'F7. a malformed Finance answer (two postings of one plan) is refused whole: no Post, no Posted');
+    const dn = await openFin({ [FIN(MONTH)]: [err(403, 'forbidden')] });
+    check(/could not read the Finance status/.test(dn.appHTML()) && !/id="swpFinRetryBtn"|id="swpFinPostBtn"/.test(dn.appHTML()), 'F7. a denied Finance read: no Post and no retry');
+    const ld = await openFin({ [FIN(MONTH)]: ['HANG'] });
+    check(/Checking the Finance status…/.test(ld.appHTML()) && !/id="swpFinPostBtn"/.test(ld.appHTML()), 'F7. while the Finance status loads, Post is not offered');
+    const mo = await openFin();
+    mo.app.fire('swpBackBtn', 'click'); await flush();
+    mo.app.fire('swpNextMonth', 'click'); await flush();
+    check(countOf(mo, FIN('2031-05')) === 1 && mo.pr().finMonth === '2031-05', 'F7. another month reads that month\'s postings (the old ones are forgotten)');
+  }
+
+  /* ---------- F8. AFI-4e the Employee never sees, reads or writes Finance ---------- */
+  {
+    const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [DET(ID7)]: [ok(det(MINE, [OT1]))], [SLIST(MONTH)]: [ok({ supplementalPayrolls: [SMINE1] })],
+      [SDET(SID_MINE1)]: [ok(sdet(SMINE1, [SLINE]))], [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', MINE, '777.00')])] });
+    rt.app.fire('swSectionPayroll', 'click'); await flush();
+    rt.app.fire('swpOpen0', 'click'); await flush();
+    const planHTML = rt.appHTML();
+    rt.app.fire('swpBackBtn', 'click'); await flush();
+    rt.app.fire('swpSuppOpen0', 'click'); await flush();
+    const suppHTML = rt.appHTML();
+    rt.SessionPayroll.openPanel('finPostPlan'); rt.SessionPayroll.openPanel('finPostSupp'); await rt.SessionPayroll.confirmPanel();
+    await rt.SessionPayroll.retryPosting(); await rt.SessionPayroll.retryFinance(); await flush();
+    check(!/Finance|Posted|swpFin|swpSuppFin/.test(planHTML + suppHTML + rt.appHTML()) && rt.net.calls.every((c) => !/^\/api\/finance/.test(c.url)) && rt.pr().fin === null && rt.pr().postIntent === null && rt.crypto.calls === 0,
+      'F8. an Employee\'s own Committed payroll and Supplemental cards show no Finance; no Finance read or write is ever made, even called directly');
+    firewall(rt, 'F8. Employee');
+  }
+
+  /* ---------- F9. AFI-4e no execution semantics; the store's own guards ---------- */
+  {
+    const rt = await openFin({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', PCX, '999.00')])] });
+    const card = (/<section class="card" id="swpFinance"[\s\S]*?<\/section>/.exec(rt.appHTML()) || [''])[0];
+    check(card !== '' && !/<button/.test(card) && !/Execut|Mark paid|payment|Revers|Correct|account|categor|ledger|journal|actual/i.test(card) && !/\bPaid\b/.test(card),
+      'F9. a posted card holds no control and no execution, payment, reversal, correction, account, category or actual vocabulary');
+    const un = await openFin();
+    const ucard = (/<section class="card" id="swpFinance"[\s\S]*?<\/section>/.exec(un.appHTML()) || [''])[0];
+    check((ucard.match(/<button/g) || []).length === 1 && /id="swpFinPostBtn"/.test(ucard) && !/Execut|payment|Revers|account|categor/i.test(ucard) && !/\bPaid\b/.test(ucard), 'F9. an unposted card holds exactly one control: Post to Finance');
+    check(un.net.calls.every((c) => !/execut|payment|\/pay\b|revers|correct|transaction/i.test(c.url)), 'F9. no execution, payment, reversal, correction or transaction request exists');
+    const s = un.SessionPayrollStore;
+    s.setPostIntent({ sourceKind: 'payrollPlan', sourceId: IDPC, employeeId: 'e_c', monthKey: MONTH, amount: '999.00', key: 'a'.repeat(32), extra: 'x' });
+    const held = s.snapshot().postIntent;
+    check(Object.isFrozen(held) && keys(held) === 'amount,employeeId,key,monthKey,sourceId,sourceKind', 'F9. the store holds a posting intent frozen, with exactly its six fields');
+    const token = s.begin('fin', MONTH);
+    s.begin('fin', MONTH);
+    check(s.applyFin(token, []) === false, 'F9. a superseded Finance read is dropped');
+    s.clear();
+    check(s.snapshot().postIntent === null && s.snapshot().fin === null && s.snapshot().finStatus === 'idle', 'F9. clear() destroys the postings, the intent and its key');
+    const two = await openFin();
+    two.app.fire('swpFinPostBtn', 'click'); await flush();
+    two.SessionPayrollStore.setPostIntent({ sourceKind: 'supplementalPayroll', sourceId: SID_COM, employeeId: SCOM.employeeId, monthKey: MONTH, amount: '4321.00', key: 'b'.repeat(32) });
+    await two.SessionPayroll.confirmPanel(); await flush();
+    check(finPosts(two).length === 0 && two.crypto.calls === 0 && two.pr().panel === null && two.pr().postIntent.key === 'b'.repeat(32),
+      'F9. a confirmation never makes a second intent while one exists (defence in depth beneath the panel guard): nothing sent, the panel closes');
+    const pc = await openFin({ [FW.plan]: [NETFAIL()] });
+    pc.app.fire('swpFinPostBtn', 'click'); await flush();
+    pc.app.fire('swpPanelConfirm', 'click'); await flush();
+    pc.SessionPayrollStore.bindPrincipal(ME_CEO_PRINCIPAL);
+    check(pc.pr().postIntent === null && pc.pr().fin === null, 'F9. another principal destroys the postings and the intent');
+  }
+
+
   /* ---------- K. sources: no money arithmetic, no LOCAL, Overtime or Finance authority ---------- */
   {
     const code = (f) => fs.readFileSync(path.join(root, 'js', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
@@ -1527,7 +1984,13 @@ function firewall(rt, label, overtimeOpened){
     check(!/\b(OvertimeApi|OvertimeDecoders|SessionOvertime|SessionOvertimeStore|OvertimeValuation|TAM-OT-1|valuation)\b/.test(all) && /OvertimeCalendar\./.test(all),
       'K. no Overtime authority (only the pure calendar helper is reused)');
     // AFI-4c2 authorized revision: Commit, expectedTotal and the idempotency key exist. Was: none.
-    check(!/finance|ledger|journal|payment|execut|\/post|markPaid|\bpay\(/i.test(all.replace(/posted to Finance|It is not a payment/g, '')), 'K. no Finance, payment, execution or posting code (only the confirmations say it is not a payment and nothing is posted to Finance)');
+    // AFI-4e authorized revision: the BF-4e Finance posting client exists (its identifiers, the three
+    // Finance routes and the approved confirmation "Nothing is paid or executed."). Was: no Finance code.
+    const nonFinance = all.replace(/posted to Finance|It is not a payment|Nothing is paid or executed\. A posting cannot be reversed\./g, '').replace(/'\/api\/finance-postings(\/payroll-plan|\/supplemental-payroll)?'/g, "''")
+      .replace(/[A-Za-z_]*(Finance|FINANCE|finance)[A-Za-z_]*/g, 'X');
+    check(!/finance|ledger|journal|payment|execut|\/post|markPaid|\bpay\(|revers|correct|account|categor/i.test(nonFinance), 'K. no payment, execution, ledger, reversal, correction, account or category code (AFI-4e: only the Finance posting client and its approved words)');
+    check(((all.match(/'\/api\/finance[^']*'/g) || []).sort().join()) === "'/api/finance-postings','/api/finance-postings/payroll-plan','/api/finance-postings/supplemental-payroll'",
+      'K. AFI-4e names exactly the three BF-4e Finance routes — the month read and the two posting commands');
     check(!/Math\.random|crypto\.subtle|randomUUID|localStorage|sessionStorage|indexedDB|document\.cookie/.test(all)
       && (all.match(/getRandomValues\(/g) || []).length === 1 && /c\.getRandomValues\(new Uint8Array\(16\)\)/.test(code('core/payroll-api.js'))
       && !/getRandomValues/.test(code('core/session-payroll.js') + code('ui/session-payroll-view.js')),
@@ -1543,8 +2006,8 @@ function firewall(rt, label, overtimeOpened){
   }
 
   console.log('');
-  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 + AFI-4d SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
-  console.log('AFI-4c1 + AFI-4c2 + AFI-4d SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
+  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
+  console.log('AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
   failures.forEach((f) => console.log('   - ' + f));
   process.exit(1);
 })().catch((e) => { console.error('HARNESS ERROR: ' + (e && e.stack || e)); process.exit(2); });

@@ -1,5 +1,5 @@
 /* ============================================================
-   PAYROLL API (AFI-4c1, AFI-4c2, AFI-4d) — js/core/payroll-api.js
+   PAYROLL API (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e) — js/core/payroll-api.js
    ------------------------------------------------------------
    The SESSION-mode client for the server payroll plan (BF-4c1, PR #44; BF-4c2, PR #46): three
    reads over ApiClient and six writes over authSessionMutation (js/core/auth-boot.js), each
@@ -56,6 +56,8 @@
 
    AFI-4d: SupplementalDecoders, SupplementalRequests and SupplementalApi (end of this file) are the
    client of the BF-4d Supplemental Payroll routes, over the same wire.
+   AFI-4e: FinancePostingDecoders, FinancePostingRequests and FinancePostingApi (after them) are the
+   client of the BF-4e Finance posting routes (D-AFI4e-2 = A: this module, no new one).
 
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
@@ -561,6 +563,136 @@ const SupplementalApi = (function(){
     async myGet(id, employeeId){
       const out = await SupplementalApi.get(id);
       return out.ok && !SupplementalDecoders.ownCommitted(out.data.doc, employeeId) ? refused : out;
+    }
+  });
+})();
+
+/* ============================================================
+   AFI-4e — FINANCE POSTING (over BF-4e, PR #50; owner decisions D-AFI4e-1..5 = A)
+   ------------------------------------------------------------
+   The SESSION client of the BF-4e Finance posting routes, over the same wire: the CEO's month
+   read and the two posting commands, each answer strictly decoded. A posting is one immutable,
+   Planned Finance record made from exactly one Committed payroll obligation — a base payroll plan
+   or a Supplemental document — and nothing else: no account, category, actual amount, reversal or
+   correction exists here, and nothing here pays anything.
+
+     month(monthKey)   GET /api/finance-postings?month=YYYY-MM       every posting of the month (CEO)
+     post(intent)      POST /api/finance-postings/payroll-plan       exactly { payrollPlanId,
+                       POST /api/finance-postings/supplemental-payroll   expectedAmount, idempotencyKey }
+                                                                     or { supplementalPayrollId, … }
+                       of ONE posting intent (financePostingIntent): the source's own decoded amount
+                       string (a plan's totalAmount, a document's overtimeAmount), unchanged, and one
+                       Web Crypto key (payrollIdempotencyKey). Confirmed only by a Planned posting of
+                       the same source kind and id, at exactly that amount, for the source's own
+                       employee and month. A retry sends the same intent again; the server replays
+                       the original posting (SDR-0002 §10).
+
+   STRICT DECODING: a posting has exactly FinancePostingView::FIELDS; its source kind is one of the
+   two, its ids are the server's grammars, its amount a positive whole-Rupiah string and its status
+   Planned; a month answer holds only postings of the month asked for, at most one per source and
+   at most the server's list cap. Anything else is INVALID_RESPONSE and nothing of it is returned.
+   ============================================================ */
+
+// server/src/Finance/FinancePostingView.php FIELDS (sorted), SOURCE_KINDS and PLANNED; the input
+// field of each source kind (FinancePostingInput); FinancePostingStore::LIST_CAP.
+const FINANCE_POSTING_KEYS = Object.freeze(['amount', 'employeeId', 'id', 'monthKey', 'sourceId', 'sourceKind', 'status']);
+const FINANCE_POSTING_SOURCE_KINDS = Object.freeze(['payrollPlan', 'supplementalPayroll']);
+const FINANCE_POSTING_PLANNED = 'Planned';
+const FINANCE_POSTING_LIST_CAP = 2000;
+const FINANCE_POSTING_ROUTES = Object.freeze({ payrollPlan: '/api/finance-postings/payroll-plan', supplementalPayroll: '/api/finance-postings/supplemental-payroll' });
+const FINANCE_POSTING_SOURCE_FIELDS = Object.freeze({ payrollPlan: 'payrollPlanId', supplementalPayroll: 'supplementalPayrollId' });
+
+// The posted amount of a Committed source: a plan's totalAmount, a document's overtimeAmount — the
+// decoded server string, never computed.
+function financePostingSourceAmount(sourceKind, source){
+  if(!source) return null;
+  return sourceKind === 'payrollPlan' ? source.totalAmount : sourceKind === 'supplementalPayroll' ? source.overtimeAmount : null;
+}
+// One posting intent { sourceKind, sourceId, employeeId, monthKey, amount, key } of one Committed
+// source, frozen — or null when this browser offers no Web Crypto (nothing is then sent).
+function financePostingIntent(sourceKind, source){
+  if(FINANCE_POSTING_SOURCE_KINDS.indexOf(sourceKind) === -1 || !source || source.status !== 'Committed') return null;
+  const key = payrollIdempotencyKey();
+  if(key === null) return null;
+  return Object.freeze({ sourceKind: sourceKind, sourceId: source.id, employeeId: source.employeeId, monthKey: source.monthKey,
+    amount: financePostingSourceAmount(sourceKind, source), key: key });
+}
+
+const FinancePostingDecoders = (function(){
+  function isPlain(v){
+    return !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+  }
+  function exactKeys(o, keys){
+    const k = Object.keys(o).sort();
+    if(k.length !== keys.length) return false;
+    for(let i = 0; i < k.length; i++){ if(k[i] !== keys[i]) return false; }
+    return true;
+  }
+  const isId = (v) => typeof v === 'string' && PAYROLL_ID_PATTERN.test(v);
+  // A frozen copy holding exactly the seven posting keys, or null.
+  function posting(o){
+    if(!isPlain(o) || !exactKeys(o, FINANCE_POSTING_KEYS)) return null;
+    if(!isId(o.id) || FINANCE_POSTING_SOURCE_KINDS.indexOf(o.sourceKind) === -1 || !isId(o.sourceId)
+      || typeof o.employeeId !== 'string' || !PAYROLL_EMPLOYEE_ID_PATTERN.test(o.employeeId) || !OvertimeCalendar.isMonth(o.monthKey)
+      || !payrollIsAmount(o.amount) || o.amount === '0.00' || o.status !== FINANCE_POSTING_PLANNED) return null;
+    return Object.freeze({ id: o.id, sourceKind: o.sourceKind, sourceId: o.sourceId, employeeId: o.employeeId, monthKey: o.monthKey, amount: o.amount, status: o.status });
+  }
+  return Object.freeze({
+    posting: posting,
+    // { financePostings: [posting…] } of exactly `monthKey` -> frozen array, or null. One posting
+    // per source (the server's unique keys) and per id; never above the server's list cap.
+    monthResponse(data, monthKey){
+      if(!isPlain(data) || !exactKeys(data, ['financePostings']) || !Array.isArray(data.financePostings) || data.financePostings.length > FINANCE_POSTING_LIST_CAP) return null;
+      const out = [];
+      for(let i = 0; i < data.financePostings.length; i++){
+        const p = posting(data.financePostings[i]);
+        if(!p || p.monthKey !== monthKey || out.some((x) => x.id === p.id || (x.sourceKind === p.sourceKind && x.sourceId === p.sourceId))) return null;
+        out.push(p);
+      }
+      return Object.freeze(out);
+    },
+    // { financePosting } -> the posting, or null.
+    postingResponse(data){
+      return (isPlain(data) && exactKeys(data, ['financePosting'])) ? posting(data.financePosting) : null;
+    }
+  });
+})();
+
+// The allowlisted request mirror of FinancePostingInput: { ok: true, body } or { ok: false, fields }.
+const FinancePostingRequests = Object.freeze({
+  // Exactly { payrollPlanId | supplementalPayrollId, expectedAmount, idempotencyKey } of one intent —
+  // the amount is the source's decoded string, sent as it is.
+  post(intent){
+    const i = intent || {};
+    const field = Object.prototype.hasOwnProperty.call(FINANCE_POSTING_SOURCE_FIELDS, i.sourceKind) ? FINANCE_POSTING_SOURCE_FIELDS[i.sourceKind] : null;
+    if(field === null) return Object.freeze({ ok: false, fields: Object.freeze(['sourceKind']) });
+    const bad = [];
+    if(typeof i.sourceId !== 'string' || !PAYROLL_ID_PATTERN.test(i.sourceId)) bad.push(field);
+    if(!payrollIsAmount(i.amount) || i.amount === '0.00') bad.push('expectedAmount');
+    if(typeof i.key !== 'string' || !PAYROLL_KEY_PATTERN.test(i.key)) bad.push('idempotencyKey');
+    if(bad.length) return Object.freeze({ ok: false, fields: Object.freeze(bad) });
+    const body = {};
+    body[field] = i.sourceId;
+    body.expectedAmount = i.amount;
+    body.idempotencyKey = i.key;
+    return Object.freeze({ ok: true, body: body });
+  }
+});
+
+const FinancePostingApi = (function(){
+  const outcome = payrollApiOutcome, write = payrollApiWrite, refused = PAYROLL_API_REFUSED;
+  return Object.freeze({
+    async month(monthKey){
+      if(!OvertimeCalendar.isMonth(monthKey)) return refused;
+      const res = await ApiClient.request('/api/finance-postings', { method: 'GET', query: { month: monthKey } });
+      return outcome(res, (d) => FinancePostingDecoders.monthResponse(d, monthKey));
+    },
+    // One posting intent, sent once per deliberate click (a Retry sends the same intent again).
+    post(intent){
+      const i = intent || {};
+      const route = Object.prototype.hasOwnProperty.call(FINANCE_POSTING_ROUTES, i.sourceKind) ? FINANCE_POSTING_ROUTES[i.sourceKind] : null;
+      return write(route, FinancePostingRequests.post(i), (d) => FinancePostingDecoders.postingResponse(d),
+        (p) => p.sourceKind === i.sourceKind && p.sourceId === i.sourceId && p.amount === i.amount && p.monthKey === i.monthKey && p.employeeId === i.employeeId);
     }
   });
 })();

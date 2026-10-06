@@ -404,7 +404,12 @@ or with it. Finance posting follows (*D-FIN-1..5 = A, 2026-10-06*). **BF-4e** (o
 from exactly one Committed base plan or Committed Supplemental document, by an explicit CEO command per obligation —
 never on Commit — under the Action of its source domain, `payroll.manage` or `supplemental.manage`, idempotent on an
 SDR-0002 §10 key, at most one posting per source, CEO-only reads, no execution, payment, account, category, monthly plan,
-reversal or correction; migrations `0032`–`0033`) is a local candidate on a feature branch, backend only, not deployed. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+reversal or correction; migrations `0032`–`0033`) is merged as source (PR #50, canonical merge `e6ce440c1ea1e71d2d921a1119543592f4113d56`), backend only, not deployed.
+**AFI-4e** (the CEO's SESSION posting of a Committed plan or Committed Supplemental document from its own Payroll detail —
+"Not posted to Finance" / "Posted to Finance — Planned, not paid", one confirmed command per obligation at the source's own
+amount, one intent and a same-key "Retry posting", no Finance screen, nothing for an Employee, no execution; *D-AFI4e-1..5 =
+A, 2026-10-06*) is a local candidate on a feature branch, frontend only, not deployed. It needs the Finance posting routes
+deployed first or with it. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.
