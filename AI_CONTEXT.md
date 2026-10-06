@@ -291,8 +291,8 @@ document is its own twelve-key projection; the base plan keeps exactly its thirt
 **0031**; `0031` admits the Payroll operations under `supplemental.manage` on `supplementalPayroll`). No frontend or package
 change (100 files, `16e06b7e…`), no Finance, payment or statutory effect, `AUTH_MODE` stays LOCAL. D-SPAY-4 = A: the CEO
 Supplemental screens and the Employee's My payroll presentation are AFI-4d; Finance posting comes later.
-**AFI-4d — SESSION Supplemental Payroll** (local candidate on `feature/afi-4d-session-supplemental`; not pushed, not
-merged, not deployed; owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A, 2026-10-05) is the SESSION frontend of BF-4d.
+**AFI-4d — SESSION Supplemental Payroll** (merged as source, PR #49, canonical merge
+`152eccab1973db28b9e86f87d9959aa507b0b5fe`, 2026-10-06; not deployed; owner decisions D-AFI4d-1 = A, D-AFI4d-2 = A, 2026-10-05) is the SESSION frontend of BF-4d.
 D-AFI4d-1 = A: the CEO's Supplemental payroll lives **on the Payroll month page** (no new section): a Supplemental payroll
 card lists the month's eligibility — each Committed plan named from that plan's own snapshot (same `payrollPlanId`, never
 the Employee list), its record count, hours and amount as sent — with **Prepare supplemental payroll** (`{ payrollPlanId }`;
@@ -317,6 +317,30 @@ write in flight) and `ui/session-payroll-view.js` are extended — no new module
 change; the SESSION names never collide with the LOCAL Supplemental engine's; the package keeps 100 files with a new digest;
 the dedicated Payroll harness is extended (CI stays at ten harnesses). AFI-4d needs BF-4d deployed first or with it.
 `AUTH_MODE` stays LOCAL.
+**BF-4e — Finance posting of Committed payroll obligations** (local candidate on `feature/bf-4e-finance-posting`; not
+pushed, not merged, not deployed; owner decisions D-FIN-1 = A, D-FIN-2 = A, D-FIN-3 = A, D-FIN-4 = A, D-FIN-5 = A,
+2026-10-06) is the server's first Finance record, **backend only**. D-FIN-1 = A: a new, minimal, **Planned** posting made
+from exactly one Committed obligation — a Committed base payroll plan or a Committed Supplemental Payroll document — and
+nothing else: no execution or payment, no actual amount, no company account, no category, no monthly-plan link, no manual
+Finance transaction. D-FIN-3 = A: posting is an explicit CEO command per obligation and never a side effect of Commit:
+`POST /api/finance-postings/payroll-plan` takes exactly `{ payrollPlanId, expectedAmount, idempotencyKey }` and
+`POST /api/finance-postings/supplemental-payroll` exactly `{ supplementalPayrollId, expectedAmount, idempotencyKey }`; the
+posted amount is the source's own stored string (the plan's `totalAmount`, the document's `overtimeAmount`) and
+`expectedAmount` only an exact-string guard (409 otherwise); the 32-hex key is the SDR-0002 §10 idempotency key, stored on
+the posting (unique within a company): the same request replays the original posting with no write and no audit, any other
+use of the key is 409, and a refused or failed posting consumes no key. At most one posting exists per source (a unique key
+on each source column; a second posting is 409). D-FIN-2 = A: authorization follows the source domain with no new Action
+(**ACTIONS stay 21**) — the base plan posting is `payroll.manage` against the plan, the Supplemental posting the record-free
+`supplemental.manage`; the audit row (operation `post`, migration `0033`) is written on the source under that Action. One
+READ COMMITTED transaction locks the source's employee, then the plan or the document, by primary key (the global lock
+order), checks the key, the Committed status, the amount and the absence of a posting, inserts the posting and its audit
+row; F1–F6 races are proven against MariaDB with no deadlock. Payroll and Supplemental keep their single writers: Finance
+reads and locks the source and never writes it. D-FIN-4 = A: reads are CEO-only — `GET /api/finance-postings?month=`
+answers `{ financePostings: [{ id, sourceKind, sourceId, employeeId, monthKey, amount, status }…] }` (status always
+`Planned`); an Employee is 403 on every Finance route. D-FIN-5 = A: a posting is immutable — no reversal and no correction.
+Migrations `0032`–`0033` (head **0033**). The base plan (thirteen keys) and Supplemental (twelve keys) projections are
+unchanged. No frontend or package change (100 files, `7768d72b…`), `AUTH_MODE` stays LOCAL; Finance execution and any
+posting screen are later, separately authorized slices.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
@@ -997,7 +1021,9 @@ eligible/skipped/reason. Posted/Executed payroll is immutable. See the payroll d
 Approved payroll is **posted** to finance as **planned** transactions (one per employee; no
 duplicates, never auto-executed). Payments are then **executed** in the Execution Center, recording
 the actual amount separately from the planned amount. Cash Flow and Budget views aggregate across
-transactions; Reports export locally as CSV.
+transactions; Reports export locally as CSV. On the server (BF-4e, backend only, not deployed) a Committed
+base plan or Supplemental document is posted, by an explicit CEO command per obligation, as one immutable
+Planned posting; there is no server execution yet.
 
 ## 11. Overtime Workflow
 

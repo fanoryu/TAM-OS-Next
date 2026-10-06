@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **BF-4e Finance posting of Committed payroll obligations (backend only, not shipped).** The CEO can now post a
+  committed payroll — or a committed Supplemental payroll — to Finance on the server, one obligation at a time. Each
+  posting is a Planned record of exactly that obligation's amount; it is never a payment, nothing is executed, and it
+  can never be changed or posted twice. Committing payroll still posts nothing: posting is always its own deliberate
+  step, confirmed against the amount shown, and a repeated request is recognised and never duplicated. Only the CEO can
+  post or see postings. There is no screen for it yet. The shipped `AUTH_MODE` stays **LOCAL**.
 - **AFI-4d SESSION Supplemental Payroll (frontend; SESSION mode only, not shipped).** The CEO's Payroll month page now shows
   Supplemental payroll: the committed payrolls with overtime approved after they were committed — named from the payroll
   itself, with the number of records, hours and amount exactly as TAM OS reports them — and "Prepare supplemental payroll",
