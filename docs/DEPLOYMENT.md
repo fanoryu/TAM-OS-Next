@@ -164,6 +164,13 @@ month read and the two posting commands), so BF-4e — its routes and migrations
 AFI-4e or with it. It changes no backend contract and no existing frontend contract, and adds no other deploy-together
 constraint. It is not deployed.
 
+**Deployment note — Finance execution (BF-4f).** BF-4f adds the two Finance execution routes and migrations `0034`–`0035`
+(one new table, `finance_executions`, and the `finance.execute` / `execute` audit vocabulary); it changes no existing table's
+rows, no existing route and no existing DTO, and no frontend calls it yet, so it can be deployed behind the current frontend
+with no deploy-together constraint of its own. Its migrations must run before its routes are reachable, and it executes only
+BF-4e postings, so BF-4e (`0032`–`0033`) must already be deployed. Before real payment records are entered, the backup
+prerequisite and SDR-0002's pre-deployment evidence must be in place. It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

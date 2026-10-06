@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **BF-4f Finance execution of Planned postings (backend only, not shipped).** The CEO can now record on the server that a
+  Planned Finance posting was paid — in full, outside TAM OS — on a given date and by one of the usual payment methods
+  (cash, bank transfer, QRIS, virtual account, credit card or other). TAM OS moves no money. The record is kept separately
+  from the posting, which stays Planned and is never changed; a posting can be recorded as paid only once, always for its
+  own amount, and the record can never be changed or reversed. The date cannot be later than today in Jakarta. A repeated
+  request is recognised and never duplicated. Only the CEO can record or see payments. There is no screen for it yet. The
+  shipped `AUTH_MODE` stays **LOCAL**.
 - **AFI-4e SESSION Finance posting (frontend; SESSION mode only, not shipped).** In SESSION mode the CEO can now post a
   committed payroll — or a committed Supplemental payroll — to Finance from its own Payroll detail. The detail shows "Not
   posted to Finance" with "Post to Finance", or "Posted to Finance — Planned, not paid" with the amount posted. Posting

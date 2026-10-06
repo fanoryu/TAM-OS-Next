@@ -1749,7 +1749,8 @@ Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c8824
 AFI-4c2 is merged (PR #47, canonical `0ae3ef828349db8167e6bc7c858394c689f83bf5`). Supplemental Payroll follows: BF-4d (below)
 is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AFI-4d (below) is merged (PR #49, canonical
 `152eccab1973db28b9e86f87d9959aa507b0b5fe`). Finance posting follows: BF-4e (below) is merged (PR #50, canonical
-`e6ce440c1ea1e71d2d921a1119543592f4113d56`). Its SESSION frontend, AFI-4e (below), is a local candidate.
+`e6ce440c1ea1e71d2d921a1119543592f4113d56`), and its SESSION frontend, AFI-4e (below), is merged (PR #51, canonical
+`d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`). Finance execution follows: BF-4f (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2356,7 +2357,7 @@ verifier's BF-4e section pin all of this.
 **Compatibility and deployment.** BF-4e adds three routes and one table and changes no existing row, route or DTO, so it can
 be deployed behind a frontend that does not call it; its migrations must run before its routes are reachable, and it posts
 only what BF-4c2 and BF-4d commit. Its CEO posting screen is AFI-4e (below), which calls it and so needs it deployed first or
-with it; Finance execution is a later, separately authorized slice.
+with it; Finance execution is BF-4f (below).
 
 **Proof.** Unit (`FinancePostingDomainTest`), HTTP (`FinanceRoutingTest`), MariaDB (`FinancePostingSchemaTest`: columns,
 CHECKs, one posting per source, the company-scoped key, tenant FKs, 0033 and the upgrade from 0031;
@@ -2366,10 +2367,10 @@ one source under two keys, one key on two sources, against the Payroll generate,
 wave, a plan and its own document at once), the boundary tool and its selftest, the verifier's BF-4e section, and a
 deterministic mutation campaign.
 
-### SESSION Finance posting — AFI-4e (local candidate; frontend; SESSION mode only)
+### SESSION Finance posting — AFI-4e (merged as PR #51, canonical `d5a5fad1`; frontend; SESSION mode only)
 
-AFI-4e is a local candidate on `feature/afi-4e-session-finance-posting` (not pushed, merged or deployed), from the Phase 0
-owner decisions D-AFI4e-1..5 = A (2026-10-06). It is the SESSION frontend of the Finance posting routes above — frontend
+AFI-4e is merged to `main` as source (PR #51, canonical merge `d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`; not deployed),
+from the Phase 0 owner decisions D-AFI4e-1..5 = A (2026-10-06). It is the SESSION frontend of the Finance posting routes above — frontend
 only: no backend, migration, ApiClient, AuthBoot, CSS or LOCAL change, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
 
 **Where (D-AFI4e-1 = A, D-AFI4e-4 = A).** On the CEO's SESSION Payroll details only: a Committed base plan's detail and a
@@ -2416,6 +2417,69 @@ amount, 400 / 401 / 403 / 404; the Finance read failure; the Employee's isolatio
 guards. The firewall now admits only the month read and the two posting commands. `tools/serve-auth-stub.js` models BF-4e
 for browser QA (`/__stub/fail-next-posting`). The verifier's AFI-4e section pins the contract, routes, bodies, words and
 digest. AFI-4e needs BF-4e deployed first or with it.
+
+### Finance execution — BF-4f (local candidate; backend only, not deployed)
+
+BF-4f is a local candidate on `feature/bf-4f-finance-execution` (not pushed, merged or deployed), from the Phase 0 owner
+decisions D-FEX-1..8 = A (2026-10-07). It records that one Planned posting was **paid in full outside TAM OS** — TAM OS moves
+no money, integrates no bank and keeps no ledger. Backend only (D-FEX-7 = A; the SESSION screen is a later AFI-4f with its own
+Phase 0): no frontend change, the package is unchanged (100 files, digest `e3e56858…`), ACTIONS stay **21**, `AUTH_MODE` stays
+LOCAL, LOCAL's Execution Center is untouched.
+
+**Model (D-FEX-1 = A, D-FEX-2 = A).** obligation → Planned posting → execution. An execution is a separate, append-only
+record; the posting is read and locked, never written, and stays `Planned` (BF-4e's CHECK and D-FIN-5 hold). "Executed" is
+derived: a posting with an execution row is executed, one without is not. Exactly one execution per posting, always for the
+posting's full amount: no partial, multiple, over- or under-payment, no failed or pending state (a refused request stores
+nothing), no reversal, correction, reconciliation or settlement.
+
+**Schema.** `0034` creates `finance_executions`: `id`, `company_id`, `finance_posting_id`, the posting's `employee_id` and
+`month_key`, `amount` (`DECIMAL(17,2)`, positive whole Rupiah — the posting's own), `executed_on` (`DATE`), `payment_method`
+(CHECK: `cash`, `bankTransfer`, `qris`, `virtualAccount`, `creditCard`, `other`), `idempotency_key` and `recorded_at`. Unique
+keys: one execution per posting, each key once per company. Composite tenant FKs to the posting, the employee and the
+company, none cascading — an executed posting can never be removed. No status, version or update column, no account,
+reference or note. `0035` replaces the audit action (v6, adds `finance.execute`), entity (v5, `financePosting` ⇔
+`finance.execute`), operation (v7, adds `execute`) and action-operation (v7, `finance.execute` ⇒ `execute`) CHECKs; every
+earlier rule is kept. Head **0035**.
+
+**Execute (D-FEX-3..6, D-FEX-8 = A).** `POST /api/finance-executions/execute` takes exactly `{ financePostingId,
+expectedAmount, executedOn, paymentMethod, idempotencyKey }`; any other key is a 400 naming it. `executedOn` is a real
+calendar date no later than today in the Asia/Jakarta company calendar (no lower bound); `paymentMethod` is one of the closed
+list. The route declares the existing record-free `finance.execute`, so the kernel refuses an Employee before the body. One
+READ COMMITTED transaction locks the posting row by primary key (404 when absent or another company's) — the only lock an
+execution takes: BF-4e locks employee → source and only inserts new posting rows, so the two never cycle — then, in order:
+the key (held by this posting's execution with the same amount, date and method → the original execution replayed, no
+write, no audit; held by anything else → 409), the posting has no execution (409), `expectedAmount` equals the locked amount
+as an exact string (409); then the INSERT at the posting's employee, month and amount, and one audit row on the posting
+(`finance.execute`, entity `financePosting`, operation `execute`, no field, no value). A duplicate key raised by the INSERT is
+a concurrent execution of the same key or posting: 409. Every 409 is the generic `conflict` (the cause only in the server
+log; no payment value is logged). A refused or failed execution stores nothing and consumes no key; a failed audit rolls
+everything back. The answer is `{ financeExecution: E }`.
+
+**Read.** `GET /api/finance-executions?month=` → `{ financeExecutions: [E…] }`, CEO only (an Employee is 403). E is exactly
+`{ id, financePostingId, employeeId, monthKey, amount, executedOn, paymentMethod }` — never the company, the key,
+`recorded_at`, the actor or an audit detail. The posting read is unchanged (seven keys, always `Planned`), so AFI-4e's strict
+decoder is unaffected (D-FEX-6 = A).
+
+**Firewalls.** Posting, Payroll and Supplemental never execute: an execution is one explicit command per posting (no
+automatic, scheduled or batch execution). The execution never writes a posting, a source, overtime or an employee and calls
+no other store; it never computes money; and it has no reversal, correction, refund, partial, settlement, reconciliation,
+company or bank account, reference, note, category, batch or schedule. The boundary tool's BF-4f rules (the BF-4e posting
+firewall now governs every Finance domain file but `FinanceExecution*`, which have their own) and the verifier's BF-4f section
+pin all of this.
+
+**Compatibility and deployment.** BF-4f adds two routes and one table and changes no existing row, route or DTO, so it can be
+deployed behind a frontend that does not call it; its migrations must run before its routes are reachable, and it executes
+only BF-4e postings, so BF-4e (`0032`–`0033`) must be deployed first. Before real payment records are entered, the backup
+prerequisite (CLAUDE §7.5) and SDR-0002's pre-deployment evidence must be in place.
+
+**Proof.** Unit (`FinanceExecutionDomainTest`: the input, the Jakarta date bound, the closed method list, the projection,
+the store statements and guards, `finance.execute`, the `execute` audit vocabulary), HTTP (`FinanceExecutionRoutingTest`),
+MariaDB (`FinanceExecutionSchemaTest`: columns, CHECKs, one execution per posting, the company-scoped key, tenant FKs, 0035
+and the upgrade from 0033; `FinanceExecutionWorkflowTest`: both source kinds, the same request twice, the dropped-response
+replay, every refusal and key mismatch, reads and privacy, audit rollback, the firewalls; `FinanceExecutionConcurrencyTest`:
+the lock proofs and X1–X5 — a double click, one posting under two keys, one key on two postings, two executions and a
+posting of one employee at once, a dropped-response retry racing another key), the boundary tool and its selftest, the
+verifier's BF-4f section, and a deterministic mutation campaign.
 
 ### Release engineering
 

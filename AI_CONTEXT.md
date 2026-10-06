@@ -340,10 +340,10 @@ answers `{ financePostings: [{ id, sourceKind, sourceId, employeeId, monthKey, a
 `Planned`); an Employee is 403 on every Finance route. D-FIN-5 = A: a posting is immutable — no reversal and no correction.
 Migrations `0032`–`0033` (head **0033**). The base plan (thirteen keys) and Supplemental (twelve keys) projections are
 unchanged. BF-4e itself changed no frontend or package (100 files, `7768d72b…`), `AUTH_MODE` stays LOCAL; its CEO posting
-screen is AFI-4e (below); Finance execution is a later, separately authorized slice.
-**AFI-4e — SESSION Finance posting (CEO)** (local candidate on `feature/afi-4e-session-finance-posting`; not pushed, not
-merged, not deployed; owner decisions D-AFI4e-1 = A, D-AFI4e-2 = A, D-AFI4e-3 = A, D-AFI4e-4 = A, D-AFI4e-5 = A,
-2026-10-06) is the SESSION frontend of BF-4e. D-AFI4e-1 = A: posting lives **on the CEO's SESSION Payroll details** — a
+screen is AFI-4e (below); Finance execution is BF-4f (below).
+**AFI-4e — SESSION Finance posting (CEO)** (merged as source, PR #51, canonical merge
+`d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`, 2026-10-06; not deployed; owner decisions D-AFI4e-1 = A, D-AFI4e-2 = A,
+D-AFI4e-3 = A, D-AFI4e-4 = A, D-AFI4e-5 = A, 2026-10-06) is the SESSION frontend of BF-4e. D-AFI4e-1 = A: posting lives **on the CEO's SESSION Payroll details** — a
 Committed base plan's detail and a Committed Supplemental document's detail each carry a Finance card; there is no Finance
 screen, section or navigation, and no non-Committed source shows a Finance line. D-AFI4e-4 = A: the CEO's month load also
 reads `GET /api/finance-postings?month=`; it is read again whenever a plan or a document is opened and after every posting
@@ -368,6 +368,31 @@ executed in the Execution Center). Frontend only: `core/payroll-api.js` (`Financ
 and `ui/session-payroll-view.js` are extended — no new module, no backend, migration, ApiClient, AuthBoot or CSS change; the
 package keeps 100 files with a new digest; the dedicated Payroll harness is extended (CI stays at ten harnesses). AFI-4e
 needs BF-4e deployed first or with it. `AUTH_MODE` stays LOCAL.
+**BF-4f — Finance execution of Planned postings** (local candidate on `feature/bf-4f-finance-execution`; not pushed, not
+merged, not deployed; owner decisions D-FEX-1 = A, D-FEX-2 = A, D-FEX-3 = A, D-FEX-4 = A, D-FEX-5 = A, D-FEX-6 = A,
+D-FEX-7 = A, D-FEX-8 = A, 2026-10-07) is the server's first Finance execution, **backend only** (D-FEX-7 = A: its SESSION
+screen is a later AFI-4f with its own Phase 0). An execution is an immutable statement, recorded by the CEO, that one
+Planned posting was **paid in full outside TAM OS** — TAM OS moves no money. D-FEX-1 = A: it is a separate, append-only
+`finance_executions` record linked to the posting; the posting is never written and stays `Planned` (D-FIN-5 holds), so
+the chain is obligation → Planned posting → execution, and "executed" is derived from the presence of the record.
+D-FEX-2 = A: exactly one execution per posting, for the posting's full amount — no partial, multiple, over- or
+under-payment, no reversal, no correction, no reconciliation or settlement. D-FEX-3 = A: the server copies the posting's
+amount; `expectedAmount` is only an exact-string guard (409 otherwise). D-FEX-5 = A: the command requires `executedOn` (a
+real calendar date) and `paymentMethod` from the closed list `cash`, `bankTransfer`, `qris`, `virtualAccount`,
+`creditCard`, `other` (the LOCAL methods as stable codes); there is no company account, bank account, reference or note.
+D-FEX-8 = A: `executedOn` is no later than today in the company calendar (Asia/Jakarta, never the server's UTC date), with
+no lower bound. D-FEX-4 = A: authorization is the existing record-free `finance.execute` (CEO-only, decided by the kernel
+before the handler; **ACTIONS stay 21**), and reads are CEO-only. D-FEX-6 = A: `POST /api/finance-executions/execute`
+takes exactly `{ financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey }` and answers
+`{ financeExecution: E }`; the same full body under the same key replays the original execution with no write and no
+audit, any other use of the key is 409, a second execution of a posting is 409, every 409 is the generic `conflict`, and a
+refused or failed execution consumes no key; `GET /api/finance-executions?month=` answers `{ financeExecutions: [E…] }`,
+E exactly `{ id, financePostingId, employeeId, monthKey, amount, executedOn, paymentMethod }` — the seven-key posting read
+is unchanged, so AFI-4e's strict decoder is untouched. One READ COMMITTED transaction locks the posting row by primary key
+(the only lock an execution takes), checks the key, the absence of an execution and the amount, inserts the execution and
+one audit row (`finance.execute`, entity `financePosting`, operation `execute`, migration `0035`; no field, no value);
+X1–X5 races are proven against MariaDB with no deadlock. Migrations `0034`–`0035` (head **0035**). No frontend, package
+(100 files, `e3e56858…`) or LOCAL change; `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
@@ -1050,7 +1075,10 @@ duplicates, never auto-executed). Payments are then **executed** in the Executio
 the actual amount separately from the planned amount. Cash Flow and Budget views aggregate across
 transactions; Reports export locally as CSV. On the server (BF-4e, not deployed) a Committed
 base plan or Supplemental document is posted, by an explicit CEO command per obligation, as one immutable
-Planned posting — in SESSION mode from the CEO's Payroll details (AFI-4e); there is no server execution yet.
+Planned posting — in SESSION mode from the CEO's Payroll details (AFI-4e). The CEO then records, by an explicit command
+per posting, that the Planned posting was paid in full outside TAM OS on a stated date by a stated method (BF-4f, not
+deployed, no screen yet): a separate immutable execution record — the posting stays Planned, no money moves, nothing is
+reversed or corrected.
 
 ## 11. Overtime Workflow
 
