@@ -152,6 +152,8 @@ return [
         // their two tables join. Was: through 0028, fourteen tables.
         // BF-4e authorized revision: 0032–0033 (the Finance posting, its post audit operation) and
         // its one table join. Was: through 0031, sixteen tables.
+        // BF-4f authorized revision: 0034–0035 (the Finance execution, its execute audit operation)
+        // and its one table join. Was: through 0033, seventeen tables.
         $apply = runMigrateCli(['apply'], $file);
         assertSame([0, "applied: 0001_create_companies\napplied: 0002_create_users\napplied: 0003_create_memberships\n"
             . "applied: 0004_create_sessions\napplied: 0005_create_auth_rate_limits\napplied: 0006_create_auth_events\n"
@@ -167,9 +169,10 @@ return [
             . "applied: 0027_add_payroll_plans_commit_key\napplied: 0028_replace_audit_events_payroll_commit\n"
             . "applied: 0029_create_supplemental_payrolls\napplied: 0030_create_supplemental_payroll_overtime\napplied: 0031_replace_audit_events_supplemental_checks\n"
             . "applied: 0032_create_finance_postings\napplied: 0033_replace_audit_events_finance_post\n"
+            . "applied: 0034_create_finance_executions\napplied: 0035_replace_audit_events_finance_execute\n"
             . "migrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
-        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_postings', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
+        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
         $again = runMigrateCli(['status'], $file);
         assertSame([0, "migrations: current\n"], [$again['exit'], $again['stdout']]);
         $noop = runMigrateCli(['apply'], $file);
