@@ -1748,7 +1748,8 @@ Payroll follows: BF-4c1 is merged (PR #44, canonical `ff53e7b475341030f33e8c8824
 `6834a572485e0057f01897283f006ccaa00769c6`), BF-4c2 is merged (PR #46, canonical `df15b41a9097411eabde39be175f2b38c0809a04`), and
 AFI-4c2 is merged (PR #47, canonical `0ae3ef828349db8167e6bc7c858394c689f83bf5`). Supplemental Payroll follows: BF-4d (below)
 is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AFI-4d (below) is merged (PR #49, canonical
-`152eccab1973db28b9e86f87d9959aa507b0b5fe`). Finance posting follows: BF-4e (below) is a local candidate.
+`152eccab1973db28b9e86f87d9959aa507b0b5fe`). Finance posting follows: BF-4e (below) is merged (PR #50, canonical
+`e6ce440c1ea1e71d2d921a1119543592f4113d56`). Its SESSION frontend, AFI-4e (below), is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2308,10 +2309,10 @@ firewall and the global-collision proof; a deterministic mutation campaign. `too
 browser QA (late Approved overtime fixtures, the Employee's two Committed waves, `/__stub/late-overtime`,
 `/__stub/bump-supplemental`, `/__stub/fail-next-supplemental-commit`). AFI-4d needs BF-4d deployed first or with it.
 
-### Finance posting — BF-4e (local candidate; backend only)
+### Finance posting — BF-4e (merged as PR #50, canonical `e6ce440c`; backend only, not deployed)
 
-BF-4e is a local candidate on `feature/bf-4e-finance-posting` (not pushed, merged or deployed), from the Phase 0 owner
-decisions D-FIN-1..5 = A (2026-10-06). It is the first server Finance record: one minimal, immutable, **Planned** posting
+BF-4e is merged to `main` as source (PR #50, canonical merge `e6ce440c1ea1e71d2d921a1119543592f4113d56`; not deployed),
+from the Phase 0 owner decisions D-FIN-1..5 = A (2026-10-06). It is the first server Finance record: one minimal, immutable, **Planned** posting
 made from exactly one Committed payroll obligation. Backend only: no frontend change, the package is unchanged (100 files,
 digest `7768d72b…`), ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
 
@@ -2353,8 +2354,9 @@ category, monthly plan, manual transaction, reversal or correction (D-FIN-1 = A,
 verifier's BF-4e section pin all of this.
 
 **Compatibility and deployment.** BF-4e adds three routes and one table and changes no existing row, route or DTO, so it can
-be deployed behind the current frontend (nothing calls it yet); its migrations must run before its routes are reachable, and
-it posts only what BF-4c2 and BF-4d commit. A posting screen and Finance execution are later, separately authorized slices.
+be deployed behind a frontend that does not call it; its migrations must run before its routes are reachable, and it posts
+only what BF-4c2 and BF-4d commit. Its CEO posting screen is AFI-4e (below), which calls it and so needs it deployed first or
+with it; Finance execution is a later, separately authorized slice.
 
 **Proof.** Unit (`FinancePostingDomainTest`), HTTP (`FinanceRoutingTest`), MariaDB (`FinancePostingSchemaTest`: columns,
 CHECKs, one posting per source, the company-scoped key, tenant FKs, 0033 and the upgrade from 0031;
@@ -2363,6 +2365,57 @@ privacy, audit rollback, the firewalls; `FinancePostingConcurrencyTest`: the loc
 one source under two keys, one key on two sources, against the Payroll generate, against a Supplemental commit of the next
 wave, a plan and its own document at once), the boundary tool and its selftest, the verifier's BF-4e section, and a
 deterministic mutation campaign.
+
+### SESSION Finance posting — AFI-4e (local candidate; frontend; SESSION mode only)
+
+AFI-4e is a local candidate on `feature/afi-4e-session-finance-posting` (not pushed, merged or deployed), from the Phase 0
+owner decisions D-AFI4e-1..5 = A (2026-10-06). It is the SESSION frontend of the Finance posting routes above — frontend
+only: no backend, migration, ApiClient, AuthBoot, CSS or LOCAL change, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
+
+**Where (D-AFI4e-1 = A, D-AFI4e-4 = A).** On the CEO's SESSION Payroll details only: a Committed base plan's detail and a
+Committed Supplemental document's detail carry a Finance card. There is no Finance screen, section or navigation, the month
+list shows no Finance status, and no Draft, Reviewed, Ready or Cancelled source shows a Finance line. The CEO's month load
+also reads `GET /api/finance-postings?month=`; it is read again whenever a plan or a document is opened and after every
+posting outcome. A source matches its posting by `sourceKind` + `sourceId` only.
+
+**States.** Unposted: "Not posted to Finance" with **Post to Finance**. Posted: "Posted to Finance — Planned, not paid" and
+the posting's amount, with no control. While the month's postings load: "Checking the Finance status…"; after their read
+failed (or answered malformed): a warning and "Retry Finance status" (none after a 403) — Post is never offered while the
+Finance status is not known. While one posting intent is unresolved, no other source offers Post.
+
+**Post (D-AFI4e-5 = A).** An inline confirmation names the source and says "Records one Planned Finance posting of Rp
+{amount}. Nothing is paid or executed. A posting cannot be reversed." — `{amount}` is the source's own decoded string (a
+plan's `totalAmount`, a document's `overtimeAmount`); nothing edits or computes it, and no amount field exists. Confirming
+makes ONE frozen in-memory intent `{ sourceKind, sourceId, employeeId, monthKey, amount, key }` (`financePostingIntent`, the
+one Web Crypto `payrollIdempotencyKey()`) and sends exactly `{ payrollPlanId | supplementalPayrollId, expectedAmount,
+idempotencyKey }` once, over `authSessionMutation`; one write is in flight at a time, so a double click sends nothing more.
+Without Web Crypto nothing is sent.
+
+**Outcomes (D-AFI4e-3 = A).** Success counts only for a strictly decoded Planned posting of the same source kind and id, at
+the same amount, employee and month; the intent ends and the postings are read again. Any 409 is the server's one generic
+conflict — the page never names a cause — and, like every other definite refusal (400, 403), drops the intent and reads the
+source and the postings again; a 404 closes the detail and reads the month; a 401 ends the session. An unknown outcome (503,
+500, network, timeout, a malformed or non-confirming answer) keeps the intent, reads both again and is NEVER resent
+automatically: posted at the intent's amount is the success; still Committed and unposted at the same amount offers "Retry
+posting", which sends the same body and key on a deliberate click (the server replays the original posting); anything else
+drops the intent as stale. Logout, session loss and another principal destroy the intent and the postings.
+
+**Decoding.** `FinancePostingDecoders` accepts exactly the seven `FinancePostingView::FIELDS`, a known source kind, the
+server's id grammars, a positive whole-Rupiah amount and `Planned`; a month answer is refused whole for a posting of another
+month, a second posting of one source or one id, or more than `FinancePostingStore::LIST_CAP` postings.
+
+**Firewalls.** CEO only: an Employee never reads or writes Finance and sees no Finance (the server answers 403 regardless).
+Nothing executes, pays, records an actual amount, reverses or corrects; no account or category exists. Every value is
+escaped; the posting id never appears in the page. LOCAL is unchanged: its Commit still posts Planned transactions to the
+local Finance, executed in the Execution Center; the SESSION modules never touch `State` or the LOCAL engines.
+
+**Proof.** `tools/verify-session-payroll-runtime.js` (still the tenth CI harness) adds sections F–F9: the decoders, encoders
+and intent; both happy paths with the exact bodies; already posted; ineligible sources; the unknown outcome with the
+same-key Retry, a stale re-read and a failed re-read; 500 / 503 / malformed / timeout; the generic 409, a stale expected
+amount, 400 / 401 / 403 / 404; the Finance read failure; the Employee's isolation; no execution semantics and the store's
+guards. The firewall now admits only the month read and the two posting commands. `tools/serve-auth-stub.js` models BF-4e
+for browser QA (`/__stub/fail-next-posting`). The verifier's AFI-4e section pins the contract, routes, bodies, words and
+digest. AFI-4e needs BF-4e deployed first or with it.
 
 ### Release engineering
 
