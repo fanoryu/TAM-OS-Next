@@ -71,6 +71,21 @@ the `mail` configuration section and prints counts only:
 php server/bin/mail.php run   # deliver up to 20 due outbox rows under the tamos_mail lock, then exit
 ```
 
+Encrypted database backups (OPS-1) are operator tooling, never an HTTP surface. `create` and `status` run on
+the host and need the `backup` configuration section (`dir`, `public_key`); `verify` and `keygen` run
+off-host with the secret key file and refuse where the configuration is the production one:
+
+```bash
+php server/bin/backup.php create    # cron: one encrypted backup of every classified table, then keep the newest 7
+php server/bin/backup.php status    # exit 1 when there is none, the newest is older than 26 hours, or any is damaged
+php server/bin/backup.php verify --file=<backup> --secret-key-file=<key> [--previous=<older backup>]
+php server/bin/backup.php keygen --secret-key-file=<new key file>
+```
+
+Backup tests write keys and backups only to temporary directories; the database suite seeds fabricated
+rows only. The boundary tool requires every migrated table to be classified for backup exactly once
+(`server/src/Ops/BackupTables.php`) — see `ARCHITECTURE.md` → Encrypted database backup — OPS-1.
+
 Mail tests use the in-memory `RecordingMailTransport` (`server/tests/lib.php`) and the Resend adapter
 with an injected poster: no test reaches a network or sends mail, and the CLI tests run the worker
 only over an empty outbox.

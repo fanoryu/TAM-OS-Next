@@ -418,8 +418,15 @@ reconciliation, company account or bank integration; migrations `0034`–`0035`)
 merge `171392a16800c85e128c178f934d72c96a6255be`), backend only, not deployed. **AFI-4f** (the CEO's SESSION "Record
 payment" inside the Finance card of a posted Committed plan or Supplemental document — a display-only posting amount, a
 required Date paid and Payment method, one frozen intent with a same-key "Retry recording", "Payment recorded — paid
-outside TAM OS"; TAM OS moves no money; details only, nothing for an Employee; *D-AFI4f-1..8 = A, 2026-10-07*) is a local
-candidate on a feature branch, frontend only, not deployed. It needs the Finance execution routes deployed first or with it. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+outside TAM OS"; TAM OS moves no money; details only, nothing for an Employee; *D-AFI4f-1..8 = A, 2026-10-07*) is merged as
+source (PR #53, canonical merge `a39b728f00688fb27e5983422c878a2f933b0e37`), frontend only, not deployed. It needs the Finance
+execution routes deployed first or with it. The audit/backup step follows (*Audit & Backup Phase 0, D-AB-1..16 =
+recommended, 2026-10-07*: separate slices OPS-1 → OPS-2 → BF-4g → optional AFI-4g). **OPS-1** (encrypted database backups as
+operator tooling — `server/bin/backup.php create | status | verify | keygen`: one read-only snapshot of every classified table
+with the security state excluded, a manifest of counts, digests and exact money totals, libsodium encryption to a host
+public key whose secret key stays off-host, atomic publication, host retention of 7, and an off-host audit-continuity check;
+no route, UI, Action, migration or package change) is a local candidate on a feature branch, not deployed. OPS-2 (restore
+into an empty database and the rehearsal) follows it. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

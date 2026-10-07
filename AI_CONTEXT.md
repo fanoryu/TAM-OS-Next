@@ -393,8 +393,8 @@ is unchanged, so AFI-4e's strict decoder is untouched. One READ COMMITTED transa
 one audit row (`finance.execute`, entity `financePosting`, operation `execute`, migration `0035`; no field, no value);
 X1–X5 races are proven against MariaDB with no deadlock. Migrations `0034`–`0035` (head **0035**). BF-4f itself changed no
 frontend, package (100 files, `e3e56858…`) or LOCAL; `AUTH_MODE` stays LOCAL.
-**AFI-4f — SESSION Record payment (CEO)** (local candidate on `feature/afi-4f-session-finance-execution`; not pushed, not
-merged, not deployed; owner decisions D-AFI4f-1 = A, D-AFI4f-2 = A, D-AFI4f-3 = A, D-AFI4f-4 = A, D-AFI4f-5 = A,
+**AFI-4f — SESSION Record payment (CEO)** (merged as source, PR #53, canonical merge
+`a39b728f00688fb27e5983422c878a2f933b0e37`, 2026-10-07; not deployed; owner decisions D-AFI4f-1 = A, D-AFI4f-2 = A, D-AFI4f-3 = A, D-AFI4f-4 = A, D-AFI4f-5 = A,
 D-AFI4f-6 = A, D-AFI4f-7 = A, D-AFI4f-8 = A, 2026-10-07) is the SESSION frontend of BF-4f. TAM OS **records** that a Planned
 posting was paid in full outside TAM OS — it never sends or moves money. D-AFI4f-1 = A: the payment status lives **inside
 the AFI-4e Finance card** of the CEO's Committed plan and Committed Supplemental details, under the posted state — no
@@ -433,6 +433,48 @@ wording bans are revised only by exact strips of the AFI-4f identifiers, routes,
 "Bank transfer" and the approved word constants, all pinned in its own AFI-4f section; the dedicated Payroll harness is
 extended (sections X–X9; CI stays at ten harnesses). AFI-4f needs BF-4f (migrations `0034`–`0035`) deployed first or with
 it. `AUTH_MODE` stays LOCAL.
+**OPS-1 — Encrypted database backup: create, status, verify** (local candidate on `feature/ops-1-backup`; not committed,
+pushed, merged or deployed; the Audit & Backup Phase 0 owner decisions D-AB-1 … D-AB-16 = recommended, 2026-10-07) is the
+first slice of the roadmap's audit/backup step, **operator tooling only** — no route, no UI, no Action, no migration, no
+package change. The decisions: D-AB-1 = B (Audit and Backup are separate slices: OPS-1 backup create + verify → OPS-2
+restore into an empty database + rehearsal → BF-4g the CEO-only audit read API → optionally AFI-4g its SESSION view;
+D-AB-16 = A that order); D-AB-2 = A, D-AB-3 = A, D-AB-4 = A and D-AB-15 = A belong to BF-4g (a CEO-only month and
+record-history read, no new Action, backend first, `auth_events` not exposed); D-AB-5 = B (audit integrity is the
+application's append-only rules plus a **continuity check** against the previous off-host backup — no trigger, no hash
+chain); D-AB-6 = A (a PHP CLI, `server/bin/backup.php`, reading one read-only REPEATABLE READ snapshot into an
+application-native format — no `mysqldump`, no shell, no credential on a cron line); D-AB-7 = B (scope: every business,
+identity and audit table — users keep their password hashes; **excluded**: `sessions`, `account_tokens`,
+`auth_rate_limits`, `mail_outbox`); D-AB-8 = A (the host keeps the files outside the web root and the application; the
+owner pulls them off-host over SFTP into the private layer — no new service); D-AB-9 = A (a random file key encrypts the
+gzip payload with libsodium secretstream, sealed to an X25519 **public key on the host** whose **secret key exists only
+off-host**, so the host can make a backup but never read one; a SHA-256 sidecar for the transfer); D-AB-10 = A (the host
+keeps the newest **7**; off-host 30 daily + 12 monthly is the owner's); D-AB-11 = A, D-AB-12 = A (restore is OPS-2, an
+operator CLI into an empty target only, never HTTP or UI); D-AB-13 = A (a verified backup before every migration on a
+database that holds real data — a backup is allowed while migrations are pending and records both heads); D-AB-14 = A
+(restore rehearsal before PILOT-1, already SDR-0002 E7). `create` (cron) takes the `tamos_backup` lock (a second run is
+refused, `backup_busy`) and the migration lock (a running migration refuses it, and no migration starts during it), refuses
+an incomplete, drifted or missing migration history, an unclassified table, a non-InnoDB table, a table without a single
+`id` key or a float column, streams every backed-up table in primary-key pages, requires each table's streamed rows to
+equal its `COUNT(*)` in the same snapshot, writes to an exclusive temporary file, syncs, re-reads and compares its
+SHA-256, writes the sidecar and renames last (never overwriting), then prunes to 7 — a failed run deletes only its own
+temporary files and prunes nothing. The manifest (the payload's last line) records per table the columns, a column
+definition digest, the row count, the largest id, the row digest and the **exact totals of every DECIMAL column** (digit
+arithmetic, never a float), plus the excluded and not-yet-created tables, the applied migration history, the key
+fingerprint and a non-secret source fingerprint — never a path, a credential or a value. `status` (host, no key) checks
+every backup's sidecar, digest and clear header and exits 1 when none exists, the newest is older than 26 hours, or any is
+damaged. `verify` (off-host, with the secret key file) authenticates every frame (a truncated, extended, modified, renamed
+or wrongly keyed file is refused), re-parses the canonical payload, recomputes every manifest claim and, with
+`--previous`, requires every row of `audit_events` and `auth_events` already in the older backup of the same database to
+reappear byte-identical. `keygen` (off-host) writes the secret key file once and prints the public key. `verify` and
+`keygen` refuse to run where the configuration is the production one. One metadata-only log line per `create`. The
+`backup` configuration section (`dir`, `public_key`) is optional; the API only keeps `dir` out of a known document root.
+The boundary tool keeps it operator-only (the backup classes are named only by `server/src/Ops/`,
+`server/src/Data/Backup/` and the CLI; libsodium only in the cipher; file deletion and renaming only in the store; the
+host path never names the secret key or decryption; the one cross-company reader holds SELECT statements only) and
+requires every migrated table to be classified for backup exactly once, in foreign-key-safe order. ACTIONS stay **21**;
+migration head **0035**; the package keeps 100 files at `d030d544…`; `AUTH_MODE` stays LOCAL. Host evidence still
+required before production (SDR-0002 E2/E4/E7): PHP CLI under hPanel cron, the `sodium` and `zlib` extensions, the
+time and memory limits, and an off-host restore rehearsal (OPS-2).
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
