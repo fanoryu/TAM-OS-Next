@@ -6,6 +6,7 @@ namespace TamOs\Http;
 use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\FinanceController;
+use TamOs\Controller\FinanceExecutionController;
 use TamOs\Controller\HealthController;
 use TamOs\Controller\OvertimeController;
 use TamOs\Controller\PayrollController;
@@ -59,6 +60,11 @@ use TamOs\Policy\Action;
  * CEO-only (decided by the handler). There is no execution, payment, actual, reversal or
  * correction route. ACTIONS stay 21.
  *
+ * BF-4f: the one Finance execution write declares the existing record-free finance.execute
+ * (D-FEX-4 = A), decided by the kernel before the handler (an Employee is 403 before the body). The
+ * month read adds no Action and is CEO-only (decided by the handler). There is no batch, automatic,
+ * partial, reversal, correction or reconciliation route, and no posting route changes. ACTIONS stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -78,7 +84,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -142,6 +148,9 @@ final class Routes
             new Route('GET', '/api/finance-postings', $finance->month(...), ['month'], RouteAuth::Required),
             new Route('POST', '/api/finance-postings/payroll-plan', $finance->postPayrollPlan(...), [], RouteAuth::Required, Action::PayrollManage),
             new Route('POST', '/api/finance-postings/supplemental-payroll', $finance->postSupplementalPayroll(...), [], RouteAuth::Required, Action::SupplementalManage),
+            // BF-4f: Finance execution — one full execution per Planned posting, recorded under finance.execute.
+            new Route('GET', '/api/finance-executions', $financeExecutions->month(...), ['month'], RouteAuth::Required),
+            new Route('POST', '/api/finance-executions/execute', $financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceExecute),
         ]);
     }
 

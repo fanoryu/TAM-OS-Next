@@ -19,7 +19,8 @@ $code = static fn (string $method, string $path): ErrorCode => assertThrows(ApiE
 return [
     // BF-4d authorized revision: the nine Supplemental Payroll routes follow (forty-seven). Was: thirty-eight.
     // BF-4e authorized revision: the three Finance posting routes follow (fifty). Was: forty-seven.
-    'production has exactly fifty routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes; BF-4e: the three Finance posting routes); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll, Supplemental and Finance routes require one' => static function () use ($production): void {
+    // BF-4f authorized revision: the two Finance execution routes follow (fifty-two). Was: fifty.
+    'production has exactly fifty-two routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes; BF-4e: the three Finance posting routes; BF-4f: the two Finance execution routes); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll, Supplemental and Finance routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -73,6 +74,8 @@ return [
             ['GET', '/api/finance-postings', ['month'], RouteAuth::Required],
             ['POST', '/api/finance-postings/payroll-plan', [], RouteAuth::Required],
             ['POST', '/api/finance-postings/supplemental-payroll', [], RouteAuth::Required],
+            ['GET', '/api/finance-executions', ['month'], RouteAuth::Required],
+            ['POST', '/api/finance-executions/execute', [], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

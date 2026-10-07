@@ -1,0 +1,9 @@
+ALTER TABLE audit_events
+  DROP CONSTRAINT audit_events_action_v5,
+  DROP CONSTRAINT audit_events_entity_v4,
+  DROP CONSTRAINT audit_events_operation_v6,
+  DROP CONSTRAINT audit_events_action_operation_v6,
+  ADD CONSTRAINT audit_events_action_v6 CHECK (action IN ('employee.create', 'employee.update', 'employee.delete', 'account.manage', 'overtime.createSelfDraft', 'overtime.updateSelfDraft', 'overtime.deleteSelfDraft', 'overtime.submitSelf', 'overtime.manage', 'payroll.manage', 'supplemental.manage', 'finance.execute')),
+  ADD CONSTRAINT audit_events_entity_v5 CHECK (entity IN ('employee', 'overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting') AND (entity = 'overtime') = (action LIKE 'overtime.%') AND (entity = 'payrollPlan') = (action = 'payroll.manage') AND (entity = 'supplementalPayroll') = (action = 'supplemental.manage') AND (entity = 'financePosting') = (action = 'finance.execute')),
+  ADD CONSTRAINT audit_events_operation_v7 CHECK (operation IN ('provision', 'reissue', 'disable', 'enable', 'submit', 'review', 'reject', 'approve', 'create', 'recalculate', 'return', 'cancel', 'commit', 'post', 'execute')),
+  ADD CONSTRAINT audit_events_action_operation_v7 CHECK (CASE action WHEN 'account.manage' THEN operation IS NOT NULL AND operation IN ('provision', 'reissue', 'disable', 'enable') WHEN 'overtime.submitSelf' THEN operation IS NOT NULL AND operation = 'submit' WHEN 'overtime.manage' THEN operation IS NOT NULL AND operation IN ('review', 'reject', 'approve') WHEN 'payroll.manage' THEN operation IS NOT NULL AND operation IN ('create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post') WHEN 'supplemental.manage' THEN operation IS NOT NULL AND operation IN ('create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post') WHEN 'finance.execute' THEN operation IS NOT NULL AND operation = 'execute' ELSE operation IS NULL END);

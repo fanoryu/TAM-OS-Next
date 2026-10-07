@@ -58,6 +58,14 @@
  *     payment, actual, account, category, monthly-plan, reversal or correction concept; a Finance
  *     posting route declares anything but the Action of its source domain, or another Finance route
  *     exists;
+ *   - (BF-4f) finance_executions is written outside server/src/Data/Finance/FinanceExecutionStore.php
+ *     or by anything but its one INSERT (an execution is immutable: no UPDATE, DELETE, REPLACE or
+ *     TRUNCATE — no reversal, no correction); the execution locks anything but its one posting row by
+ *     primary key, calls another store, computes money, or names a reversal, correction, refund,
+ *     partial, settlement, reconciliation, company or bank account, reference, note, category, batch
+ *     or schedule concept; its input allows anything but the five approved keys or the closed payment
+ *     method list drifts; the execution route declares anything but finance.execute, finance.execute
+ *     is declared by any other route, or another Finance execution route exists;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -190,6 +198,23 @@ const FINANCE_CONTROLLER = 'server/src/Controller/FinanceController.php';
 const FINANCE_INPUT = 'server/src/Finance/FinancePostingInput.php';
 const FINANCE_ROUTES = { '/api/finance-postings/payroll-plan': 'PayrollManage', '/api/finance-postings/supplemental-payroll': 'SupplementalManage' };
 const FINANCE_READ_ROUTE = 'GET /api/finance-postings';
+// BF-4f (owner decisions D-FEX-1..8 = A): the Finance execution has one writer, which only inserts
+// one full execution of one Planned posting — an execution is immutable (no UPDATE, DELETE, REPLACE
+// or TRUNCATE anywhere: no reversal, no correction). It locks only its posting, by primary key, and
+// never writes it (the posting stays Planned; finance_postings keeps its one writer) or calls another
+// store; it never computes money (the amount is the posting's stored string); it has no reversal,
+// correction, refund, partial, settlement, reconciliation, company-account, bank-account, reference,
+// note, category, batch or schedule vocabulary; the command declares exactly the existing
+// record-free finance.execute (ACTIONS stay 21) and the month read none; its input takes exactly the
+// five approved keys, the payment method from the closed list.
+const FINANCE_EXECUTION_STORE = 'server/src/Data/Finance/FinanceExecutionStore.php';
+const FINANCE_EXECUTION_PREFIX = 'server/src/Finance/FinanceExecution';
+const FINANCE_EXECUTION_CONTROLLER = 'server/src/Controller/FinanceExecutionController.php';
+const FINANCE_EXECUTION_INPUT = 'server/src/Finance/FinanceExecutionInput.php';
+const FINANCE_EXECUTION_ROUTE = '/api/finance-executions/execute';
+const FINANCE_EXECUTION_READ_ROUTE = 'GET /api/finance-executions';
+const FINANCE_EXECUTION_KEYS = 'financePostingId,expectedAmount,executedOn,paymentMethod,idempotencyKey';
+const PAYMENT_METHODS = 'cash,bankTransfer,qris,virtualAccount,creditCard,other';
 const ACTION_COUNT = 21;
 
 // ---------------------------------------------------------------------------------------------
@@ -325,6 +350,9 @@ const STRING_RULES = [
   // BF-4e: finance_postings has one writer, which only inserts — a posting is immutable.
   { id: 'finance-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_postings\b/i, msg: 'finance_postings is written only by ' + FINANCE_STORE, allow: (f) => f === FINANCE_STORE },
   { id: 'finance-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_postings\b/i, msg: 'a Finance posting is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_postings' },
+  // BF-4f: finance_executions has one writer, which only inserts — an execution is immutable.
+  { id: 'finance-execution-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_executions\b/i, msg: 'finance_executions is written only by ' + FINANCE_EXECUTION_STORE, allow: (f) => f === FINANCE_EXECUTION_STORE },
+  { id: 'finance-execution-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_executions\b/i, msg: 'a Finance execution is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_executions (no reversal, no correction)' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -369,7 +397,7 @@ function checkMigrationSql(src, file) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings', 'finance_executions']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -458,11 +486,22 @@ function checkRouteActions(src) {
     else if (!new RegExp('RouteAuth::Required, Action::' + action + '\\),$').test(line.trim())) out.push('Routes.php: Finance posting route POST ' + path + ' must declare exactly Action::' + action + ' (its source domain)');
   }
   if (!src.split('\n').some((l) => l.includes("new Route('GET', '/api/finance-postings', ") && /\['month'\], RouteAuth::Required\),$/.test(l.trim()))) out.push('Routes.php: the Finance month read GET /api/finance-postings (?month=, a session, no Action) is missing');
+  // BF-4f: exactly one Finance execution command under exactly the record-free finance.execute, and
+  // the CEO execution month read with no Action; finance.execute is declared by no other route.
+  const execLine = src.split('\n').find((l) => l.includes("new Route('POST', '" + FINANCE_EXECUTION_ROUTE + "'"));
+  if (!execLine) out.push('Routes.php: Finance execution route POST ' + FINANCE_EXECUTION_ROUTE + ' is missing');
+  else if (!/RouteAuth::Required, Action::FinanceExecute\),$/.test(execLine.trim())) out.push('Routes.php: Finance execution route POST ' + FINANCE_EXECUTION_ROUTE + ' must declare exactly Action::FinanceExecute');
+  if (!src.split('\n').some((l) => l.includes("new Route('GET', '/api/finance-executions', ") && /\['month'\], RouteAuth::Required\),$/.test(l.trim()))) out.push('Routes.php: the Finance execution month read GET /api/finance-executions (?month=, a session, no Action) is missing');
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    if (/\bAction::FinanceExecute\b/.test(m[3]) && !(m[1] === 'POST' && m[2] === FINANCE_EXECUTION_ROUTE)) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not the Finance execution and must not declare Action::FinanceExecute');
+  }
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
     if (!/^\/api\/finance/.test(m[2])) continue;
     const key = m[1] + ' ' + m[2];
-    if (key !== FINANCE_READ_ROUTE && !(m[1] === 'POST' && FINANCE_ROUTES[m[2]])) out.push('Routes.php: ' + key + ' — the only Finance routes are the two postings and the month read (no execution, payment, actual, reversal or correction route)');
-    if (key === FINANCE_READ_ROUTE && /\bAction::/.test(m[3])) out.push('Routes.php: ' + key + ' is a read and declares no Action');
+    // BF-4f authorized revision: the one execution command and its month read join the Finance
+    // routes. Was: the two postings and the posting month read only.
+    if (key !== FINANCE_READ_ROUTE && key !== FINANCE_EXECUTION_READ_ROUTE && !(m[1] === 'POST' && (FINANCE_ROUTES[m[2]] || m[2] === FINANCE_EXECUTION_ROUTE))) out.push('Routes.php: ' + key + ' — the only Finance routes are the two postings, the execution and their two month reads (no batch, payment, actual, reversal, correction or reconciliation route)');
+    if ((key === FINANCE_READ_ROUTE || key === FINANCE_EXECUTION_READ_ROUTE) && /\bAction::/.test(m[3])) out.push('Routes.php: ' + key + ' is a read and declares no Action');
   }
   return out;
 }
@@ -485,7 +524,7 @@ function checkAuditInTransaction(lex) {
     ranges.push([m.index, i]);
   }
   const out = [];
-  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll|Supplemental|Posting)?\s*\(/g;
+  const append = /->\s*audit\s*\(\s*\)\s*->\s*append(Account|Overtime|Payroll|Supplemental|Posting|Execution)?\s*\(/g;
   while ((m = append.exec(code))) {
     const at = m.index;
     if (!ranges.some(([a, b]) => at > a && at < b)) out.push('an audit row is appended only inside the transaction of the mutation it records (->atomically(...))');
@@ -598,8 +637,15 @@ function checkPhp(file, src) {
   if (file.startsWith(SUPPLEMENTAL_DIR)) for (const v of checkIntegerSupplemental(lex)) out.push(v);
   if (file === SUPPLEMENTAL_INPUT) for (const v of checkSupplementalInput(lex)) out.push(v);
   for (const v of checkFinanceStatements(file, lex)) out.push(v);
-  if (file.startsWith(FINANCE_DIR) || file === FINANCE_STORE || file === FINANCE_CONTROLLER) for (const v of checkFinanceFirewall(lex)) out.push(v);
+  // BF-4f authorized revision: the BF-4e posting firewall governs every Finance domain file but the
+  // FinanceExecution* files, which have the execution firewall below. Was: every file of
+  // server/src/Finance/ (the posting store and controller unchanged).
+  const executionFile = file.startsWith(FINANCE_EXECUTION_PREFIX) || file === FINANCE_EXECUTION_STORE || file === FINANCE_EXECUTION_CONTROLLER;
+  if ((file.startsWith(FINANCE_DIR) && !file.startsWith(FINANCE_EXECUTION_PREFIX)) || file === FINANCE_STORE || file === FINANCE_CONTROLLER) for (const v of checkFinanceFirewall(lex)) out.push(v);
   if (file === FINANCE_INPUT) for (const v of checkFinanceInput(lex)) out.push(v);
+  for (const v of checkFinanceExecutionStatements(file, lex)) out.push(v);
+  if (executionFile) for (const v of checkFinanceExecutionFirewall(lex)) out.push(v);
+  if (file === FINANCE_EXECUTION_INPUT) for (const v of checkFinanceExecutionInput(lex)) out.push(v);
   return out;
 }
 
@@ -827,6 +873,72 @@ function checkFinanceInput(lex) {
   const out = [];
   if (lists.length !== 2 || lists[0] !== 'payrollPlanId,expectedAmount,idempotencyKey' || lists[1] !== 'supplementalPayrollId,expectedAmount,idempotencyKey') out.push('the Finance posting inputs allow exactly { payrollPlanId, expectedAmount, idempotencyKey } and { supplementalPayrollId, expectedAmount, idempotencyKey }');
   if (lex.strings.some((s) => /^(employeeId|companyId|role|amount|totalAmount|overtimeAmount|status|month|monthKey|sourceKind|companyAccountId|accountId|category)$/.test(s))) out.push('a Finance posting input never names an identity, money, month, status, account or category key');
+  return out;
+}
+
+// BF-4f: the execution store holds exactly one statement writing finance_executions — its INSERT of
+// one execution with the date, the payment method and the key, never IGNORE or ON DUPLICATE KEY
+// UPDATE — and exactly one lock, the posting row by primary key (never a range, a join, an employee
+// or a source); it names no Employee scope (CEO only) and never computes money in SQL (the amount is
+// the posting's stored string).
+const FINANCE_EXECUTION_INSERT = /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?finance_executions\b/i;
+const FINANCE_EXECUTION_LOCK = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, amount, status FROM finance_postings WHERE id = :id AND company_id = :company_id FOR UPDATE';
+function checkFinanceExecutionStatements(file, lex) {
+  if (file !== FINANCE_EXECUTION_STORE) return [];
+  const out = [];
+  let inserts = 0;
+  let locks = 0;
+  for (const s of lex.strings) {
+    if (FINANCE_EXECUTION_INSERT.test(s)) {
+      inserts++;
+      if (/\bIGNORE\b|\bON\s+DUPLICATE\s+KEY\b/i.test(s) || !/, :amount, :executed_on, :payment_method, :idempotency_key, UTC_TIMESTAMP\(6\)\)$/.test(s)) out.push('a Finance execution is inserted only once, with its date, payment method and idempotency key — never IGNORE or ON DUPLICATE KEY UPDATE');
+    }
+    if (/:self_employee_id\b/.test(s)) out.push('the Finance execution statements are CEO company scope only (no :self_employee_id)');
+    if (/\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s)) {
+      locks++;
+      if (s !== FINANCE_EXECUTION_LOCK) out.push('an execution locks exactly its posting, by primary key (' + FINANCE_EXECUTION_LOCK + ') — never a range, a join, an employee or a source');
+    }
+    if (SQL_MONEY_ARITHMETIC.test(s) || /\bamount\s*[-+*\/]|[-+*\/]\s*:?amount\b/i.test(s)) out.push("Finance never computes money in SQL: the executed amount is the posting's stored string");
+  }
+  if (inserts !== 1) out.push('FinanceExecutionStore has exactly one INSERT statement; found ' + inserts);
+  if (locks !== 1) out.push('FinanceExecutionStore takes exactly one lock, its posting; found ' + locks);
+  return out;
+}
+
+// BF-4f: the execution code (domain, store, controller) never calls the posting, Payroll,
+// Supplemental, Overtime or Employee store (it locks its posting through its own statement and never
+// writes it), records one full execution only (no reversal, correction, refund, partial, settlement,
+// reconciliation, company or bank account, reference, note, category, batch or schedule identifier
+// or statement — D-FEX-1/2/5 = A), never values overtime or names a statutory component, and never
+// computes money (no float, BCMath, GMP, rounding helper or division operator).
+const FINANCE_EXECUTION_STORE_CALLS = /->\s*(finance|payroll|supplemental|overtime|employees)\s*\(\s*\)/;
+const FINANCE_EXECUTION_BEYOND = /\brevers|\brefund|\bcorrect|\bunexecut|partial|\bsettle|reconcil|disburse|company_?account|companyAccount|bank_?account|bankAccount|account_?id\b|accountId|\bcategor|ledger|journal|monthly_?plan|monthlyPlan|\bbatch|\bschedul|\breference|\bnotes?\b|\bmemo\b|\btxn|transaction_|\bwithdraw/i;
+function checkFinanceExecutionFirewall(lex) {
+  const out = [];
+  const code = lex.code.replace(/->\s*atomically\s*\(/g, '');
+  const any = (re) => re.test(code) || lex.strings.some((s) => re.test(s));
+  if (FINANCE_EXECUTION_STORE_CALLS.test(code)) out.push('the Finance execution never calls the posting, Payroll, Supplemental, Overtime or Employee store — it locks its posting through its own statement and never writes it');
+  if (any(FINANCE_EXECUTION_BEYOND)) out.push('BF-4f records one full execution only: no reversal, correction, refund, partial, settlement, reconciliation, company or bank account, reference, note, category, batch or schedule identifier or statement');
+  if (any(PAYROLL_OVERTIME_AUTHORITY) || any(PAYROLL_STATUTORY)) out.push('the Finance execution never values overtime and has no statutory or component payroll');
+  if (FLOAT_AUTHORITY.test(lex.code)) out.push('the Finance execution code never computes money (no float, BCMath, GMP, rounding helper or division operator)');
+  return out;
+}
+
+// BF-4f: the execution input takes exactly { financePostingId, expectedAmount, executedOn,
+// paymentMethod, idempotencyKey } — no employee, company, role, amount, month, status, account,
+// reference or note key — and the payment method comes from exactly the closed list (D-FEX-5 = A),
+// the date bound from the Asia/Jakarta company calendar (D-FEX-8 = A).
+function checkFinanceExecutionInput(lex) {
+  const valuesIn = (re) => [...lex.code.matchAll(re)]
+    .map((m) => lex.spans.filter((sp) => sp.start >= m.index && sp.end <= m.index + m[0].length).map((sp) => sp.value).join(','));
+  const lists = valuesIn(/self::onlyKeys\(\$json, \[[^\]]*\]\)/g);
+  const methods = valuesIn(/const PAYMENT_METHODS = \[[^\]]*\];/g);
+  const zone = valuesIn(/const COMPANY_TIMEZONE = '[^']*';/g);
+  const out = [];
+  if (lists.length !== 1 || lists[0] !== FINANCE_EXECUTION_KEYS) out.push('the Finance execution input allows exactly { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey }');
+  if (lex.strings.some((s) => /^(employeeId|companyId|role|amount|actualAmount|totalAmount|status|month|monthKey|sourceKind|companyAccountId|accountId|bankAccount|reference|notes?|category)$/.test(s))) out.push('a Finance execution input never names an identity, money, month, status, account, reference or note key');
+  if (methods.length !== 1 || methods[0] !== PAYMENT_METHODS) out.push('the payment methods are exactly the closed list ' + PAYMENT_METHODS + ' (D-FEX-5 = A)');
+  if (zone.length !== 1 || zone[0] !== 'Asia/Jakarta') out.push('executedOn is bounded by today in the Asia/Jakarta company calendar (D-FEX-8 = A)');
   return out;
 }
 
@@ -1728,6 +1840,62 @@ function selftest() {
   tenant('finance_postings without its tenant UNIQUE is caught', m32.replace('  UNIQUE KEY finance_postings_company_id (company_id, id),\n', ''), 'UNIQUE KEY (company_id, id)');
   tenant('a cascading posting source FK is caught', m32.replace('REFERENCES payroll_plans (company_id, id)', 'REFERENCES payroll_plans (company_id, id) ON DELETE CASCADE'), 'CASCADE');
   tenant('a set-null posting FK is caught', m32.replace('REFERENCES supplemental_payrolls (company_id, id)', 'REFERENCES supplemental_payrolls (company_id, id) ON DELETE SET NULL'), 'CASCADE');
+  // BF-4f: one execution writer that only inserts, one posting lock, no SQL money, no posting write or
+  // store call, one full execution only (no reversal, correction, partial, account, reference, note),
+  // the exact input and closed method list, the route under finance.execute.
+  const realExe = fs.readFileSync(path.join(root, FINANCE_EXECUTION_STORE), 'utf8');
+  const inExe = (extra) => realExe.replace('    public const LIST_CAP', '    ' + extra + '\n    public const LIST_CAP');
+  const exeSwap = (from, to) => { if (!realExe.includes(from)) throw new Error('selftest fixture drift: ' + from); return realExe.replace(from, to); };
+  clean('the real FinanceExecutionStore passes', FINANCE_EXECUTION_STORE, realExe);
+  const EXE_SERVICE = FINANCE_EXECUTION_PREFIX + 'Service.php';
+  const realExeService = fs.readFileSync(path.join(root, EXE_SERVICE), 'utf8');
+  clean('the real FinanceExecutionService passes the execution firewalls', EXE_SERVICE, realExeService);
+  clean('the real FinanceExecutionController passes the execution firewalls', FINANCE_EXECUTION_CONTROLLER, fs.readFileSync(path.join(root, FINANCE_EXECUTION_CONTROLLER), 'utf8'));
+  for (const f of ['Input.php', 'View.php']) clean('the real FinanceExecution' + f + ' passes', FINANCE_EXECUTION_PREFIX + f, fs.readFileSync(path.join(root, FINANCE_EXECUTION_PREFIX + f), 'utf8'));
+  dirty('an execution UPDATE is caught (immutable)', FINANCE_EXECUTION_STORE, inExe("public const U_SQL = \"UPDATE finance_executions SET payment_method = 'cash' WHERE id = :id AND company_id = :company_id\";"), 'immutable');
+  dirty('an execution DELETE is caught (no reversal)', FINANCE_EXECUTION_STORE, inExe("public const D_SQL = 'DELETE FROM finance_executions WHERE id = :id AND company_id = :company_id';"), 'immutable');
+  dirty('an execution TRUNCATE is caught', FINANCE_EXECUTION_STORE, inExe("public const T_SQL = 'TRUNCATE TABLE finance_executions';"), 'immutable');
+  dirty('an execution write outside FinanceExecutionStore is caught', FINANCE_STORE, inFin("public const E_SQL = \"INSERT INTO finance_executions (id, company_id) VALUES (:id, :company_id)\";"), 'written only by ' + FINANCE_EXECUTION_STORE);
+  dirty('a posting status write from the execution store is caught (D-FEX-1)', FINANCE_EXECUTION_STORE, inExe("public const P_SQL = \"UPDATE finance_postings SET status = 'Executed' WHERE id = :id AND company_id = :company_id\";"), 'written only by ' + FINANCE_STORE);
+  dirty('an INSERT IGNORE execution is caught', FINANCE_EXECUTION_STORE, exeSwap("'INSERT INTO finance_executions (", "'INSERT IGNORE INTO finance_executions ("), 'never IGNORE');
+  dirty('an upserting execution is caught', FINANCE_EXECUTION_STORE, exeSwap(":idempotency_key, UTC_TIMESTAMP(6))';", ":idempotency_key, UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE executed_on = VALUES(executed_on)';"), 'inserted only once');
+  dirty('a second execution INSERT is caught (one execution per posting)', FINANCE_EXECUTION_STORE, inExe("public const P2_SQL = 'INSERT INTO finance_executions (id, company_id, finance_posting_id, employee_id, month_key, amount, executed_on, payment_method, idempotency_key, recorded_at) VALUES (:execution_id, :company_id, :finance_posting_id, :employee_id, :month_key, :amount, :executed_on, :payment_method, :idempotency_key, UTC_TIMESTAMP(6))';"), 'exactly one INSERT');
+  dirty('an execution lock of the employee is caught', FINANCE_EXECUTION_STORE, inExe("public const E_SQL = 'SELECT id, company_id, id AS owner_employee_id FROM employees WHERE id = :employee_id AND company_id = :company_id FOR UPDATE';"), 'locks exactly its posting');
+  dirty('an execution range lock is caught (deadlock)', FINANCE_EXECUTION_STORE, exeSwap("FROM finance_postings WHERE id = :id AND company_id = :company_id FOR UPDATE'", "FROM finance_postings WHERE company_id = :company_id AND month_key = :id FOR UPDATE'"), 'locks exactly its posting');
+  dirty('an execution without its posting lock is caught', FINANCE_EXECUTION_STORE, exeSwap(" AND company_id = :company_id FOR UPDATE';", " AND company_id = :company_id';"), 'exactly one lock');
+  dirty('an Employee execution statement is caught (CEO only)', FINANCE_EXECUTION_STORE, inExe("public const MONTH_SELF_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id FROM finance_executions WHERE company_id = :company_id AND employee_id = :self_employee_id';"), 'CEO company scope only');
+  dirty('an execution SQL money computation is caught (partial payment)', FINANCE_EXECUTION_STORE, exeSwap(":month_key, :amount, :executed_on", ":month_key, :amount - 1, :executed_on"), 'never computes money in SQL');
+  dirty('an execution SQL sum is caught', FINANCE_EXECUTION_STORE, inExe("public const S_SQL = 'SELECT SUM(amount) AS t, company_id, employee_id AS owner_employee_id FROM finance_executions WHERE company_id = :company_id';"), 'never computes money in SQL');
+  dirty('a posting store call from the execution is caught', EXE_SERVICE, S + "$this->data->finance()->record($scope, $id);\n", 'never calls the posting');
+  dirty('a Payroll store call from the execution is caught', EXE_SERVICE, S + "$this->data->payroll()->commit($auth, 1, $k);\n", 'never calls the posting');
+  dirty('a reversal in the execution is caught (no reversal)', EXE_SERVICE, S + "$this->reverse($id);\n", 'one full execution only');
+  dirty('a correction in the execution is caught (no correction)', EXE_SERVICE, S + "$correction = 1;\n", 'one full execution only');
+  dirty('a refund in the execution is caught', EXE_SERVICE, S + "$refund = 1;\n", 'one full execution only');
+  dirty('a partial payment in the execution is caught (D-FEX-2)', EXE_SERVICE, S + "$partialAmount = $x;\n", 'one full execution only');
+  dirty('a reconciliation in the execution is caught', EXE_SERVICE, S + "$this->reconcile($id);\n", 'one full execution only');
+  dirty('a company account in the execution is caught (D-FEX-5)', FINANCE_EXECUTION_STORE, inExe("public const A_SQL = 'SELECT company_account_id, company_id, employee_id AS owner_employee_id FROM finance_executions WHERE company_id = :company_id';"), 'one full execution only');
+  dirty('a bank account in the execution view is caught (D-FEX-5)', FINANCE_EXECUTION_PREFIX + 'View.php', S + "$bankAccount = 'x';\n", 'one full execution only');
+  dirty('a reference in the execution controller is caught (D-FEX-5)', FINANCE_EXECUTION_CONTROLLER, S + "$out = ['reference' => $r];\n", 'one full execution only');
+  dirty('a note in the execution is caught (D-FEX-5)', EXE_SERVICE, S + "$notes = $n;\n", 'one full execution only');
+  dirty('a batch execution is caught', EXE_SERVICE, S + "$this->batch($ids);\n", 'one full execution only');
+  dirty('a scheduled execution is caught', EXE_SERVICE, S + "$scheduledFor = $d;\n", 'one full execution only');
+  dirty('a float in the execution is caught', EXE_SERVICE, S + "$t = (float) $amount;\n", 'never computes money');
+  dirty('a division in the execution is caught', EXE_SERVICE, S + "$t = $amount / 2;\n", 'never computes money');
+  dirty('a statutory term in the execution is caught', EXE_SERVICE, S + "$pph21 = 0;\n", 'no statutory');
+  dirty('an execution audit append outside the transaction is caught', EXE_SERVICE, realExeService.replace("            $this->data->audit()->appendExecution($auth, $actor, $in['financePostingId'], $requestId);\n            return $executionId;\n        }, readCommitted: true);\n",
+    "            return $executionId;\n        }, readCommitted: true);\n        $this->data->audit()->appendExecution($auth, $actor, $in['financePostingId'], $requestId);\n"), 'inside the transaction');
+  const realExeInput = fs.readFileSync(path.join(root, FINANCE_EXECUTION_INPUT), 'utf8');
+  const exeKeys = "self::onlyKeys($json, ['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey']);";
+  dirty('a browser amount key on an execution is caught (D-FEX-3)', FINANCE_EXECUTION_INPUT, realExeInput.replace(exeKeys, "self::onlyKeys($json, ['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey', 'amount']);"), 'allows exactly');
+  dirty('an execution without its idempotency key is caught', FINANCE_EXECUTION_INPUT, realExeInput.replace(exeKeys, "self::onlyKeys($json, ['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod']);"), 'allows exactly');
+  dirty('a company account key on an execution is caught (D-FEX-5)', FINANCE_EXECUTION_INPUT, realExeInput.replace(exeKeys, "self::onlyKeys($json, ['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey', 'companyAccountId']);"), 'allows exactly');
+  dirty('an employeeId key on an execution is caught (identity)', FINANCE_EXECUTION_INPUT, realExeInput.replace(exeKeys, "self::onlyKeys($json, ['employeeId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey']);"), 'never names an identity');
+  dirty('a widened payment method list is caught (D-FEX-5)', FINANCE_EXECUTION_INPUT, realExeInput.replace("'creditCard', 'other'];", "'creditCard', 'other', 'cheque'];"), 'closed list');
+  dirty('a server UTC date bound is caught (D-FEX-8)', FINANCE_EXECUTION_INPUT, realExeInput.replace("COMPANY_TIMEZONE = 'Asia/Jakarta';", "COMPANY_TIMEZONE = 'UTC';"), 'Asia/Jakarta');
+  const m34 = fs.readFileSync(path.join(root, 'server/migrations/0034_create_finance_executions.sql'), 'utf8');
+  tenant('the real finance_executions migration passes', m34, 0);
+  tenant('finance_executions without its tenant UNIQUE is caught', m34.replace('  UNIQUE KEY finance_executions_company_id (company_id, id),\n', ''), 'UNIQUE KEY (company_id, id)');
+  tenant('a cascading execution posting FK is caught (an executed posting removed)', m34.replace('REFERENCES finance_postings (company_id, id)', 'REFERENCES finance_postings (company_id, id) ON DELETE CASCADE'), 'CASCADE');
   const SERVICE = 'server/src/Employee/EmployeeService.php';
   const realService = fs.readFileSync(path.join(root, SERVICE), 'utf8');
   clean('the real EmployeeService appends audit rows inside its transactions', SERVICE, realService);
@@ -1778,6 +1946,14 @@ function selftest() {
   cases.push({ name: 'a Finance reversal route is caught (D-FIN-5)', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-postings',", "            new Route('POST', '/api/finance-postings/reverse', $finance->postPayrollPlan(...), [], RouteAuth::Required, Action::FinanceManage),\n            new Route('GET', '/api/finance-postings',")), expect: 'the only Finance routes' });
   cases.push({ name: 'a Finance transaction route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-postings',", "            new Route('GET', '/api/finance-transactions', $finance->month(...), ['month'], RouteAuth::Required),\n            new Route('GET', '/api/finance-postings',")), expect: 'the only Finance routes' });
   cases.push({ name: 'an Action on the Finance month read is caught', run: () => checkRouteActions(realRoutes.replace("$finance->month(...), ['month'], RouteAuth::Required)", "$finance->month(...), ['month'], RouteAuth::Required, Action::FinanceManage)")), expect: 'Finance month read' });
+  // BF-4f: the one execution command under exactly finance.execute; its month read with no Action.
+  cases.push({ name: 'the Finance execution under finance.manage is caught (D-FEX-4)', run: () => checkRouteActions(realRoutes.replace("$financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceExecute)", "$financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceManage)")), expect: 'must declare exactly Action::FinanceExecute' });
+  cases.push({ name: 'a missing Finance execution route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('POST', '/api/finance-executions/execute', $financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceExecute),\n", '')), expect: 'Finance execution route POST /api/finance-executions/execute is missing' });
+  cases.push({ name: 'a missing Finance execution month read is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-executions', $financeExecutions->month(...), ['month'], RouteAuth::Required),\n", '')), expect: 'Finance execution month read' });
+  cases.push({ name: 'an Action on the Finance execution month read is caught', run: () => checkRouteActions(realRoutes.replace("$financeExecutions->month(...), ['month'], RouteAuth::Required)", "$financeExecutions->month(...), ['month'], RouteAuth::Required, Action::FinanceExecute)")), expect: 'Finance execution month read' });
+  cases.push({ name: 'finance.execute on a posting route is caught', run: () => checkRouteActions(realRoutes.replace("$finance->postSupplementalPayroll(...), [], RouteAuth::Required, Action::SupplementalManage)", "$finance->postSupplementalPayroll(...), [], RouteAuth::Required, Action::FinanceExecute)")), expect: 'must not declare Action::FinanceExecute' });
+  cases.push({ name: 'a batch execution route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-executions',", "            new Route('POST', '/api/finance-executions/batch', $financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceExecute),\n            new Route('GET', '/api/finance-executions',")), expect: 'the only Finance routes' });
+  cases.push({ name: 'an execution reversal route is caught', run: () => checkRouteActions(realRoutes.replace("            new Route('GET', '/api/finance-executions',", "            new Route('POST', '/api/finance-executions/reverse', $financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceManage),\n            new Route('GET', '/api/finance-executions',")), expect: 'the only Finance routes' });
   cases.push({ name: 'payroll.manage on another route is caught', run: () => checkRouteActions(realRoutes.replace("$overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->reject(...), [], RouteAuth::Required, Action::PayrollManage)")), expect: 'must not declare Action::PayrollManage' });
   cases.push({ name: 'a self-service route claiming an Action is caught', run: () => checkRouteActions(realRoutes.replace("$auth->login(...)),", "$auth->login(...), [], RouteAuth::Required, Action::SettingsManage),")), expect: 'must not declare' });
 
