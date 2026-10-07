@@ -350,6 +350,11 @@ const bodyOf = (c) => JSON.parse(c.init.body);
 const countOf = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
 const payrollCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/payroll/.test(c.url));
 const keys = (o) => Object.keys(o).sort().join();
+// AFI-4f security: no regex HTML filtering. rawScript() reports any raw <script opening or closing
+// tag in rendered HTML, whatever its case (the page is lower-cased first; no regex is involved);
+// escapedForm() is the exact text a payload must become (js/core/utils.js escapeHtml's mapping).
+const rawScript = (html) => { const h = String(html).toLowerCase(); return h.indexOf('<script') !== -1 || h.indexOf('</script') !== -1; };
+const escapedForm = (v) => String(v).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;').split("'").join('&#39;');
 const buttons = (html) => ['swpReviewBtn', 'swpApproveBtn', 'swpReturnBtn', 'swpCancelBtn'].filter((b) => html.indexOf('id="' + b + '"') !== -1).map((b) => b.slice(3, -3)).join();
 // AFI-4d: the Supplemental writes and the Supplemental action buttons shown, in page order.
 const suppPosts = (rt, route) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && (route ? c.url === route : /^\/api\/supplemental-payrolls\//.test(c.url)));
@@ -2546,12 +2551,28 @@ function firewall(rt, label, overtimeOpened){
     fill(rt, '2031-04-10"><script>x</script>', 'cash" onclick="x');
     rt.render(); await flush();
     const h2 = rt.appHTML();
-    check(!/<script>|onclick="x/.test(h2) && /value="2031-04-10&quot;&gt;&lt;script&gt;x&lt;\/script&gt;"/.test(h2) && !/<option value="cash" selected/.test(h2),
+    check(!rawScript(h2) && h2.indexOf('onclick="x') === -1 && h2.indexOf('value="' + escapedForm('2031-04-10"><script>x</script>') + '"') !== -1 && h2.indexOf('<option value="cash" selected') === -1,
       'X9. a hostile typed date is escaped back into the field; a hostile method value selects nothing');
     rt.app.fire('swpPanelConfirm', 'click'); await flush();
     check(exPosts(rt).length === 0 && rt.pr().payDraft.missing.join() === 'executedOn,paymentMethod', 'X9. hostile field values are refused locally: nothing sent');
     const rq = await openPay({ [EXE(MONTH)]: [resp(503, { ok: false, error: { code: 'service_unavailable', message: '<script>alert(1)</script>' }, requestId: RID })] });
-    check(!/<script>|alert\(1\)/.test(rq.appHTML()) && /Reference: 0123456789abcdef0123456789abcdef\./.test(rq.appHTML()), 'X9. a failed execution read shows fixed words and the reference only — never server text');
+    check(!rawScript(rq.appHTML()) && rq.appHTML().indexOf('alert(1)') === -1 && rq.appHTML().indexOf('Reference: ' + RID + '.') !== -1, 'X9. a failed execution read shows fixed words and the reference only — never server text');
+    // The check itself cannot be bypassed by case: it sees every raw script-tag variant and none of their escaped forms.
+    const VARIANTS = ['<script>x</script>', '<SCRIPT>x</SCRIPT>', '<ScRiPt>x</sCrIpT>', '<script src=x></script>', '<SCRIPT\tsrc=x>', '</script >', '</SCRIPT>', '<sCrIpT/x>'];
+    check(VARIANTS.every((v) => rawScript('<p>' + v + '</p>') && !rawScript('<p>' + escapedForm(v) + '</p>')) && !rawScript('<p>Prescription &lt;script&gt;</p>'),
+      'X9. the raw-script check detects <script>, <SCRIPT>, mixed case and closing-tag variants, and never their escaped forms');
+    for(const v of VARIANTS){
+      const fv = await openPay();
+      fv.app.fire('swpPayRecordBtn', 'click'); await flush();
+      fill(fv, '2031-04-10' + v, 'cash');
+      fv.render(); await flush();
+      const fh = fv.appHTML();
+      check(!rawScript(fh) && fh.indexOf('value="' + escapedForm('2031-04-10' + v) + '"') !== -1, 'X9. a typed Date paid of ' + JSON.stringify(v) + ' is escaped exactly, never rendered as a tag');
+      fv.app.fire('swpPanelConfirm', 'click'); await flush();
+      check(exPosts(fv).length === 0, 'X9. a typed Date paid of ' + JSON.stringify(v) + ' is refused locally: nothing sent');
+      const sv = await openPay({ [EXE(MONTH)]: [resp(503, { ok: false, error: { code: 'service_unavailable', message: v + 'alert(1)' + v }, requestId: RID })] });
+      check(!rawScript(sv.appHTML()) && sv.appHTML().indexOf('alert(1)') === -1, 'X9. server text ' + JSON.stringify(v) + ' in a failed execution read never reaches the page');
+    }
     const hx = await openPay();
     const ht = hx.SessionPayrollStore.begin('exec', MONTH);
     hx.SessionPayrollStore.applyExec(ht, [Object.freeze(Object.assign(execution(XID1, FPCX, '2031-04-10', 'cash'), { executedOn: '<img src=x onerror=alert(1)>' }))]);
