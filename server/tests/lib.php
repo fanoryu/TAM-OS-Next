@@ -305,6 +305,9 @@ function writeConfigFile(Config $config): string
     if ($config->mail !== null) {
         $values['mail'] = $config->mail;
     }
+    if ($config->backup !== null) {
+        $values['backup'] = $config->backup;
+    }
     file_put_contents($file, "<?php\ndeclare(strict_types=1);\nreturn " . var_export($values, true) . ";\n");
     return $file;
 }
@@ -510,4 +513,102 @@ function sessionRequest(string $method, string $path, ?string $token, ?string $c
         'body' => $mutation && $body === '' ? '{}' : $body, 'bodyTooLarge' => false, 'isHttps' => true,
         'sessionToken' => $token, 'csrfToken' => $csrf, 'remoteAddr' => '203.0.113.7',
     ]));
+}
+
+/**
+ * OPS-1: a fresh backup key pair — the secret key, the base64 public key and a secret key file
+ * (in a per-test temporary directory, never in the repository).
+ *
+ * @return array{secretKey: string, publicKey: string, publicKeyBase64: string, keyFile: string}
+ */
+function backupKeys(): array
+{
+    $pair = \TamOs\Ops\BackupCipher::generateKeyPair();
+    $keyFile = tempDir() . DIRECTORY_SEPARATOR . 'backup.key';
+    file_put_contents($keyFile, $pair['secretKeyFile']);
+    $secret = \TamOs\Ops\BackupCipher::readSecretKeyFile($keyFile);
+    return ['secretKey' => $secret, 'publicKey' => \TamOs\Ops\BackupCipher::decodePublicKey($pair['publicKey']), 'publicKeyBase64' => $pair['publicKey'], 'keyFile' => $keyFile];
+}
+
+/**
+ * OPS-1: writes a finished synthetic backup — no database — through the real format, cipher and
+ * store, and returns its path. $tables maps a backed-up table name to its columns, DECIMAL scales
+ * and rows; every other backed-up table is recorded as absent. $mutate may rewrite any payload line
+ * before encryption (to forge a manifest); $meta overrides manifest fields.
+ *
+ * @param array<string, array{columns: list<string>, decimals?: array<string, int>, rows: list<list<mixed>>}> $tables
+ * @param array<string, mixed> $meta
+ */
+function syntheticBackup(string $dir, string $publicKey, array $tables, string $snapshotAt = '2026-10-07 01:00:00.000000', ?\Closure $mutate = null, array $meta = []): string
+{
+    $store = \TamOs\Ops\BackupStore::open($dir, dirname(__DIR__));
+    $id = \TamOs\Ops\BackupStore::newId($snapshotAt);
+    [$handle, $temp] = $store->createTemporary($id);
+    $cipher = \TamOs\Ops\BackupCipher::seal($handle, $id, $publicKey);
+    $format = new \TamOs\Ops\BackupFormat(static function (string $line) use ($cipher, $mutate): void {
+        $cipher->write($mutate === null ? $line : $mutate($line));
+    });
+    $format->begin($id);
+    $absent = [];
+    foreach (\TamOs\Ops\BackupTables::INCLUDED as $name) {
+        if (!isset($tables[$name])) {
+            $absent[] = $name;
+            continue;
+        }
+        $t = $tables[$name];
+        $format->beginTable($name, $t['columns'], $t['decimals'] ?? [], hash('sha256', $name));
+        foreach ($t['rows'] as $row) {
+            $format->row(array_combine($t['columns'], $row));
+        }
+        $format->endTable();
+    }
+    $format->finish($meta + [
+        'backupId' => $id,
+        'snapshotAt' => $snapshotAt,
+        'keyFingerprint' => \TamOs\Ops\BackupCipher::fingerprint($publicKey),
+        'source' => ['env' => 'test', 'databaseFingerprint' => hash('sha256', 'synthetic-source')],
+        'schema' => ['databaseHead' => 1, 'codeHead' => 1, 'migrations' => [['version' => 1, 'name' => 'create_companies', 'sha256' => hash('sha256', 'm1')]]],
+        'excludedTables' => \TamOs\Ops\BackupTables::EXCLUDED,
+        'absentTables' => $absent,
+    ]);
+    $sealed = $cipher->finish();
+    return $store->finalize($handle, $temp, $id, $sealed['sha256']);
+}
+
+/** OPS-1: the synthetic tables most backup tests use — a company, two audit rows, one money row. */
+function syntheticTables(int $auditRows = 2): array
+{
+    $audit = [];
+    for ($i = 1; $i <= $auditRows; $i++) {
+        $audit[] = [$i, 'c1', 'employee.update', 'fields-' . $i];
+    }
+    return [
+        'companies' => ['columns' => ['id', 'created_at'], 'rows' => [[str_repeat('a', 32), '2026-10-01 00:00:00.000000']]],
+        'auth_events' => ['columns' => ['id', 'event'], 'rows' => [[1, 'login_success'], [2, 'logout']]],
+        'audit_events' => ['columns' => ['id', 'company_id', 'action', 'fields'], 'rows' => $audit],
+        'finance_executions' => ['columns' => ['id', 'amount', 'note'], 'decimals' => ['amount' => 2], 'rows' => [
+            [str_repeat('1', 32), '1500000.00', 'Café ☕ "quoted" \ slash / and
+newline'],
+            [str_repeat('2', 32), '0.05', null],
+            [str_repeat('3', 32), '99999999999999.95', ''],
+        ]],
+    ];
+}
+
+/** Rewrites a backup file's sidecar to the file's current SHA-256 (to reach the checks behind it). */
+function resealSidecar(string $path): void
+{
+    file_put_contents($path . '.sha256', hash_file('sha256', $path) . '  ' . basename($path) . "
+");
+}
+
+/**
+ * Runs server/bin/backup.php (OPS-1) in a child process with the given config file.
+ *
+ * @param list<string> $args
+ * @return array{exit: int, stdout: string, stderr: string}
+ */
+function runBackupCli(array $args, ?string $configFile): array
+{
+    return runCli('backup.php', $args, $configFile);
 }
