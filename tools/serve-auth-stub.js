@@ -161,7 +161,20 @@
  * at a scenario switch.
  *   /__stub/fail-next-posting   the next posting is APPLIED, then answered 503: an unknown outcome
  *                               the page must reconcile by reading the source and the postings again
- * Nothing here pays, executes, reverses or corrects anything.
+ *
+ * AFI-4f Record payment (a test-only model of BF-4f): GET /api/finance-executions?month= (CEO only,
+ * an Employee 403; every execution of the month: { id, financePostingId, employeeId, monthKey,
+ * amount, executedOn, paymentMethod }); POST /api/finance-executions/execute exactly
+ * { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey } (CEO only, CSRF;
+ * any other key 400 naming it; executedOn a real date no later than today in the Asia/Jakarta
+ * calendar, paymentMethod one of the six codes) in the BF-4f order: the posting (404), the key
+ * (held by this posting's execution at this amount, date and method: that execution replayed; held
+ * by any other: 409), not yet executed (409), expectedAmount equal to the posting's own amount
+ * string (409); then one execution at the posting's amount. Every 409 is the generic conflict. The
+ * write-* scenarios apply. No execution exists at a scenario switch.
+ *   /__stub/fail-next-execution   the next execution is APPLIED, then answered 503: an unknown
+ *                                 outcome the page must reconcile by reading the executions again
+ * The stub records a payment statement only: nothing here moves money, reverses or corrects anything.
  */
 'use strict';
 const http = require('http');
@@ -316,8 +329,13 @@ let failNextSuppCommit = false;
 let lateSeq = 0;
 // AFI-4e: this scenario's Finance postings (test-only model of BF-4e) — Planned only, immutable.
 const FP_VIEW = ['id', 'sourceKind', 'sourceId', 'employeeId', 'monthKey', 'amount', 'status'];
+// AFI-4f: FinanceExecutionView::FIELDS, FinanceExecutionInput::PAYMENT_METHODS.
+const FX_VIEW = ['id', 'financePostingId', 'employeeId', 'monthKey', 'amount', 'executedOn', 'paymentMethod'];
+const FX_METHODS = ['cash', 'bankTransfer', 'qris', 'virtualAccount', 'creditCard', 'other'];
 let finance = [];
 let failNextPosting = false;
+let executions = [];           // AFI-4f: this scenario's Finance executions (each with its key)
+let failNextExecution = false;
 // The exact sum of some Approved records (test-only mirror of PayrollCalculation::overtime).
 function spSum(records){
   let rupiah = 0n, quarters = 0n;
@@ -365,6 +383,7 @@ function reset(name){
   supplemental = stubSupplemental();   // AFI-4d
   failNextSuppCommit = false; lateSeq = 0;
   finance = []; failNextPosting = false;   // AFI-4e
+  executions = []; failNextExecution = false;   // AFI-4f
   session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
@@ -529,6 +548,18 @@ async function handleApi(req, res, p, query){
       .sort((a, c) => (a.employeeId < c.employeeId ? -1 : a.employeeId > c.employeeId ? 1 : a.sourceKind < c.sourceKind ? -1 : a.sourceKind > c.sourceKind ? 1 : a.seq - c.seq))
       .map((x) => pick(x, FP_VIEW)) });
   }
+  // AFI-4f: the Finance execution read — CEO only.
+  if(p === '/api/finance-executions' && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'employees-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    if(scenario === 'employees-unavailable') return api(res, 503, 'service_unavailable');
+    if([...query.keys()].join() !== 'month' || !otMonth(query.get('month'))) return api(res, 400, 'invalid_query');
+    if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+    const month = query.get('month');
+    return api(res, 200, { financeExecutions: executions.filter((x) => x.monthKey === month)
+      .sort((a, c) => (a.employeeId < c.employeeId ? -1 : a.employeeId > c.employeeId ? 1 : a.seq - c.seq)).map((x) => pick(x, FX_VIEW)) });
+  }
+  if(p === '/api/finance-executions/execute' && req.method === 'POST') return handleExecutionWrite(req, res);
   const fpWrite = { '/api/finance-postings/payroll-plan': 'payrollPlan', '/api/finance-postings/supplemental-payroll': 'supplementalPayroll' }[p];
   if(fpWrite && req.method === 'POST') return handleFinanceWrite(req, res, fpWrite);
   const spWrite = { '/api/supplemental-payrolls/generate': 'generate', '/api/supplemental-payrolls/review': 'review', '/api/supplemental-payrolls/approve': 'approve',
@@ -912,6 +943,56 @@ async function handleFinanceWrite(req, res, kind){
   return done(x);
 }
 
+// AFI-4f: today in the company calendar (Asia/Jakarta, UTC+7 all year), "YYYY-MM-DD".
+function fxToday(){ return new Date(Date.now() + 25200000).toISOString().slice(0, 10); }
+function fxIsDate(v){
+  const m = typeof v === 'string' ? /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(v) : null;
+  if(!m) return false;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
+}
+// AFI-4f: the one Finance execution command (test-only model of FinanceExecutionService).
+async function handleExecutionWrite(req, res){
+  const b = await readJson(req);
+  if(!session) return api(res, 401, 'unauthenticated');
+  if(scenario === 'write-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+  if(scenario === 'write-stale-csrf' && !session.rotated){ session.rotated = true; session.csrf = token(); return api(res, 403, 'forbidden'); }
+  if(req.headers['x-csrf-token'] !== session.csrf || scenario === 'write-denied') return api(res, 403, 'forbidden');
+  if(!b) return api(res, 400, 'validation_failed');
+  const unknown = Object.keys(b).filter((k) => ['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey'].indexOf(k) === -1);
+  if(unknown.length) return api(res, 400, 'validation_failed', null, unknown);
+  const bad = [];
+  if(typeof b.financePostingId !== 'string' || !/^[0-9a-f]{32}$/.test(b.financePostingId)) bad.push('financePostingId');
+  if(typeof b.expectedAmount !== 'string' || !/^(0|[1-9][0-9]{0,14})\.00$/.test(b.expectedAmount)) bad.push('expectedAmount');
+  if(!fxIsDate(b.executedOn) || b.executedOn > fxToday()) bad.push('executedOn');
+  if(FX_METHODS.indexOf(b.paymentMethod) === -1) bad.push('paymentMethod');
+  if(typeof b.idempotencyKey !== 'string' || !/^[0-9a-f]{32}$/.test(b.idempotencyKey)) bad.push('idempotencyKey');
+  if(bad.length) return api(res, 400, 'validation_failed', null, bad);
+  if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+  if(scenario === 'write-validation') return api(res, 400, 'validation_failed', null, ['executedOn']);
+  if(scenario === 'write-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '45' });
+  if(scenario === 'write-error') return api(res, 500, 'internal_error');
+  if(scenario === 'write-unavailable') return api(res, 503, 'service_unavailable');
+  if(scenario === 'write-conflict') return api(res, 409, 'conflict');
+  if(scenario === 'write-slow') await new Promise((r) => setTimeout(r, 4000));
+  const done = (x) => (scenario === 'write-malformed' ? api(res, 200, { financeExecution: Object.assign(pick(x, FX_VIEW), { idempotencyKey: x.key }) }) : api(res, 200, { financeExecution: pick(x, FX_VIEW) }));
+  const posting = finance.find((x) => x.id === b.financePostingId);
+  if(!posting) return api(res, 404, 'not_found');
+  // The BF-4f order: the key first (replay or mismatch), then one execution per posting, the amount.
+  const holder = executions.find((x) => x.key === b.idempotencyKey);
+  if(holder){
+    if(holder.financePostingId === posting.id && holder.amount === b.expectedAmount && holder.executedOn === b.executedOn && holder.paymentMethod === b.paymentMethod) return done(holder);
+    return api(res, 409, 'conflict');
+  }
+  if(executions.some((x) => x.financePostingId === posting.id) || posting.amount !== b.expectedAmount) return api(res, 409, 'conflict');
+  const x = { id: crypto.randomBytes(16).toString('hex'), financePostingId: posting.id, employeeId: posting.employeeId, monthKey: posting.monthKey,
+    amount: posting.amount, executedOn: b.executedOn, paymentMethod: b.paymentMethod, key: b.idempotencyKey, seq: executions.length + 1 };
+  executions.push(x);
+  // Applied, then answered 503: an outcome the page must reconcile by reading again.
+  if(failNextExecution){ failNextExecution = false; return api(res, 503, 'service_unavailable'); }
+  return done(x);
+}
+
 // AFI-4a3: the account operations (test-only model of AccountService's guards).
 function accountWrite(res, kind, b, done){
   if(typeof b.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(b.id)) return api(res, 400, 'validation_failed', null, ['id']);
@@ -1000,6 +1081,12 @@ http.createServer((req, res) => {
     failNextPosting = true;
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('the next posting answer will be dropped');
+  }
+  if(urlPath === '/__stub/fail-next-execution' && req.method === 'GET'){
+    // AFI-4f: the next Finance execution is applied, then its answer is dropped.
+    failNextExecution = true;
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('the next execution answer will be dropped');
   }
   if(urlPath === '/__stub/bump-payroll' && req.method === 'GET'){
     // AFI-4c1: another change to the live plans (no scenario switch, the session stays).
