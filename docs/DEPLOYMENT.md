@@ -171,6 +171,14 @@ with no deploy-together constraint of its own. Its migrations must run before it
 BF-4e postings, so BF-4e (`0032`–`0033`) must already be deployed. Before real payment records are entered, the backup
 prerequisite and SDR-0002's pre-deployment evidence must be in place. It is not deployed.
 
+**Deployment note — SESSION Record payment (AFI-4f).** AFI-4f calls the two BF-4f Finance execution routes (the CEO's month
+read and the one execution command), so BF-4f — its routes and migrations `0034`–`0035`, and therefore BF-4e (`0032`–`0033`)
+before it — must be deployed before AFI-4f or with it; the dependency chain is BF-4c2 / BF-4d → BF-4e → BF-4f → AFI-4f.
+Against a backend without the BF-4f routes the payment status fails closed (it cannot be read, so Record payment is never
+offered), but that is not a supported configuration. AFI-4f changes no backend contract and no existing frontend contract,
+and adds no other deploy-together constraint. The same backup prerequisite and SDR-0002 evidence apply before real payment
+records are entered. It is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |

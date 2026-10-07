@@ -340,7 +340,7 @@ answers `{ financePostings: [{ id, sourceKind, sourceId, employeeId, monthKey, a
 `Planned`); an Employee is 403 on every Finance route. D-FIN-5 = A: a posting is immutable — no reversal and no correction.
 Migrations `0032`–`0033` (head **0033**). The base plan (thirteen keys) and Supplemental (twelve keys) projections are
 unchanged. BF-4e itself changed no frontend or package (100 files, `7768d72b…`), `AUTH_MODE` stays LOCAL; its CEO posting
-screen is AFI-4e (below); Finance execution is BF-4f (below).
+screen is AFI-4e (below); Finance execution is BF-4f (below), recorded from AFI-4f (below).
 **AFI-4e — SESSION Finance posting (CEO)** (merged as source, PR #51, canonical merge
 `d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`, 2026-10-06; not deployed; owner decisions D-AFI4e-1 = A, D-AFI4e-2 = A,
 D-AFI4e-3 = A, D-AFI4e-4 = A, D-AFI4e-5 = A, 2026-10-06) is the SESSION frontend of BF-4e. D-AFI4e-1 = A: posting lives **on the CEO's SESSION Payroll details** — a
@@ -368,10 +368,10 @@ executed in the Execution Center). Frontend only: `core/payroll-api.js` (`Financ
 and `ui/session-payroll-view.js` are extended — no new module, no backend, migration, ApiClient, AuthBoot or CSS change; the
 package keeps 100 files with a new digest; the dedicated Payroll harness is extended (CI stays at ten harnesses). AFI-4e
 needs BF-4e deployed first or with it. `AUTH_MODE` stays LOCAL.
-**BF-4f — Finance execution of Planned postings** (local candidate on `feature/bf-4f-finance-execution`; not pushed, not
-merged, not deployed; owner decisions D-FEX-1 = A, D-FEX-2 = A, D-FEX-3 = A, D-FEX-4 = A, D-FEX-5 = A, D-FEX-6 = A,
-D-FEX-7 = A, D-FEX-8 = A, 2026-10-07) is the server's first Finance execution, **backend only** (D-FEX-7 = A: its SESSION
-screen is a later AFI-4f with its own Phase 0). An execution is an immutable statement, recorded by the CEO, that one
+**BF-4f — Finance execution of Planned postings** (merged as source, PR #52, canonical merge
+`171392a16800c85e128c178f934d72c96a6255be`, 2026-10-07; not deployed; owner decisions D-FEX-1 = A, D-FEX-2 = A,
+D-FEX-3 = A, D-FEX-4 = A, D-FEX-5 = A, D-FEX-6 = A, D-FEX-7 = A, D-FEX-8 = A, 2026-10-07) is the server's first Finance
+execution, **backend only** (D-FEX-7 = A: its SESSION screen is AFI-4f, below). An execution is an immutable statement, recorded by the CEO, that one
 Planned posting was **paid in full outside TAM OS** — TAM OS moves no money. D-FEX-1 = A: it is a separate, append-only
 `finance_executions` record linked to the posting; the posting is never written and stays `Planned` (D-FIN-5 holds), so
 the chain is obligation → Planned posting → execution, and "executed" is derived from the presence of the record.
@@ -391,8 +391,48 @@ E exactly `{ id, financePostingId, employeeId, monthKey, amount, executedOn, pay
 is unchanged, so AFI-4e's strict decoder is untouched. One READ COMMITTED transaction locks the posting row by primary key
 (the only lock an execution takes), checks the key, the absence of an execution and the amount, inserts the execution and
 one audit row (`finance.execute`, entity `financePosting`, operation `execute`, migration `0035`; no field, no value);
-X1–X5 races are proven against MariaDB with no deadlock. Migrations `0034`–`0035` (head **0035**). No frontend, package
-(100 files, `e3e56858…`) or LOCAL change; `AUTH_MODE` stays LOCAL.
+X1–X5 races are proven against MariaDB with no deadlock. Migrations `0034`–`0035` (head **0035**). BF-4f itself changed no
+frontend, package (100 files, `e3e56858…`) or LOCAL; `AUTH_MODE` stays LOCAL.
+**AFI-4f — SESSION Record payment (CEO)** (local candidate on `feature/afi-4f-session-finance-execution`; not pushed, not
+merged, not deployed; owner decisions D-AFI4f-1 = A, D-AFI4f-2 = A, D-AFI4f-3 = A, D-AFI4f-4 = A, D-AFI4f-5 = A,
+D-AFI4f-6 = A, D-AFI4f-7 = A, D-AFI4f-8 = A, 2026-10-07) is the SESSION frontend of BF-4f. TAM OS **records** that a Planned
+posting was paid in full outside TAM OS — it never sends or moves money. D-AFI4f-1 = A: the payment status lives **inside
+the AFI-4e Finance card** of the CEO's Committed plan and Committed Supplemental details, under the posted state — no
+Finance screen, section or navigation. Wherever the postings are read (the month load, opening a detail, Reload, after
+every outcome) `GET /api/finance-executions?month=` is read with them; a posting matches its execution by
+`financePostingId`. D-AFI4f-6 = A: the card shows "Payment not recorded in TAM OS." with **Record payment**; "Checking the
+payment status…"; a read failure (with "Retry payment status") or a status that does not match its posting — then no
+Record payment; or "Payment recorded — paid outside TAM OS. TAM OS did not send this money." with the server's amount,
+Date paid and Payment method — details only, no list column. Record payment is offered only when the source is Committed,
+its posting is read and consistent with it (amount, employee, month), the month's executions are read and hold none for
+it, and no posting or execution intent is unresolved — never while a read is idle, loading, failed or inconsistent.
+D-AFI4f-4 = A: the inline form holds exactly the posting's own amount (display only, sent unchanged as `expectedAmount`),
+**Date paid** (required, empty; `max` is the Asia/Jakarta today, UTC+7, as a browser hint only — the server decides
+`executedOn` ≤ today) and **Payment method** (required, no default; the six BF-4f codes shown as Cash, Bank transfer, QRIS,
+Virtual account, Credit card, Other); no account, reference or note. D-AFI4f-3 = A: the words are "Record payment",
+"Recording…", "Retry recording" and "Payment recorded — paid outside TAM OS"; the form says "Records that Rp {amount} was
+paid in full outside TAM OS. TAM OS does not send or move money. A recorded payment cannot be changed or reversed."
+D-AFI4f-5 = A: a deliberate confirmation with both fields valid freezes ONE in-memory intent `{ financePostingId,
+employeeId, monthKey, amount, executedOn, paymentMethod, key }` with the one Web Crypto `payrollIdempotencyKey()` and sends
+it once as exactly `{ financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey }` (a double click sends
+nothing more); success counts only for an execution of the same posting at the same amount, date, method, employee and
+month; any 409 is the generic conflict (its cause never claimed) and like every definite refusal drops the intent and
+reads the postings and executions again; an unknown outcome (500, 503, network, timeout, a malformed or non-confirming
+answer) keeps the intent, re-reads both and is never resent automatically: recorded at the intent's amount, date and method
+is the success, the posting at the same amount with no execution offers "Retry recording" (the same frozen body and key —
+the server replays the original execution), anything else drops it as stale. A stale CSRF token is recovered by the
+existing single replay of the same body and key for the same principal. Logout, session loss or another principal destroy
+the executions, the intent, its key and the draft. D-AFI4f-7 = A: an Employee never reads or records an execution and sees
+no payment status (server-enforced regardless; ACTIONS stay **21**). Nothing pays, transfers, settles, reconciles, reverses
+or corrects; no partial, multiple, batch or automatic execution; LOCAL is unchanged. D-AFI4f-2 = A: frontend only —
+`core/payroll-api.js` (`FinanceExecutionDecoders`, `FinanceExecutionRequests`, `FinanceExecutionApi`,
+`financeExecutionIntent` — strict seven-key decoding beside the unchanged seven-key posting decoder),
+`core/session-payroll.js` and `ui/session-payroll-view.js` are extended — no new module, no backend, migration, ApiClient,
+AuthBoot or CSS change; the package keeps 100 files with a new digest. D-AFI4f-8 = A: the verifier's payment / execution
+wording bans are revised only by exact strips of the AFI-4f identifiers, routes, field names, the six codes, the label
+"Bank transfer" and the approved word constants, all pinned in its own AFI-4f section; the dedicated Payroll harness is
+extended (sections X–X9; CI stays at ten harnesses). AFI-4f needs BF-4f (migrations `0034`–`0035`) deployed first or with
+it. `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
@@ -1077,7 +1117,7 @@ transactions; Reports export locally as CSV. On the server (BF-4e, not deployed)
 base plan or Supplemental document is posted, by an explicit CEO command per obligation, as one immutable
 Planned posting — in SESSION mode from the CEO's Payroll details (AFI-4e). The CEO then records, by an explicit command
 per posting, that the Planned posting was paid in full outside TAM OS on a stated date by a stated method (BF-4f, not
-deployed, no screen yet): a separate immutable execution record — the posting stays Planned, no money moves, nothing is
+deployed; in SESSION mode "Record payment" on the same details, AFI-4f): a separate immutable execution record — the posting stays Planned, no money moves, nothing is
 reversed or corrected.
 
 ## 11. Overtime Workflow

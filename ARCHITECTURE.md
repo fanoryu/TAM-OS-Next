@@ -1750,7 +1750,8 @@ AFI-4c2 is merged (PR #47, canonical `0ae3ef828349db8167e6bc7c858394c689f83bf5`)
 is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AFI-4d (below) is merged (PR #49, canonical
 `152eccab1973db28b9e86f87d9959aa507b0b5fe`). Finance posting follows: BF-4e (below) is merged (PR #50, canonical
 `e6ce440c1ea1e71d2d921a1119543592f4113d56`), and its SESSION frontend, AFI-4e (below), is merged (PR #51, canonical
-`d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`). Finance execution follows: BF-4f (below) is a local candidate.
+`d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`). Finance execution follows: BF-4f (below) is merged (PR #52, canonical
+`171392a16800c85e128c178f934d72c96a6255be`). Its SESSION frontend, AFI-4f (below), is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2418,12 +2419,12 @@ guards. The firewall now admits only the month read and the two posting commands
 for browser QA (`/__stub/fail-next-posting`). The verifier's AFI-4e section pins the contract, routes, bodies, words and
 digest. AFI-4e needs BF-4e deployed first or with it.
 
-### Finance execution — BF-4f (local candidate; backend only, not deployed)
+### Finance execution — BF-4f (merged as PR #52, canonical `171392a1`; backend only, not deployed)
 
-BF-4f is a local candidate on `feature/bf-4f-finance-execution` (not pushed, merged or deployed), from the Phase 0 owner
-decisions D-FEX-1..8 = A (2026-10-07). It records that one Planned posting was **paid in full outside TAM OS** — TAM OS moves
-no money, integrates no bank and keeps no ledger. Backend only (D-FEX-7 = A; the SESSION screen is a later AFI-4f with its own
-Phase 0): no frontend change, the package is unchanged (100 files, digest `e3e56858…`), ACTIONS stay **21**, `AUTH_MODE` stays
+BF-4f is merged to `main` as source (PR #52, canonical merge `171392a16800c85e128c178f934d72c96a6255be`; not deployed), from
+the Phase 0 owner decisions D-FEX-1..8 = A (2026-10-07). It records that one Planned posting was **paid in full outside TAM
+OS** — TAM OS moves no money, integrates no bank and keeps no ledger. Backend only (D-FEX-7 = A; its SESSION screen is AFI-4f,
+below): BF-4f itself changed no frontend and no package (100 files, digest `e3e56858…`), ACTIONS stay **21**, `AUTH_MODE` stays
 LOCAL, LOCAL's Execution Center is untouched.
 
 **Model (D-FEX-1 = A, D-FEX-2 = A).** obligation → Planned posting → execution. An execution is a separate, append-only
@@ -2480,6 +2481,66 @@ replay, every refusal and key mismatch, reads and privacy, audit rollback, the f
 the lock proofs and X1–X5 — a double click, one posting under two keys, one key on two postings, two executions and a
 posting of one employee at once, a dropped-response retry racing another key), the boundary tool and its selftest, the
 verifier's BF-4f section, and a deterministic mutation campaign.
+
+### SESSION Record payment — AFI-4f (local candidate; frontend; SESSION mode only)
+
+AFI-4f is a local candidate on `feature/afi-4f-session-finance-execution` (not pushed, merged or deployed), from the Phase 0
+owner decisions D-AFI4f-1..8 = A (2026-10-07). It is the SESSION frontend of the Finance execution routes above: the CEO
+**records** that a Planned posting was paid in full outside TAM OS — TAM OS never sends or moves money. Frontend only: no
+backend, migration, ApiClient, AuthBoot, CSS or LOCAL change, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
+
+**Where (D-AFI4f-1 = A, D-AFI4f-6 = A).** Inside the AFI-4e Finance card of the CEO's Committed plan and Committed
+Supplemental details, under "Posted to Finance — Planned, not paid": a Payment block. No Finance screen, section, navigation
+or month-list column. `loadFinance` reads `GET /api/finance-executions?month=` together with the postings wherever those are
+read; a posting matches its execution by `financePostingId` only. States: "Payment not recorded in TAM OS." (Record
+payment), "Checking the payment status…", a read failure ("Retry payment status", none on a 403), a status that does not
+match its posting (posting amount / employee / month against the source, or the execution against the posting), and
+"Payment recorded — paid outside TAM OS. TAM OS did not send this money." with Amount paid (Rp), Date paid and Payment
+method as the server holds them.
+
+**Eligibility (fail closed).** `sessionFinanceExecutionStatus()` derives the state from the source, the posting read and the
+execution read; Record payment opens and sends only in `unrecorded`, and never while a posting or execution intent is
+unresolved. Idle, loading, failed or inconsistent reads never expose the command.
+
+**The form (D-AFI4f-4 = A).** The posting's own amount (display only), **Date paid** (one required, empty date input; `max` is
+`financeExecutionToday()` — Asia/Jakarta, UTC+7 all year, computed without `Intl` — a hint only, the server decides
+`executedOn` ≤ today) and **Payment method** (one required select, no default, exactly the six BF-4f codes as fixed labels:
+Cash, Bank transfer, QRIS, Virtual account, Credit card, Other). The fields follow input and change events into a
+memory-only draft (no render); a missing or invalid field sends nothing and marks the field. No amount, account, reference or
+note input exists.
+
+**The command (D-AFI4f-5 = A).** One deliberate confirmation freezes ONE intent `{ financePostingId, employeeId, monthKey,
+amount, executedOn, paymentMethod, key }` — the posting's amount string, the entered date and method, the one Web Crypto key
+(`payrollIdempotencyKey()`) — and sends it once through `authSessionMutation` as exactly `{ financePostingId, expectedAmount,
+executedOn, paymentMethod, idempotencyKey }`; the single in-flight write makes a double click one command. Confirmed only by
+an execution of the same posting at the same amount, date, method, employee and month. Any 409 (the generic conflict, its
+cause never claimed) and every other definite refusal drop the intent and read the postings and executions again (a 404:
+the month). An unknown outcome (500, 503, network, timeout, a malformed or non-confirming answer) keeps the intent and reads
+both again — never resent automatically. `reconcileFinanceExecution()` decides once both are read: recorded with the
+intent's amount, date and method → the success; the posting at the same amount with no execution → "Retry recording", which
+on a deliberate click sends the same frozen body and key (the server replays the original execution); anything else → stale,
+dropped. The stale-CSRF recovery is `authSessionMutation`'s existing single replay of the same body for the same principal.
+
+**Words (D-AFI4f-3 = A).** "Record payment", "Recording…", "Retry recording", "Payment recorded — paid outside TAM OS", and
+the confirmation "Records that Rp {amount} was paid in full outside TAM OS. TAM OS does not send or move money. A recorded
+payment cannot be changed or reversed." Never Pay, Paid, Execute, Executed, Mark paid or "payment date".
+
+**Isolation.** CEO only (D-AFI4f-7 = A): the execution read is guarded by the principal, every entry point by `canAct()`; an
+Employee's My payroll cards carry no payment status. `clear()` (logout, session loss, a new principal) destroys the
+executions, the intent, its key and the draft; a month change forgets the executions. Nothing is stored. Strict decoding:
+`FinanceExecutionDecoders` accepts exactly the seven BF-4f keys, an id grammar, a positive whole-Rupiah amount, a real date
+and a known code; a month answer is refused whole for another month, a second execution of one posting or id, or more than
+the server cap; the seven-key posting decoder is unchanged.
+
+**Modules (D-AFI4f-2 = A).** `core/payroll-api.js`, `core/session-payroll.js` and `ui/session-payroll-view.js` are
+extended; no new module; the package keeps 100 files with a new digest. AFI-4f needs BF-4f (`0034`–`0035`, and so BF-4e)
+deployed first or with it.
+
+**Proof (D-AFI4f-8 = A).** The SESSION Payroll harness sections X–X9 (decoders and request mirror, the card and form, the
+fail-closed eligibility matrix, the unknown outcome and same-key retry, refusals, stale CSRF, principal and session changes,
+the Employee, hostile payloads), the auth stub's BF-4f model (`/__stub/fail-next-execution`), the verifier's AFI-4f section
+(the earlier payment / execution bans are revised only by exact strips of the AFI-4f identifiers, routes, field names, the
+six codes, the label "Bank transfer" and the pinned word constants), and a deterministic frontend mutation campaign.
 
 ### Release engineering
 
