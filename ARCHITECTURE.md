@@ -1751,7 +1751,8 @@ is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AF
 `152eccab1973db28b9e86f87d9959aa507b0b5fe`). Finance posting follows: BF-4e (below) is merged (PR #50, canonical
 `e6ce440c1ea1e71d2d921a1119543592f4113d56`), and its SESSION frontend, AFI-4e (below), is merged (PR #51, canonical
 `d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`). Finance execution follows: BF-4f (below) is merged (PR #52, canonical
-`171392a16800c85e128c178f934d72c96a6255be`). Its SESSION frontend, AFI-4f (below), is a local candidate.
+`171392a16800c85e128c178f934d72c96a6255be`). Its SESSION frontend, AFI-4f (below), is merged (PR #53, canonical
+`a39b728f00688fb27e5983422c878a2f933b0e37`). Encrypted database backups follow: OPS-1 (below) is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2482,9 +2483,9 @@ the lock proofs and X1–X5 — a double click, one posting under two keys, one 
 posting of one employee at once, a dropped-response retry racing another key), the boundary tool and its selftest, the
 verifier's BF-4f section, and a deterministic mutation campaign.
 
-### SESSION Record payment — AFI-4f (local candidate; frontend; SESSION mode only)
+### SESSION Record payment — AFI-4f (merged as PR #53, canonical `a39b728f`; frontend; SESSION mode only)
 
-AFI-4f is a local candidate on `feature/afi-4f-session-finance-execution` (not pushed, merged or deployed), from the Phase 0
+AFI-4f is merged as source (PR #53, canonical merge `a39b728f00688fb27e5983422c878a2f933b0e37`, 2026-10-07; not deployed), from the Phase 0
 owner decisions D-AFI4f-1..8 = A (2026-10-07). It is the SESSION frontend of the Finance execution routes above: the CEO
 **records** that a Planned posting was paid in full outside TAM OS — TAM OS never sends or moves money. Frontend only: no
 backend, migration, ApiClient, AuthBoot, CSS or LOCAL change, ACTIONS stay **21**, `AUTH_MODE` stays LOCAL.
@@ -2541,6 +2542,106 @@ fail-closed eligibility matrix, the unknown outcome and same-key retry, refusals
 the Employee, hostile payloads), the auth stub's BF-4f model (`/__stub/fail-next-execution`), the verifier's AFI-4f section
 (the earlier payment / execution bans are revised only by exact strips of the AFI-4f identifiers, routes, field names, the
 six codes, the label "Bank transfer" and the pinned word constants), and a deterministic frontend mutation campaign.
+
+### Encrypted database backup — OPS-1 (local candidate; operator tooling; no HTTP surface)
+
+OPS-1 is a local candidate on `feature/ops-1-backup` (not committed, pushed, merged or deployed), from the Audit & Backup
+Phase 0 owner decisions D-AB-1 … D-AB-16 = recommended (2026-10-07). It implements the backup half of ADR-0004 §2.6 and
+SDR-0002 §16 as **operator tooling only**: no route, no UI, no Action (ACTIONS stay **21**), no migration (head **0035**), no
+package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL. Restore is OPS-2; the CEO audit read is BF-4g (D-AB-1 = B,
+D-AB-16 = A).
+
+**Command contract — `server/bin/backup.php`** (CLI only; exit 0 done, 1 any refusal, failure, stale or damaged backup,
+2 usage; output is reason codes, backup ids, counts and digests only — never a path, a key, a value, SQL or a driver
+message).
+
+| Command | Where | Needs | Does |
+|---|---|---|---|
+| `create` | host, cron | config `db` + `backup` | one encrypted backup, then host retention |
+| `status` | host | config `backup` | every backup's sidecar, SHA-256 and clear header; exit 1 when none, the newest is older than 26 h, or any is damaged |
+| `verify --file= --secret-key-file= [--previous=]` | off-host | the secret key file | decrypts and checks everything; with `--previous`, the append-only continuity |
+| `keygen --secret-key-file=` | off-host | — | writes a new secret key file once (never overwrites) and prints the public key + fingerprint |
+
+`verify` and `keygen` refuse (`refused_on_production_host`) wherever the configuration loads as the production one, so the
+secret key never has to exist on the host. The `backup` configuration section is exactly `dir` (absolute, existing, a real
+directory, writable, outside the application tree — and, when the API knows its document root, outside it:
+`backup_inside_document_root`) and `public_key` (base64 of 32 bytes); it is optional and validated only by the CLI
+(`TamOs\Ops\BackupConfig`).
+
+**Snapshot (D-AB-6 = A, D-AB-13 = A).** `create` takes `GET_LOCK('tamos_backup', 0)` (a second run: `backup_busy`) and the
+migration lock `tamos_migrate` (a running migration: `migration_busy`; no migration can start during the backup), then
+checks the migration history exactly like `migrate.php status` — missing, incomplete or drifted history refuses; pending
+migrations are **allowed** (the pre-migration backup) and the manifest records the database head and the code head. Every
+read happens in one read-only REPEATABLE READ transaction (`Database::snapshot`; a write inside it is refused by the
+server). Before any row is read the tables are classified: each must be backed up, excluded or `schema_migrations`
+(otherwise `unclassified_table`), InnoDB, keyed by a single `id` column of an integer or binary-collated type, and present
+exactly when an applied migration created it (`unexpected_schema`); a float, blob, binary, bit or JSON column is refused
+(`unsupported_value`). Each table is read in pages of 500 by `id` through a fixed statement per table
+(`TamOs\Data\Backup\BackupReader`, the data layer's one cross-company reader — SELECT statements only), and its
+streamed rows must equal its `COUNT(*)` in the same snapshot (`snapshot_inconsistent`).
+
+**Scope (D-AB-7 = B; `TamOs\Ops\BackupTables`).** Backed up, in foreign-key-safe order: `companies`, `users` (with their
+password hashes — no credential reset after a restore), `employees`, `memberships`, `auth_events`, `audit_events`,
+`overtime_records`, `payroll_plans`, `payroll_plan_overtime`, `supplemental_payrolls`, `supplemental_payroll_overtime`,
+`finance_postings`, `finance_executions`. Excluded: `sessions` (a restore must not revive signed-in sessions),
+`account_tokens` (reissued), `auth_rate_limits` and `mail_outbox`. `schema_migrations` is recorded in the manifest, not
+copied. Configuration and secrets are never in a backup; they are re-created from the private layer.
+
+**Payload and manifest (`TamOs\Ops\BackupFormat`).** Newline-delimited canonical JSON: a preamble, then per table a header
+(columns, DECIMAL scales), its rows as JSON arrays in `id` order (an int, the database's exact text for DECIMAL / DATE /
+DATETIME, or null — never a float), and an end marker; the **manifest is the last line**: format and version, backup id,
+snapshot time (database clock), key fingerprint, source (`env` and a SHA-256 of host, port and database name — never a
+credential), the applied migration history (version, name, SHA-256), the excluded and not-yet-created tables, and per table
+the columns, a digest of the column definitions, the row count, the largest id, the SHA-256 of its row lines and the
+**exact total of every DECIMAL column** (string digit arithmetic, never a float). Encoding is canonical, so the same
+content always yields the same table lines.
+
+**Container and keys (D-AB-9 = A; `TamOs\Ops\BackupCipher`, the only libsodium user).** `TAMOSBK1` | backup id |
+key fingerprint | the random file key sealed (`crypto_box_seal`) to the configured X25519 public key | a secretstream header,
+then frames of at most 64 KiB of gzip output, each `uint32` length + XChaCha20-Poly1305 ciphertext authenticated with the
+whole header as associated data; the last frame carries `TAG_FINAL` and nothing may follow it. The host holds only the
+public key: it can make a backup but never read one. The secret key file (`TAMOS-BACKUP-SECRET-KEY-V1`) lives off-host in
+the private layer — losing every copy makes every backup unreadable, so it is kept twice.
+
+**Publication, failure and retention (D-AB-8 = A, D-AB-10 = A; `TamOs\Ops\BackupStore`, the only code that deletes or
+renames files).** Names: `tamos-backup-<YYYYMMDDTHHMMSSZ-xxxxxxxx>.tamosbk` (UTC snapshot time, its microsecond, a random
+suffix — chronological, never colliding) and its `.sha256` sidecar in `sha256sum` format. The payload is written to an
+exclusive `.tamos-backup-<id>.tmp` (mode 0600), synced, closed, re-read and compared with the SHA-256 written
+(`readback_mismatch`), the sidecar is written and renamed first and the backup renamed last — a final name is never
+overwritten (`exists`). Any failure deletes only the run's own temporaries and prunes nothing; stale temporaries of a
+crashed run are removed by the next run under the lock. After a success the host keeps the **newest 7** (never the one just
+made), deleting only names it owns; off-host retention (30 daily + 12 monthly) is the owner's.
+
+**Verification and continuity (D-AB-5 = B; `TamOs\Ops\BackupVerifier`, `BackupParser`).** `verify` requires the sidecar
+digest, the file name equal to the header's id, the matching key, every frame authentic, the final frame present and no
+trailing byte (`digest_mismatch`, `name_mismatch`, `wrong_key`, `tampered`, `truncated`, `malformed`); it re-parses the
+payload, rejects any non-canonical line, float or out-of-order id, recomputes every count, digest, maximum id and DECIMAL
+total and requires the manifest to equal them (`manifest_mismatch`), and requires the classified table lists, the history
+1..head and the source to be coherent. With `--previous` (itself verified first) both must come from the same database
+and the previous must be older (`previous_mismatch`), and the rows of `audit_events` and `auth_events` up to the previous
+backup's largest id must equal its row digest and count exactly (`continuity_broken`): a rewritten, deleted or truncated
+audit history is detected against the off-host copy. This is detection, not prevention — whoever holds the database
+credentials can still write; the external, encrypted copy is the anchor. No trigger and no hash chain (D-AB-5 = B).
+
+**Logging.** One `backup` line per `create` in the API log (`outcome` created / failed, the backup id, bytes, duration and
+a fixed reason code); `status`, `verify` and `keygen` log nothing.
+
+**Enforcement added to `tools/verify-backend-boundary.js`.** `server/bin/backup.php` joins the CLI files (SAPI-guarded); the
+backup classes are named only by `server/src/Ops/`, `server/src/Data/Backup/` and the CLI (no HTTP surface); libsodium only
+in `BackupCipher`; `unlink` / `rename` / `rmdir` only in `BackupStore`; the host-side path (`BackupCreator`, `BackupStore`,
+`BackupReader`) never names the secret key, decryption or the verifier; `server/src/Data/Backup/` holds only the reader,
+which holds SELECT statements only (no write, locking read or file output) and takes only the `tamos_backup` lock; every
+table a migration creates is classified exactly once (backed up or excluded), `EXCLUDED` and `APPEND_ONLY` are pinned, the
+backed-up order is foreign-key safe, and the reader's per-table statements equal that list in one fixed shape each.
+
+**Tests.** `server/tests/Unit/BackupFormatTest.php` (exact decimal arithmetic, determinism, unsupported values, forged
+manifests, non-canonical payloads, continuity), `BackupFileTest.php` (configuration, round trip, no plaintext in the file,
+modified / truncated / extended / renamed / wrongly keyed / forged-header files, sidecars, incoherent manifests,
+`--previous`, retention and the store), `BackupCliTest.php` (usage, keygen, verify, status, the production-host refusal,
+no path or key in the output) — no database; and `server/tests/Db/BackupCreateTest.php` against MariaDB (every table from
+one snapshot with the database's own counts and `SUM()`, excluded state never copied, rows committed during the backup
+absent across page boundaries, the read-only snapshot, double invocation and a running migration, the pre-migration backup,
+the refusals, a failure part-way, retention through `create`, continuity end to end, and the CLI with its log line).
 
 ### Release engineering
 

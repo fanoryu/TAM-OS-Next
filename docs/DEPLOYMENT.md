@@ -280,6 +280,34 @@ separate database credentials from the runtime API.
 
 Target RPO is about 24 hours; PITR is not required initially.
 
+**Deployment note — Encrypted database backup (OPS-1).** OPS-1 implements item 2 as operator tooling,
+`server/bin/backup.php` (see `ARCHITECTURE.md` → Encrypted database backup — OPS-1). It adds no route, migration, Action or
+package file and changes no existing behaviour, so it has no deploy-together constraint; it needs the database schema it
+backs up (any head; pending migrations are allowed). Restore and the rehearsal are OPS-2. It is not deployed.
+The runbook, with every value kept in the private layer:
+
+1. **Keys, off-host, once.** On the owner's machine (never the host):
+   `php server/bin/backup.php keygen --secret-key-file=<private layer>/tamos-backup.key`. Keep two copies of that file in
+   the private layer; losing every copy makes every backup unreadable. Put the printed `public_key` into the host
+   configuration.
+2. **Host configuration.** Add the `backup` section (`dir`: an existing directory outside the public web root and outside the
+   application, writable only by the account's PHP; `public_key`) to the configuration file outside the web root.
+3. **Schedule.** An hPanel cron job runs `php <app root>/bin/backup.php create` nightly, after the business day; it prints the
+   backup id and counts and writes one line to the API log. A run that finds another backup or a migration in progress
+   exits 1 without writing anything.
+4. **Pull off-host.** The owner copies each new `tamos-backup-<id>.tamosbk` **and** its `.sha256` over SFTP into the private
+   layer, then runs `php server/bin/backup.php verify --file=<backup> --secret-key-file=<key> --previous=<the last verified
+   backup>`; exit 0 is required. Off-host retention: 30 daily and 12 monthly backups. The host keeps the newest 7 by itself.
+5. **Watch.** `php <app root>/bin/backup.php status` exits 1 when there is no backup, the newest is older than 26 hours, or
+   any backup is damaged.
+6. **Before every migration on a database that holds real data:** run `create`, pull and `verify` the new backup, and only
+   then `php server/bin/migrate.php apply` (D-AB-13). The first deployment applies the migrations to an empty database, so it
+   needs no prior backup; the first backup is taken and verified before real data is entered.
+
+Host evidence still needed (SDR-0002 E2, E4, E7): the PHP CLI that hPanel cron runs, with the `sodium` and `zlib`
+extensions; its time and memory limits for a full backup; and an off-host restore rehearsal with reconciled row counts and
+money totals (OPS-2) before PILOT-1 (D-AB-14).
+
 **Cutover gate.** TAM OS replaces the default page at `finance.reliabilityindonesia.com` — and real
 company data may be entered — only when **all** of the following hold. A visible login form is not
 readiness.

@@ -66,6 +66,15 @@
  *     or schedule concept; its input allows anything but the five approved keys or the closed payment
  *     method list drifts; the execution route declares anything but finance.execute, finance.execute
  *     is declared by any other route, or another Finance execution route exists;
+ *   - (OPS-1) a backup class is named outside the backup tooling (server/src/Ops/,
+ *     server/src/Data/Backup/, server/bin/backup.php) — backups have no HTTP surface; libsodium is used
+ *     outside server/src/Ops/BackupCipher.php, or a file is deleted or renamed outside
+ *     server/src/Ops/BackupStore.php; the host-side create path names the secret key, decryption or
+ *     the verifier; the backup reader holds anything but SELECT statements (no write, locking read or
+ *     file output) or an advisory lock other than tamos_backup, or server/src/Data/Backup/ holds
+ *     another file; a migration creates a table that BackupTables does not classify exactly once
+ *     (backed up or excluded), the excluded or append-only lists drift, the backed-up order breaks a
+ *     foreign key, or the reader's per-table statements drift from that list;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -90,9 +99,9 @@ const DATA_DIR = 'server/src/Data/';
 // only in that slice. server/src/Data was un-gated by BF-2A; server/migrations and server/bin by
 // BF-2B, each narrowly (see checkTree); server/src/Policy by BF-3C.
 const NOT_YET_AUTHORIZED = [];
-// The only files allowed under server/bin/ (BF-2B migrate, BF-3B account, BF-3D mail), and the
-// only shape a migration file may have.
-const CLI_FILES = new Set(['server/bin/migrate.php', 'server/bin/account.php', 'server/bin/mail.php']);
+// The only files allowed under server/bin/ (BF-2B migrate, BF-3B account, BF-3D mail, OPS-1 backup),
+// and the only shape a migration file may have.
+const CLI_FILES = new Set(['server/bin/migrate.php', 'server/bin/account.php', 'server/bin/mail.php', 'server/bin/backup.php']);
 const MIGRATION_FILE = /^server\/migrations\/\d{4}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;
 const SUPERGLOBAL_READERS = new Set(['server/src/Http/Request.php', 'server/dev/router.php']);
 const HEADER_EMITTERS = new Set(['server/src/Http/Response.php', 'server/src/bootstrap.php']);
@@ -216,6 +225,20 @@ const FINANCE_EXECUTION_READ_ROUTE = 'GET /api/finance-executions';
 const FINANCE_EXECUTION_KEYS = 'financePostingId,expectedAmount,executedOn,paymentMethod,idempotencyKey';
 const PAYMENT_METHODS = 'cash,bankTransfer,qris,virtualAccount,creditCard,other';
 const ACTION_COUNT = 21;
+// OPS-1 (D-AB-1..16 = recommended): encrypted database backups are operator tooling, never an HTTP
+// surface. The one cross-company reader (read-only), the backup classes and their CLI form a closed
+// set; only the cipher uses libsodium, only the store deletes or renames files (its own names), and
+// the host-side create path never names the secret key, decryption or the verifier (SDR-0002 §16).
+const BACKUP_CLI = 'server/bin/backup.php';
+const BACKUP_DATA_DIR = 'server/src/Data/Backup/';
+const BACKUP_READER = 'server/src/Data/Backup/BackupReader.php';
+const OPS_DIR = 'server/src/Ops/';
+const BACKUP_CIPHER = 'server/src/Ops/BackupCipher.php';
+const BACKUP_STORE = 'server/src/Ops/BackupStore.php';
+const BACKUP_TABLES_FILE = 'server/src/Ops/BackupTables.php';
+const BACKUP_HOST_FILES = new Set(['server/src/Ops/BackupCreator.php', BACKUP_STORE, BACKUP_READER]);
+const BACKUP_EXCLUDED = 'account_tokens,auth_rate_limits,mail_outbox,sessions';
+const BACKUP_APPEND_ONLY = 'auth_events,audit_events';
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -299,6 +322,11 @@ const CODE_RULES = [
   { id: 'token-output', re: /\b(echo|print|printf|fwrite|fputs|error_log|file_put_contents|var_export)\b[^;]*\$\w*(token|link)\b/i, msg: 'a raw token or recovery link is never printed, written or logged (only the operator CLI prints its activation token)', allow: (f) => TOKEN_PRINTERS.has(f) },
   { id: 'account-admin-token', re: /\b(SessionToken|AccountTokenStore|ActivationMail|RecoveryMail|MailTransport)\b|->\s*issue\s*\(/, msg: 'Employee account administration never issues a token or builds a mail: it only queues delivery intent; the outbox worker issues the token at send time (SDR-0004 §4)', allow: (f) => !(f.startsWith(EMPLOYEE_DIR) || f === EMPLOYEE_CONTROLLER) },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
+  // OPS-1: backups are operator tooling only — no route, controller, service or kernel names them.
+  { id: 'backup-surface', re: /\b(BackupReader|BackupCreator|BackupStore|BackupVerifier|BackupCipher|BackupParser|BackupFormat|BackupConfig|BackupTables)\b/, msg: 'the backup classes are named only by the backup tooling (' + OPS_DIR + ', ' + BACKUP_DATA_DIR + ', ' + BACKUP_CLI + '): backups have no HTTP surface (OPS-1)', allow: (f) => f.startsWith(OPS_DIR) || f.startsWith(BACKUP_DATA_DIR) || f === BACKUP_CLI },
+  { id: 'sodium', re: /(?<![\w$>:])sodium_[a-z0-9_]+\s*\(|\bSODIUM_[A-Z0-9_]+\b/i, msg: 'libsodium is used only by ' + BACKUP_CIPHER, allow: (f) => f === BACKUP_CIPHER },
+  { id: 'file-delete', re: /(?<![\w$>:])(?<!\bfunction\s+)(unlink|rename|rmdir)\s*\(/i, msg: 'files are deleted or renamed only by ' + BACKUP_STORE + ' (only its own backup names)', allow: (f) => f === BACKUP_STORE },
+  { id: 'backup-host-decrypt', re: /\b(readSecretKeyFile|generateKeyPair|BackupVerifier|BackupParser|publicKeyOf)\b|\bBackupCipher\s*::\s*open\s*\(/, msg: 'the host-side backup path (create, store, reader) never names the secret key, decryption or the verifier: the host can encrypt a backup, never read one (SDR-0002 §16)', allow: (f) => !BACKUP_HOST_FILES.has(f) },
 ];
 // Banned in every production file, the data layer included.
 const EVERYWHERE_RULES = [
@@ -623,6 +651,7 @@ function checkPhp(file, src) {
   if (/\$_COOKIE\b/.test(lex.code)) out.push('$_COOKIE is never read: the session cookie comes from HTTP_COOKIE in Request.php');
   for (const v of checkCsrfComparison(lex.code)) out.push(v);
   for (const v of checkScopedData(file, src, lex)) out.push(v);
+  for (const v of checkBackupReader(file, lex)) out.push(v);
   for (const v of checkAuditInTransaction(lex)) out.push(v);
   for (const v of checkOvertimeDelete(lex)) out.push(v);
   for (const v of checkOvertimeApproval(file, lex)) out.push(v);
@@ -1003,7 +1032,10 @@ function checkOvertimeDelete(lex) {
 // (named parameters only), with every *_SELF_SQL also naming :self_employee_id. The company
 // tables are named in SQL only by business stores. Heuristic shape checks: they cannot prove a
 // predicate is correct; ScopedDatabase's run-time refusals and the hostile-principal tests do.
-const SCOPED_STORE = /^server\/src\/Data\/(?!Auth\/|Migration\/|Scope\/)[A-Z][A-Za-z0-9]*\/[A-Za-z0-9]+\.php$/;
+// OPS-1 authorized revision: server/src/Data/Backup/ is not a business store — it holds only the
+// read-only, cross-company BackupReader, governed by checkBackupReader below. Was: every domain
+// folder but Auth, Migration and Scope.
+const SCOPED_STORE = /^server\/src\/Data\/(?!Auth\/|Migration\/|Scope\/|Backup\/)[A-Z][A-Za-z0-9]*\/[A-Za-z0-9]+\.php$/;
 function companyTableSql(s) {
   const names = [...COMPANY_TABLES].join('|');
   return new RegExp('\\b(FROM|JOIN|INTO|UPDATE|TABLE)\\s+`?(' + names + ')\\b', 'i').test(s);
@@ -1023,8 +1055,70 @@ function checkScopedData(file, src, lex) {
     const selfSql = /\bconst\s+(\w+_SELF_SQL)\s*=\s*(?:'([^']*)'|"([^"]*)")/g;
     let m;
     while ((m = selfSql.exec(src))) if (!/:self_employee_id\b/.test(m[2] ?? m[3])) out.push(m[1] + ' must name :self_employee_id');
-  } else if (sql.some(companyTableSql)) {
+  } else if (file !== BACKUP_READER && sql.some(companyTableSql)) {
     out.push('the company tables (' + [...COMPANY_TABLES].join(', ') + ') are read and written only by business stores under ScopedDatabase');
+  }
+  return out;
+}
+
+// OPS-1: the backup reader is the data layer's one cross-company reader, so it is read-only by
+// shape: every statement is a SELECT (no write, no locking read, no INTO OUTFILE / DUMPFILE), its only
+// advisory lock is tamos_backup (the migration lock is taken through MigrationHistory), and
+// server/src/Data/Backup/ holds nothing else.
+function checkBackupReader(file, lex) {
+  if (!file.startsWith(BACKUP_DATA_DIR)) return [];
+  if (file !== BACKUP_READER) return [BACKUP_DATA_DIR + ' holds only BackupReader.php'];
+  const out = [];
+  const sql = lex.strings.filter((s) => SQL_STRING.test(s) || /^\s*SELECT\b/i.test(s) || (SQL_VERB.test(s) && SQL_KEYWORD.test(s.replace(SQL_VERB, ''))));
+  for (const s of sql) {
+    if (!/^SELECT\b/.test(s) || /\b(INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP|CREATE|GRANT|REVOKE|LOCK|OUTFILE|DUMPFILE|SHARE)\b/i.test(s.slice(6))) {
+      out.push('the backup reader holds SELECT statements only (no write, locking read or file output): "' + s.slice(0, 40) + '"');
+    }
+    for (const m of s.matchAll(/\b(GET_LOCK|RELEASE_LOCK|IS_FREE_LOCK)\s*\(\s*'([^']*)'/gi)) {
+      if (m[2] !== 'tamos_backup') out.push('the backup reader takes only the tamos_backup advisory lock (the migration lock through MigrationHistory)');
+    }
+  }
+  return out;
+}
+
+// OPS-1 (D-AB-7 = B): every table a migration creates is classified for backup exactly once —
+// BackupTables::INCLUDED or EXCLUDED — so a new table can never be silently left out of the backups;
+// the excluded and append-only lists are pinned; the backed-up order is foreign-key safe (a table
+// references only tables before it, so a restore loads front to back); and BackupReader's fixed
+// per-table statements cover exactly that list, in order, in exactly one shape each.
+function phpStringList(src, decl) {
+  const m = new RegExp(decl + ' = \\[([\\s\\S]*?)\\];').exec(src);
+  return m ? [...m[1].matchAll(/'([a-z0-9_]+)'/g)].map((x) => x[1]) : null;
+}
+function checkBackupTables(tablesSrc, readerSrc, migrationSrcs) {
+  const included = phpStringList(tablesSrc, 'public const INCLUDED');
+  const excluded = phpStringList(tablesSrc, 'public const EXCLUDED');
+  const appendOnly = phpStringList(tablesSrc, 'public const APPEND_ONLY');
+  if (!included || !excluded || !appendOnly) return [BACKUP_TABLES_FILE + ': INCLUDED, EXCLUDED and APPEND_ONLY are not parseable'];
+  const out = [];
+  const created = new Set();
+  const references = [];
+  for (const src of migrationSrcs) {
+    const owner = /^\s*(?:CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?|ALTER\s+TABLE\s+)`?(\w+)`?/i.exec(src);
+    for (const m of src.matchAll(/^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?/gim)) created.add(m[1].toLowerCase());
+    if (owner) for (const m of src.matchAll(/\bREFERENCES\s+`?(\w+)`?/gi)) references.push([owner[1].toLowerCase(), m[1].toLowerCase()]);
+  }
+  for (const t of created) {
+    if (t !== 'schema_migrations' && included.includes(t) === excluded.includes(t)) out.push('table ' + t + ' must be classified for backup exactly once, in BackupTables::INCLUDED or EXCLUDED (OPS-1)');
+  }
+  for (const t of [...included, ...excluded]) if (!created.has(t)) out.push('BackupTables names ' + t + ', which no migration creates');
+  if (new Set(included).size !== included.length) out.push('BackupTables::INCLUDED names a table twice');
+  if (excluded.slice().sort().join() !== BACKUP_EXCLUDED) out.push('BackupTables::EXCLUDED is exactly ' + BACKUP_EXCLUDED + ' (D-AB-7 = B)');
+  if (appendOnly.join() !== BACKUP_APPEND_ONLY) out.push('BackupTables::APPEND_ONLY is exactly ' + BACKUP_APPEND_ONLY + ' — the tables the boundary keeps append-only');
+  for (const [from, to] of references) {
+    if (from !== to && included.includes(from) && included.indexOf(to) > included.indexOf(from)) out.push('BackupTables::INCLUDED is not foreign-key safe: ' + from + ' references ' + to + ', which comes after it');
+    if (included.includes(from) && excluded.includes(to)) out.push('a backed-up table (' + from + ') references an excluded one (' + to + ')');
+  }
+  for (const [decl, shape] of [['PAGE_SQL', (t) => 'SELECT * FROM ' + t + ' WHERE id > :after ORDER BY id LIMIT 500'], ['COUNT_SQL', (t) => 'SELECT COUNT(*) AS n FROM ' + t]]) {
+    const m = new RegExp('private const ' + decl + ' = \\[([\\s\\S]*?)\\];').exec(readerSrc);
+    const entries = m ? [...m[1].matchAll(/^\s*'([a-z0-9_]+)' => '([^']*)',?\s*$/gm)] : [];
+    if (entries.map((e) => e[1]).join() !== included.join()) out.push('BackupReader::' + decl + ' covers exactly BackupTables::INCLUDED, in order');
+    for (const [, t, sql] of entries) if (sql !== shape(t)) out.push('BackupReader::' + decl + "['" + t + "'] must be exactly: " + shape(t));
   }
   return out;
 }
@@ -1070,7 +1164,7 @@ function checkTree(files, dirs = []) {
     const isMigration = MIGRATION_FILE.test(f) && base.length - '0000_'.length - '.sql'.length <= 64;
     if (f.startsWith('server/migrations/') && !isMigration) out.push(f + ': server/migrations/ holds only NNNN_name.sql migration files');
     if (/\.sql$/i.test(f) && !f.startsWith('server/migrations/')) out.push(f + ': .sql files belong only in server/migrations/');
-    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php, account.php and mail.php');
+    if (f.startsWith('server/bin/') && !CLI_FILES.has(f)) out.push(f + ': server/bin/ holds only migrate.php, account.php, mail.php and backup.php');
     if (/^\.env/.test(base) || /\.(phar|pem|key)$/i.test(base)) out.push(f + ': forbidden file type');
     if (!/\.php$/.test(f) && f !== 'server/public/api/.htaccess' && !isMigration && !f.startsWith('server/migrations/')) out.push(f + ': unexpected file type under server/');
   }
@@ -1281,6 +1375,11 @@ function run() {
     for (const v of checkMigrationNoCascade(src)) failures.push(f + ': ' + v);
   }
   for (const v of checkMigrationContinuity(files)) failures.push(v);
+  // OPS-1: the backup table classification against every migration.
+  const tablesPath = path.join(root, BACKUP_TABLES_FILE);
+  const readerPath = path.join(root, BACKUP_READER);
+  if (!fs.existsSync(tablesPath) || !fs.existsSync(readerPath)) failures.push(BACKUP_TABLES_FILE + ' / ' + BACKUP_READER + ': missing — the backup table classification cannot be checked');
+  else for (const v of checkBackupTables(fs.readFileSync(tablesPath, 'utf8'), fs.readFileSync(readerPath, 'utf8'), files.filter((x) => x.endsWith('.sql')).map((f) => fs.readFileSync(path.join(root, f), 'utf8')))) failures.push(v);
   for (const v of checkRouteActions(fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8'))) failures.push(v);
   for (const v of checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8'))) failures.push(KERNEL_FILE + ': ' + v);
   const contract = require('./package-headers.js');
@@ -1300,7 +1399,7 @@ function run() {
     for (const v of dedup) console.error('  - ' + v);
     process.exit(1);
   }
-  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (21 actions, rules, entities).');
+  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (21 actions, rules, entities); every migrated table is classified for backup.');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1993,6 +2092,61 @@ function selftest() {
   treeCase('a stray .sql file is caught', ['server/src/schema.sql'], 'belong only in server/migrations');
   treeCase('a .env file is caught', ['server/.env'], 'forbidden');
   treeCase('an unexpected file type is caught', ['server/src/notes.txt'], 'unexpected');
+
+  // OPS-1: backups are operator tooling — CLI, surface, crypto, file deletion, host-never-decrypts,
+  // the read-only reader and the table classification.
+  clean('backup.php with its CLI guard passes', BACKUP_CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\nrequire dirname(__DIR__) . '/src/bootstrap.php';\n$c = new BackupCreator(BackupReader::fromConfig($x), $s, $k, $e, $d);\n");
+  dirty('backup.php without the CLI guard is caught', BACKUP_CLI, S + "require dirname(__DIR__) . '/src/bootstrap.php';\n", 'non-CLI SAPI');
+  dirty('SQL inside backup.php is caught', BACKUP_CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$q = 'SELECT * FROM users WHERE id = 1';\n", 'SQL');
+  treeCase('another CLI (a restore) is caught', ['server/bin/restore.php'], 'server/bin/ holds only');
+  dirty('a controller naming the backup creator is caught (no HTTP surface)', 'server/src/Controller/BackupController.php', S + "final class BackupController { public function f(BackupCreator $c): void {} }\n", 'no HTTP surface');
+  dirty('a route naming the backup store is caught', ROUTES_FILE, S + "$s = BackupStore::open($d, $r);\n", 'no HTTP surface');
+  dirty('the kernel naming the verifier is caught', KERNEL_FILE, S + "$v = new BackupVerifier($k);\n", 'no HTTP surface');
+  clean('the Ops classes name each other and the reader', 'server/src/Ops/BackupCreator.php', S + "final class BackupCreator { public function __construct(private BackupReader $r, private BackupStore $s) {} }\n");
+  clean('libsodium inside the cipher passes', BACKUP_CIPHER, S + "$k = sodium_crypto_secretstream_xchacha20poly1305_keygen(); $t = SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL;\n");
+  dirty('libsodium outside the cipher is caught', BACKUP_STORE, S + "$s = sodium_crypto_box_seal($k, $p);\n", 'libsodium is used only');
+  dirty('a libsodium constant outside the cipher is caught', 'server/src/Auth/SessionToken.php', S + "$n = SODIUM_CRYPTO_BOX_SEALBYTES;\n", 'libsodium is used only');
+  clean('the store deletes and renames its own files', BACKUP_STORE, S + "unlink($p); rename($a, $b);\n");
+  dirty('unlink outside the store is caught', 'server/src/Ops/BackupCreator.php', S + "unlink($p);\n", 'deleted or renamed only');
+  dirty('rename outside the store is caught', 'server/src/Log/Logger.php', S + "rename($a, $b);\n", 'deleted or renamed only');
+  dirty('rmdir anywhere else is caught', 'server/bin/backup.php', S + "if (PHP_SAPI !== 'cli') { exit(1); }\nrmdir($d);\n", 'deleted or renamed only');
+  clean('a method named unlink, and its call, are not file deletion', 'server/src/Data/Employee/EmployeeStore.php', S + "final class S { public function unlink(Authorization $auth): int { return 0; } }\n$store->unlink($auth);\n");
+  dirty('the create path reading the secret key is caught', 'server/src/Ops/BackupCreator.php', S + "$k = BackupCipher::readSecretKeyFile($f);\n", 'never names the secret key');
+  dirty('the create path decrypting is caught', 'server/src/Ops/BackupCreator.php', S + "BackupCipher::open($in, $k, $sink);\n", 'never names the secret key');
+  dirty('the store naming the verifier is caught', BACKUP_STORE, S + "$v = new BackupVerifier($k);\n", 'never names the secret key');
+  dirty('the reader deriving a public key is caught', BACKUP_READER, S + "$p = BackupCipher::publicKeyOf($k);\n", 'never names the secret key');
+  clean('the verifier opens backups off-host', 'server/src/Ops/BackupVerifier.php', S + "$h = BackupCipher::open($in, $this->secretKey, $sink);\n");
+  clean('the backup reader reads every table, company tables included, with fixed SELECTs', BACKUP_READER, S + "const P = ['employees' => 'SELECT * FROM employees WHERE id > :after ORDER BY id LIMIT 500'];\nconst L = \"SELECT GET_LOCK('tamos_backup', 0) AS acquired\";\nconst C = 'SELECT COUNT(*) AS n FROM audit_events';\n");
+  dirty('a write in the backup reader is caught', BACKUP_READER, S + "const Q = 'INSERT INTO auth_events (id) VALUES (:id)';\n", 'SELECT statements only');
+  dirty('a delete in the backup reader is caught', BACKUP_READER, S + "const Q = 'DELETE FROM sessions WHERE token_hash = :h';\n", 'SELECT statements only');
+  dirty('a locking read in the backup reader is caught', BACKUP_READER, S + "const Q = 'SELECT * FROM users WHERE id > :after FOR UPDATE';\n", 'SELECT statements only');
+  dirty('a shared-lock read in the backup reader is caught', BACKUP_READER, S + "const Q = 'SELECT * FROM users LOCK IN SHARE MODE';\n", 'SELECT statements only');
+  dirty('file output from the backup reader is caught', BACKUP_READER, S + "const Q = 'SELECT * FROM users INTO OUTFILE :f';\n", 'SELECT statements only');
+  dirty('the backup reader taking the migration lock directly is caught', BACKUP_READER, S + "const Q = \"SELECT GET_LOCK('tamos_migrate', 0) AS a\";\n", 'only the tamos_backup advisory lock');
+  dirty('another file in Data/Backup is caught', 'server/src/Data/Backup/BackupWriter.php', S + "final class BackupWriter {}\n", 'holds only BackupReader.php');
+  dirty('a business store still may not skip :company_id', 'server/src/Data/Employee/EmployeeStore.php', S + "const Q = 'SELECT * FROM employees WHERE id > :after';\n", ':company_id');
+  {
+    const tablesSrc = (inc, exc, app) => S + 'final class BackupTables {\n    public const INCLUDED = [' + inc.map((t) => "'" + t + "'").join(', ') + '];\n    public const EXCLUDED = [' + exc.map((t) => "'" + t + "'").join(', ') + '];\n    public const APPEND_ONLY = [' + app.map((t) => "'" + t + "'").join(', ') + '];\n}\n';
+    const readerSrc = (tables, page = (t) => 'SELECT * FROM ' + t + ' WHERE id > :after ORDER BY id LIMIT 500') => S + '    private const PAGE_SQL = [\n' + tables.map((t) => "        '" + t + "' => '" + page(t) + "',\n").join('') + '    ];\n    private const COUNT_SQL = [\n' + tables.map((t) => "        '" + t + "' => 'SELECT COUNT(*) AS n FROM " + t + "',\n").join('') + '    ];\n';
+    const migs = ['CREATE TABLE companies (\n  id CHAR(32)\n)', 'CREATE TABLE users (\n  id CHAR(32)\n)', 'CREATE TABLE auth_events (\n  id BIGINT\n)', 'CREATE TABLE audit_events (\n  id BIGINT,\n  CONSTRAINT f FOREIGN KEY (company_id) REFERENCES companies (id)\n)',
+      'CREATE TABLE sessions (x INT)', 'CREATE TABLE account_tokens (x INT)', 'CREATE TABLE auth_rate_limits (x INT)', 'CREATE TABLE mail_outbox (x INT)', 'CREATE TABLE schema_migrations (x INT)'];
+    const inc = ['companies', 'users', 'auth_events', 'audit_events'];
+    const exc = ['account_tokens', 'auth_rate_limits', 'mail_outbox', 'sessions'];
+    const app = ['auth_events', 'audit_events'];
+    const tables = (name, t, r, m, expect) => cases.push({ name, run: () => checkBackupTables(t, r, m), expect });
+    tables('a complete backup classification passes', tablesSrc(inc, exc, app), readerSrc(inc), migs, 0);
+    tables('an unclassified new table is caught', tablesSrc(inc, exc, app), readerSrc(inc), [...migs, 'CREATE TABLE invoices (id CHAR(32))'], 'classified for backup exactly once');
+    tables('a table both backed up and excluded is caught', tablesSrc([...inc, 'sessions'], exc, app), readerSrc([...inc, 'sessions']), migs, 'classified for backup exactly once');
+    tables('a classified table no migration creates is caught', tablesSrc([...inc, 'ghosts'], exc, app), readerSrc([...inc, 'ghosts']), migs, 'which no migration creates');
+    tables('moving sessions into the backup is caught (D-AB-7)', tablesSrc([...inc, 'sessions'], exc.filter((t) => t !== 'sessions'), app), readerSrc([...inc, 'sessions']), migs, 'EXCLUDED is exactly');
+    tables('a drifted append-only list is caught', tablesSrc(inc, exc, ['audit_events']), readerSrc(inc), migs, 'APPEND_ONLY is exactly');
+    tables('a foreign-key-unsafe order is caught', tablesSrc(['audit_events', 'companies', 'users', 'auth_events'], exc, app), readerSrc(['audit_events', 'companies', 'users', 'auth_events']), migs, 'not foreign-key safe');
+    tables('a late ALTER TABLE reference is honoured', tablesSrc(inc, exc, app), readerSrc(inc), [...migs, 'ALTER TABLE companies ADD CONSTRAINT g FOREIGN KEY (u) REFERENCES users (id)'], 'not foreign-key safe');
+    tables('a reader missing a table is caught', tablesSrc(inc, exc, app), readerSrc(inc.slice(0, 3)), migs, 'covers exactly');
+    tables('a reader statement that drifts is caught', tablesSrc(inc, exc, app), readerSrc(inc, (t) => 'SELECT * FROM ' + t + ' ORDER BY id'), migs, 'must be exactly');
+    tables('the real classification passes against the real migrations', fs.readFileSync(path.join(root, BACKUP_TABLES_FILE), 'utf8'), fs.readFileSync(path.join(root, BACKUP_READER), 'utf8'),
+      fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => f.endsWith('.sql')).map((f) => fs.readFileSync(path.join(root, 'server', 'migrations', f), 'utf8')), 0);
+  }
 
   const contract = { API_HEADERS: { 'Cache-Control': 'no-store, private', 'X-Content-Type-Options': 'nosniff' }, HSTS_PRODUCTION: 'max-age=1' };
   const phpHeaders = (entries, hsts) => S + 'final class ApiHeaders {\n    public const HEADERS = [\n' + entries.map(([k, v]) => "        '" + k + "' => '" + v + "',\n").join('') + "    ];\n    public const HSTS = '" + hsts + "';\n}\n";

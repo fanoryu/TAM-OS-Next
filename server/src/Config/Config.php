@@ -8,7 +8,8 @@ namespace TamOs\Config;
  *
  * `db` is carried unvalidated: it is checked by TamOs\Data\DatabaseConfig only when the
  * database is first needed, so a missing or malformed section never affects /api/health.
- * `mail` likewise: TamOs\Mail\MailConfig checks it only when the outbox worker needs it.
+ * `mail` likewise: TamOs\Mail\MailConfig checks it only when the outbox worker needs it, and
+ * `backup` (OPS-1): TamOs\Ops\BackupConfig checks it only when server/bin/backup.php needs it.
  */
 final class Config
 {
@@ -21,6 +22,7 @@ final class Config
         public readonly int $bodyLimitBytes,
         #[\SensitiveParameter] public readonly mixed $db = null,
         #[\SensitiveParameter] public readonly mixed $mail = null,
+        public readonly mixed $backup = null,
     ) {
     }
 
@@ -43,6 +45,7 @@ final class Config
             'bodyLimitBytes' => $this->bodyLimitBytes,
             'db' => $this->db === null ? null : '[REDACTED]',
             'mail' => $this->mail === null ? null : '[REDACTED]',
+            'backup' => $this->backup === null ? null : '[CONFIGURED]',
         ];
     }
 }

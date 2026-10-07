@@ -49,4 +49,14 @@ return [
         'from' => 'TAM OS <CHANGE_ME@example.invalid>',
         'api_key' => 'CHANGE_ME',
     ],
+
+    // Encrypted database backups (OPS-1), used only by server/bin/backup.php (create, status), never
+    // by an HTTP request. Optional: without it the API runs and no backup can be made. Exactly these
+    // two keys. `dir` is an existing directory outside the public web root and outside the
+    // application; `public_key` is the base64 public key printed by `backup.php keygen`, run
+    // OFF-HOST — the matching secret key file never comes to the host. The public key is not a secret.
+    'backup' => [
+        'dir' => '/CHANGE_ME/outside-web-root/backups',
+        'public_key' => 'CHANGE_ME',
+    ],
 ];

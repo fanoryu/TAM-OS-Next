@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **OPS-1 Encrypted database backups (operator tooling, not shipped).** The server can now make an encrypted backup of its
+  database from a nightly scheduled command: one consistent copy of every employee, account, overtime, payroll,
+  supplemental payroll, finance and audit record, taken while TAM OS keeps running. Signed-in sessions, open activation
+  links, sign-in counters and the mail queue are deliberately left out, so a later restore never revives them. Each backup
+  is encrypted so that the server itself cannot read it — only the owner's separately kept key can — and comes with a
+  checksum for copying it off the server. The server keeps the newest seven. A check command reports when the newest
+  backup is missing, older than a day or damaged, and an off-server verify command opens a backup with the owner's key,
+  checks every record count, checksum and money total, and can confirm that no earlier audit record was changed or removed
+  since the previous backup. There is no screen, no web address and no restore yet (restore comes next, separately). The
+  shipped `AUTH_MODE` stays **LOCAL**; the app is unchanged.
 - **AFI-4f Record payment (SESSION mode, CEO; not shipped).** On a Committed payroll or supplemental payroll that is posted
   to Finance, the CEO can now record that its payment was made outside TAM OS: the Finance card shows "Payment not recorded
   in TAM OS." with **Record payment**, which asks for the date paid and the payment method (cash, bank transfer, QRIS,

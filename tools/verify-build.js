@@ -7399,6 +7399,76 @@ console.log('== AFI-4f — SESSION RECORD PAYMENT (CEO) ==');
     'BF-4f (N12): AI_CONTEXT, ARCHITECTURE and the milestone record BF-4f as merged (PR #52, canonical 171392a1…) — never as a local candidate');
 }
 
+// ===== OPS-1 — ENCRYPTED DATABASE BACKUP: CREATE, STATUS, VERIFY (operator tooling) =====
+// Audit & Backup Phase 0 owner decisions D-AB-1..16 = recommended: separate slices (OPS-1 → OPS-2 → BF-4g →
+// optional AFI-4g; D-AB-1 = B, D-AB-16 = A); a PHP CLI over one read-only snapshot in an application-native
+// format (D-AB-6 = A); every business, identity and audit table, with sessions, account tokens, rate limits
+// and the mail outbox excluded (D-AB-7 = B); host directory + owner SFTP pull (D-AB-8 = A); libsodium sealed
+// to a host public key whose secret key stays off-host, plus a SHA-256 sidecar (D-AB-9 = A); host keeps 7
+// (D-AB-10 = A); restore is OPS-2, operator-only (D-AB-11/12 = A); a backup is allowed with pending migrations
+// (D-AB-13 = A); audit integrity = append-only rules + the off-host continuity check (D-AB-5 = B). No route,
+// UI, Action, migration or package change; AUTH_MODE LOCAL.
+console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const cli = srv('bin/backup.php');
+  check(/^if \(PHP_SAPI !== 'cli'\) \{\n    exit\(1\);\n\}$/m.test(cli) && /'create', 'status' => \$args === \[\] \? \[\] : null,/.test(cli)
+    && /'verify' => backupOptions\(\$args, \['file', 'secret-key-file'\], \['previous'\]\),/.test(cli) && /'keygen' => backupOptions\(\$args, \['secret-key-file'\], \[\]\),/.test(cli)
+    && (cli.match(/refuseOnProductionHost\(\);/g) || []).length === 2 && !/restore|import|\bdelete\b/i.test(noComments(cli).replace(/['"][^'"\n]*['"]/g, '')),
+    'OPS-1: server/bin/backup.php is a SAPI-guarded CLI with exactly create, status, verify and keygen — verify and keygen refuse on the production host; no restore');
+  const tables = srv('src/Ops/BackupTables.php');
+  const list = (name) => ((new RegExp('public const ' + name + ' = \\[([\\s\\S]*?)\\];').exec(tables) || ['', ''])[1].match(/'[a-z_]+'/g) || []).map((t) => t.slice(1, -1)).join();
+  check(list('INCLUDED') === 'companies,users,employees,memberships,auth_events,audit_events,overtime_records,payroll_plans,payroll_plan_overtime,supplemental_payrolls,supplemental_payroll_overtime,finance_postings,finance_executions'
+    && list('EXCLUDED') === 'account_tokens,auth_rate_limits,mail_outbox,sessions' && list('APPEND_ONLY') === 'auth_events,audit_events' && /public const HISTORY = 'schema_migrations';/.test(tables),
+    'OPS-1: the backup scope is every business, identity and audit table in foreign-key order; sessions, account tokens, rate limits and the mail outbox are excluded (D-AB-7 = B); auth_events and audit_events are the append-only tables');
+  const reader = srv('src/Data/Backup/BackupReader.php');
+  const readerStrings = (noComments(reader).match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g) || []).map((x) => x.slice(1, -1)).filter((x) => /^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|SET|START|LOCK)\b/.test(x)); // upper-case SQL (the project convention)
+  check(readerStrings.length > 20 && readerStrings.every((x) => /^SELECT\b/.test(x) && !/\b(INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP|CREATE|OUTFILE|DUMPFILE|SHARE)\b/.test(x.slice(6)))
+    && /public const PAGE = 500;/.test(reader) && /return \$this->db->snapshot\(/.test(reader),
+    'OPS-1: the backup reader holds SELECT statements only and reads every table inside Database::snapshot (read-only REPEATABLE READ), 500 rows per page');
+  check(/public const SNAPSHOT_SQL = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY';/.test(srv('src/Data/Database.php')) && /public function snapshot\(callable \$fn\): mixed/.test(srv('src/Data/Database.php')),
+    'OPS-1: Database::snapshot runs one read-only REPEATABLE READ transaction');
+  const cipher = srv('src/Ops/BackupCipher.php');
+  check(/public const MAGIC = 'TAMOSBK1';/.test(cipher) && /sodium_crypto_box_seal\(\$fileKey, \$publicKey\)/.test(cipher) && /sodium_crypto_secretstream_xchacha20poly1305_init_push\(\$fileKey\)/.test(cipher)
+    && /sodium_crypto_secretstream_xchacha20poly1305_push\(\$this->state, \$message, \$this->header, \$tag\)/.test(cipher) && /SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL/.test(cipher)
+    && /throw new BackupError\(BackupError::TRUNCATED\);/.test(cipher) && /throw new BackupError\(BackupError::TAMPERED\);/.test(cipher) && /deflate_init\(ZLIB_ENCODING_GZIP/.test(cipher),
+    'OPS-1: a fresh file key encrypts the gzip payload with secretstream (every frame authenticates the header), sealed to the host public key; truncation and tampering are refused (D-AB-9 = A)');
+  const host = noComments(srv('src/Ops/BackupCreator.php') + srv('src/Ops/BackupStore.php') + reader);
+  check(!/readSecretKeyFile|generateKeyPair|BackupVerifier|BackupParser|publicKeyOf|BackupCipher::open|seal_open/.test(host),
+    'OPS-1: the host-side path (creator, store, reader) never names the secret key, decryption or the verifier — the host can make a backup, never read one');
+  const store = srv('src/Ops/BackupStore.php');
+  check(/public const KEEP = 7;/.test(store) && /public const MAX_AGE_SECONDS = 26 \* 3600;/.test(store) && /fopen\(\$path, 'xb'\)/.test(store) && /fsync\(\$handle\)/.test(store)
+    && /throw new BackupError\(BackupError::READBACK_MISMATCH\);/.test(store) && /throw new BackupError\(BackupError::EXISTS\);/.test(store) && /if \(\$id === \$justCreated\) \{/.test(store),
+    'OPS-1: exclusive temporary, sync, read-back, sidecar first and rename last (never overwriting); the host keeps the newest 7, never the one just made (D-AB-10 = A); status: fresh within 26 hours');
+  check(/private const KEYS = \['dir', 'public_key'\];/.test(srv('src/Ops/BackupConfig.php')) && /private const KEYS = \['env', 'origin', 'log_path', 'body_limit_bytes', 'db', 'mail', 'backup'\];/.test(srv('src/Config/ConfigLoader.php'))
+    && /'backup_inside_document_root'/.test(srv('src/Config/ConfigLoader.php')) && /'backup' => \[\n        'dir' => '\/CHANGE_ME\/outside-web-root\/backups',\n        'public_key' => 'CHANGE_ME',\n    \],/.test(srv('config/config.example.php')),
+    'OPS-1: the optional backup section is exactly dir and public_key (no secret key on the host); the API keeps dir out of a known document root; the example shows placeholders only');
+  check(/\$previous\['source'\]\['databaseFingerprint'\] !== \$manifest\['source'\]\['databaseFingerprint'\]/.test(srv('src/Ops/BackupVerifier.php')) && /BackupTables::APPEND_ONLY/.test(srv('src/Ops/BackupVerifier.php'))
+    && /throw new BackupError\(BackupError::CONTINUITY_BROKEN\);/.test(srv('src/Ops/BackupParser.php')),
+    'OPS-1: verify --previous requires every append-only row of the older backup of the same database to reappear byte-identical (D-AB-5 = B)');
+  const routes = srv('src/Http/Routes.php') + srv('src/bootstrap.php') + srv('src/Http/Kernel.php');
+  check(!/backup/i.test(noComments(routes)) && fs.readdirSync(path.join(root, 'server', 'src', 'Controller')).every((f) => !/backup/i.test(f)),
+    'OPS-1: no route, controller or kernel names a backup — no HTTP surface (restore stays operator-only, OPS-2)');
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql'
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && pkg.files.length === 100 && pkg.actions === 21 && pkg.packageDigest === 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    'OPS-1: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE LOCAL, and the package unchanged — 100 files at digest d030d544…');
+  check(['Unit/BackupFormatTest.php', 'Unit/BackupFileTest.php', 'Unit/BackupCliTest.php', 'Db/BackupCreateTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
+    && /continuity end to end/.test(srv('tests/Db/BackupCreateTest.php')) && /rows committed while the backup runs are not in it/.test(srv('tests/Db/BackupCreateTest.php')),
+    'OPS-1: the format, file, CLI and MariaDB backup tests exist (snapshot, continuity, refusals, failure, retention)');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md')), arch = read(path.join(root, 'ARCHITECTURE.md')), ms = read(path.join(root, 'docs', '05-milestones', 'Milestones.md'));
+  check(['D-AB-1 = B', 'D-AB-2 = A', 'D-AB-3 = A', 'D-AB-4 = A', 'D-AB-5 = B', 'D-AB-6 = A', 'D-AB-7 = B', 'D-AB-8 = A', 'D-AB-9 = A', 'D-AB-10 = A', 'D-AB-11 = A', 'D-AB-12 = A',
+    'D-AB-13 = A', 'D-AB-14 = A', 'D-AB-15 = A', 'D-AB-16 = A'].every((d) => ctx.includes(d)) && /### Encrypted database backup — OPS-1/.test(arch)
+    && /Deployment note — Encrypted database backup \(OPS-1\)/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && /\*\*OPS-1\*\*/.test(ms) && /OPS-1 Encrypted database backups/.test(read(path.join(root, 'CHANGELOG.md')))
+    && /php server\/bin\/backup\.php create/.test(read(path.join(root, 'tools', 'README.md'))),
+    'OPS-1: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the runbook (DEPLOYMENT), the milestone, the changelog and the tools README');
+  // N13 (resolved in OPS-1's docs commit): AFI-4f is merged as PR #53 at its canonical merge, not deployed — no longer a local candidate.
+  check([ctx, arch, ms].every((t) => !/AFI-4f[^.]*local candidate|local candidate on `feature\/afi-4f|AFI-4f \(below\) is a local candidate/.test(t) && /PR #53/.test(t) && /a39b728f00688fb27e5983422c878a2f933b0e37/.test(t)),
+    'AFI-4f (N13): AI_CONTEXT, ARCHITECTURE and the milestone record AFI-4f as merged (PR #53, canonical a39b728f…) — never as a local candidate');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
