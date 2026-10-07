@@ -5558,9 +5558,11 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   // exactly the nine BF-4d Supplemental Payroll paths (SupplementalApi, the same module and wire —
   // no new API caller). Was: the nine Payroll paths only. AFI-4e authorized revision: plus exactly the
   // three BF-4e Finance posting paths (FinancePostingApi, the same module and wire — D-AFI4e-2 = A).
-  // Was: the eighteen Payroll and Supplemental paths only.
+  // Was: the eighteen Payroll and Supplemental paths only. AFI-4f authorized revision: plus exactly the
+  // two BF-4f Finance execution paths (FinanceExecutionApi, the same module and wire — D-AFI4f-2 = A).
+  // Was: the twenty-one Payroll, Supplemental and Finance posting paths only.
   check(!/\/api\//.test(prodFiles.filter((f) => ['transport/api-client.js', 'core/session-identity.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/overtime-api.js', 'core/payroll-api.js'].indexOf(f) === -1).map((f) => prodCode[f]).join('\n'))
-    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/finance-postings','/api/finance-postings/payroll-plan','/api/finance-postings/supplemental-payroll',"
+    && ((prodCode['core/payroll-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/finance-executions','/api/finance-executions/execute','/api/finance-postings','/api/finance-postings/payroll-plan','/api/finance-postings/supplemental-payroll',"
       + "'/api/payroll-plan','/api/payroll-plan/drift','/api/payroll-plans','/api/payroll-plans/approve','/api/payroll-plans/cancel','/api/payroll-plans/commit','/api/payroll-plans/generate','/api/payroll-plans/return','/api/payroll-plans/review',"
       + "'/api/supplemental-payroll','/api/supplemental-payrolls','/api/supplemental-payrolls/approve','/api/supplemental-payrolls/cancel','/api/supplemental-payrolls/commit','/api/supplemental-payrolls/eligibility','/api/supplemental-payrolls/generate','/api/supplemental-payrolls/return','/api/supplemental-payrolls/review'"
     // AFI-4b1 authorized revision: overtime-api.js names exactly the eight BF-4b1 Overtime paths.
@@ -6540,7 +6542,14 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
   // AFI-4e authorized revision: the three BF-4e Finance posting routes and the approved posting
   // confirmation (D-AFI4e-5 = A: "… Nothing is paid or executed. A posting cannot be reversed.")
   // exist (pinned in the AFI-4e section). Was: no /finance route and no "executed" at all.
-  check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|payslip)\b/i.test(all) && !/ledger|journal|payment|execut|\/finance|markPaid|\bpay\(/i.test(all.replace(/posted to Finance|It is not a payment|Nothing is paid or executed\. A posting cannot be reversed\.|'\/api\/finance-postings(\/payroll-plan|\/supplemental-payroll)?'/g, '')),
+  // AFI-4f authorized revision: exactly the AFI-4f Record payment client is stripped first — its
+  // FinanceExecution identifiers, the two BF-4f routes, the two field names (executedOn,
+  // paymentMethod), the server's six payment method codes and the approved word constants (all
+  // pinned in the AFI-4f section). Everything else stays banned. Was: no AFI-4f exception.
+  const afi4fStrip = (src) => src.replace(/const SESSION_FINANCE_EXECUTION_(TEXT|METHOD_TEXT|CONFIRM|PANELS|BUTTONS|ERRORS|FIELD_ERRORS|CONFLICT|AMBIGUOUS|NOTICES) = [\s\S]*?;\n/g, '')
+    .replace(/\['cash', 'bankTransfer', 'qris', 'virtualAccount', 'creditCard', 'other'\]/g, '[]').replace(/'\/api\/finance-executions(\/execute)?'/g, "''")
+    .replace(/\b(paymentMethod|executedOn|swpPayment(Title)?)\b/g, 'X').replace(/\b[A-Za-z_]*(FinanceExecution|financeExecution|FINANCE_EXECUTION)[A-Za-z_0-9]*\b/g, 'X');
+  check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|payslip)\b/i.test(all) && !/ledger|journal|payment|execut|\/finance|markPaid|\bpay\(/i.test(afi4fStrip(all).replace(/posted to Finance|It is not a payment|Nothing is paid or executed\. A posting cannot be reversed\.|'\/api\/finance-postings(\/payroll-plan|\/supplemental-payroll)?'/g, '')),
     'AFI-4c1: no statutory payroll, payslip, Finance, payment or execution code');
   check(/const PAYROLL_TRANSITIONS = Object\.freeze\(\{\s*review:[\s\S]*approve:[\s\S]*return:[\s\S]*cancel:[^}]*\}\)/.test(apiC) && !/commit/i.test((/const PAYROLL_TRANSITIONS = [\s\S]*?\}\);/.exec(apiC) || [''])[0])
     // AFI-4c2 authorized revision: Ready also offers commit (BF-4c2). Was: Ready: return / cancel.
@@ -6701,7 +6710,9 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
     'AFI-4c2: the words are D-AFI4c2-3 = A — "Commit payroll", "Committing…", "Retry commit", "Committed — final, not paid"; never Paid or Post to Finance');
   check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\./.test(all), 'AFI-4c2: still no number conversion, Math, formatter or Intl in the Payroll modules');
   check(/tab\('swSectionPayroll', ceo \? 'Payroll' : 'My payroll', payroll === true\)/.test(wsC) && /function sessionPayrollMineDetailHTML\(w\)/.test(viewC)
-    && !/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|net salary|bank|payment date)\b/i.test(viewC.replace(/It is not a payment/g, '')),
+    // AFI-4f authorized revision: the one label of the BF-4f code bankTransfer (pinned in the AFI-4f
+    // section) is not a bank concept of My payroll. Was: no bank word at all.
+    && !/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|net salary|bank|payment date)\b/i.test(viewC.replace(/It is not a payment/g, '').replace(/bankTransfer: 'Bank transfer'/g, '')),
     'AFI-4c2: an Employee\'s My payroll is a read-only card of the server\'s fields only — no statutory or bank concept');
   check((rd('core/auth-boot.js').match(/SessionPayrollStore\.clear\(\);/g) || []).length >= 1 && /forgetDrift\(\); commitIntent = null;/.test(storeC),
     'AFI-4c2: AuthBoot (unchanged) clears the store, and clear() destroys the drift, the intent and its key');
@@ -7119,12 +7130,14 @@ console.log('== AFI-4e — SESSION FINANCE POSTING (CEO) ==');
   check(touching.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
     && !/FinancePosting|finance-postings/.test(rd('people/payroll-ops-engine.js') + rd('people/supplemental-engine.js') + rd('finance/execution-center.js') + rd('finance/transactions.js')),
     'AFI-4e: only the three SESSION Payroll modules know the Finance posting client — the LOCAL payroll engine, Supplemental engine, Execution Center and transactions are untouched');
-  // Package and module order: no new module; 100 files; the AFI-4e digest.
+  // Package and module order: no new module; 100 files.
+  // AFI-4f authorized revision: the package changed with AFI-4f (frontend only) and its new digest is
+  // pinned in the AFI-4f section. Was: digest e3e56858… (AFI-4e).
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 100 && pkg.actions === 21
-    && pkg.packageDigest === 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
-    'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files at digest e3e56858…, ACTIONS 21');
+    && pkg.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files, ACTIONS 21 (its digest: the AFI-4f section)');
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
@@ -7225,9 +7238,15 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walkJs(q); else if (e.name.endsWith('.js')) jsFiles.push(q); } };
   walkJs(path.join(root, 'js'));
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(!jsFiles.some((f) => /finance-executions|FinanceExecution|financeExecution/.test(read(f)))
-    && manifest.files.length === 100 && manifest.actions === 21 && manifest.packageDigest === 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
-    'BF-4f: backend only (D-FEX-7 = A) — no frontend module names a Finance execution; the package is unchanged (100 files, digest e3e56858…), ACTIONS 21');
+  // AFI-4f authorized revision: AFI-4f is the frontend of these routes — exactly the three SESSION
+  // Payroll modules name a Finance execution, only core/payroll-api.js names its routes (pinned in the
+  // AFI-4f section), and the package changed with it (its digest: the AFI-4f section). Was: no frontend
+  // module names a Finance execution; the package unchanged at digest e3e56858… (BF-4f backend only).
+  const exeFiles = jsFiles.filter((f) => /finance-executions|FinanceExecution|financeExecution/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).sort();
+  check(exeFiles.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
+    && jsFiles.filter((f) => /finance-executions/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
+    && manifest.files.length === 100 && manifest.actions === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    'BF-4f/AFI-4f: exactly the three SESSION Payroll modules name a Finance execution and only core/payroll-api.js its routes; the package keeps 100 files, ACTIONS 21 (its digest: the AFI-4f section)');
   check(['Unit/FinanceExecutionDomainTest.php', 'Http/FinanceExecutionRoutingTest.php', 'Db/FinanceExecutionSchemaTest.php', 'Db/FinanceExecutionWorkflowTest.php', 'Db/FinanceExecutionConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /X5 race/.test(srv('tests/Db/FinanceExecutionConcurrencyTest.php')) && /'execute' => '\/api\/finance-executions\/execute'/.test(srv('tests/Support/finance-worker.php')),
     'BF-4f: the domain, routing, schema, workflow and X1–X5 concurrency tests exist');
@@ -7240,6 +7259,144 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   // N11 (resolved in BF-4f's docs commit): AFI-4e is merged as PR #51 at its canonical merge, not deployed — no longer a local candidate.
   check([ctx, arch, ms].every((t) => !/AFI-4e[^.]*local candidate|local candidate on `feature\/afi-4e|AFI-4e \(below\) is a local candidate/.test(t) && /PR #51/.test(t) && /d5a5fad1783e42f0f75b8e692aa05af7fd1837f6/.test(t)),
     'AFI-4e (N11): AI_CONTEXT, ARCHITECTURE and the milestone record AFI-4e as merged (PR #51, canonical d5a5fad1…) — never as a local candidate');
+}
+
+// ===== AFI-4f — SESSION RECORD PAYMENT (CEO; BF-4f FINANCE EXECUTION) =====
+// Owner decisions D-AFI4f-1 = A (inside the AFI-4e Finance card of the Committed plan and Supplemental
+// details, no Finance screen), D-AFI4f-2 = A (the three Payroll modules extended, no new module, 100
+// files), D-AFI4f-3 = A (the words "Record payment", "Recording…", "Retry recording", "Payment
+// recorded — paid outside TAM OS"), D-AFI4f-4 = A (a display-only amount, an empty required Date paid
+// whose Jakarta-today max is only a hint, a required Payment method with no default), D-AFI4f-5 = A
+// (an unknown outcome is re-read, never resent automatically; a deliberate same-key "Retry recording"
+// of the frozen full body only while the reads stay unresolved), D-AFI4f-6 = A (not recorded /
+// recording / checking / recorded, plus a read failure; details only), D-AFI4f-7 = A (nothing for an
+// Employee) and D-AFI4f-8 = A (narrow verifier revisions, this section). Frontend only, over the
+// canonical BF-4f (PR #52): no backend, migration, ApiClient, AuthBoot, CSS or LOCAL change; ACTIONS
+// 21; AUTH_MODE LOCAL; the Payroll harness extended (CI stays at ten). TAM OS moves no money.
+console.log('== AFI-4f — SESSION RECORD PAYMENT (CEO) ==');
+{
+  const rd = (f) => read(path.join(root, 'js', f));
+  const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1');
+  const srv = (f) => { const q = path.join(root, 'server', 'src', f); return fs.existsSync(q) ? read(q) : ''; };
+  const apiC = code(rd('core/payroll-api.js')), storeC = code(rd('core/session-payroll.js')), viewC = code(rd('ui/session-payroll-view.js'));
+  const all = apiC + '\n' + storeC + '\n' + viewC;
+  const phpList = (src, name) => { const m = new RegExp('const ' + name + " = \\[([^\\]]*)\\]").exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  const jsList = (src, name) => { const m = new RegExp('const ' + name + ' = Object\\.freeze\\(\\[([^\\]]*)\\]\\)').exec(src); return m ? (m[1].match(/'([^']*)'/g) || []).map((x) => x.slice(1, -1)) : null; };
+  // The contract is BF-4f's: the seven-key projection, the closed method list, the list cap.
+  const xview = srv('Finance/FinanceExecutionView.php'), xinput = srv('Finance/FinanceExecutionInput.php');
+  const fields = phpList(xview, 'FIELDS'), methods = phpList(xinput, 'PAYMENT_METHODS');
+  check(!!fields && fields.length === 7 && JSON.stringify(jsList(apiC, 'FINANCE_EXECUTION_KEYS')) === JSON.stringify(fields.slice().sort())
+    && !!methods && methods.length === 6 && JSON.stringify(jsList(apiC, 'FINANCE_EXECUTION_PAYMENT_METHODS')) === JSON.stringify(methods)
+    && /public const LIST_CAP = 2000;/.test(srv('Data/Finance/FinanceExecutionStore.php')) && /const FINANCE_EXECUTION_LIST_CAP = 2000;/.test(apiC),
+    'AFI-4f: contract = BF-4f — an execution is exactly FinanceExecutionView::FIELDS (7), its method one of FinanceExecutionInput::PAYMENT_METHODS (6, in order), a month answer never above FinanceExecutionStore::LIST_CAP');
+  check(/const SESSION_FINANCE_EXECUTION_METHOD_TEXT = Object\.freeze\(\{ cash: 'Cash', bankTransfer: 'Bank transfer', qris: 'QRIS', virtualAccount: 'Virtual account', creditCard: 'Credit card', other: 'Other' \}\);/.test(viewC)
+    && /FINANCE_EXECUTION_PAYMENT_METHODS\.map\(function\(c\)\{ return '<option value="' \+ c \+ '"/.test(viewC) && (viewC.match(/<option /g) || []).length === 2,
+    'AFI-4f: the six codes map to fixed labels (never widening the list); the select offers "Choose a payment method" and exactly the server codes');
+  // The routes: FinanceExecutionApi names exactly the two BF-4f routes of Routes.php.
+  const routes = srv('Http/Routes.php');
+  const serverPaths = (routes.match(/new Route\('[A-Z]+', '(\/api\/finance-executions[^']*)'/g) || []).map((l) => l.replace(/^.*'(\/api\/[^']*)'$/, '$1')).sort();
+  const clientPaths = (apiC.match(/'\/api\/finance-executions[^']*'/g) || []).map((x) => x.slice(1, -1)).sort();
+  check(serverPaths.length === 2 && JSON.stringify(clientPaths) === JSON.stringify(serverPaths) && /const FINANCE_EXECUTION_ROUTE = '\/api\/finance-executions\/execute';/.test(apiC),
+    'AFI-4f: FinanceExecutionApi names exactly the two BF-4f routes of server/src/Http/Routes.php — the month read and the one execution command');
+  // The exact body — the FinanceExecutionInput allowlist — and a strictly confirming answer.
+  check(/self::onlyKeys\(\$json, \['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey'\]\);/.test(xinput)
+    && /body: \{ financePostingId: i\.financePostingId, expectedAmount: i\.amount, executedOn: i\.executedOn, paymentMethod: i\.paymentMethod, idempotencyKey: i\.key \}/.test(apiC)
+    && (apiC.match(/body: \{ financePostingId/g) || []).length === 1,
+    'AFI-4f: the body is exactly { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey } — never an employee, month, account, reference, note or a second amount');
+  check(/\(e\) => e\.financePostingId === i\.financePostingId && e\.amount === i\.amount && e\.executedOn === i\.executedOn && e\.paymentMethod === i\.paymentMethod\s*&& e\.monthKey === i\.monthKey && e\.employeeId === i\.employeeId/.test(apiC)
+    && /e\.monthKey !== monthKey \|\| out\.some\(\(x\) => x\.id === e\.id \|\| x\.financePostingId === e\.financePostingId\)/.test(apiC) && /o\.amount === '0\.00'/.test(apiC)
+    && /!financeExecutionIsDate\(o\.executedOn\) \|\| !financeExecutionIsMethod\(o\.paymentMethod\)/.test(apiC),
+    'AFI-4f: a success counts only for an execution of the same posting at the same amount, date, method, employee and month; a month answer is refused whole for another month, a second execution of one posting or id, a zero amount, a bad date or an unknown method');
+  check(/const FINANCE_POSTING_KEYS = Object\.freeze\(\['amount', 'employeeId', 'id', 'monthKey', 'sourceId', 'sourceKind', 'status'\]\);/.test(apiC)
+    && /if\(!isPlain\(o\) \|\| !exactKeys\(o, FINANCE_POSTING_KEYS\)\) return null;/.test(apiC),
+    'AFI-4f: the seven-key AFI-4e posting decoder is unchanged — the execution has its own decoder (D-FEX-6 = A)');
+  // One frozen intent per deliberate confirmation: the posting's own amount, the one Web Crypto key.
+  check(/amount: posting\.amount,\s*executedOn: executedOn, paymentMethod: paymentMethod, key: key \}\);/.test(apiC) && /const key = payrollIdempotencyKey\(\);\s*if\(key === null\) return null;\s*return Object\.freeze\(\{ financePostingId: posting\.id/.test(apiC)
+    && (all.match(/getRandomValues\(/g) || []).length === 1 && (storeC.match(/financeExecutionIntent\(/g) || []).length === 1 && (storeC.match(/FinanceExecutionApi\.record\(/g) || []).length === 1
+    && /const intent = financeExecutionIntent\(status\.posting, d\.executedOn, d\.paymentMethod\);/.test(storeC)
+    && /SessionPayrollStore\.setExecIntent\(intent\);\s*return sendRecord\(SessionPayrollStore\.snapshot\(\)\.execIntent, sourceKind, false\);/.test(storeC),
+    'AFI-4f: one intent per confirmation — the confirmed posting\'s own amount string, the date and method entered, the one Web Crypto key — frozen before the one send path');
+  check(/if\(s\.panel \|\| !i \|\| sessionFinanceExecutionIntentState\(s, i\) !== 'unresolved'\) return;/.test(storeC) && /return sendRecord\(i, shown\[0\], true\);/.test(storeC)
+    && /return \(p\.length === 1 && p\[0\]\.amount === intent\.amount && p\[0\]\.employeeId === intent\.employeeId\) \? 'unresolved' : 'stale';/.test(storeC),
+    'AFI-4f: Retry recording sends the SAME frozen intent, only while the reads show its posting at the same amount with no execution (D-AFI4f-5 = A)');
+  check(/function settleFinanceExecution\(token, out, s\)\{[\s\S]*?if\(COMMIT_AMBIGUOUS\.indexOf\(out\.kind\) !== -1\)\{\s*SessionPayrollStore\.failMutation\(token, SESSION_PAYROLL_MUTATION_STATUS\.AMBIGUOUS, out\);\s*SessionPayrollStore\.setFocus\('message'\);\s*loadFinance\(s\.month\);/.test(storeC)
+    && /SessionPayrollStore\.failMutation\(token, SESSION_PAYROLL_MUTATION_STATUS\.ERROR, out\);\s*SessionPayrollStore\.dropExecIntent\(\);/.test(storeC)
+    && /if\(state === 'recorded'\)\{\s*SessionPayrollStore\.dropExecIntent\(\);[\s\S]*?\} else if\(state === 'stale'\)\{\s*SessionPayrollStore\.dropExecIntent\(\);/.test(storeC)
+    && /if\(applied && \(kind === 'fin' \|\| kind === 'exec'\)\) reconcileFinanceExecution\(\);/.test(storeC),
+    'AFI-4f: an unknown outcome (500 / 503 / network / timeout / invalid) keeps the intent and re-reads (never resent); any 409 or other refusal drops it and re-reads; the reads decide recorded / unresolved / stale');
+  // Fail-closed eligibility: Record payment only for a consistent posting whose executions are read.
+  check(/if\(!f \|\| f\.state !== 'posted'\) return null;/.test(storeC)
+    && /if\(p\.amount !== financePostingSourceAmount\(sourceKind, source\) \|\| p\.employeeId !== source\.employeeId \|\| p\.monthKey !== source\.monthKey\) return Object\.freeze\(\{ state: 'inconsistent', posting: p \}\);/.test(storeC)
+    && /if\(s\.execStatus !== SESSION_PAYROLL_STATUS\.READY \|\| !s\.exec \|\| s\.execMonth !== p\.monthKey\) return Object\.freeze\(\{ state: 'loading', posting: p \}\);/.test(storeC)
+    && /const hits = s\.exec\.filter\(\(e\) => e\.financePostingId === p\.id\);/.test(storeC)
+    && /if\(s\.panel \|\| s\.postIntent \|\| s\.execIntent\) return;[\s\S]*?if\(!status \|\| status\.state !== 'unrecorded'\) return;/.test(storeC)
+    && /if\(!source \|\| source\.id !== a\.id \|\| s\.postIntent \|\| s\.execIntent \|\| !status \|\| status\.state !== 'unrecorded'\)\{ SessionPayrollStore\.closePanel\(\); paint\(\); return; \}/.test(storeC),
+    'AFI-4f: Record payment opens and sends only for a posted, consistent source whose executions are read and hold none of it, with no posting or execution intent unresolved — never while a read is idle, loading, failed or inconsistent');
+  check(/\+ sessionFinanceExecutionHTML\(w, sourceKind, source, dis\);/.test(viewC) && (viewC.match(/sessionFinanceExecutionHTML\(/g) || []).length === 2
+    && /status\.state === 'posted'\)\{[\s\S]*?sessionFinanceExecutionHTML\(w, sourceKind, source, dis\)/.test(viewC),
+    'AFI-4f: the payment status is rendered only inside the Finance card\'s posted state (D-AFI4f-1 = A) — no other screen, list column or navigation (D-AFI4f-6 = A)');
+  // CEO only: the Employee never reads or records an execution.
+  check(/function loadFinanceExecutions\(key\)\{\s*if\(!sessionPayrollIsCeo\(principalNow\(\)\) \|\| !OvertimeCalendar\.isMonth\(key\)\) return;/.test(storeC)
+    && /retryRecording\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /retryFinanceExecutionStatus\(\)\{\s*if\(!canAct\(\)\) return;/.test(storeC) && /setPayDraft\(name, value\)\{\s*if\(!canAct\(\)\) return;/.test(storeC)
+    && !/sessionFinanceExecutionHTML\(|swpPay(ment|RecordBtn|RetryBtn|StatusRetryBtn|Date|Method)|swpSuppPay/.test((/function sessionPayrollMineDetailHTML[\s\S]*?\n\}/.exec(viewC) || [''])[0] + (/function sessionSupplementalMineDetailHTML[\s\S]*?\n\}/.exec(viewC) || [''])[0]),
+    'AFI-4f: CEO only — the execution read is the CEO\'s, every Record payment entry point is behind canAct(), and an Employee\'s cards carry no payment status (D-AFI4f-7 = A)');
+  // The form: exactly a display-only amount, Date paid and Payment method.
+  const form = (/function sessionFinanceExecutionPanelHTML\(w\)\{[\s\S]*?\n\}/.exec(viewC) || [''])[0];
+  check(form !== '' && (form.match(/<input/g) || []).length === 1 && /type="date" id="swpPayDate" name="executedOn" required aria-required="true" autocomplete="off" max="' \+ escapeHtml\(financeExecutionToday\(\)\) \+ '"/.test(form)
+    && (form.match(/<select/g) || []).length === 1 && /id="swpPayMethod" name="paymentMethod" required/.test(form) && (form.match(/name="/g) || []).length === 2
+    && !/<textarea|contenteditable|<input[^']*(amount|Amount)/.test(form) && /escapeHtml\(T\.amount\) \+ '<\/th><td>' \+ escapeHtml\(amount\)/.test(form) && /const amount = status \? status\.posting\.amount : '';/.test(form),
+    'AFI-4f: the form is exactly the posting\'s amount (display only), Date paid (one date input, its max the Jakarta today) and Payment method (one select) — no amount, account, reference or note field (D-AFI4f-4 = A)');
+  check(/const FINANCE_EXECUTION_JAKARTA_OFFSET_MS = 25200000;/.test(apiC) && /return new Date\(\(now \|\| new Date\(\)\)\.getTime\(\) \+ FINANCE_EXECUTION_JAKARTA_OFFSET_MS\)\.toISOString\(\)\.slice\(0, 10\);/.test(apiC)
+    && (all.match(/financeExecutionToday\(/g) || []).length === 2 && /if\(!financeExecutionIsDate\(d\.executedOn\)\) missing\.push\('executedOn'\);/.test(storeC)
+    && !/executedOn\s*[<>]=?|[<>]=?\s*financeExecutionToday|strcmp/.test(all),
+    'AFI-4f: the Jakarta today (UTC+7) is only the date field\'s max hint — the browser checks the date\'s shape and never its upper bound; the server decides executedOn <= today');
+  // The words (D-AFI4f-3 = A); nothing that pays, transfers, settles, reverses or corrects.
+  check(/record: 'Record payment', recording: 'Recording…', retry: 'Retry recording', retryRead: 'Retry payment status',/.test(viewC)
+    && /recorded: 'Payment recorded — paid outside TAM OS\. TAM OS did not send this money\.',/.test(viewC) && /unrecorded: 'Payment not recorded in TAM OS\.',/.test(viewC)
+    && /explain: 'Record a payment that was already made outside TAM OS\. TAM OS does not send or move money\.',/.test(viewC)
+    && /const SESSION_FINANCE_EXECUTION_CONFIRM = Object\.freeze\(\['Records that Rp ', ' was paid in full outside TAM OS\. TAM OS does not send or move money\. A recorded payment cannot be changed or reversed\.'\]\);/.test(viewC)
+    && /amount: 'Amount paid \(Rp\)', date: 'Date paid', method: 'Payment method', chooseMethod: 'Choose a payment method',/.test(viewC)
+    && /const SESSION_FINANCE_EXECUTION_CONFLICT = 'TAM OS did not record this payment \(a conflict was reported\)\./.test(viewC)
+    && !/finance_(executed|amount|duplicate)|idempotency_mismatch/.test(all),
+    'AFI-4f: the words are D-AFI4f-3 = A — "Record payment", "Recording…", "Retry recording", "Payment recorded — paid outside TAM OS", the approved confirmation; a 409 never names its cause');
+  check(!/\b(execute|pay|payNow|transfer|sendMoney|reconcile|reverse|correct|refund)\s*\(/i.test(all)
+    && !/\bPay\b|Execute|Executed|Mark paid|\bPaid\b|payment date|Settled|Reconciled|Transferred|Partial|Batch/.test(viewC)
+    && !/companyAccount|bankAccount|\breference\b|\bnotes?\b|installment|schedule/i.test(all.replace(/' Reference: '/g, "''")),
+    'AFI-4f: no execute / pay / transfer / reconcile / reverse / correct / refund function; no Pay, Execute, Executed, Mark paid, Paid, payment date, settled, reconciled, transferred, partial or batch word; no account, reference, note or schedule concept');
+  // Money: exact strings only.
+  check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\.|BigInt/.test(all) && !/\bamount\s*[-+*\/]\s*[a-z0-9]|[-+*\/]\s*[a-z.]*\.amount\b(?!\s*[,)'])/.test(all.replace(/'[^'\n]*'/g, "''")),
+    'AFI-4f: still no number conversion, Math, formatter, Intl or arithmetic on an amount — the posting\'s own string is shown and sent');
+  // The SESSION firewall: memory only; cleared with the identity; LOCAL untouched.
+  check(/forgetFinance\(\); postIntent = null;\s*forgetFinanceExecutions\(\); execIntent = null; payDraft = SESSION_FINANCE_EXECUTION_DRAFT_IDLE;/.test(storeC)
+    && /forgetFinance\(\);\s*forgetFinanceExecutions\(\);/.test(storeC.replace(/\/\/[^\n]*/g, '')) && !/localStorage|sessionStorage|indexedDB|document\.cookie/.test(all),
+    'AFI-4f: clear() (logout, session loss, a new principal) destroys the executions, the intent, its key and the draft; a month change forgets the executions; nothing is stored');
+  const localOnly = [];
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walk(q); else if (e.name.endsWith('.js')) localOnly.push(q); } };
+  walk(path.join(root, 'js'));
+  const touching = localOnly.map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).filter((f) => /FinanceExecution|financeExecution|FINANCE_EXECUTION|finance-executions/.test(read(path.join(root, 'js', f))));
+  check(touching.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
+    && /const PAYMENT_METHODS = \['Cash','Bank Transfer','QRIS','Virtual Account','Credit Card','Other'\];/.test(rd('core/constants.js')),
+    'AFI-4f: only the three SESSION Payroll modules know the execution client — the LOCAL Execution Center, transactions and PAYMENT_METHODS are untouched');
+  // Package and module order: no new module; 100 files; the AFI-4f digest.
+  const mods = require(path.join(root, 'tools', 'module-order.js'));
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(mods.length === new Set(mods).size && mods.length === 86 && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 100 && pkg.actions === 21
+    && pkg.packageDigest === 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    'AFI-4f: no new production module (module order and index.html unchanged); the package keeps 100 files at digest d030d544…, ACTIONS 21');
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql' && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /case FinanceExecute = 'finance\.execute';/.test(read(path.join(root, 'server', 'src', 'Policy', 'Action.php'))),
+    'AFI-4f: frontend only — migration head 0035 (BF-4f), ACTIONS 21 (the existing finance.execute), AUTH_MODE LOCAL');
+  const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js')), stub = read(path.join(root, 'tools', 'serve-auth-stub.js'));
+  check(['X. ', 'X1. ', 'X2. ', 'X3. ', 'X4. ', 'X5. ', 'X6. ', 'X7. ', 'X8. ', 'X9. '].every((t) => harness.indexOf("'" + t) !== -1)
+    && /\/__stub\/fail-next-execution/.test(stub) && /p === '\/api\/finance-executions\/execute' && req\.method === 'POST'/.test(stub) && /p === '\/api\/finance-executions' && req\.method === 'GET'/.test(stub),
+    'AFI-4f: the Payroll runtime harness proves Record payment (sections X–X9) and the auth stub models BF-4f for the browser');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md')), arch = read(path.join(root, 'ARCHITECTURE.md')), ms = read(path.join(root, 'docs', '05-milestones', 'Milestones.md'));
+  check(['D-AFI4f-1 = A', 'D-AFI4f-2 = A', 'D-AFI4f-3 = A', 'D-AFI4f-4 = A', 'D-AFI4f-5 = A', 'D-AFI4f-6 = A', 'D-AFI4f-7 = A', 'D-AFI4f-8 = A'].every((d) => ctx.includes(d)) && /AFI-4f/.test(arch)
+    && /AFI-4f/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && /AFI-4f/.test(ms) && /AFI-4f/.test(read(path.join(root, 'CHANGELOG.md'))),
+    'AFI-4f: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the deployment note (DEPLOYMENT), the milestone and the changelog');
+  // N12 (resolved in AFI-4f's docs commit): BF-4f is merged as PR #52 at its canonical merge, not deployed — no longer a local candidate.
+  check([ctx, arch, ms].every((t) => !/BF-4f[^.]*local candidate|local candidate on `feature\/bf-4f|BF-4f \(below\) is a local candidate/.test(t) && /PR #52/.test(t) && /171392a16800c85e128c178f934d72c96a6255be/.test(t)),
+    'BF-4f (N12): AI_CONTEXT, ARCHITECTURE and the milestone record BF-4f as merged (PR #52, canonical 171392a1…) — never as a local candidate');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
