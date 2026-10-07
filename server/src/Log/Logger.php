@@ -52,6 +52,23 @@ final class Logger
         ]);
     }
 
+    /**
+     * OPS-1: one line per server/bin/backup.php create run — the outcome, the backup id, its size,
+     * the duration and a fixed reason code. Never a path, a key, a row value or SQL.
+     */
+    public function backup(string $outcome, ?string $backupId, int $bytes, int $durationMs, ?string $reason): void
+    {
+        $this->write([
+            'level' => $outcome === 'created' ? 'info' : 'error',
+            'event' => 'backup',
+            'outcome' => $outcome === 'created' ? 'created' : 'failed',
+            'backupId' => $backupId !== null && preg_match('/^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/D', $backupId) === 1 ? $backupId : null,
+            'bytes' => $bytes,
+            'durationMs' => $durationMs,
+            'reason' => $reason !== null && preg_match('/^[a-z][a-z_]{0,47}$/D', $reason) === 1 ? $reason : null,
+        ]);
+    }
+
     public function exception(string $requestId, \Throwable $e): void
     {
         // A PDOException message can name the user, host, SQL or row values: never log it.

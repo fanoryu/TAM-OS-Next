@@ -16,7 +16,7 @@ final class ConfigLoader
 {
     public const DEFAULT_BODY_LIMIT = 65536;
     public const MAX_BODY_LIMIT = 1048576;
-    private const KEYS = ['env', 'origin', 'log_path', 'body_limit_bytes', 'db', 'mail'];
+    private const KEYS = ['env', 'origin', 'log_path', 'body_limit_bytes', 'db', 'mail', 'backup'];
     private const PLACEHOLDER = 'CHANGE_ME';
 
     public static function resolvePath(): string
@@ -91,7 +91,17 @@ final class ConfigLoader
             throw new ConfigError('invalid_body_limit');
         }
 
-        return new Config($env, $origin, $logPath, $limit, $data['db'] ?? null, $data['mail'] ?? null);
+        // OPS-1: the backup section is validated by TamOs\Ops\BackupConfig when the backup CLI needs
+        // it; here only its directory is kept out of a known document root, like the log.
+        $backup = $data['backup'] ?? null;
+        if ($backup !== null && !is_array($backup)) {
+            throw new ConfigError('invalid_backup');
+        }
+        if (is_array($backup) && is_string($backup['dir'] ?? null) && self::isInside($backup['dir'], $documentRoot)) {
+            throw new ConfigError('backup_inside_document_root');
+        }
+
+        return new Config($env, $origin, $logPath, $limit, $data['db'] ?? null, $data['mail'] ?? null, $backup);
     }
 
     private static function isAbsolute(string $path): bool

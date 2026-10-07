@@ -23,6 +23,7 @@ namespace TamOs\Data;
 final class Database
 {
     public const READ_COMMITTED_SQL = 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED';
+    public const SNAPSHOT_SQL = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY';
 
     private ?\PDO $pdo = null;
     private bool $inTransaction = false;
@@ -91,6 +92,24 @@ final class Database
         } finally {
             $this->inTransaction = false;
         }
+    }
+
+    /**
+     * OPS-1: runs $fn in one read-only REPEATABLE READ transaction, so every InnoDB read inside it
+     * sees the one snapshot taken at its first read, whatever commits meanwhile. Any write inside
+     * is refused by the server; nested transactions are refused here.
+     *
+     * @template T
+     * @param callable(Database): T $fn
+     * @return T
+     */
+    public function snapshot(callable $fn): mixed
+    {
+        if ($this->inTransaction) {
+            throw new \LogicException('nested database transaction');
+        }
+        $this->run(self::SNAPSHOT_SQL, [], 'begin');    // applies to the next transaction only
+        return $this->transaction($fn);
     }
 
     /** @param array<int|string, int|string|bool|null> $params */
