@@ -1,5 +1,5 @@
 /* ============================================================
-   PAYROLL API (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e) — js/core/payroll-api.js
+   PAYROLL API (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e, AFI-4f) — js/core/payroll-api.js
    ------------------------------------------------------------
    The SESSION-mode client for the server payroll plan (BF-4c1, PR #44; BF-4c2, PR #46): three
    reads over ApiClient and six writes over authSessionMutation (js/core/auth-boot.js), each
@@ -58,6 +58,8 @@
    client of the BF-4d Supplemental Payroll routes, over the same wire.
    AFI-4e: FinancePostingDecoders, FinancePostingRequests and FinancePostingApi (after them) are the
    client of the BF-4e Finance posting routes (D-AFI4e-2 = A: this module, no new one).
+   AFI-4f: FinanceExecutionDecoders, FinanceExecutionRequests and FinanceExecutionApi (end of this
+   file) are the client of the BF-4f Finance execution routes (D-AFI4f-2 = A: this module, no new one).
 
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
@@ -693,6 +695,139 @@ const FinancePostingApi = (function(){
       const route = Object.prototype.hasOwnProperty.call(FINANCE_POSTING_ROUTES, i.sourceKind) ? FINANCE_POSTING_ROUTES[i.sourceKind] : null;
       return write(route, FinancePostingRequests.post(i), (d) => FinancePostingDecoders.postingResponse(d),
         (p) => p.sourceKind === i.sourceKind && p.sourceId === i.sourceId && p.amount === i.amount && p.monthKey === i.monthKey && p.employeeId === i.employeeId);
+    }
+  });
+})();
+
+/* ============================================================
+   AFI-4f — FINANCE EXECUTION: RECORD PAYMENT (over BF-4f, PR #52; owner decisions D-AFI4f-1..8 = A)
+   ------------------------------------------------------------
+   The SESSION client of the BF-4f Finance execution routes, over the same wire: the CEO's month
+   read and the one command that records that a Planned posting was paid in full OUTSIDE TAM OS.
+   TAM OS moves no money: an execution is a statement the CEO records, never a transfer.
+
+     month(monthKey)   GET /api/finance-executions?month=YYYY-MM       every execution of the month (CEO)
+     record(intent)    POST /api/finance-executions/execute            exactly { financePostingId,
+                       expectedAmount, executedOn, paymentMethod, idempotencyKey } of ONE execution
+                       intent (financeExecutionIntent): the confirmed posting's own amount string,
+                       unchanged, the date and the method the CEO chose, and one Web Crypto key
+                       (payrollIdempotencyKey). Confirmed only by an execution of the same posting, at
+                       exactly that amount, date and method, for the posting's employee and month. A
+                       retry sends the same intent again; the server replays the original execution.
+
+   STRICT DECODING: an execution has exactly FinanceExecutionView::FIELDS; its ids are the server's
+   grammars, its amount a positive whole-Rupiah string, its executedOn a real calendar date and its
+   paymentMethod one of FinanceExecutionInput::PAYMENT_METHODS; a month answer holds only executions
+   of the month asked for, at most one per posting and per id, and at most the server's list cap.
+   Anything else is INVALID_RESPONSE and nothing of it is returned. The seven-key posting decoder
+   above is untouched (D-FEX-6 = A): an execution is a separate record, read separately.
+
+   executedOn: "YYYY-MM-DD", no later than today in the company calendar (Asia/Jakarta) — the
+   SERVER decides that bound (D-AFI4f-4 = A). financeExecutionToday() is only the date field's max
+   hint: Asia/Jakarta is UTC+7 all year (no daylight saving).
+   ============================================================ */
+
+// server/src/Finance/FinanceExecutionView.php FIELDS (sorted); FinanceExecutionInput::PAYMENT_METHODS
+// (order included); FinanceExecutionStore::LIST_CAP.
+const FINANCE_EXECUTION_KEYS = Object.freeze(['amount', 'employeeId', 'executedOn', 'financePostingId', 'id', 'monthKey', 'paymentMethod']);
+const FINANCE_EXECUTION_PAYMENT_METHODS = Object.freeze(['cash', 'bankTransfer', 'qris', 'virtualAccount', 'creditCard', 'other']);
+const FINANCE_EXECUTION_LIST_CAP = 2000;
+const FINANCE_EXECUTION_ROUTE = '/api/finance-executions/execute';
+const FINANCE_EXECUTION_JAKARTA_OFFSET_MS = 25200000;
+const FINANCE_EXECUTION_DATE_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+
+// A real calendar date "YYYY-MM-DD" (the pure OvertimeCalendar helper: year >= 1900).
+function financeExecutionIsDate(v){
+  return typeof v === 'string' && FINANCE_EXECUTION_DATE_PATTERN.test(v) && OvertimeCalendar.isDateIn(v, v.slice(0, 7));
+}
+function financeExecutionIsMethod(v){ return typeof v === 'string' && FINANCE_EXECUTION_PAYMENT_METHODS.indexOf(v) !== -1; }
+// The company calendar's today of `now` (a Date): the date field's hint, never authority.
+function financeExecutionToday(now){
+  return new Date((now || new Date()).getTime() + FINANCE_EXECUTION_JAKARTA_OFFSET_MS).toISOString().slice(0, 10);
+}
+// One execution intent { financePostingId, employeeId, monthKey, amount, executedOn, paymentMethod,
+// key } of one Planned posting, frozen — or null for anything else, a date or method outside the
+// grammar, or a browser without Web Crypto (nothing is then sent). The amount is the posting's own.
+function financeExecutionIntent(posting, executedOn, paymentMethod){
+  if(!posting || posting.status !== FINANCE_POSTING_PLANNED || !financeExecutionIsDate(executedOn) || !financeExecutionIsMethod(paymentMethod)) return null;
+  const key = payrollIdempotencyKey();
+  if(key === null) return null;
+  return Object.freeze({ financePostingId: posting.id, employeeId: posting.employeeId, monthKey: posting.monthKey, amount: posting.amount,
+    executedOn: executedOn, paymentMethod: paymentMethod, key: key });
+}
+
+const FinanceExecutionDecoders = (function(){
+  function isPlain(v){
+    return !!v && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+  }
+  function exactKeys(o, keys){
+    const k = Object.keys(o).sort();
+    if(k.length !== keys.length) return false;
+    for(let i = 0; i < k.length; i++){ if(k[i] !== keys[i]) return false; }
+    return true;
+  }
+  const isId = (v) => typeof v === 'string' && PAYROLL_ID_PATTERN.test(v);
+  // A frozen copy holding exactly the seven execution keys, or null.
+  function financeExecution(o){
+    if(!isPlain(o) || !exactKeys(o, FINANCE_EXECUTION_KEYS)) return null;
+    if(!isId(o.id) || !isId(o.financePostingId) || typeof o.employeeId !== 'string' || !PAYROLL_EMPLOYEE_ID_PATTERN.test(o.employeeId)
+      || !OvertimeCalendar.isMonth(o.monthKey) || !payrollIsAmount(o.amount) || o.amount === '0.00'
+      || !financeExecutionIsDate(o.executedOn) || !financeExecutionIsMethod(o.paymentMethod)) return null;
+    return Object.freeze({ id: o.id, financePostingId: o.financePostingId, employeeId: o.employeeId, monthKey: o.monthKey, amount: o.amount,
+      executedOn: o.executedOn, paymentMethod: o.paymentMethod });
+  }
+  return Object.freeze({
+    financeExecution: financeExecution,
+    // { financeExecutions: [execution…] } of exactly `monthKey` -> frozen array, or null. One
+    // execution per posting (the server's unique key) and per id; never above the server's list cap.
+    monthResponse(data, monthKey){
+      if(!isPlain(data) || !exactKeys(data, ['financeExecutions']) || !Array.isArray(data.financeExecutions) || data.financeExecutions.length > FINANCE_EXECUTION_LIST_CAP) return null;
+      const out = [];
+      for(let i = 0; i < data.financeExecutions.length; i++){
+        const e = financeExecution(data.financeExecutions[i]);
+        if(!e || e.monthKey !== monthKey || out.some((x) => x.id === e.id || x.financePostingId === e.financePostingId)) return null;
+        out.push(e);
+      }
+      return Object.freeze(out);
+    },
+    // { financeExecution } -> the execution, or null.
+    financeExecutionResponse(data){
+      return (isPlain(data) && exactKeys(data, ['financeExecution'])) ? financeExecution(data.financeExecution) : null;
+    }
+  });
+})();
+
+// The allowlisted request mirror of FinanceExecutionInput: { ok: true, body } or { ok: false, fields }.
+const FinanceExecutionRequests = Object.freeze({
+  // Exactly { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey } of one
+  // intent — the amount is the posting's decoded string, sent as it is.
+  record(intent){
+    const i = intent || {};
+    const bad = [];
+    if(typeof i.financePostingId !== 'string' || !PAYROLL_ID_PATTERN.test(i.financePostingId)) bad.push('financePostingId');
+    if(!payrollIsAmount(i.amount) || i.amount === '0.00') bad.push('expectedAmount');
+    if(!financeExecutionIsDate(i.executedOn)) bad.push('executedOn');
+    if(!financeExecutionIsMethod(i.paymentMethod)) bad.push('paymentMethod');
+    if(typeof i.key !== 'string' || !PAYROLL_KEY_PATTERN.test(i.key)) bad.push('idempotencyKey');
+    if(bad.length) return Object.freeze({ ok: false, fields: Object.freeze(bad) });
+    return Object.freeze({ ok: true, body: { financePostingId: i.financePostingId, expectedAmount: i.amount, executedOn: i.executedOn, paymentMethod: i.paymentMethod, idempotencyKey: i.key } });
+  }
+});
+
+const FinanceExecutionApi = (function(){
+  const outcome = payrollApiOutcome, write = payrollApiWrite, refused = PAYROLL_API_REFUSED;
+  return Object.freeze({
+    async month(monthKey){
+      if(!OvertimeCalendar.isMonth(monthKey)) return refused;
+      const res = await ApiClient.request('/api/finance-executions', { method: 'GET', query: { month: monthKey } });
+      return outcome(res, (d) => FinanceExecutionDecoders.monthResponse(d, monthKey));
+    },
+    // One execution intent, sent once per deliberate click (a Retry sends the same intent again).
+    record(intent){
+      const i = intent || {};
+      return write(FINANCE_EXECUTION_ROUTE, FinanceExecutionRequests.record(i), (d) => FinanceExecutionDecoders.financeExecutionResponse(d),
+        (e) => e.financePostingId === i.financePostingId && e.amount === i.amount && e.executedOn === i.executedOn && e.paymentMethod === i.paymentMethod
+          && e.monthKey === i.monthKey && e.employeeId === i.employeeId);
     }
   });
 })();
