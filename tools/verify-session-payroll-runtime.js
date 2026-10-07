@@ -37,6 +37,17 @@
    confirmation, the unknown outcome re-read and never resent, the same-key "Retry posting", a 409
    that never claims its cause, the Finance read failure (no Post), the Employee's isolation and no
    execution semantics. The Committed plan posted here has a total that is NOT base + overtime.
+
+   AFI-4f (owner decisions D-AFI4f-1..8 = A): sections X–X9 prove Record payment over BF-4f — the
+   strict seven-key execution decoders and the five-key request mirror, the payment status inside
+   the Finance card of a posted Committed source only (matched by financePostingId), the fail-closed
+   eligibility (no Record payment while a posting or execution read is idle, loading, failed or
+   inconsistent), the form (display-only amount, empty Date paid with the Jakarta max hint, a
+   Payment method with no default), the exact body with the posting's own amount string, one
+   frozen intent and one key per deliberate confirmation, the unknown outcome re-read and never
+   resent, the same-key "Retry recording", a 409 that never claims its cause, the stale-CSRF
+   replay of the same body and key, principal and session changes, the Employee's isolation and
+   no money-moving semantics. TAM OS only records a payment made outside it.
    ============================================================ */
 
 const fs = require('fs');
@@ -163,6 +174,14 @@ const FIN_SUPP_KEYS = 'expectedAmount,idempotencyKey,supplementalPayrollId';
 const finOk = (list) => ok({ financePostings: list });
 const fone = (p) => ok({ financePosting: p });
 const posting = (id, kind, src, amount) => ({ id: id, sourceKind: kind, sourceId: src.id, employeeId: src.employeeId, monthKey: MONTH, amount: amount, status: 'Planned' });
+// AFI-4f: the BF-4f Finance execution routes and executions of the postings above.
+const EXE = (m) => '/api/finance-executions?month=' + m;
+const EXW = '/api/finance-executions/execute';
+const EXEC_KEYS = 'executedOn,expectedAmount,financePostingId,idempotencyKey,paymentMethod';
+const exeOk = (list) => ok({ financeExecutions: list });
+const xone = (e) => ok({ financeExecution: e });
+const execution = (id, p, date, method, amount) => ({ id: id, financePostingId: p.id, employeeId: p.employeeId, monthKey: p.monthKey, amount: amount || p.amount, executedOn: date, paymentMethod: method });
+const XID1 = 'e7'.repeat(16), XID2 = 'e8'.repeat(16);
 function deferred(){ let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise: promise, resolve: resolve }; }
 
 /* ---------- a recording #app (the SESSION harnesses' element) ---------- */
@@ -240,7 +259,10 @@ function loadRuntime(routes, opts){
     + ' sessionSupplementalActions: sessionSupplementalActions, sessionSupplementalIntentState: sessionSupplementalIntentState,'
     + ' LOCAL_SUPPLEMENTAL_STATUSES: SUPPLEMENTAL_STATUSES,'
     + ' FinancePostingApi: FinancePostingApi, FinancePostingDecoders: FinancePostingDecoders, FinancePostingRequests: FinancePostingRequests,'
-    + ' financePostingIntent: financePostingIntent, sessionFinanceStatus: sessionFinanceStatus, sessionFinanceIntentState: sessionFinanceIntentState };';
+    + ' financePostingIntent: financePostingIntent, sessionFinanceStatus: sessionFinanceStatus, sessionFinanceIntentState: sessionFinanceIntentState,'
+    + ' FinanceExecutionApi: FinanceExecutionApi, FinanceExecutionDecoders: FinanceExecutionDecoders, FinanceExecutionRequests: FinanceExecutionRequests,'
+    + ' financeExecutionIntent: financeExecutionIntent, financeExecutionToday: financeExecutionToday, FINANCE_EXECUTION_PAYMENT_METHODS: FINANCE_EXECUTION_PAYMENT_METHODS,'
+    + ' sessionFinanceExecutionStatus: sessionFinanceExecutionStatus, sessionFinanceExecutionIntentState: sessionFinanceExecutionIntentState, LOCAL_PAYMENT_METHODS: PAYMENT_METHODS };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => {
@@ -328,6 +350,11 @@ const bodyOf = (c) => JSON.parse(c.init.body);
 const countOf = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
 const payrollCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/payroll/.test(c.url));
 const keys = (o) => Object.keys(o).sort().join();
+// AFI-4f security: no regex HTML filtering. rawScript() reports any raw <script opening or closing
+// tag in rendered HTML, whatever its case (the page is lower-cased first; no regex is involved);
+// escapedForm() is the exact text a payload must become (js/core/utils.js escapeHtml's mapping).
+const rawScript = (html) => { const h = String(html).toLowerCase(); return h.indexOf('<script') !== -1 || h.indexOf('</script') !== -1; };
+const escapedForm = (v) => String(v).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('"').join('&quot;').split("'").join('&#39;');
 const buttons = (html) => ['swpReviewBtn', 'swpApproveBtn', 'swpReturnBtn', 'swpCancelBtn'].filter((b) => html.indexOf('id="' + b + '"') !== -1).map((b) => b.slice(3, -3)).join();
 // AFI-4d: the Supplemental writes and the Supplemental action buttons shown, in page order.
 const suppPosts = (rt, route) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && (route ? c.url === route : /^\/api\/supplemental-payrolls\//.test(c.url)));
@@ -336,7 +363,8 @@ const suppButtons = (html) => ['swpSuppReviewBtn', 'swpSuppApproveBtn', 'swpSupp
 
 async function boot(me, routes, opts){
   // AFI-4e: the CEO's Finance read of the month answers no posting unless a test says otherwise.
-  const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1] })], [FIN(MONTH)]: [finOk([])] } : { '/api/employee?id=emp_srv_1': [ok({ employee: { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active', joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' } })] };
+  // AFI-4f authorized revision: and the month's executions none. Was: the postings only.
+  const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [E1] })], [FIN(MONTH)]: [finOk([])], [EXE(MONTH)]: [exeOk([])] } : { '/api/employee?id=emp_srv_1': [ok({ employee: { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active', joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' } })] };
   const rt = loadRuntime(Object.assign({ '/api/auth/me': [ok(me)] }, base, routes || {}), opts);
   await flush();
   return rt;
@@ -383,7 +411,20 @@ async function openFin(routes, opts){
   rt.app.fire('swpOpen5', 'click'); await flush();
   return rt;
 }
-const finPosts = (rt, route) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && (route ? c.url === route : /^\/api\/finance/.test(c.url)));
+// AFI-4f authorized revision: the posting commands only (the execution command: exPosts). Was: any /api/finance POST.
+const finPosts = (rt, route) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && (route ? c.url === route : /^\/api\/finance-postings/.test(c.url)));
+// AFI-4f: the plan PCX open, posted (FPCX) and with no execution unless `routes` says otherwise; the
+// execution writes; the two form fields set as a browser would (input + change).
+const FPCX = posting(FID1, 'payrollPlan', PCX, '999.00');
+const FSCX = posting(FID2, 'supplementalPayroll', SCOM, '4321.00');
+async function openPay(routes, opts){ return openFin(Object.assign({ [FIN(MONTH)]: [finOk([FPCX])] }, routes || {}), opts); }
+const exPosts = (rt) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && c.url === EXW);
+function fill(rt, date, method){ if(date !== null) rt.app.set('swpPayDate', date); if(method !== null) rt.app.set('swpPayMethod', method); }
+async function recordOnce(rt, date, method){
+  rt.app.fire('swpPayRecordBtn', 'click'); await flush();
+  fill(rt, date || '2031-04-10', method || 'bankTransfer');
+  rt.app.fire('swpPanelConfirm', 'click'); await flush();
+}
 
 // The SESSION firewall, after every phase.
 function firewall(rt, label, overtimeOpened){
@@ -404,9 +445,12 @@ function firewall(rt, label, overtimeOpened){
   // confirmation ("… Nothing is paid or executed. …") and the posting messages speak of Finance and
   // Posted (pinned below and in sections F–F9). Was: no Finance wording outside those confirmations.
   const sp = rt.pr();
-  const finOwned = ['finPostPlan', 'finPostSupp'].indexOf(sp.mutation.kind) !== -1 || /^fin/.test(sp.notice || '');
+  // AFI-4f authorized revision: the Record payment form and its messages too (pinned in sections
+  // X–X9). Was: the posting confirmation and the posting messages only.
+  const finOwned = ['finPostPlan', 'finPostSupp', 'finRecordPlan', 'finRecordSupp'].indexOf(sp.mutation.kind) !== -1 || /^(fin|pay)/.test(sp.notice || '');
   let finFree = outsideGenerate.replace(/<section class="card" id="swpFinance"[\s\S]*?<\/section>/g, '')
-    .replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Post this (payroll|supplemental payroll) to Finance\?<\/h2>[\s\S]*?<\/section>/, '');
+    .replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Post this (payroll|supplemental payroll) to Finance\?<\/h2>[\s\S]*?<\/section>/, '')
+    .replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Record the payment of this (payroll|supplemental payroll)\?<\/h2>[\s\S]*?<\/section>/, '');
   if(finOwned) finFree = finFree.replace(/<p class="auth-message[^"]*" id="swpMutationMessage"[^>]*>[^<]*<\/p>/, '');
   check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(finFree) && !/\bPaid\b|Mark paid|\bPay\b/.test(html),
     label + ': no Finance, payment, execution or posting wording (only the preparation and Commit confirmations say nothing is posted to Finance; AFI-4e: the Finance card, the posting confirmation and its messages)');
@@ -420,7 +464,9 @@ function firewall(rt, label, overtimeOpened){
   // Supplemental document shown to the CEO.
   const sd = sp.suppDetail;
   const committedShown = (!!d && !!sp.detailId && d.plan.status === 'Committed') || (!!sd && !!sp.suppDetailId && sd.doc.status === 'Committed');
-  const finShown = /id="swpFinance"|id="swp(Fin|SuppFin)(Post|RetryPost)Btn"|id="swpFinRetryBtn"|Post this (payroll|supplemental payroll) to Finance\?/.test(html);
+  // AFI-4f authorized revision: the payment status, its controls and the Record payment form too.
+  const finShown = /id="swpFinance"|id="swp(Fin|SuppFin)(Post|RetryPost)Btn"|id="swpFinRetryBtn"|Post this (payroll|supplemental payroll) to Finance\?/.test(html)
+    || /id="swpPayment"|id="swp(Pay|SuppPay)RecordBtn"|id="swpPay(Retry|StatusRetry)Btn"|id="swpPay(Date|Method)"|Record the payment of this/.test(html);
   check(!finShown || (!!who && who.principalType === 'ceo' && committedShown), label + ': Finance appears only on a Committed plan or Supplemental document shown to the CEO');
   // AFI-4d authorized revision: a Supplemental document's captured overtime record ids too. Was: IDO only.
   check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO + '|' + IDO2 + '|' + IDO3, 'g'), '')), label + ': no opaque plan or document id in the page (only an overtime record id, by design)');
@@ -436,18 +482,25 @@ function firewall(rt, label, overtimeOpened){
   // AFI-4c2 authorized revision: POST /api/payroll-plans/commit exists (CEO). Was: never a commit request.
   // AFI-4e authorized revision: the CEO's Finance month read and the two BF-4e posting commands
   // exist (an Employee makes none: below). Was: no Finance request at all.
+  // AFI-4f authorized revision: plus exactly the BF-4f month read of the executions and the one
+  // execution command (CEO). Was: the posting read and the two posting commands only.
   check(rt.net.calls.every((c) => !(overtimeOpened ? /^\/api\/(transactions|payments)/ : /^\/api\/(overtime|transactions|payments)/).test(c.url) && !/^\/api\/payroll-plans\/(status|pay|post)/.test(c.url)
-      && (!/^\/api\/finance/.test(c.url) || (/^\/api\/finance-postings\?month=[0-9]{4}-[0-9]{2}$/.test(c.url) && (!c.init || !c.init.method || c.init.method === 'GET'))
-        || ((c.url === FW.plan || c.url === FW.supp) && !!c.init && c.init.method === 'POST'))),
-    label + ': no Overtime, status or payment request is ever made by the Payroll section; Finance only as the month read and the two posting commands');
+      && (!/^\/api\/finance/.test(c.url) || (/^\/api\/finance-(postings|executions)\?month=[0-9]{4}-[0-9]{2}$/.test(c.url) && (!c.init || !c.init.method || c.init.method === 'GET'))
+        || ((c.url === FW.plan || c.url === FW.supp || c.url === EXW) && !!c.init && c.init.method === 'POST'))),
+    label + ': no Overtime, status or payment request is ever made by the Payroll section; Finance only as the two month reads, the two posting commands and the one execution command');
   const badFin = finPosts(rt).filter((c) => keys(bodyOf(c)) !== (c.url === FW.plan ? FIN_PLAN_KEYS : FIN_SUPP_KEYS) || c.init.headers['X-CSRF-Token'] === undefined);
   check(badFin.length === 0, label + ': every Finance posting is a CSRF POST of exactly { payrollPlanId | supplementalPayrollId, expectedAmount, idempotencyKey }');
+  // AFI-4f: every execution command is a CSRF POST of exactly the five BF-4f keys.
+  const badExe = exPosts(rt).filter((c) => keys(bodyOf(c)) !== EXEC_KEYS || c.init.headers['X-CSRF-Token'] === undefined);
+  check(badExe.length === 0, label + ': every execution command is a CSRF POST of exactly { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey }');
   if(who && who.principalType === 'employee'){
     check(posts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/payroll-plan\/drift/.test(c.url)), label + ': an Employee never writes Payroll and never reads drift');
     // AFI-4d: nor writes Supplemental payroll or reads its eligibility.
     check(suppPosts(rt).length === 0 && rt.net.calls.every((c) => !/^\/api\/supplemental-payrolls\/eligibility/.test(c.url)), label + ': an Employee never writes Supplemental payroll and never reads its eligibility');
     // AFI-4e: nor reads or writes Finance.
     check(rt.net.calls.every((c) => !/^\/api\/finance/.test(c.url)) && sp.fin === null && sp.postIntent === null, label + ': an Employee never reads or writes Finance');
+    // AFI-4f: nor reads or writes an execution.
+    check(sp.exec === null && sp.execIntent === null && sp.execStatus === 'idle', label + ': an Employee never reads or records a payment');
   }
   // AFI-4d: every Supplemental write is a CSRF POST of exactly { payrollPlanId }, { id, expectedVersion }
   // or (commit) { id, expectedVersion, expectedTotal, idempotencyKey }; the LOCAL engine's words never appear.
@@ -459,7 +512,7 @@ function firewall(rt, label, overtimeOpened){
 }
 
 (async function main(){
-  console.log('== AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e SESSION PAYROLL — RUNTIME VERIFICATION ==');
+  console.log('== AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e + AFI-4f SESSION PAYROLL — RUNTIME VERIFICATION ==');
 
   /* ---------- 0. the harness itself ---------- */
   {
@@ -1943,13 +1996,23 @@ function firewall(rt, label, overtimeOpened){
   /* ---------- F9. AFI-4e no execution semantics; the store's own guards ---------- */
   {
     const rt = await openFin({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', PCX, '999.00')])] });
+    // AFI-4f authorized revision: a posted card now also holds the AFI-4f payment status (its one
+    // control is Record payment, pinned in X–X9); the posting part itself is unchanged. Was: a
+    // posted card held no control and no payment wording at all.
     const card = (/<section class="card" id="swpFinance"[\s\S]*?<\/section>/.exec(rt.appHTML()) || [''])[0];
-    check(card !== '' && !/<button/.test(card) && !/Execut|Mark paid|payment|Revers|Correct|account|categor|ledger|journal|actual/i.test(card) && !/\bPaid\b/.test(card),
-      'F9. a posted card holds no control and no execution, payment, reversal, correction, account, category or actual vocabulary');
+    const pay = (/<div id="swpPayment"[\s\S]*<\/div>(?=<\/section>)/.exec(card) || [''])[0];
+    const postingPart = card.replace(pay, '');
+    check(card !== '' && pay !== '' && !/<button/.test(postingPart) && !/Execut|Mark paid|payment|Revers|Correct|account|categor|ledger|journal|actual/i.test(postingPart) && !/\bPaid\b/.test(card),
+      'F9. a posted card\'s posting part holds no control and no execution, payment, reversal, correction, account, category or actual vocabulary');
+    check((pay.match(/<button/g) || []).length === 1 && /id="swpPayRecordBtn"[^>]*>Record payment</.test(pay) && !/Execut|Mark paid|Revers|Correct|account|categor|ledger|journal|actual|transfer|settle|reconcil/i.test(pay),
+      'F9. its payment part (AFI-4f) holds exactly one control, Record payment, and no execution, reversal, transfer, settlement or account vocabulary');
     const un = await openFin();
     const ucard = (/<section class="card" id="swpFinance"[\s\S]*?<\/section>/.exec(un.appHTML()) || [''])[0];
     check((ucard.match(/<button/g) || []).length === 1 && /id="swpFinPostBtn"/.test(ucard) && !/Execut|payment|Revers|account|categor/i.test(ucard) && !/\bPaid\b/.test(ucard), 'F9. an unposted card holds exactly one control: Post to Finance');
-    check(un.net.calls.every((c) => !/execut|payment|\/pay\b|revers|correct|transaction/i.test(c.url)), 'F9. no execution, payment, reversal, correction or transaction request exists');
+    // AFI-4f authorized revision: the one execution request here is the BF-4f month read (no
+    // command is sent in this test). Was: no execution request at all.
+    check(un.net.calls.every((c) => !/execut|payment|\/pay\b|revers|correct|transaction/i.test(c.url) || /^\/api\/finance-executions\?month=2031-04$/.test(c.url)) && exPosts(un).length === 0,
+      'F9. no payment, reversal, correction or transaction request exists; the only execution request is the BF-4f month read (nothing recorded here)');
     const s = un.SessionPayrollStore;
     s.setPostIntent({ sourceKind: 'payrollPlan', sourceId: IDPC, employeeId: 'e_c', monthKey: MONTH, amount: '999.00', key: 'a'.repeat(32), extra: 'x' });
     const held = s.snapshot().postIntent;
@@ -1973,6 +2036,562 @@ function firewall(rt, label, overtimeOpened){
   }
 
 
+  /* ---------- X. AFI-4f Record payment: strict decoders, the request mirror, the intent, the date hint ---------- */
+  {
+    const rt = loadRuntime({});
+    const D0 = rt.FinanceExecutionDecoders, R = rt.FinanceExecutionRequests;
+    const inPage = (x) => (x === undefined ? x : rt.parse(JSON.stringify(x)));
+    const D = { financeExecution: (o) => D0.financeExecution(inPage(o)), monthResponse: (o, m) => D0.monthResponse(inPage(o), m), financeExecutionResponse: (o) => D0.financeExecutionResponse(inPage(o)) };
+    const good = execution(XID1, FPCX, '2031-04-10', 'bankTransfer');
+    const g2 = execution(XID2, FSCX, '2031-01-31', 'cash');
+    const d = D.financeExecution(good);
+    check(!!d && Object.isFrozen(d) && keys(d) === 'amount,employeeId,executedOn,financePostingId,id,monthKey,paymentMethod' && d.amount === '999.00' && d.executedOn === '2031-04-10' && d.paymentMethod === 'bankTransfer',
+      'X. an execution decodes to exactly its seven keys (FinanceExecutionView::FIELDS), frozen, the amount, date and method verbatim');
+    check(rt.FINANCE_EXECUTION_PAYMENT_METHODS.every((m) => D.financeExecution(Object.assign({}, good, { paymentMethod: m })) !== null) && rt.FINANCE_EXECUTION_PAYMENT_METHODS.length === 6,
+      'X. each of the six BF-4f payment method codes decodes');
+    const missing = Object.assign({}, good); delete missing.executedOn;
+    [['an extra key', Object.assign({}, good, { companyId: 'c_1' })], ['the idempotency key', Object.assign({}, good, { idempotencyKey: 'a'.repeat(32) })],
+     ['a company account', Object.assign({}, good, { companyAccount: 'x' })], ['a reference', Object.assign({}, good, { reference: 'TRX-1' })], ['a note', Object.assign({}, good, { notes: 'x' })],
+     ['a status', Object.assign({}, good, { status: 'Executed' })], ['a missing key', missing], ['a bad id', Object.assign({}, good, { id: '1' })],
+     ['a bad posting id', Object.assign({}, good, { financePostingId: 'F'.repeat(32) })], ['a bad employee id', Object.assign({}, good, { employeeId: '<script>' })],
+     ['a bad month', Object.assign({}, good, { monthKey: '2031-13' })], ['a zero amount', Object.assign({}, good, { amount: '0.00' })], ['a fractional amount', Object.assign({}, good, { amount: '999.50' })],
+     ['a number amount', Object.assign({}, good, { amount: 999 })], ['a negative amount', Object.assign({}, good, { amount: '-999.00' })],
+     ['an impossible date', Object.assign({}, good, { executedOn: '2031-02-29' })], ['a short date', Object.assign({}, good, { executedOn: '2031-4-10' })],
+     ['a date-time', Object.assign({}, good, { executedOn: '2031-04-10T00:00:00Z' })], ['a number date', Object.assign({}, good, { executedOn: 20310410 })],
+     ['an unknown method', Object.assign({}, good, { paymentMethod: 'wire' })], ['a LOCAL method label', Object.assign({}, good, { paymentMethod: 'Bank Transfer' })],
+     ['a case-changed method', Object.assign({}, good, { paymentMethod: 'BankTransfer' })], ['a hostile method', Object.assign({}, good, { paymentMethod: '<img src=x onerror=alert(1)>' })],
+     ['an empty method', Object.assign({}, good, { paymentMethod: '' })], ['a null', null], ['an array', [good]], ['a string', 'x']]
+      .forEach(([label, o]) => check(D.financeExecution(o) === null, 'X. an execution with ' + label + ' is refused'));
+    check(D0.financeExecution(rt.parse('{"__proto__":{"x":1},"id":"' + XID1 + '","financePostingId":"' + FID1 + '","employeeId":"e_c","monthKey":"2031-04","amount":"999.00","executedOn":"2031-04-10","paymentMethod":"cash"}')) === null,
+      'X. a hostile __proto__ key is an extra key: refused');
+    const two = D.monthResponse({ financeExecutions: [good, g2] }, MONTH);
+    check(Array.isArray(two) && two.length === 2 && Object.isFrozen(two), 'X. a month answer of two executions of the month decodes, frozen');
+    check(Array.isArray(D.monthResponse({ financeExecutions: [Object.assign({}, good, { executedOn: '2031-06-01' })] }, MONTH)), 'X. an execution dated outside its month decodes (BF-4f has no lower or month bound on executedOn)');
+    const many = [];
+    for(let i = 0; i < 2001; i++){ const h = ('00000000' + i.toString(16)).slice(-8); many.push(execution(h.repeat(4), { id: 'ffffffff' + h.repeat(3), employeeId: 'e_' + i, monthKey: MONTH, amount: '1.00' }, '2031-04-01', 'cash')); }
+    [['an execution of another month', { financeExecutions: [Object.assign({}, good, { monthKey: '2031-05' })] }], ['two executions of one posting', { financeExecutions: [good, Object.assign({}, good, { id: XID2 })] }],
+     ['two executions with one id', { financeExecutions: [good, Object.assign({}, g2, { id: XID1 })] }], ['one bad item', { financeExecutions: [good, Object.assign({}, g2, { paymentMethod: 'refund' })] }],
+     ['an extra wrapper key', { financeExecutions: [], total: '1.00' }], ['the postings wrapper', { financePostings: [] }], ['no array', { financeExecutions: {} }],
+     ['more executions than the server cap (2001)', { financeExecutions: many }]]
+      .forEach(([label, data]) => check(D.monthResponse(data, MONTH) === null, 'X. a month answer with ' + label + ' is refused whole'));
+    check(D.monthResponse({ financeExecutions: many.slice(0, 2000) }, MONTH) !== null, 'X. a month answer of exactly the server cap (2000) decodes');
+    check(D.financeExecutionResponse({ financeExecution: good }) !== null && D.financeExecutionResponse({ financeExecution: good, extra: 1 }) === null && D.financeExecutionResponse({ financeExecutions: [good] }) === null
+      && D.financeExecutionResponse({ financePosting: good }) === null, 'X. an execution answer is exactly { financeExecution }');
+    check(rt.FinancePostingDecoders.posting(rt.parse(JSON.stringify(FPCX))) !== null && rt.FinancePostingDecoders.posting(rt.parse(JSON.stringify(Object.assign({}, FPCX, { executedOn: '2031-04-10' })))) === null,
+      'X. the seven-key posting decoder is unchanged: a posting carrying execution data is still refused (D-FEX-6 = A)');
+    const intent = { financePostingId: FID1, employeeId: 'e_c', monthKey: MONTH, amount: '999.00', executedOn: '2031-04-10', paymentMethod: 'qris', key: 'a'.repeat(32) };
+    const r = R.record(intent);
+    check(r.ok && keys(r.body) === EXEC_KEYS && r.body.financePostingId === FID1 && r.body.expectedAmount === '999.00' && r.body.executedOn === '2031-04-10' && r.body.paymentMethod === 'qris' && r.body.idempotencyKey === 'a'.repeat(32),
+      'X. the body is exactly { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey } — never an employee, month, account, reference or note');
+    [['a bad posting id', { financePostingId: 'x' }, 'financePostingId'], ['a zero amount', { amount: '0.00' }, 'expectedAmount'], ['a number amount', { amount: 999 }, 'expectedAmount'],
+     ['an impossible date', { executedOn: '2031-02-30' }, 'executedOn'], ['an empty date', { executedOn: '' }, 'executedOn'], ['an unknown method', { paymentMethod: 'wire' }, 'paymentMethod'],
+     ['an empty method', { paymentMethod: '' }, 'paymentMethod'], ['a bad key', { key: 'A'.repeat(32) }, 'idempotencyKey']]
+      .forEach(([label, patch, field]) => { const x = R.record(Object.assign({}, intent, patch)); check(!x.ok && x.fields.indexOf(field) !== -1, 'X. a request with ' + label + ' is refused locally (' + field + ')'); });
+    const fp = rt.FinancePostingDecoders.posting(rt.parse(JSON.stringify(FPCX)));
+    const it = rt.financeExecutionIntent(fp, '2031-04-10', 'creditCard');
+    check(!!it && Object.isFrozen(it) && keys(it) === 'amount,employeeId,executedOn,financePostingId,key,monthKey,paymentMethod' && it.amount === '999.00' && it.financePostingId === FID1
+      && it.employeeId === 'e_c' && it.monthKey === MONTH && /^[0-9a-f]{32}$/.test(it.key) && rt.crypto.calls === 1,
+      'X. an execution intent: the posting\'s own amount string (999.00), the date and method chosen and one Web Crypto key, frozen');
+    const calls = rt.crypto.calls;
+    check(rt.financeExecutionIntent(Object.assign({}, fp, { status: 'Executed' }), '2031-04-10', 'cash') === null && rt.financeExecutionIntent(fp, '2031-02-29', 'cash') === null
+      && rt.financeExecutionIntent(fp, '2031-04-10', 'wire') === null && rt.financeExecutionIntent(null, '2031-04-10', 'cash') === null && rt.crypto.calls === calls,
+      'X. no intent (and no key) for a non-Planned posting, an invalid date or an unknown method');
+    check(loadRuntime({}, { noCrypto: true }).financeExecutionIntent(fp, '2031-04-10', 'cash') === null, 'X. without Web Crypto there is no intent');
+    check(rt.financeExecutionToday(new Date(Date.UTC(2031, 3, 15, 16, 59, 59))) === '2031-04-15' && rt.financeExecutionToday(new Date(Date.UTC(2031, 3, 15, 17, 0, 0))) === '2031-04-16'
+      && rt.financeExecutionToday(new Date(Date.UTC(2031, 11, 31, 18, 0, 0))) === '2032-01-01' && rt.financeExecutionToday() === '2031-04-15',
+      'X. the Jakarta today (the date field\'s max hint) is UTC+7, whatever the browser\'s timezone: midnight at 17:00 UTC');
+    check(Object.keys(rt.FinanceExecutionApi).sort().join() === 'month,record' && Object.keys(rt.FinancePostingApi).sort().join() === 'month,post',
+      'X. the execution client has exactly the month read and record — no execute, pay, transfer, reverse or correct; the posting client is unchanged');
+  }
+
+  /* ---------- X1. AFI-4f CEO: record the payment of a base payroll — the card, the form, the exact body ---------- */
+  {
+    const rt = await openPay();
+    let html = rt.appHTML();
+    check(countOf(rt, EXE(MONTH)) === 2 && /id="swpPayment"/.test(html) && /<p class="auth-lead">Payment not recorded in TAM OS\.<\/p>/.test(html) && /id="swpPayRecordBtn"[^>]*>Record payment</.test(html)
+      && /Record a payment that was already made outside TAM OS\. TAM OS does not send or move money\./.test(html),
+      'X1. a posted Committed plan with no execution: "Payment not recorded in TAM OS." and Record payment; the executions are read with the month and again on opening the plan');
+    check(html.indexOf('id="swpPayment"') > html.indexOf('Posted to Finance — Planned, not paid') && html.indexOf('id="swpPayment"') < html.indexOf('</section>', html.indexOf('id="swpFinance"')),
+      'X1. the payment status sits inside the Finance card, after the posting (D-AFI4f-1 = A)');
+    rt.app.fire('swpPayRecordBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(!!rt.pr().panel && rt.pr().panel.kind === 'finRecordPlan' && exPosts(rt).length === 0 && rt.crypto.calls === 0 && rt.pr().execIntent === null && rt.dom.focused.slice(-1)[0] === 'swpPanelTitle',
+      'X1. Record payment opens an inline form: nothing sent, no key, no intent yet; the focus moves to it');
+    check(/Record the payment of this payroll\?/.test(html) && html.indexOf('Fabricated EMP-0C (EMP-0C) — April 2031. Records that Rp 999.00 was paid in full outside TAM OS. TAM OS does not send or move money. A recorded payment cannot be changed or reversed.') !== -1,
+      'X1. the form names the plan and says the approved words with the posting\'s own amount 999.00');
+    const panel = (/<section class="card" aria-labelledby="swpPanelTitle"[\s\S]*?<\/section>/.exec(html) || [''])[0];
+    check((panel.match(/<input/g) || []).length === 1 && /<input class="input" type="date" id="swpPayDate" name="executedOn" required aria-required="true" autocomplete="off" max="2031-04-15"[^>]* value="">/.test(panel)
+      && (panel.match(/<select/g) || []).length === 1 && !/<textarea|contenteditable/.test(panel) && !/<input[^>]*(amount|Amount|account|reference|note)/i.test(panel),
+      'X1. exactly two fields: Date paid (a required, empty date input whose max is the Jakarta today 2031-04-15) and one select; no amount, account, reference or note input');
+    const opts = (panel.match(/<option value="[^"]*"[^>]*>[^<]*<\/option>/g) || []);
+    check(opts.join('') === '<option value="" selected>Choose a payment method</option><option value="cash">Cash</option><option value="bankTransfer">Bank transfer</option><option value="qris">QRIS</option>'
+      + '<option value="virtualAccount">Virtual account</option><option value="creditCard">Credit card</option><option value="other">Other</option>',
+      'X1. Payment method: no default, then exactly the six BF-4f codes as labels, in the server order');
+    check(/Amount paid \(Rp\)<\/th><td>999\.00</.test(panel) && /Date paid <span aria-hidden="true">\*<\/span>/.test(panel) && /btn btn-danger" type="button" id="swpPanelConfirm"[^>]*>Record payment</.test(panel),
+      'X1. the amount is display only (the posting\'s 999.00); a deliberate, danger-styled "Record payment"');
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    html = rt.appHTML();
+    check(exPosts(rt).length === 0 && rt.crypto.calls === 0 && !!rt.pr().panel && rt.pr().payDraft.missing.join() === 'executedOn,paymentMethod'
+      && /Enter Date paid: a real date, no later than today \(Jakarta calendar\)\./.test(html) && /Choose a payment method\.<\/p>/.test(html) && rt.dom.focused.slice(-1)[0] === 'swpPayDate',
+      'X1. Record payment with nothing entered sends nothing and makes no key: the form stays, both fields are marked, the focus goes to Date paid');
+    fill(rt, '2031-04-10', null);
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(exPosts(rt).length === 0 && rt.pr().payDraft.missing.join() === 'paymentMethod' && rt.dom.focused.slice(-1)[0] === 'swpPayMethod' && /value="2031-04-10"/.test(rt.appHTML()),
+      'X1. a date but no method: still nothing sent; only Payment method is marked; the date entered is kept');
+    fill(rt, '2031-02-30', 'bankTransfer');
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(exPosts(rt).length === 0 && rt.pr().payDraft.missing.join() === 'executedOn' && rt.crypto.calls === 0, 'X1. an impossible date is refused locally: nothing sent, no key');
+    const X = execution(XID1, FPCX, '2031-04-10', 'bankTransfer');
+    rt.net.routes[EXW] = [xone(X)];
+    rt.net.routes[EXE(MONTH)] = [exeOk([X])];
+    fill(rt, '2031-04-10', 'bankTransfer');
+    rt.app.fire('swpPanelConfirm', 'click');
+    const second = rt.app.fire('swpPanelConfirm', 'click');
+    await rt.SessionPayroll.confirmPanel(); await flush();
+    const sent = exPosts(rt);
+    check(sent.length === 1 && rt.crypto.calls === 1 && second !== 'fired', 'X1. one confirmation, double-clicked and invoked again: exactly one key and one POST (one logical command)');
+    const b = sent.length ? bodyOf(sent[0]) : {};
+    check(keys(b) === EXEC_KEYS && b.financePostingId === FID1 && b.executedOn === '2031-04-10' && b.paymentMethod === 'bankTransfer' && sent[0].init.headers['X-CSRF-Token'] === CSRF,
+      'X1. the body is exactly { financePostingId, expectedAmount, executedOn, paymentMethod, idempotencyKey }, a CSRF POST to /api/finance-executions/execute');
+    check(b.expectedAmount === '999.00' && typeof b.expectedAmount === 'string' && b.expectedAmount === FPCX.amount && b.expectedAmount === PCX.totalAmount,
+      'X1. expectedAmount is the posting\'s exact amount string 999.00 (byte for byte) — never computed, never a number, never entered');
+    check(/^[0-9a-f]{32}$/.test(b.idempotencyKey) && b.idempotencyKey === rt.crypto.last, 'X1. the key is the 16 Web Crypto bytes as 32 lowercase hex characters');
+    html = rt.appHTML();
+    check(rt.pr().execIntent === null && rt.pr().panel === null && /<p class="auth-lead">Payment recorded — paid outside TAM OS\. TAM OS did not send this money\.<\/p>/.test(html)
+      && /Amount paid \(Rp\)<\/th><td>999\.00<\/td><\/tr><tr><th scope="row">Date paid<\/th><td>2031-04-10<\/td><\/tr><tr><th scope="row">Payment method<\/th><td>Bank transfer</.test(html)
+      && !/id="swpPayRecordBtn"/.test(html) && countOf(rt, EXE(MONTH)) === 3,
+      'X1. confirmed: the intent ends, the executions are read again — "Payment recorded — paid outside TAM OS." with the amount, date and method the server holds; no Record payment');
+    check(/id="swpMutationMessage"[^>]*>Payment recorded — paid outside TAM OS\. TAM OS did not send this money\.</.test(html), 'X1. the notice says the payment was recorded, paid outside TAM OS');
+    check(rt.pr().detail.plan.status === 'Committed' && posts(rt).length === 0 && finPosts(rt).length === 0 && /Posted to Finance — Planned, not paid<\/p>/.test(html),
+      'X1. recording changes nothing in Payroll or the posting (no Payroll or posting write; still Planned)');
+    firewall(rt, 'X1. recorded');
+    for(const [label, e] of [['another posting', Object.assign({}, X, { financePostingId: FID3 })], ['another amount', Object.assign({}, X, { amount: '1000.00' })],
+      ['another date', Object.assign({}, X, { executedOn: '2031-04-11' })], ['another method', Object.assign({}, X, { paymentMethod: 'cash' })],
+      ['another employee', Object.assign({}, X, { employeeId: 'e_x' })], ['another month', Object.assign({}, X, { monthKey: '2031-05' })]]){
+      const r = await openPay({ [EXW]: [xone(e)] });
+      await recordOnce(r);
+      check(r.pr().mutation.status === 'ambiguous' && exPosts(r).length === 1 && r.pr().execIntent !== null && /id="swpPayRetryBtn"/.test(r.appHTML()),
+        'X1. a success answer with ' + label + ' is not a success: unknown outcome, re-read (still unrecorded), the intent kept, Retry recording offered, nothing resent');
+    }
+  }
+  {
+    // The intent ends with the confirming answer itself — not only once the executions are read again.
+    const r = await openPay({ [EXW]: [xone(execution(XID1, FPCX, '2031-04-10', 'bankTransfer'))] });
+    r.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(r, '2031-04-10', 'bankTransfer');
+    r.net.routes[EXE(MONTH)] = ['HANG'];
+    r.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(r.pr().execIntent === null && r.pr().mutation.status === 'idle' && r.pr().notice === 'payRecorded' && /Checking the payment status…/.test(r.appHTML()) && !/id="swpPayRecordBtn"/.test(r.appHTML()),
+      'X1. a confirming answer ends the intent at once; while the executions are read again, Record payment is not offered');
+    const back = await openPay();
+    back.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(back, '2031-04-10', 'cash');
+    back.app.fire('swpPanelCancel', 'click'); await flush();
+    check(back.pr().panel === null && exPosts(back).length === 0 && back.crypto.calls === 0 && /id="swpPayRecordBtn"/.test(back.appHTML()), 'X1. Back closes the form: nothing sent, no key');
+    back.app.fire('swpPayRecordBtn', 'click'); await flush();
+    check(back.pr().payDraft.executedOn === '' && back.pr().payDraft.paymentMethod === '' && /id="swpPayDate"[^>]* value=""/.test(back.appHTML()) && /<option value="" selected>/.test(back.appHTML()),
+      'X1. a reopened form starts empty again (no remembered date or method)');
+  }
+
+  /* ---------- X2. AFI-4f CEO: record the payment of a Supplemental payroll ---------- */
+  {
+    const rt = await suppDetail(SCOM, [SLINE], { [FIN(MONTH)]: [finOk([FSCX])] });
+    let html = rt.appHTML();
+    check(/id="swpPayment"/.test(html) && /id="swpSuppPayRecordBtn"[^>]*>Record payment</.test(html) && !/id="swpPayRecordBtn"/.test(html), 'X2. a posted Committed Supplemental document with no execution: Record payment');
+    rt.app.fire('swpSuppPayRecordBtn', 'click'); await flush();
+    html = rt.appHTML();
+    check(rt.pr().panel.kind === 'finRecordSupp' && /Record the payment of this supplemental payroll\?/.test(html) && html.indexOf('Records that Rp 4321.00 was paid in full outside TAM OS.') !== -1 && exPosts(rt).length === 0,
+      'X2. the form: the approved words with the posting\'s own amount 4321.00 (never the lines\' 1234.00); nothing sent yet');
+    const X = execution(XID2, FSCX, '2031-04-01', 'other');
+    rt.net.routes[EXW] = [xone(X)]; rt.net.routes[EXE(MONTH)] = [exeOk([X])];
+    fill(rt, '2031-04-01', 'other');
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    const sent = exPosts(rt);
+    const b = sent.length ? bodyOf(sent[0]) : {};
+    check(sent.length === 1 && keys(b) === EXEC_KEYS && b.financePostingId === FID2 && b.expectedAmount === '4321.00' && b.executedOn === '2031-04-01' && b.paymentMethod === 'other',
+      'X2. exactly one POST of the five keys — the Supplemental posting\'s id and its amount 4321.00');
+    html = rt.appHTML();
+    check(rt.pr().execIntent === null && /Payment recorded — paid outside TAM OS\./.test(html) && /<td>4321\.00<\/td>/.test(html) && /Payment method<\/th><td>Other</.test(html) && suppPosts(rt).length === 0,
+      'X2. confirmed: recorded, with the server\'s amount and method; no Supplemental write');
+    firewall(rt, 'X2. supplemental recorded');
+  }
+
+  /* ---------- X3. AFI-4f eligibility fails closed: no Record payment unless every read is known ---------- */
+  {
+    const noRecord = (r) => !/id="swp(Pay|SuppPay)RecordBtn"|id="swpPayRetryBtn"/.test(r.appHTML());
+    const tryOpen = async (r, kind) => { r.SessionPayroll.openPanel(kind || 'finRecordPlan'); await flush(); await r.SessionPayroll.confirmPanel(); await r.SessionPayroll.retryRecording(); await flush(); return r.pr().panel === null && exPosts(r).length === 0 && r.crypto.calls === 0; };
+    const ld = await openPay({ [EXE(MONTH)]: ['HANG'] });
+    check(/Checking the payment status…/.test(ld.appHTML()) && noRecord(ld) && await tryOpen(ld), 'X3. while the executions load: "Checking the payment status…", no Record payment, and none can be opened');
+    const er = await openPay({ [EXE(MONTH)]: [err(503, 'service_unavailable')] });
+    check(/could not read the payment status of this month, so recording a payment is not offered\./.test(er.appHTML()) && /id="swpPayStatusRetryBtn"[^>]*>Retry payment status</.test(er.appHTML()) && noRecord(er) && await tryOpen(er),
+      'X3. the execution read failed: its status is unknown, Retry payment status is offered, Record payment is not and cannot be opened');
+    er.net.routes[EXE(MONTH)] = [exeOk([])];
+    er.app.fire('swpPayStatusRetryBtn', 'click'); await flush();
+    check(/id="swpPayRecordBtn"/.test(er.appHTML()) && countOf(er, EXE(MONTH)) === 3 && countOf(er, FIN(MONTH)) === 2, 'X3. Retry payment status reads the executions only, again; with none, Record payment is offered');
+    firewall(er, 'X3. retried');
+    const dn = await openPay({ [EXE(MONTH)]: [err(403, 'forbidden')] });
+    check(/could not read the payment status/.test(dn.appHTML()) && !/id="swpPayStatusRetryBtn"/.test(dn.appHTML()) && noRecord(dn), 'X3. a denied execution read: no Record payment and no retry');
+    const rl = await openPay({ [EXE(MONTH)]: [err(429, 'rate_limited')] });
+    check(/could not read the payment status/.test(rl.appHTML()) && noRecord(rl), 'X3. a rate-limited execution read: no Record payment');
+    for(const [label, list] of [['two executions of one posting', [execution(XID1, FPCX, '2031-04-10', 'cash'), execution(XID2, FPCX, '2031-04-11', 'cash')]],
+      ['an unknown method', [Object.assign(execution(XID1, FPCX, '2031-04-10', 'cash'), { paymentMethod: 'refund' })]], ['an extra key', [Object.assign(execution(XID1, FPCX, '2031-04-10', 'cash'), { reference: 'x' })]]]){
+      const m = await openPay({ [EXE(MONTH)]: [exeOk(list)] });
+      check(/could not read the payment status/.test(m.appHTML()) && noRecord(m) && !/Payment recorded/.test(m.appHTML()), 'X3. a malformed execution answer (' + label + ') is refused whole: no Record payment, no Recorded');
+    }
+    const fe = await openPay({ [FIN(MONTH)]: [err(503, 'service_unavailable')] });
+    check(!/id="swpPayment"/.test(fe.appHTML()) && noRecord(fe) && await tryOpen(fe), 'X3. the posting read failed: no payment status at all and no Record payment');
+    const fl = await openPay({ [FIN(MONTH)]: ['HANG'] });
+    check(!/id="swpPayment"/.test(fl.appHTML()) && noRecord(fl) && await tryOpen(fl), 'X3. while the postings load: no payment status and no Record payment');
+    const un = await openFin();
+    check(/Not posted to Finance/.test(un.appHTML()) && !/id="swpPayment"/.test(un.appHTML()) && await tryOpen(un), 'X3. an unposted source: no payment status and no Record payment (only Post to Finance)');
+    const ic = await openPay({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', PCX, '1000.00')])] });
+    check(/does not match this posting, so recording a payment is not offered\./.test(ic.appHTML()) && noRecord(ic) && await tryOpen(ic),
+      'X3. a posting whose amount does not match its source (inconsistent): no Record payment');
+    const ie = await openPay({ [EXE(MONTH)]: [exeOk([execution(XID1, FPCX, '2031-04-10', 'cash', '1000.00')])] });
+    check(/does not match this posting/.test(ie.appHTML()) && !/Payment recorded/.test(ie.appHTML()) && noRecord(ie) && await tryOpen(ie), 'X3. an execution whose amount does not match its posting (inconsistent): neither Recorded nor Record payment');
+    const iw = await openPay({ [EXE(MONTH)]: [exeOk([Object.assign(execution(XID1, FPCX, '2031-04-10', 'cash'), { employeeId: 'e_x' })])] });
+    check(/does not match this posting/.test(iw.appHTML()) && noRecord(iw), 'X3. an execution of another employee for this posting (inconsistent): no Record payment');
+    const rec = await openPay({ [EXE(MONTH)]: [exeOk([execution(XID1, FPCX, '2031-03-31', 'virtualAccount')])] });
+    check(/Payment recorded — paid outside TAM OS/.test(rec.appHTML()) && /Date paid<\/th><td>2031-03-31</.test(rec.appHTML()) && /Virtual account/.test(rec.appHTML()) && noRecord(rec) && await tryOpen(rec),
+      'X3. an execution already exists: Recorded with its date and method; no Record payment; called directly nothing opens or is sent');
+    firewall(rec, 'X3. already recorded');
+    const other = await openPay({ [EXE(MONTH)]: [exeOk([execution(XID1, FSCX, '2031-04-10', 'cash')])] });
+    check(/Payment not recorded in TAM OS/.test(other.appHTML()) && /id="swpPayRecordBtn"/.test(other.appHTML()), 'X3. another posting\'s execution does not record this one (financePostingId)');
+    const pi = await openPay();
+    pi.SessionPayrollStore.setPostIntent({ sourceKind: 'supplementalPayroll', sourceId: SID_COM, employeeId: SCOM.employeeId, monthKey: MONTH, amount: '4321.00', key: 'b'.repeat(32) });
+    pi.render(); await flush();
+    check(/Another Finance record is not confirmed yet\./.test(pi.appHTML()) && noRecord(pi) && await tryOpen(pi), 'X3. while a posting intent is unresolved, no payment can be recorded (one Finance command at a time)');
+    for(const p of [P1, P2, P3, P5]){
+      const r = await detail(p.id, det(p), { [DRIFT(p.id)]: [driftOk(p.id, [])], [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', p, '5000000.00')])] });
+      check(!/id="swpPayment"/.test(r.appHTML()) && await tryOpen(r), 'X3. a ' + p.status + ' plan shows no payment status and cannot record one (even with a hypothetical posting of it)');
+    }
+    const l = await open({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', P4, '5000000.00')])] });
+    check(!/swpPayment|Payment|Record payment/.test(l.appHTML()) && countOf(l, EXE(MONTH)) === 1, 'X3. the month list shows no payment column or status (D-AFI4f-6 = A: details only), though the executions are read');
+  }
+
+  /* ---------- X4. AFI-4f the unknown outcome and Retry recording (D-AFI4f-5 = A) ---------- */
+  {
+    const X = execution(XID1, FPCX, '2031-04-10', 'bankTransfer');
+    // A: the execution was recorded — the re-read resolves it.
+    const a = await openPay({ [EXW]: [NETFAIL()] });
+    a.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(a, '2031-04-10', 'bankTransfer');
+    a.net.routes[EXE(MONTH)] = [exeOk([X])];
+    a.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(exPosts(a).length === 1 && a.pr().execIntent === null && /could not confirm the payment record at first, but the payment status read again shows it: Payment recorded — paid outside TAM OS\./.test(a.appHTML())
+      && /Payment recorded — paid outside TAM OS\. TAM OS did not send this money\.<\/p>/.test(a.appHTML()) && countOf(a, FIN(MONTH)) === 3 && countOf(a, EXE(MONTH)) === 3,
+      'X4. A: a network failure, then the re-read (postings and executions) shows the execution at the same amount, date and method — resolved as the success, nothing resent');
+    firewall(a, 'X4. A');
+    // B: still unrecorded at the same amount — Retry recording, the same body and key, only on a click.
+    const b = await openPay({ [EXW]: [NETFAIL(), xone(X)] });
+    b.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(b, '2031-04-10', 'bankTransfer');
+    b.app.fire('swpPanelConfirm', 'click'); await flush();
+    const first = bodyOf(exPosts(b)[0]);
+    let html = b.appHTML();
+    check(exPosts(b).length === 1 && !!b.pr().execIntent && b.pr().execIntent.key === first.idempotencyKey && /id="swpPayRetryBtn"[^>]*>Retry recording</.test(html) && !/id="swpPayRecordBtn"/.test(html)
+      && /still shows no payment recorded for this posting, at the same amount\. Retry recording sends the same record again — it can never record the payment twice\./.test(html) && b.pr().panel === null,
+      'X4. B: the posting at the same amount with no execution — the intent is kept, the form closed, Retry recording offered; nothing was resent');
+    b.render(); await flush(); b.SessionPayroll.ensureLoaded(b.AuthBoot.snapshot().principal); await flush();
+    b.SessionPayroll.openPanel('finRecordPlan'); await flush();
+    check(exPosts(b).length === 1 && b.pr().panel === null && b.crypto.calls === 1, 'X4. B: a re-render, a reload of state or another Record payment never sends or makes a new key');
+    b.app.fire('swpBackBtn', 'click'); await flush();
+    b.app.fire('swpOpen5', 'click'); await flush();
+    check(!!b.pr().execIntent && /id="swpPayRetryBtn"/.test(b.appHTML()) && exPosts(b).length === 1, 'X4. B: leaving and reopening the plan keeps the unresolved intent (Retry recording, never a new key)');
+    b.SessionPayrollStore.setPayDraft('executedOn', '2031-04-01'); b.SessionPayrollStore.setPayDraft('paymentMethod', 'cash');
+    b.net.routes[EXE(MONTH)] = [exeOk([X])];
+    b.app.fire('swpPayRetryBtn', 'click');
+    const again = b.app.fire('swpPayRetryBtn', 'click');
+    await b.SessionPayroll.retryRecording(); await flush();
+    const retried = exPosts(b);
+    check(retried.length === 2 && again !== 'fired' && JSON.stringify(bodyOf(retried[1])) === JSON.stringify(first) && b.crypto.calls === 1 && retried[1].init.headers['X-CSRF-Token'] === CSRF,
+      'X4. B: Retry recording (double-clicked) sends exactly one POST with the SAME frozen body — posting, amount, date, method and key — even after the draft changed; no new key');
+    check(b.pr().execIntent === null && /Payment recorded — paid outside TAM OS\./.test(b.appHTML()) && /Date paid<\/th><td>2031-04-10</.test(b.appHTML()), 'X4. B: the retried record (the server\'s replay) is confirmed');
+    firewall(b, 'X4. B');
+    // C: the re-read shows an execution of the posting with another method — stale (recorded elsewhere).
+    const c2 = await openPay({ [EXW]: [NETFAIL()] });
+    c2.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(c2, '2031-04-10', 'bankTransfer');
+    c2.net.routes[EXE(MONTH)] = [exeOk([execution(XID2, FPCX, '2031-04-09', 'cash')])];
+    c2.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c2.pr().execIntent === null && !/id="swpPayRetryBtn"|id="swpPayRecordBtn"/.test(c2.appHTML()) && /what was read again has changed/.test(c2.appHTML()) && /Payment method<\/th><td>Cash</.test(c2.appHTML()) && exPosts(c2).length === 1,
+      'X4. C: the re-read shows the posting recorded with another date and method — the intent is stale: dropped, no Retry; the server\'s record is shown');
+    // C4: the re-read shows an execution of the posting at the same date but another method — stale too.
+    const c4 = await openPay({ [EXW]: [NETFAIL()] });
+    c4.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(c4, '2031-04-10', 'bankTransfer');
+    c4.net.routes[EXE(MONTH)] = [exeOk([execution(XID2, FPCX, '2031-04-10', 'qris')])];
+    c4.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c4.pr().execIntent === null && c4.pr().notice === 'payRecordStale' && /what was read again has changed/.test(c4.appHTML()) && /Payment method<\/th><td>QRIS</.test(c4.appHTML()),
+      'X4. C4: the re-read shows the posting recorded on the same date by another method — not this record: stale, never claimed as the success');
+    const c5 = await openPay({ [EXW]: [NETFAIL()] });
+    c5.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(c5, '2031-04-10', 'bankTransfer');
+    c5.net.routes[EXE(MONTH)] = [exeOk([execution(XID2, FPCX, '2031-04-09', 'bankTransfer')])];
+    c5.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c5.pr().execIntent === null && c5.pr().notice === 'payRecordStale', 'X4. C5: the same method on another date is stale too');
+    // C3: the re-read no longer shows the posting at the same amount — stale.
+    const c3 = await openPay({ [EXW]: [NETFAIL()] });
+    c3.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(c3, '2031-04-10', 'bankTransfer');
+    c3.net.routes[FIN(MONTH)] = [finOk([posting(FID1, 'payrollPlan', PCX, '1000.00')])];
+    c3.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(c3.pr().execIntent === null && !/id="swpPayRetryBtn"/.test(c3.appHTML()) && exPosts(c3).length === 1, 'X4. C3: the posting read again carries another amount — the intent is stale: dropped, no Retry, nothing resent');
+    // P: while the re-read is pending, Retry recording (called directly) sends nothing.
+    const pend = await openPay({ [EXW]: [NETFAIL()] });
+    pend.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(pend, '2031-04-10', 'bankTransfer');
+    pend.net.routes[EXE(MONTH)] = ['HANG'];
+    pend.app.fire('swpPanelConfirm', 'click'); await flush();
+    await pend.SessionPayroll.retryRecording(); await flush();
+    check(!!pend.pr().execIntent && exPosts(pend).length === 1 && !/id="swpPayRetryBtn"/.test(pend.appHTML()) && /It is being read again…/.test(pend.appHTML()),
+      'X4. P: while the payment status is read again, the outcome is undecided — no Retry recording, and calling it sends nothing');
+    // D: the execution re-read fails — the intent is kept, nothing is sent, no Retry until it is read.
+    const d = await openPay({ [EXW]: [NETFAIL()] });
+    d.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(d, '2031-04-10', 'bankTransfer');
+    d.net.routes[EXE(MONTH)] = [err(500, 'internal_error'), exeOk([])];
+    d.app.fire('swpPanelConfirm', 'click'); await flush();
+    html = d.appHTML();
+    check(!!d.pr().execIntent && /the payment status could not be read again\. Nothing is sent again/.test(html) && !/id="swpPayRetryBtn"|id="swpPayRecordBtn"/.test(html) && /id="swpPayStatusRetryBtn"/.test(html) && exPosts(d).length === 1,
+      'X4. D: the execution re-read fails — the intent is kept, nothing sent, neither Record payment nor Retry recording until it is read');
+    await d.SessionPayroll.retryRecording(); await flush();
+    check(exPosts(d).length === 1, 'X4. D: Retry recording called directly while unread sends nothing');
+    d.app.fire('swpPayStatusRetryBtn', 'click'); await flush();
+    check(/id="swpPayRetryBtn"/.test(d.appHTML()) && exPosts(d).length === 1, 'X4. D: reading the payment status again (still unrecorded) offers Retry recording — still nothing sent');
+    // D2: the posting re-read fails — undecided too.
+    const d2 = await openPay({ [EXW]: [NETFAIL()] });
+    d2.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(d2, '2031-04-10', 'bankTransfer');
+    d2.net.routes[FIN(MONTH)] = [err(503, 'service_unavailable')];
+    d2.app.fire('swpPanelConfirm', 'click'); await flush();
+    await d2.SessionPayroll.retryRecording(); await flush();
+    check(!!d2.pr().execIntent && exPosts(d2).length === 1 && !/id="swpPayRetryBtn"/.test(d2.appHTML()), 'X4. D2: the posting re-read fails — the intent is kept, no Retry recording, nothing sent');
+    // E: 500, 503, a malformed answer and a timeout are unknown outcomes too.
+    for(const [label, answer] of [['a 500', err(500, 'internal_error')], ['a 503', err(503, 'service_unavailable')], ['a malformed answer', xone(Object.assign({}, X, { idempotencyKey: 'a'.repeat(32) }))],
+      ['the postings wrapper', ok({ financePosting: FPCX })], ['a non-JSON body', resp(200, 'not json')], ['a timeout', 'HANG']]){
+      const e = await openPay({ [EXW]: [answer] });
+      e.app.fire('swpPayRecordBtn', 'click'); await flush();
+      fill(e, '2031-04-10', 'bankTransfer');
+      e.app.fire('swpPanelConfirm', 'click'); await flush();
+      if(answer === 'HANG'){ e.net.timers.splice(0).forEach((fn) => fn()); await flush(); }
+      check(e.pr().mutation.status === 'ambiguous' && !!e.pr().execIntent && exPosts(e).length === 1 && /id="swpPayRetryBtn"/.test(e.appHTML()),
+        'X4. ' + label + ' to an execution is an unknown outcome: the intent is kept, re-read, never resent automatically');
+    }
+    // G: no Web Crypto — nothing is sent.
+    const g = await openPay({}, { noCrypto: true });
+    await recordOnce(g);
+    check(exPosts(g).length === 0 && g.pr().execIntent === null && /cannot create a secure record key\. Nothing was sent\./.test(g.appHTML()), 'X4. G: without Web Crypto the record fails closed: nothing sent');
+    // H: while one execution intent is unresolved, no other source can record a payment.
+    const h = await openPay({ [EXW]: [NETFAIL()], [FIN(MONTH)]: [finOk([FPCX, FSCX])], [SDET(SID_COM)]: [ok(sdet(SCOM, [SLINE]))] });
+    await recordOnce(h);
+    h.app.fire('swpBackBtn', 'click'); await flush();
+    await h.SessionPayroll.openSupplemental(SID_COM); await flush();
+    h.SessionPayroll.openPanel('finRecordSupp'); await flush();
+    check(/Another Finance record is not confirmed yet\./.test(h.appHTML()) && !/id="swpSuppPayRecordBtn"|id="swpPayRetryBtn"/.test(h.appHTML()) && h.pr().panel === null && exPosts(h).length === 1 && h.crypto.calls === 1,
+      'X4. H: while a payment record is unresolved another source offers no Record payment and no Retry (one command at a time)');
+    await h.SessionPayroll.retryRecording(); await flush();
+    check(exPosts(h).length === 1, 'X4. H: Retry recording is never sent from another source\'s detail');
+    h.SessionPayroll.openPanel('finPostSupp'); await flush();
+    check(h.pr().panel === null || h.pr().panel.kind !== 'finRecordSupp', 'X4. H: (the posting of another source stays AFI-4e\'s own decision)');
+  }
+
+  /* ---------- X5. AFI-4f definite refusals: a generic 409, 400 / 401 / 403 / 404 / 429 ---------- */
+  {
+    const X = execution(XID1, FPCX, '2031-04-10', 'bankTransfer');
+    const rt = await openPay({ [EXW]: [err(409, 'conflict')] });
+    await recordOnce(rt);
+    let html = rt.appHTML();
+    check(rt.pr().panel === null && rt.pr().execIntent === null && exPosts(rt).length === 1 && countOf(rt, FIN(MONTH)) === 3 && countOf(rt, EXE(MONTH)) === 3,
+      'X5. a 409: definitely refused — the form closes, the intent is dropped, the postings and executions are read again, nothing resent');
+    check(html.indexOf('TAM OS did not record this payment (a conflict was reported). The posting and its payment status were read again from TAM OS — check them before choosing again.') !== -1
+      && !/finance_(executed|amount|duplicate)|idempotency_mismatch|already (recorded|executed|paid)|amount (changed|no longer)|key/i.test(html.replace(/aria-[a-z]+="[^"]*"/g, '')), 'X5. the conflict message never claims which cause it was');
+    check(/id="swpPayRecordBtn"/.test(html) && /id="swpReloadBtn"/.test(html), 'X5. the re-read still shows it unrecorded: a new deliberate Record payment may follow (and Reload plan)');
+    rt.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(rt, '2031-04-10', 'bankTransfer');
+    rt.net.routes[EXW] = [xone(X)]; rt.net.routes[EXE(MONTH)] = [exeOk([X])];
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    const both = exPosts(rt);
+    check(both.length === 2 && bodyOf(both[1]).idempotencyKey !== bodyOf(both[0]).idempotencyKey && rt.crypto.calls === 2 && /Payment recorded — paid outside TAM OS\. TAM OS did not send this money\.<\/p>/.test(rt.appHTML()),
+      'X5. that new deliberate record is a new command with a fresh key, and it is confirmed');
+    firewall(rt, 'X5. 409');
+    const p2 = await openPay({ [EXW]: [err(409, 'conflict')] });
+    p2.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(p2, '2031-04-10', 'bankTransfer');
+    p2.net.routes[EXE(MONTH)] = [exeOk([X])];
+    p2.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(/Payment recorded — paid outside TAM OS/.test(p2.appHTML()) && !/id="swpPayRecordBtn"/.test(p2.appHTML()) && /a conflict was reported/.test(p2.appHTML()) && p2.pr().execIntent === null,
+      'X5. a 409 whose re-read shows an execution of the posting (recorded elsewhere): shown recorded, no Record payment, the conflict not explained');
+    for(const [label, answer, text] of [['a 400', err(400, 'validation_failed'), 'TAM OS could not accept this payment record. Nothing was recorded.'],
+      ['a 403', err(403, 'forbidden'), 'You do not have permission to record payments.'], ['a 429', err(429, 'rate_limited'), 'Too many requests.']]){
+      const r = await openPay({ [EXW]: [answer] });
+      await recordOnce(r);
+      check(r.pr().execIntent === null && exPosts(r).length === 1 && r.appHTML().indexOf(text) !== -1 && countOf(r, EXE(MONTH)) === 3 && /id="swpPayRecordBtn"/.test(r.appHTML()),
+        'X5. ' + label + ': definitely refused — "' + text + '", the intent dropped, the payment status read again, nothing resent');
+    }
+    const vf = await openPay({ [EXW]: [resp(400, { ok: false, error: { code: 'validation_failed', message: 'server text', fields: ['executedOn'] }, requestId: RID })] });
+    await recordOnce(vf);
+    check(/TAM OS did not accept Date paid: it must be a real date no later than today \(Jakarta calendar\)\. Nothing was recorded\./.test(vf.appHTML()) && !/server text/.test(vf.appHTML()) && vf.pr().execIntent === null,
+      'X5. a 400 naming executedOn (the server\'s Jakarta bound): the fixed Date paid message — the server decides, never server text');
+    const vm2 = await openPay({ [EXW]: [resp(400, { ok: false, error: { code: 'validation_failed', message: 'server text', fields: ['paymentMethod'] }, requestId: RID })] });
+    await recordOnce(vm2);
+    check(/TAM OS did not accept the payment method\. Nothing was recorded\./.test(vm2.appHTML()), 'X5. a 400 naming paymentMethod: the fixed method message');
+    const fut = await openPay({ [EXW]: [resp(400, { ok: false, error: { code: 'validation_failed', message: 'x', fields: ['executedOn'] }, requestId: RID })] });
+    await recordOnce(fut, '2031-04-16', 'cash');
+    check(exPosts(fut).length === 1 && bodyOf(exPosts(fut)[0]).executedOn === '2031-04-16', 'X5. a date after the Jakarta today is not blocked by the browser (max is a hint): the server decides (and refuses it)');
+    const nf = await openPay({ [EXW]: [err(404, 'not_found')] });
+    await recordOnce(nf);
+    check(nf.pr().execIntent === null && nf.pr().detailId === null && countOf(nf, LIST(MONTH)) === 2 && /This payroll is no longer available\. The month was read again\./.test(nf.appHTML()),
+      'X5. a 404: the intent is dropped, the detail closes, the month is read again');
+    const ua = await openPay({ [EXW]: [err(401, 'unauthenticated')] });
+    await recordOnce(ua);
+    check(ua.pr().execIntent === null && ua.pr().exec === null && ua.state() !== ua.AUTH_STATES.AUTHENTICATED, 'X5. a 401 ends the session: the intent, its key and the executions are destroyed');
+  }
+
+  /* ---------- X6. AFI-4f stale CSRF: one replay of the same body and key, for the same principal only ---------- */
+  {
+    const X = execution(XID1, FPCX, '2031-04-10', 'bankTransfer');
+    const rt = await openPay({ [EXW]: [err(403, 'forbidden'), xone(X)] });
+    rt.net.routes['/api/auth/me'] = [ok(Object.assign({}, ME_CEO, { csrfToken: CSRF2 }))];
+    rt.net.routes[EXE(MONTH)] = [exeOk([X])];
+    await recordOnce(rt);
+    const sent = exPosts(rt);
+    check(sent.length === 2 && JSON.stringify(bodyOf(sent[0])) === JSON.stringify(bodyOf(sent[1])) && sent[0].init.headers['X-CSRF-Token'] === CSRF && sent[1].init.headers['X-CSRF-Token'] === CSRF2 && rt.crypto.calls === 1,
+      'X6. a stale CSRF token: /me once, then exactly one replay with the new token and the SAME body and key');
+    check(rt.pr().execIntent === null && /Payment recorded — paid outside TAM OS/.test(rt.appHTML()), 'X6. the replayed record is confirmed');
+    firewall(rt, 'X6. replayed');
+    const same = await openPay({ [EXW]: [err(403, 'forbidden')] });
+    same.net.routes['/api/auth/me'] = [ok(ME_CEO)];
+    await recordOnce(same);
+    check(exPosts(same).length === 1 && /You do not have permission to record payments\./.test(same.appHTML()) && same.pr().execIntent === null,
+      'X6. a 403 whose /me shows the same token: a genuine denial — no replay, the intent dropped');
+    const other = await openPay({ [EXW]: [err(403, 'forbidden')] });
+    other.net.routes['/api/auth/me'] = [ok(ME_CEO2)];
+    await recordOnce(other);
+    check(exPosts(other).length === 1 && other.pr().execIntent === null && other.pr().exec === null, 'X6. a 403 whose /me shows another principal: no replay; the execution data and intent are destroyed');
+    const gone = await openPay({ [EXW]: [err(403, 'forbidden')] });
+    gone.net.routes['/api/auth/me'] = [err(503, 'service_unavailable')];
+    await recordOnce(gone);
+    check(exPosts(gone).length === 1 && gone.pr().execIntent === null && gone.state() !== gone.AUTH_STATES.AUTHENTICATED, 'X6. a 403 whose /me fails: fail closed — no replay, the session state cleared');
+  }
+
+  /* ---------- X7. AFI-4f principal and session changes; the store's own guards ---------- */
+  {
+    const f = await openPay({ [EXW]: [NETFAIL()] });
+    await recordOnce(f);
+    check(!!f.pr().execIntent && Array.isArray(f.pr().exec), 'X7. (an unresolved execution intent and the executions are held in memory)');
+    f.AuthBoot.sessionLost(); await flush();
+    check(f.pr().execIntent === null && f.pr().exec === null && f.pr().payDraft.executedOn === '' && f.access.local.length === 0 && f.access.session.length === 0,
+      'X7. session loss destroys the intent, its key, the draft and the executions; nothing was ever stored');
+    const pc = await openPay({ [EXW]: [NETFAIL()] });
+    await recordOnce(pc);
+    pc.SessionPayrollStore.bindPrincipal(ME_CEO_PRINCIPAL);
+    check(pc.pr().execIntent === null && pc.pr().exec === null, 'X7. another principal destroys the executions and the intent');
+    const st = loadRuntime({});
+    const s = st.SessionPayrollStore;
+    s.setExecIntent({ financePostingId: FID1, employeeId: 'e_c', monthKey: MONTH, amount: '999.00', executedOn: '2031-04-10', paymentMethod: 'cash', key: 'a'.repeat(32), extra: 'x', sourceId: IDPC });
+    const held = s.snapshot().execIntent;
+    check(Object.isFrozen(held) && keys(held) === 'amount,employeeId,executedOn,financePostingId,key,monthKey,paymentMethod', 'X7. the store holds an execution intent frozen, with exactly its seven fields');
+    s.setOpen(true, MONTH);
+    const token = s.begin('exec', MONTH);
+    s.begin('exec', MONTH);
+    check(s.applyExec(token, []) === false, 'X7. a superseded execution read is dropped');
+    const t2 = s.begin('exec', MONTH);
+    s.setMonth('2031-05');
+    check(s.applyExec(t2, []) === false && s.snapshot().exec === null, 'X7. an execution read of a month left behind is dropped');
+    const t3 = s.begin('exec', '2031-05');
+    check(s.applyExec(t3, [Object.freeze(execution(XID1, FPCX, '2031-04-10', 'cash'))]) === true && Array.isArray(s.snapshot().exec), 'X7. (an execution read of the month shown is applied)');
+    s.setMonth('2031-06');
+    check(s.snapshot().exec === null && s.snapshot().execMonth === null && s.snapshot().execStatus === 'idle', 'X7. a month change forgets the month\'s executions at once (the store, not only the next read)');
+    s.setPayDraft('executedOn', 5); s.setPayDraft('amount', '1.00');
+    check(s.snapshot().payDraft.executedOn === '' && keys(s.snapshot().payDraft) === 'executedOn,missing,paymentMethod', 'X7. the draft holds only Date paid and Payment method, as strings — never an amount');
+    s.clear();
+    check(s.snapshot().execIntent === null && s.snapshot().exec === null && s.snapshot().execStatus === 'idle', 'X7. clear() destroys the executions, the intent and its key');
+    const two = await openPay();
+    two.app.fire('swpPayRecordBtn', 'click'); await flush();
+    fill(two, '2031-04-10', 'cash');
+    two.SessionPayrollStore.setExecIntent({ financePostingId: FID2, employeeId: SCOM.employeeId, monthKey: MONTH, amount: '4321.00', executedOn: '2031-04-01', paymentMethod: 'other', key: 'b'.repeat(32) });
+    await two.SessionPayroll.confirmPanel(); await flush();
+    check(exPosts(two).length === 0 && two.crypto.calls === 0 && two.pr().panel === null && two.pr().execIntent.key === 'b'.repeat(32),
+      'X7. a confirmation never makes a second intent while one exists (defence in depth beneath the panel guard): nothing sent, the form closes');
+    const mo = await openPay();
+    mo.app.fire('swpBackBtn', 'click'); await flush();
+    mo.app.fire('swpNextMonth', 'click'); await flush();
+    check(countOf(mo, EXE('2031-05')) === 1 && mo.pr().execMonth === '2031-05', 'X7. another month reads that month\'s executions (the old ones are forgotten)');
+    const dd = await openPay();
+    dd.SessionPayroll.setPayDraft('executedOn', '2031-04-10');
+    check(dd.pr().payDraft.executedOn === '', 'X7. the draft changes only while the Record payment form is open');
+  }
+
+  /* ---------- X8. AFI-4f the Employee never sees, reads or records a payment ---------- */
+  {
+    const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [DET(ID7)]: [ok(det(MINE, [OT1]))], [SLIST(MONTH)]: [ok({ supplementalPayrolls: [SMINE1] })],
+      [SDET(SID_MINE1)]: [ok(sdet(SMINE1, [SLINE]))], [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', MINE, '777.00')])], [EXE(MONTH)]: [exeOk([execution(XID1, posting(FID1, 'payrollPlan', MINE, '777.00'), '2031-04-10', 'cash')])] });
+    rt.app.fire('swSectionPayroll', 'click'); await flush();
+    rt.app.fire('swpOpen0', 'click'); await flush();
+    const planHTML = rt.appHTML();
+    rt.app.fire('swpBackBtn', 'click'); await flush();
+    rt.app.fire('swpSuppOpen0', 'click'); await flush();
+    const suppHTML = rt.appHTML();
+    rt.SessionPayroll.openPanel('finRecordPlan'); rt.SessionPayroll.openPanel('finRecordSupp'); await rt.SessionPayroll.confirmPanel();
+    await rt.SessionPayroll.retryRecording(); await rt.SessionPayroll.retryFinanceExecutionStatus(); rt.SessionPayroll.setPayDraft('executedOn', '2031-04-10'); await flush();
+    check(!/Payment|Record payment|recorded|swpPay(ment|RecordBtn|RetryBtn|StatusRetryBtn|Date|Method)|swpSuppPay|Date paid/.test(planHTML + suppHTML + rt.appHTML()) && rt.net.calls.every((c) => !/^\/api\/finance-executions/.test(c.url))
+      && rt.pr().exec === null && rt.pr().execIntent === null && rt.pr().execStatus === 'idle' && rt.crypto.calls === 0,
+      'X8. an Employee\'s own Committed payroll and Supplemental cards show no payment status; no execution read or write is ever made, even called directly (D-AFI4f-7 = A)');
+    firewall(rt, 'X8. Employee');
+  }
+
+  /* ---------- X9. AFI-4f hostile payloads, escaping, and no money-moving semantics ---------- */
+  {
+    const HX = Object.assign({}, PCX, { employeeName: '<img src=x onerror=alert(1)>', employeeCode: 'EMP-<b>' });
+    const rt = await openFin({ [DET(IDPC)]: [ok(det(HX, [OT1]))], [FIN(MONTH)]: [finOk([FPCX])] });
+    rt.app.fire('swpPayRecordBtn', 'click'); await flush();
+    const html = rt.appHTML();
+    check(!/<img|<b>/.test(html) && html.indexOf('&lt;img src=x onerror=alert(1)&gt; (EMP-&lt;b&gt;) — April 2031.') !== -1, 'X9. the source\'s server strings are escaped in the Record payment form');
+    fill(rt, '2031-04-10"><script>x</script>', 'cash" onclick="x');
+    rt.render(); await flush();
+    const h2 = rt.appHTML();
+    check(!rawScript(h2) && h2.indexOf('onclick="x') === -1 && h2.indexOf('value="' + escapedForm('2031-04-10"><script>x</script>') + '"') !== -1 && h2.indexOf('<option value="cash" selected') === -1,
+      'X9. a hostile typed date is escaped back into the field; a hostile method value selects nothing');
+    rt.app.fire('swpPanelConfirm', 'click'); await flush();
+    check(exPosts(rt).length === 0 && rt.pr().payDraft.missing.join() === 'executedOn,paymentMethod', 'X9. hostile field values are refused locally: nothing sent');
+    const rq = await openPay({ [EXE(MONTH)]: [resp(503, { ok: false, error: { code: 'service_unavailable', message: '<script>alert(1)</script>' }, requestId: RID })] });
+    check(!rawScript(rq.appHTML()) && rq.appHTML().indexOf('alert(1)') === -1 && rq.appHTML().indexOf('Reference: ' + RID + '.') !== -1, 'X9. a failed execution read shows fixed words and the reference only — never server text');
+    // The check itself cannot be bypassed by case: it sees every raw script-tag variant and none of their escaped forms.
+    const VARIANTS = ['<script>x</script>', '<SCRIPT>x</SCRIPT>', '<ScRiPt>x</sCrIpT>', '<script src=x></script>', '<SCRIPT\tsrc=x>', '</script >', '</SCRIPT>', '<sCrIpT/x>'];
+    check(VARIANTS.every((v) => rawScript('<p>' + v + '</p>') && !rawScript('<p>' + escapedForm(v) + '</p>')) && !rawScript('<p>Prescription &lt;script&gt;</p>'),
+      'X9. the raw-script check detects <script>, <SCRIPT>, mixed case and closing-tag variants, and never their escaped forms');
+    for(const v of VARIANTS){
+      const fv = await openPay();
+      fv.app.fire('swpPayRecordBtn', 'click'); await flush();
+      fill(fv, '2031-04-10' + v, 'cash');
+      fv.render(); await flush();
+      const fh = fv.appHTML();
+      check(!rawScript(fh) && fh.indexOf('value="' + escapedForm('2031-04-10' + v) + '"') !== -1, 'X9. a typed Date paid of ' + JSON.stringify(v) + ' is escaped exactly, never rendered as a tag');
+      fv.app.fire('swpPanelConfirm', 'click'); await flush();
+      check(exPosts(fv).length === 0, 'X9. a typed Date paid of ' + JSON.stringify(v) + ' is refused locally: nothing sent');
+      const sv = await openPay({ [EXE(MONTH)]: [resp(503, { ok: false, error: { code: 'service_unavailable', message: v + 'alert(1)' + v }, requestId: RID })] });
+      check(!rawScript(sv.appHTML()) && sv.appHTML().indexOf('alert(1)') === -1, 'X9. server text ' + JSON.stringify(v) + ' in a failed execution read never reaches the page');
+    }
+    const hx = await openPay();
+    const ht = hx.SessionPayrollStore.begin('exec', MONTH);
+    hx.SessionPayrollStore.applyExec(ht, [Object.freeze(Object.assign(execution(XID1, FPCX, '2031-04-10', 'cash'), { executedOn: '<img src=x onerror=alert(1)>' }))]);
+    hx.render(); await flush();
+    check(/Date paid<\/th><td>&lt;img src=x onerror=alert\(1\)&gt;</.test(hx.appHTML()) && !/<img/.test(hx.appHTML()),
+      'X9. defence in depth: even a value the strict decoder would refuse is escaped in the recorded rows');
+    const rec = await openPay({ [EXE(MONTH)]: [exeOk([execution(XID1, FPCX, '2031-04-10', 'qris')])] });
+    const card = (/<section class="card" id="swpFinance"[\s\S]*?<\/section>/.exec(rec.appHTML()) || [''])[0];
+    check(!/<button/.test(card) && !/\bPay\b|\bPaid\b|Execut|Mark paid|Transfer(red)?\b|transferred|sent money|Settle|settled|Reconcil|Revers|Correct|Refund|account|ledger|journal|balance/.test(card)
+      && /TAM OS did not send this money\./.test(card) && !/[0-9a-f]{32}/.test(card), 'X9. a recorded card holds no control, no money-moving, settlement or reversal word, no id — and says TAM OS did not send the money');
+    const un = await openPay();
+    un.app.fire('swpPayRecordBtn', 'click'); await flush();
+    const form = (/<section class="card" aria-labelledby="swpPanelTitle"[\s\S]*?<\/section>/.exec(un.appHTML()) || [''])[0];
+    const words = form.replace(/<[^>]*>/g, ' ').replace(/Bank transfer|Virtual account|Credit card|paid in full outside TAM OS|cannot be changed or reversed/g, '');
+    check(form !== '' && !/\bPay\b|\bPaid\b|Execute|Executed|Mark paid/.test(words) && !/send money|transfer money|settle|reconcil|refund|partial|installment|schedule|batch|company account|bank account|reference|\bnote/i.test(words),
+      'X9. the form offers no pay / execute / transfer / settle / partial / batch / schedule / account / reference / note concept — only the approved words');
+    check(!/[0-9a-f]{32}/.test(form.replace(RID, '').replace(new RegExp(IDO, 'g'), '')), 'X9. no posting, execution or key id appears in the page');
+  }
+
   /* ---------- K. sources: no money arithmetic, no LOCAL, Overtime or Finance authority ---------- */
   {
     const code = (f) => fs.readFileSync(path.join(root, 'js', f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
@@ -1986,11 +2605,17 @@ function firewall(rt, label, overtimeOpened){
     // AFI-4c2 authorized revision: Commit, expectedTotal and the idempotency key exist. Was: none.
     // AFI-4e authorized revision: the BF-4e Finance posting client exists (its identifiers, the three
     // Finance routes and the approved confirmation "Nothing is paid or executed."). Was: no Finance code.
-    const nonFinance = all.replace(/posted to Finance|It is not a payment|Nothing is paid or executed\. A posting cannot be reversed\./g, '').replace(/'\/api\/finance-postings(\/payroll-plan|\/supplemental-payroll)?'/g, "''")
+    // AFI-4f authorized revision: the BF-4f execution client exists — its FinanceExecution
+    // identifiers, the two execution routes, the two field names, the server's payment method list
+    // and the approved Record payment words (pinned in X and in the verifier). Was: the posting client only.
+    const nonFinance = all.replace(/const SESSION_FINANCE_EXECUTION_(TEXT|METHOD_TEXT|CONFIRM|PANELS|BUTTONS|ERRORS|FIELD_ERRORS|CONFLICT|AMBIGUOUS|NOTICES) = [\s\S]*?;\n/g, '')
+      .replace(/\['cash', 'bankTransfer', 'qris', 'virtualAccount', 'creditCard', 'other'\]/g, '[]').replace(/'\/api\/finance-executions(\/execute)?'/g, "''")
+      .replace(/\b(paymentMethod|executedOn|swpPayment(Title)?)\b/g, 'X')
+      .replace(/posted to Finance|It is not a payment|Nothing is paid or executed\. A posting cannot be reversed\./g, '').replace(/'\/api\/finance-postings(\/payroll-plan|\/supplemental-payroll)?'/g, "''")
       .replace(/[A-Za-z_]*(Finance|FINANCE|finance)[A-Za-z_]*/g, 'X');
-    check(!/finance|ledger|journal|payment|execut|\/post|markPaid|\bpay\(|revers|correct|account|categor/i.test(nonFinance), 'K. no payment, execution, ledger, reversal, correction, account or category code (AFI-4e: only the Finance posting client and its approved words)');
-    check(((all.match(/'\/api\/finance[^']*'/g) || []).sort().join()) === "'/api/finance-postings','/api/finance-postings/payroll-plan','/api/finance-postings/supplemental-payroll'",
-      'K. AFI-4e names exactly the three BF-4e Finance routes — the month read and the two posting commands');
+    check(!/finance|ledger|journal|payment|execut|\/post|markPaid|\bpay\(|revers|correct|account|categor/i.test(nonFinance), 'K. no payment, execution, ledger, reversal, correction, account or category code (AFI-4e/AFI-4f: only the Finance posting and execution clients and their approved words)');
+    check(((all.match(/'\/api\/finance[^']*'/g) || []).sort().join()) === "'/api/finance-executions','/api/finance-executions/execute','/api/finance-postings','/api/finance-postings/payroll-plan','/api/finance-postings/supplemental-payroll'",
+      'K. AFI-4e/AFI-4f name exactly the five Finance routes — the two month reads, the two posting commands and the one execution command');
     check(!/Math\.random|crypto\.subtle|randomUUID|localStorage|sessionStorage|indexedDB|document\.cookie/.test(all)
       && (all.match(/getRandomValues\(/g) || []).length === 1 && /c\.getRandomValues\(new Uint8Array\(16\)\)/.test(code('core/payroll-api.js'))
       && !/getRandomValues/.test(code('core/session-payroll.js') + code('ui/session-payroll-view.js')),
@@ -2003,11 +2628,21 @@ function firewall(rt, label, overtimeOpened){
       'K. the Supplemental expectedTotal is the document\'s own overtimeAmount string; no arithmetic on any eligible amount');
     check(!/\b(generateSupplementalForPlan|refreshSupplemental|transitionSupplemental|postSupplemental|persistSupplementalPayments|supplementalById|supplementalsForPlan|SUPPLEMENTAL_STATUSES|SUPPLEMENTAL_TRANSITIONS|supplementalPayments|tam_supplemental_payments_v1)\b/.test(all),
       'K. no LOCAL Supplemental engine, store or status vocabulary in the SESSION Payroll modules');
+    // AFI-4f: LOCAL is untouched — no LOCAL module knows the execution client, and the LOCAL payment
+    // method labels are not the server's codes (the SESSION map is its own).
+    const localSrc = ['finance/execution-center.js', 'finance/transactions.js', 'finance/transaction-modals.js', 'people/payroll-ops-engine.js', 'people/supplemental-engine.js', 'core/constants.js']
+      .map((f) => fs.readFileSync(path.join(root, 'js', f), 'utf8')).join('\n');
+    const rtl = loadRuntime({});
+    check(!/FinanceExecution|financeExecution|finance-executions|FINANCE_EXECUTION/.test(localSrc) && rtl.LOCAL_PAYMENT_METHODS.join() === 'Cash,Bank Transfer,QRIS,Virtual Account,Credit Card,Other'
+      && rtl.FINANCE_EXECUTION_PAYMENT_METHODS.join() === 'cash,bankTransfer,qris,virtualAccount,creditCard,other' && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(fs.readFileSync(path.join(root, 'js', 'core', 'constants.js'), 'utf8')),
+      'K. AFI-4f leaves LOCAL unchanged: no LOCAL module names the execution client, the LOCAL PAYMENT_METHODS keep their labels beside the six server codes, AUTH_MODE stays LOCAL in the source');
+    check(!/\b(execute|pay|payNow|transfer|sendMoney|reconcile|reverse|correct)\s*\(/i.test(all) && !/\bPay\b|Execute payment|Mark paid|\bPaid\b|Executed|payment date/.test(code('ui/session-payroll-view.js')),
+      'K. AFI-4f adds no execute / pay / transfer / reconcile / reverse / correct function and none of the banned words (Pay, Execute payment, Mark paid, Paid, Executed, payment date)');
   }
 
   console.log('');
-  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
-  console.log('AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
+  if(failures.length === 0){ console.log('AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e + AFI-4f SESSION PAYROLL RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.'); process.exit(0); }
+  console.log('AFI-4c1 + AFI-4c2 + AFI-4d + AFI-4e + AFI-4f SESSION PAYROLL RUNTIME VERIFICATION FAILED -- ' + passed + ' passed, ' + failures.length + ' failed:');
   failures.forEach((f) => console.log('   - ' + f));
   process.exit(1);
 })().catch((e) => { console.error('HARNESS ERROR: ' + (e && e.stack || e)); process.exit(2); });

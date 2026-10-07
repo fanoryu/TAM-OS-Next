@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e) — js/ui/session-payroll-view.js
+   SESSION PAYROLL VIEW (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e, AFI-4f) — js/ui/session-payroll-view.js
    ------------------------------------------------------------
    The Payroll section of the authenticated SESSION workspace — CEO only — rendered by
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js), its only caller, when the section
@@ -65,6 +65,19 @@
    posting" (the same intent again). A posting 409 never claims its cause. No other Finance control,
    no Finance screen or navigation, nothing for an Employee, and no non-Committed source shows a
    Finance line.
+
+   AFI-4f (owner decisions D-AFI4f-1..8 = A): RECORD PAYMENT — inside that same Finance card, once
+   the posting is shown, its payment status: "Payment not recorded in TAM OS." with "Record payment",
+   or "Payment recorded — paid outside TAM OS. TAM OS did not send this money." with the amount,
+   Date paid and Payment method the server holds; while the month's executions load, fail or do
+   not match the posting, that status (and a read retry) and no Record payment. "Record payment"
+   opens an inline form with exactly the posting's own amount (display only), Date paid (required,
+   empty; the Jakarta today is only its max hint — the server decides) and Payment method (required,
+   no default; the six BF-4f codes as labels). TAM OS records a payment made outside it — it never
+   sends or moves money. An unconfirmed record whose reads still show the posting at the same
+   amount with no execution offers "Retry recording" (the same intent again). A 409 never claims
+   its cause. No account, reference, note, partial, reversal or correction, no month-list column,
+   nothing for an Employee.
 
    Classic shared global scope; existing CSS classes only.
    ============================================================ */
@@ -221,6 +234,57 @@ const SESSION_FINANCE_NOTICES = Object.freeze({
   finPostStale: 'TAM OS could not confirm the posting, and what was read again has changed. Check it before choosing again.'
 });
 
+// AFI-4f: Record payment words (D-AFI4f-3 = A). TAM OS only records a payment made outside it — it
+// never sends or moves money. Every message is fixed; a 409 never names its cause.
+const SESSION_FINANCE_EXECUTION_TEXT = Object.freeze({
+  title: 'Payment',
+  unrecorded: 'Payment not recorded in TAM OS.',
+  explain: 'Record a payment that was already made outside TAM OS. TAM OS does not send or move money.',
+  recorded: 'Payment recorded — paid outside TAM OS. TAM OS did not send this money.',
+  loading: 'Checking the payment status…',
+  readError: 'TAM OS could not read the payment status of this month, so recording a payment is not offered.',
+  inconsistent: 'TAM OS returned a payment status that does not match this posting, so recording a payment is not offered.',
+  another: 'Another Finance record is not confirmed yet. Open it to check it before recording another payment.',
+  record: 'Record payment', recording: 'Recording…', retry: 'Retry recording', retryRead: 'Retry payment status',
+  amount: 'Amount paid (Rp)', date: 'Date paid', method: 'Payment method', chooseMethod: 'Choose a payment method',
+  dateHint: 'The day the payment was made outside TAM OS, no later than today (Jakarta calendar).',
+  dateMissing: 'Enter Date paid: a real date, no later than today (Jakarta calendar).',
+  methodMissing: 'Choose a payment method.'
+});
+// The server's payment method codes (FINANCE_EXECUTION_PAYMENT_METHODS) and their labels, in order.
+const SESSION_FINANCE_EXECUTION_METHOD_TEXT = Object.freeze({ cash: 'Cash', bankTransfer: 'Bank transfer', qris: 'QRIS', virtualAccount: 'Virtual account', creditCard: 'Credit card', other: 'Other' });
+// The confirmation: the posting's own amount string sits between the two parts, unchanged.
+const SESSION_FINANCE_EXECUTION_CONFIRM = Object.freeze(['Records that Rp ', ' was paid in full outside TAM OS. TAM OS does not send or move money. A recorded payment cannot be changed or reversed.']);
+const SESSION_FINANCE_EXECUTION_PANELS = Object.freeze({
+  finRecordPlan: { title: 'Record the payment of this payroll?' },
+  finRecordSupp: { title: 'Record the payment of this supplemental payroll?' }
+});
+const SESSION_FINANCE_EXECUTION_BUTTONS = Object.freeze({ payrollPlan: { id: 'swpPayRecordBtn', panel: 'finRecordPlan' }, supplementalPayroll: { id: 'swpSuppPayRecordBtn', panel: 'finRecordSupp' } });
+const SESSION_FINANCE_EXECUTION_ERRORS = Object.freeze({
+  VALIDATION: 'TAM OS could not accept this payment record. Nothing was recorded.',
+  DENIED: 'You do not have permission to record payments.',
+  NOT_FOUND: 'This payroll is no longer available. The month was read again.',
+  RATE_LIMITED: 'Too many requests.',
+  CLIENT_FAULT: 'TAM OS could not process this request.',
+  CRYPTO_UNAVAILABLE: 'This browser cannot create a secure record key. Nothing was sent.'
+});
+// A 400 that names one of the two fields the CEO entered.
+const SESSION_FINANCE_EXECUTION_FIELD_ERRORS = Object.freeze({
+  executedOn: 'TAM OS did not accept Date paid: it must be a real date no later than today (Jakarta calendar). Nothing was recorded.',
+  paymentMethod: 'TAM OS did not accept the payment method. Nothing was recorded.'
+});
+const SESSION_FINANCE_EXECUTION_CONFLICT = 'TAM OS did not record this payment (a conflict was reported). The posting and its payment status were read again from TAM OS — check them before choosing again.';
+const SESSION_FINANCE_EXECUTION_AMBIGUOUS = Object.freeze({
+  unresolved: 'TAM OS could not confirm the payment record. What was read again still shows no payment recorded for this posting, at the same amount. Retry recording sends the same record again — it can never record the payment twice.',
+  unread: 'TAM OS could not confirm the payment record, and the payment status could not be read again. Nothing is sent again — use Retry payment status to read it.',
+  reading: 'TAM OS could not confirm the payment record. It is being read again…'
+});
+const SESSION_FINANCE_EXECUTION_NOTICES = Object.freeze({
+  payRecorded: 'Payment recorded — paid outside TAM OS. TAM OS did not send this money.',
+  payRecordConfirmed: 'TAM OS could not confirm the payment record at first, but the payment status read again shows it: Payment recorded — paid outside TAM OS.',
+  payRecordStale: 'TAM OS could not confirm the payment record, and what was read again has changed. Check it before choosing again.'
+});
+
 function sessionPayrollValue(v){
   return (v === null || v === undefined || v === '') ? '—' : escapeHtml(String(v));
 }
@@ -281,6 +345,7 @@ function sessionPayrollMutationHTML(w){
 // The open confirmation: what it acts on, its explanation, Cancel and the action.
 function sessionPayrollPanelHTML(w){
   if(SESSION_FINANCE_PANEL_KINDS.indexOf(w.panel.kind) !== -1) return sessionFinancePanelHTML(w);   // AFI-4e
+  if(SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(w.panel.kind) !== -1) return sessionFinanceExecutionPanelHTML(w);   // AFI-4f
   const panel = SESSION_PAYROLL_PANELS[w.panel.kind];
   const busy = sessionPayrollBusy(w);
   const dis = busy ? ' disabled' : '';
@@ -534,6 +599,7 @@ function sessionSupplementalMutationHTML(w){
 // The open Supplemental confirmation: exactly the server strings it acts on.
 function sessionSupplementalPanelHTML(w, eligible){
   if(SESSION_FINANCE_PANEL_KINDS.indexOf(w.panel.kind) !== -1) return sessionFinancePanelHTML(w);   // AFI-4e
+  if(SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(w.panel.kind) !== -1) return sessionFinanceExecutionPanelHTML(w);   // AFI-4f
   const panel = SESSION_SUPPLEMENTAL_PANELS[w.panel.kind];
   const busy = sessionPayrollBusy(w);
   const dis = busy ? ' disabled' : '';
@@ -699,7 +765,8 @@ function sessionSupplementalDetailMessageHTML(w){
 // The posting confirmation and write messages, and the posting notices, belong to Finance.
 function sessionFinanceOwnsMessage(w){
   return SESSION_FINANCE_PANEL_KINDS.indexOf(w.mutation.kind) !== -1
-    || (w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && !!w.notice && Object.prototype.hasOwnProperty.call(SESSION_FINANCE_NOTICES, w.notice));
+    || (w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && !!w.notice && Object.prototype.hasOwnProperty.call(SESSION_FINANCE_NOTICES, w.notice))
+    || sessionFinanceExecutionOwnsMessage(w);                                    // AFI-4f
 }
 // The confirmation sentence around the source's own amount string.
 function sessionFinanceConfirmText(amount){
@@ -719,6 +786,7 @@ function sessionFinanceAmbiguousText(w){
   return 'TAM OS could not confirm the posting. It is being read again…';
 }
 function sessionFinanceMutationHTML(w){
+  if(sessionFinanceExecutionOwnsMessage(w)) return sessionFinanceExecutionMutationHTML(w);   // AFI-4f
   const m = w.mutation;
   let text = null, warn = true;
   if(m.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) text = sessionFinanceAmbiguousText(w);
@@ -764,7 +832,8 @@ function sessionFinanceHTML(w, sourceKind, source, dis){
       + (e.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn" type="button" id="swpFinRetryBtn"' + dis + '>Retry Finance status</button></div>');
   } else if(status.state === 'posted'){
     body = '<p class="auth-lead">' + escapeHtml(SESSION_FINANCE_STATE_TEXT.posted) + '</p>'
-      + '<div class="table-wrap"><table><tbody><tr><th scope="row">Planned amount (Rp)</th><td>' + escapeHtml(status.posting.amount) + '</td></tr></tbody></table></div>';
+      + '<div class="table-wrap"><table><tbody><tr><th scope="row">Planned amount (Rp)</th><td>' + escapeHtml(status.posting.amount) + '</td></tr></tbody></table></div>'
+      + sessionFinanceExecutionHTML(w, sourceKind, source, dis);                 // AFI-4f: the payment status of the posting
   } else {
     const intentState = sessionFinanceIntentState(w.postIntent, sourceKind, source, status);
     const b = SESSION_FINANCE_POST_BUTTONS[sourceKind];
@@ -777,6 +846,112 @@ function sessionFinanceHTML(w, sourceKind, source, dis){
     body = '<p class="auth-lead">' + escapeHtml(SESSION_FINANCE_STATE_TEXT.unposted) + '</p>' + control;
   }
   return '<section class="card" id="swpFinance" aria-labelledby="swpFinanceTitle"><h2 class="section-title" id="swpFinanceTitle">' + escapeHtml(SESSION_FINANCE_TITLE) + '</h2>' + body + '</section>';
+}
+
+/* ---------- AFI-4f: Record payment (Finance execution) ---------- */
+
+// The Record payment confirmation and write messages, and its notices, belong to the payment.
+function sessionFinanceExecutionOwnsMessage(w){
+  return SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(w.mutation.kind) !== -1
+    || (w.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && !!w.notice && Object.prototype.hasOwnProperty.call(SESSION_FINANCE_EXECUTION_NOTICES, w.notice));
+}
+// An unconfirmed payment record, reported by what the reads that followed it show (never as a success).
+function sessionFinanceExecutionAmbiguousText(w){
+  const state = sessionFinanceExecutionIntentState(w, w.execIntent);
+  if(w.execIntent && state === 'unresolved') return SESSION_FINANCE_EXECUTION_AMBIGUOUS.unresolved;
+  if(w.execStatus === SESSION_PAYROLL_STATUS.ERROR || w.finStatus === SESSION_PAYROLL_STATUS.ERROR) return SESSION_FINANCE_EXECUTION_AMBIGUOUS.unread;
+  return SESSION_FINANCE_EXECUTION_AMBIGUOUS.reading;
+}
+function sessionFinanceExecutionMutationHTML(w){
+  const m = w.mutation;
+  let text = null, warn = true;
+  if(m.status === SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS) text = sessionFinanceExecutionAmbiguousText(w);
+  else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.ERROR && m.error){
+    const k = m.error.kind;
+    const field = k === 'VALIDATION' && m.fields ? ['executedOn', 'paymentMethod'].filter((f) => m.fields.indexOf(f) !== -1)[0] : undefined;
+    text = k === 'CONFLICT' ? SESSION_FINANCE_EXECUTION_CONFLICT : field ? SESSION_FINANCE_EXECUTION_FIELD_ERRORS[field]
+      : (SESSION_FINANCE_EXECUTION_ERRORS[k] || SESSION_FINANCE_EXECUTION_ERRORS.CLIENT_FAULT);
+    if(k === 'RATE_LIMITED' && typeof authWaitText === 'function') text += authWaitText(m.error.retryAfter);
+  } else if(m.status === SESSION_PAYROLL_MUTATION_STATUS.IDLE && w.notice && SESSION_FINANCE_EXECUTION_NOTICES[w.notice]){
+    text = SESSION_FINANCE_EXECUTION_NOTICES[w.notice]; warn = w.notice === 'payRecordStale';
+  }
+  if(!text) return '';
+  if(warn && m.error && m.error.requestId) text += ' Reference: ' + m.error.requestId + '.';
+  return '<p class="auth-message' + (warn ? ' auth-message-warn' : '') + '" id="swpMutationMessage" role="' + (warn ? 'alert' : 'status') + '" tabindex="-1">' + escapeHtml(text) + '</p>';
+}
+// The label of a payment method code (an unknown code never reaches here: the decoder refuses it).
+function sessionFinanceExecutionMethodText(code){
+  return Object.prototype.hasOwnProperty.call(SESSION_FINANCE_EXECUTION_METHOD_TEXT, code) ? SESSION_FINANCE_EXECUTION_METHOD_TEXT[code] : '—';
+}
+// The open Record payment form: the posting's own amount (display only), Date paid (empty,
+// required, the Jakarta today as its max hint) and Payment method (no default) — nothing else.
+function sessionFinanceExecutionPanelHTML(w){
+  const T = SESSION_FINANCE_EXECUTION_TEXT;
+  const panel = SESSION_FINANCE_EXECUTION_PANELS[w.panel.kind];
+  const sourceKind = SESSION_FINANCE_EXECUTION_SOURCE_KIND[w.panel.kind];
+  const source = sessionFinanceSource(w, sourceKind);
+  const status = sessionFinanceExecutionStatus(w, sourceKind, source);
+  const amount = status ? status.posting.amount : '';
+  const busy = sessionPayrollBusy(w);
+  const dis = busy ? ' disabled' : '';
+  const d = w.payDraft;
+  const missDate = d.missing.indexOf('executedOn') !== -1, missMethod = d.missing.indexOf('paymentMethod') !== -1;
+  const what = source ? [source.employeeName, ' (', source.employeeCode, ') — ', sessionPayrollMonthLabel(source.monthKey), '.'].join('') : '';
+  const date = '<div class="field"><label for="swpPayDate">' + escapeHtml(T.date) + ' <span aria-hidden="true">*</span></label>'
+    + '<input class="input" type="date" id="swpPayDate" name="executedOn" required aria-required="true" autocomplete="off" max="' + escapeHtml(financeExecutionToday()) + '"'
+    + (missDate ? ' aria-invalid="true"' : '') + ' aria-describedby="swpPayDateHint' + (missDate ? ' swpPayDateError' : '') + '"' + dis + ' value="' + escapeHtml(d.executedOn) + '">'
+    + '<p class="hint" id="swpPayDateHint">' + escapeHtml(T.dateHint) + '</p>'
+    + (missDate ? '<p class="hint auth-message-warn" id="swpPayDateError">' + escapeHtml(T.dateMissing) + '</p>' : '') + '</div>';
+  const method = '<div class="field"><label for="swpPayMethod">' + escapeHtml(T.method) + ' <span aria-hidden="true">*</span></label>'
+    + '<select class="input" id="swpPayMethod" name="paymentMethod" required aria-required="true"' + (missMethod ? ' aria-invalid="true" aria-describedby="swpPayMethodError"' : '') + dis + '>'
+    + '<option value=""' + (d.paymentMethod === '' ? ' selected' : '') + '>' + escapeHtml(T.chooseMethod) + '</option>'
+    + FINANCE_EXECUTION_PAYMENT_METHODS.map(function(c){ return '<option value="' + c + '"' + (d.paymentMethod === c ? ' selected' : '') + '>' + escapeHtml(sessionFinanceExecutionMethodText(c)) + '</option>'; }).join('')
+    + '</select>' + (missMethod ? '<p class="hint auth-message-warn" id="swpPayMethodError">' + escapeHtml(T.methodMissing) + '</p>' : '') + '</div>';
+  return '<section class="card" aria-labelledby="swpPanelTitle"' + (busy ? ' aria-busy="true"' : '') + '>'
+    + '<h2 class="section-title" id="swpPanelTitle" tabindex="-1">' + escapeHtml(panel.title) + '</h2>'
+    + '<p class="auth-lead">' + escapeHtml(what) + ' ' + escapeHtml(SESSION_FINANCE_EXECUTION_CONFIRM[0] + amount + SESSION_FINANCE_EXECUTION_CONFIRM[1]) + '</p>'
+    + '<div class="table-wrap"><table><tbody><tr><th scope="row">' + escapeHtml(T.amount) + '</th><td>' + escapeHtml(amount) + '</td></tr></tbody></table></div>'
+    + date + method
+    + sessionFinanceExecutionMutationHTML(w)
+    + '<div class="auth-actions"><button class="btn" type="button" id="swpPanelCancel"' + dis + '>Back</button>'
+    + '<button class="btn btn-danger" type="button" id="swpPanelConfirm"' + dis + (busy ? ' aria-busy="true"' : '') + '>'
+    + escapeHtml(busy ? T.recording : T.record) + '</button></div></section>';
+}
+// The payment status of a posted source, inside its Finance card (D-AFI4f-1 = A; details only,
+// D-AFI4f-6 = A): not recorded (Record payment, or Retry recording of an unresolved record),
+// checking, could not be read, or recorded — with the execution's amount, date and method.
+function sessionFinanceExecutionHTML(w, sourceKind, source, dis){
+  const T = SESSION_FINANCE_EXECUTION_TEXT;
+  const status = sessionFinanceExecutionStatus(w, sourceKind, source);
+  if(!status) return '';
+  let body;
+  if(status.state === 'loading') body = '<p class="hint" role="status" aria-busy="true">' + escapeHtml(T.loading) + '</p>';
+  else if(status.state === 'error'){
+    const e = w.execError || {};
+    let msg = T.readError;
+    if(e.kind === 'RATE_LIMITED' && typeof authWaitText === 'function') msg += authWaitText(e.retryAfter);
+    if(e.requestId) msg += ' Reference: ' + e.requestId + '.';
+    body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(msg) + '</p>'
+      + (e.kind === 'DENIED' ? '' : '<div class="auth-actions"><button class="btn" type="button" id="swpPayStatusRetryBtn"' + dis + '>' + escapeHtml(T.retryRead) + '</button></div>');
+  } else if(status.state === 'inconsistent') body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(T.inconsistent) + '</p>';
+  else if(status.state === 'recorded'){
+    const e = status.financeExecution;
+    body = '<p class="auth-lead">' + escapeHtml(T.recorded) + '</p>'
+      + '<div class="table-wrap"><table><tbody>'
+      + [[T.amount, e.amount], [T.date, e.executedOn], [T.method, sessionFinanceExecutionMethodText(e.paymentMethod)]].map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + escapeHtml(r[1]) + '</td></tr>'; }).join('')
+      + '</tbody></table></div>';
+  } else {
+    const mine = !!w.execIntent && w.execIntent.financePostingId === status.posting.id;
+    const b = SESSION_FINANCE_EXECUTION_BUTTONS[sourceKind];
+    let control = '';
+    if(!w.panel){
+      if(mine && sessionFinanceExecutionIntentState(w, w.execIntent) === 'unresolved') control = '<div class="auth-actions"><button class="btn btn-accent" type="button" id="swpPayRetryBtn"' + dis + '>' + escapeHtml(T.retry) + '</button></div>';
+      else if(w.execIntent || w.postIntent) control = '<p class="hint">' + escapeHtml(T.another) + '</p>';
+      else control = '<div class="auth-actions"><button class="btn btn-accent" type="button" id="' + b.id + '"' + dis + '>' + escapeHtml(T.record) + '</button></div>';
+    }
+    body = '<p class="auth-lead">' + escapeHtml(T.unrecorded) + '</p><p class="hint">' + escapeHtml(T.explain) + '</p>' + control;
+  }
+  return '<div id="swpPayment" role="group" aria-labelledby="swpPaymentTitle"><h3 class="section-title" id="swpPaymentTitle">' + escapeHtml(T.title) + '</h3>' + body + '</div>';
 }
 
 function bindSessionPayroll(app){
@@ -808,12 +983,22 @@ function bindSessionPayroll(app){
   Object.keys(SESSION_FINANCE_POST_BUTTONS).forEach(function(k){ const b = SESSION_FINANCE_POST_BUTTONS[k]; click(b.id, function(){ SessionPayroll.openPanel(b.panel); }); });
   click('swpFinRetryPostBtn', function(){ SessionPayroll.retryPosting(); });
   click('swpFinRetryBtn', function(){ SessionPayroll.retryFinance(); });
+  // AFI-4f: Record payment — the form's two fields follow what is typed or chosen (no render).
+  Object.keys(SESSION_FINANCE_EXECUTION_BUTTONS).forEach(function(k){ const b = SESSION_FINANCE_EXECUTION_BUTTONS[k]; click(b.id, function(){ SessionPayroll.openPanel(b.panel); }); });
+  click('swpPayRetryBtn', function(){ SessionPayroll.retryRecording(); });
+  click('swpPayStatusRetryBtn', function(){ SessionPayroll.retryFinanceExecutionStatus(); });
+  [['swpPayDate', 'executedOn'], ['swpPayMethod', 'paymentMethod']].forEach(function(f){
+    const keep = function(){ SessionPayroll.setPayDraft(f[1], this.value); };
+    on(f[0], 'input', keep); on(f[0], 'change', keep);
+  });
 }
 
 // After a render: the element the section asked for, else null (the workspace decides).
 function sessionPayrollFocusTarget(app, hint){
   if(hint === 'message') return app.querySelector('#swpMutationMessage');
   if(hint === 'panel') return app.querySelector('#swpPanelTitle');
+  if(hint === 'field:executedOn') return app.querySelector('#swpPayDate');          // AFI-4f
+  if(hint === 'field:paymentMethod') return app.querySelector('#swpPayMethod');     // AFI-4f
   if(hint === 'section') return app.querySelector('#authTitle');
   return null;
 }

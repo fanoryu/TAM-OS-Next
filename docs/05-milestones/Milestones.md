@@ -414,8 +414,12 @@ not deployed. It needs the Finance posting routes deployed first or with it. Fin
 the posting stays Planned; exactly one execution per posting at the posting's own amount; a required date no later than
 today in the Asia/Jakarta calendar and a closed-list payment method; one explicit CEO command per posting under the existing
 `finance.execute` with full-body idempotent replay; CEO-only reads; no partial payment, reversal, correction,
-reconciliation, company account or bank integration; migrations `0034`–`0035`) is a local candidate on a feature branch,
-backend only, not deployed; its SESSION screen is a later AFI-4f. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+reconciliation, company account or bank integration; migrations `0034`–`0035`) is merged as source (PR #52, canonical
+merge `171392a16800c85e128c178f934d72c96a6255be`), backend only, not deployed. **AFI-4f** (the CEO's SESSION "Record
+payment" inside the Finance card of a posted Committed plan or Supplemental document — a display-only posting amount, a
+required Date paid and Payment method, one frozen intent with a same-key "Retry recording", "Payment recorded — paid
+outside TAM OS"; TAM OS moves no money; details only, nothing for an Employee; *D-AFI4f-1..8 = A, 2026-10-07*) is a local
+candidate on a feature branch, frontend only, not deployed. It needs the Finance execution routes deployed first or with it. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

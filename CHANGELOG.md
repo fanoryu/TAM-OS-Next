@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **AFI-4f Record payment (SESSION mode, CEO; not shipped).** On a Committed payroll or supplemental payroll that is posted
+  to Finance, the CEO can now record that its payment was made outside TAM OS: the Finance card shows "Payment not recorded
+  in TAM OS." with **Record payment**, which asks for the date paid and the payment method (cash, bank transfer, QRIS,
+  virtual account, credit card or other) and shows the posted amount, which cannot be edited. Once recorded the card reads
+  "Payment recorded — paid outside TAM OS" with the amount, date and method. TAM OS does not send or move money, and a
+  recorded payment cannot be changed or reversed. If TAM OS cannot confirm a record it checks again and offers "Retry
+  recording", which can never record the payment twice. Employees see nothing of it. The shipped `AUTH_MODE` stays
+  **LOCAL**; the local app is unchanged.
 - **BF-4f Finance execution of Planned postings (backend only, not shipped).** The CEO can now record on the server that a
   Planned Finance posting was paid — in full, outside TAM OS — on a given date and by one of the usual payment methods
   (cash, bank transfer, QRIS, virtual account, credit card or other). TAM OS moves no money. The record is kept separately

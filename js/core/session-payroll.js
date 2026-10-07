@@ -1,5 +1,5 @@
 /* ============================================================
-   SESSION PAYROLL DATA (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e) — js/core/session-payroll.js
+   SESSION PAYROLL DATA (AFI-4c1, AFI-4c2, AFI-4d, AFI-4e, AFI-4f) — js/core/session-payroll.js
    ------------------------------------------------------------
    The SESSION-mode Payroll section of the authenticated workspace — CEO only — over BF-4c1:
    one month's payroll plans, a plan's detail with its contributing overtime, "Prepare payroll"
@@ -115,6 +115,28 @@
    D-AFI4e-3 = A); anything else drops it as stale. An Employee never reads or writes Finance.
    Nothing here pays, executes, reverses or corrects anything, and LOCAL is untouched.
 
+   AFI-4f (over BF-4f, PR #52; owner decisions D-AFI4f-1..8 = A): RECORD PAYMENT — the CEO records,
+   on the same detail and in the same Finance card, that one Planned posting was paid in full
+   OUTSIDE TAM OS (one BF-4f execution). TAM OS moves no money. In this same store (D-AFI4f-2 = A):
+     exec, execMonth, execSeq, execStatus, execError   the CEO's executions of the month
+                   (FinanceExecutionApi.month), read together with the postings (loadFinance)
+     execIntent    the one execution intent { financePostingId, employeeId, monthKey, amount,
+                   executedOn, paymentMethod, key } — the posting's own amount string, the date and
+                   method chosen, one Web Crypto key; frozen, memory only; destroyed by clear()
+     payDraft      the open form's Date paid and Payment method (memory only), and the fields the
+                   last confirmation found missing
+   A posting is matched to its execution by financePostingId. Record payment is offered only when
+   the source is Committed, its posting is read and consistent with it, the month's executions are
+   read and hold none of it, and no posting or execution intent is unresolved — never while either
+   read is idle, loading, failed or inconsistent. The intent is frozen before it is sent, once. The
+   rules are AFI-4e's: a confirming answer is the success; ANY 409 (generic — its cause is never
+   claimed) or other definite refusal drops the intent and reads the Finance status again; an
+   unknown outcome keeps the intent and reads it again — NEVER resent automatically. Those reads
+   decide: recorded with the intent's amount, date and method is the success; the posting at the
+   same amount with no execution keeps the intent and offers "Retry recording", which on a
+   deliberate click sends exactly the same body and key (D-AFI4f-5 = A); anything else drops it as
+   stale. An Employee never reads or writes an execution (D-AFI4f-7 = A).
+
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
 
@@ -214,6 +236,44 @@ function sessionFinanceIntentState(intent, sourceKind, source, status){
   return null;
 }
 
+// AFI-4f: the two Record payment confirmations and writes, and the source kind of each.
+const SESSION_FINANCE_EXECUTION_PANEL_KINDS = Object.freeze(['finRecordPlan', 'finRecordSupp']);
+const SESSION_FINANCE_EXECUTION_SOURCE_KIND = Object.freeze({ finRecordPlan: 'payrollPlan', finRecordSupp: 'supplementalPayroll' });
+const SESSION_FINANCE_EXECUTION_DRAFT_IDLE = Object.freeze({ executedOn: '', paymentMethod: '', missing: Object.freeze([]) });
+// AFI-4f: the payment status of a source — null unless the month's Finance read shows it posted;
+// else { state, posting } with state 'inconsistent' (the posting, or its execution, does not match
+// the source), 'loading' (the executions are not read yet), 'error' (they could not be read),
+// 'unrecorded' or 'recorded' (with its financeExecution). Matched by financePostingId only.
+function sessionFinanceExecutionStatus(s, sourceKind, source){
+  const f = sessionFinanceStatus(s, sourceKind, source);
+  if(!f || f.state !== 'posted') return null;
+  const p = f.posting;
+  if(p.amount !== financePostingSourceAmount(sourceKind, source) || p.employeeId !== source.employeeId || p.monthKey !== source.monthKey) return Object.freeze({ state: 'inconsistent', posting: p });
+  if(s.execStatus === SESSION_PAYROLL_STATUS.ERROR && s.execMonth === p.monthKey) return Object.freeze({ state: 'error', posting: p });
+  if(s.execStatus !== SESSION_PAYROLL_STATUS.READY || !s.exec || s.execMonth !== p.monthKey) return Object.freeze({ state: 'loading', posting: p });
+  const hits = s.exec.filter((e) => e.financePostingId === p.id);
+  if(!hits.length) return Object.freeze({ state: 'unrecorded', posting: p });
+  if(hits[0].amount !== p.amount || hits[0].employeeId !== p.employeeId || hits[0].monthKey !== p.monthKey) return Object.freeze({ state: 'inconsistent', posting: p });
+  return Object.freeze({ state: 'recorded', posting: p, financeExecution: hits[0] });
+}
+// AFI-4f: what the reads of an execution intent show — 'recorded' (an execution of its posting at
+// the intent's amount, date and method), 'unresolved' (its posting at the same amount, with no
+// execution: Retry recording may send the same intent), 'stale' (anything else), or null (the
+// month's postings and executions are not both read for the intent's month yet).
+function sessionFinanceExecutionIntentState(s, intent){
+  if(!intent) return null;
+  if(s.finStatus !== SESSION_PAYROLL_STATUS.READY || !s.fin || s.finMonth !== intent.monthKey
+    || s.execStatus !== SESSION_PAYROLL_STATUS.READY || !s.exec || s.execMonth !== intent.monthKey) return null;
+  const hits = s.exec.filter((e) => e.financePostingId === intent.financePostingId);
+  if(hits.length){
+    const e = hits[0];
+    return (e.amount === intent.amount && e.executedOn === intent.executedOn && e.paymentMethod === intent.paymentMethod
+      && e.employeeId === intent.employeeId && e.monthKey === intent.monthKey) ? 'recorded' : 'stale';
+  }
+  const p = s.fin.filter((x) => x.id === intent.financePostingId);
+  return (p.length === 1 && p[0].amount === intent.amount && p[0].employeeId === intent.employeeId) ? 'unresolved' : 'stale';
+}
+
 // The month the section opens on: the local calendar month of `now` (injectable; a Date by default).
 function sessionPayrollCurrentMonth(now){
   return OvertimeCalendar.monthOf(now || new Date());
@@ -249,13 +309,16 @@ const SessionPayrollStore = (function(){
   // AFI-4e: Finance posting.
   let fin = null, finMonth = null, finSeq = 0, finStatus = SESSION_PAYROLL_STATUS.IDLE, finError = null;
   let postIntent = null;
+  // AFI-4f: Record payment (Finance execution).
+  let exec = null, execMonth = null, execSeq = 0, execStatus = SESSION_PAYROLL_STATUS.IDLE, execError = null;
+  let execIntent = null, payDraft = SESSION_FINANCE_EXECUTION_DRAFT_IDLE;
 
   function keyOf(p){
     return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null;
   }
   function seqOf(kind){
     return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'labels' ? labelsSeq : kind === 'mutation' ? mutationSeq : kind === 'drift' ? driftSeq
-      : kind === 'suppList' ? suppListSeq : kind === 'elig' ? eligSeq : kind === 'suppDetail' ? suppDetailSeq : kind === 'fin' ? finSeq : -1;
+      : kind === 'suppList' ? suppListSeq : kind === 'elig' ? eligSeq : kind === 'suppDetail' ? suppDetailSeq : kind === 'fin' ? finSeq : kind === 'exec' ? execSeq : -1;
   }
   function isLive(token){ return !!token && token.gen === generation; }
   function isCurrent(token){
@@ -273,10 +336,13 @@ const SessionPayrollStore = (function(){
   }
   // AFI-4e: the month's Finance postings (a pending answer is dropped).
   function forgetFinance(){ finSeq++; fin = null; finMonth = null; finStatus = SESSION_PAYROLL_STATUS.IDLE; finError = null; }
+  // AFI-4f: the month's executions (a pending answer is dropped).
+  function forgetFinanceExecutions(){ execSeq++; exec = null; execMonth = null; execStatus = SESSION_PAYROLL_STATUS.IDLE; execError = null; }
   function clear(){
     forgetDrift(); commitIntent = null;
     forgetSupplementalMonth(); forgetSupplementalDetail(); suppIntent = null;      // AFI-4d: and its key
     forgetFinance(); postIntent = null;                                            // AFI-4e: and its key
+    forgetFinanceExecutions(); execIntent = null; payDraft = SESSION_FINANCE_EXECUTION_DRAFT_IDLE;   // AFI-4f: and its key
     open = false; month = null;
     list = null; listMonth = null; listStatus = SESSION_PAYROLL_STATUS.IDLE; listStale = false; listSeq++;
     detail = null; detailId = null; detailStatus = SESSION_PAYROLL_STATUS.IDLE; detailSeq++;
@@ -319,6 +385,7 @@ const SessionPayrollStore = (function(){
       forgetDrift();
       forgetSupplementalMonth(); forgetSupplementalDetail();                      // AFI-4d
       forgetFinance();                                                            // AFI-4e
+      forgetFinanceExecutions();                                                         // AFI-4f
       excluded = null; excludedMonth = null; panel = null;
     },
     // A request token; the new request supersedes any earlier one of its kind.
@@ -357,6 +424,11 @@ const SessionPayrollStore = (function(){
       if(kind === 'fin'){
         finSeq++; finMonth = arg; fin = null; finStatus = SESSION_PAYROLL_STATUS.LOADING; finError = null;
         return Object.freeze({ gen: generation, kind: kind, seq: finSeq });
+      }
+      // AFI-4f: the month's executions (CEO).
+      if(kind === 'exec'){
+        execSeq++; execMonth = arg; exec = null; execStatus = SESSION_PAYROLL_STATUS.LOADING; execError = null;
+        return Object.freeze({ gen: generation, kind: kind, seq: execSeq });
       }
       throw new Error('unknown session payroll request kind');
     },
@@ -407,8 +479,15 @@ const SessionPayrollStore = (function(){
       fin = items; finStatus = SESSION_PAYROLL_STATUS.READY;
       return true;
     },
+    // AFI-4f: only for the month they were read for.
+    applyExec(token, items){
+      if(!isCurrent(token) || token.kind !== 'exec' || execMonth !== month) return false;
+      exec = items; execStatus = SESSION_PAYROLL_STATUS.READY;
+      return true;
+    },
     applyError(token, failed){
       if(!isCurrent(token)) return false;
+      if(token.kind === 'exec'){ exec = null; execStatus = SESSION_PAYROLL_STATUS.ERROR; execError = failure(failed); return true; }   // AFI-4f
       if(token.kind === 'fin'){ fin = null; finStatus = SESSION_PAYROLL_STATUS.ERROR; finError = failure(failed); return true; }   // AFI-4e
       if(token.kind === 'drift'){ drift = null; driftStatus = SESSION_PAYROLL_STATUS.ERROR; return true; }
       if(token.kind === 'suppList'){ suppList = null; suppListStatus = SESSION_PAYROLL_STATUS.ERROR; suppListError = failure(failed); return true; }
@@ -444,7 +523,8 @@ const SessionPayrollStore = (function(){
     closePanel(){ mutationSeq++; mutation = SESSION_PAYROLL_MUTATION_IDLE; panel = null; },
     resetMutation(){ mutation = SESSION_PAYROLL_MUTATION_IDLE; notice = null; },
     beginMutation(kind, target){
-      if(SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1 && SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) === -1 && SESSION_FINANCE_PANEL_KINDS.indexOf(kind) === -1) throw new Error('unknown session payroll mutation kind');
+      if(SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1 && SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) === -1 && SESSION_FINANCE_PANEL_KINDS.indexOf(kind) === -1
+        && SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(kind) === -1) throw new Error('unknown session payroll mutation kind');
       mutationSeq++;
       mutation = Object.freeze({ kind: kind, status: SESSION_PAYROLL_MUTATION_STATUS.PENDING, error: null, fields: null, target: target || null });
       notice = null;
@@ -508,6 +588,29 @@ const SessionPayrollStore = (function(){
       postIntent = Object.freeze({ sourceKind: intent.sourceKind, sourceId: intent.sourceId, employeeId: intent.employeeId, monthKey: intent.monthKey, amount: intent.amount, key: intent.key });
     },
     dropPostIntent(){ postIntent = null; },
+    // AFI-4f: a confirmed execution: the confirmation closes; the Finance status is read again.
+    applyFinanceExecutionRecorded(token){
+      if(!isCurrent(token) || token.kind !== 'mutation') return false;
+      panel = null; mutation = SESSION_PAYROLL_MUTATION_IDLE; notice = 'payRecorded'; payDraft = SESSION_FINANCE_EXECUTION_DRAFT_IDLE;
+      return true;
+    },
+    // AFI-4f: the one execution intent (frozen; memory only) and its end.
+    setExecIntent(intent){
+      execIntent = Object.freeze({ financePostingId: intent.financePostingId, employeeId: intent.employeeId, monthKey: intent.monthKey, amount: intent.amount,
+        executedOn: intent.executedOn, paymentMethod: intent.paymentMethod, key: intent.key });
+    },
+    dropExecIntent(){ execIntent = null; },
+    // AFI-4f: the open form's two fields (strings, as typed or chosen) and the missing ones.
+    resetPayDraft(){ payDraft = SESSION_FINANCE_EXECUTION_DRAFT_IDLE; },
+    setPayDraft(name, value){
+      if((name !== 'executedOn' && name !== 'paymentMethod') || typeof value !== 'string') return;
+      const next = { executedOn: payDraft.executedOn, paymentMethod: payDraft.paymentMethod, missing: payDraft.missing };
+      next[name] = value;
+      payDraft = Object.freeze(next);
+    },
+    setPayDraftMissing(fields){
+      payDraft = Object.freeze({ executedOn: payDraft.executedOn, paymentMethod: payDraft.paymentMethod, missing: Object.freeze(fields.slice()) });
+    },
     markListStale(){ listStale = true; },
     // AFI-4c2: the one commit intent (frozen; memory only) and its end.
     setIntent(intent){ commitIntent = Object.freeze({ id: intent.id, version: intent.version, total: intent.total, key: intent.key }); },
@@ -530,7 +633,8 @@ const SessionPayrollStore = (function(){
         suppList: suppList, suppListMonth: suppListMonth, suppListStatus: suppListStatus, suppListError: suppListError,
         elig: elig, eligMonth: eligMonth, eligStatus: eligStatus, eligError: eligError,
         suppDetail: suppDetail, suppDetailId: suppDetailId, suppDetailStatus: suppDetailStatus, suppIntent: suppIntent,
-        fin: fin, finMonth: finMonth, finStatus: finStatus, finError: finError, postIntent: postIntent
+        fin: fin, finMonth: finMonth, finStatus: finStatus, finError: finError, postIntent: postIntent,
+        exec: exec, execMonth: execMonth, execStatus: execStatus, execError: execError, execIntent: execIntent, payDraft: payDraft
       });
     }
   });
@@ -557,11 +661,33 @@ const SessionPayroll = (function(){
     else if(kind === 'elig') applied = SessionPayrollStore.applyElig(token, out.data);
     else if(kind === 'suppDetail') applied = SessionPayrollStore.applySuppDetail(token, out.data);
     else if(kind === 'fin') applied = SessionPayrollStore.applyFin(token, out.data);          // AFI-4e
+    else if(kind === 'exec') applied = SessionPayrollStore.applyExec(token, out.data);        // AFI-4f
     else applied = SessionPayrollStore.applyLabels(token, out.data);
     if(applied && kind === 'detail' && out.ok) afterDetail(out.data.plan);
     if(applied && kind === 'suppDetail' && out.ok) afterSuppDetail(out.data.doc);
     if(applied && (kind === 'fin' || kind === 'detail' || kind === 'suppDetail')) reconcilePosting();   // AFI-4e
+    if(applied && (kind === 'fin' || kind === 'exec')) reconcileFinanceExecution();                       // AFI-4f
     if(applied) paint();
+  }
+
+  // AFI-4f: reconcile an open execution intent with what was read again — the month's postings and
+  // executions. Recorded at the intent's amount, date and method: the success; the posting at the
+  // same amount with no execution: kept (Retry recording); anything else: stale. Until both are
+  // read for the intent's month, nothing.
+  function reconcileFinanceExecution(){
+    if(!sessionPayrollIsCeo(principalNow())) return;
+    const s = SessionPayrollStore.snapshot();
+    const i = s.execIntent;
+    if(!i || s.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING) return;
+    const state = sessionFinanceExecutionIntentState(s, i);
+    const mine = SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(s.mutation.kind) !== -1;
+    if(state === 'recorded'){
+      SessionPayrollStore.dropExecIntent();
+      if(mine) SessionPayrollStore.resolveMutation('payRecordConfirmed');
+    } else if(state === 'stale'){
+      SessionPayrollStore.dropExecIntent();
+      if(mine) SessionPayrollStore.resolveMutation('payRecordStale');
+    }
   }
 
   // AFI-4e: reconcile an open posting intent with what was read again — its source and the month's
@@ -636,10 +762,16 @@ const SessionPayroll = (function(){
     }
     return Promise.all(reads);
   }
-  // AFI-4e: the month's Finance postings — CEO only; an Employee never reads Finance.
+  // AFI-4e: the month's Finance postings — CEO only; an Employee never reads Finance. AFI-4f: and,
+  // together with them, the month's executions (the payment status), wherever they are read.
   function loadFinance(key){
     if(!sessionPayrollIsCeo(principalNow()) || !OvertimeCalendar.isMonth(key)) return;
-    return run('fin', key, () => FinancePostingApi.month(key));
+    return Promise.all([run('fin', key, () => FinancePostingApi.month(key)), loadFinanceExecutions(key)]);
+  }
+  // AFI-4f: the month's executions — CEO only; an Employee never reads an execution.
+  function loadFinanceExecutions(key){
+    if(!sessionPayrollIsCeo(principalNow()) || !OvertimeCalendar.isMonth(key)) return;
+    return run('exec', key, () => FinanceExecutionApi.month(key));
   }
   // AFI-4d: one Supplemental document — an Employee: their own Committed one only.
   function loadSuppDetail(id){
@@ -693,6 +825,7 @@ const SessionPayroll = (function(){
     if(kind === 'commit') return settleCommit(token, out, s);
     if(SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) !== -1) return settleSupplemental(token, out, s);   // AFI-4d
     if(SESSION_FINANCE_PANEL_KINDS.indexOf(kind) !== -1) return settleFinance(token, out, s);             // AFI-4e
+    if(SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(kind) !== -1) return settleFinanceExecution(token, out, s); // AFI-4f
     if(out.ok){
       if(generate){
         const target = s.mutation.target;
@@ -982,6 +1115,89 @@ const SessionPayroll = (function(){
     return sendPost(SessionPayrollStore.snapshot().postIntent, false);
   }
 
+  // AFI-4f: an execution's outcome. Success: the confirming execution — the intent ends and the
+  // Finance status is read again; definite refusal (any 409, other 4xx): the intent ends and the
+  // Finance status is read again (a 404: the month); unknown: the intent stays and the Finance
+  // status is read again — those reads decide (reconcileFinanceExecution). Never resent here.
+  function settleFinanceExecution(token, out, s){
+    if(out.ok){
+      if(SessionPayrollStore.applyFinanceExecutionRecorded(token)){
+        SessionPayrollStore.dropExecIntent();
+        SessionPayrollStore.setFocus('message');
+        loadFinance(s.month);
+      }
+      paint();
+      return;
+    }
+    if(COMMIT_AMBIGUOUS.indexOf(out.kind) !== -1){
+      SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.AMBIGUOUS, out);
+      SessionPayrollStore.setFocus('message');
+      loadFinance(s.month);
+      paint();
+      return;
+    }
+    SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, out);
+    SessionPayrollStore.dropExecIntent();
+    SessionPayrollStore.setFocus('message');
+    if(out.kind === API_RESULT_KINDS.NOT_FOUND){
+      SessionPayrollStore.closeDetail(); SessionPayrollStore.closeSuppDetail();
+      SessionPayrollStore.markListStale();
+      loadMonth(s.month);
+    } else loadFinance(s.month);
+    paint();
+  }
+  // AFI-4f: sends the execution intent once.
+  async function sendRecord(intent, sourceKind, retry){
+    const kind = sourceKind === 'payrollPlan' ? 'finRecordPlan' : 'finRecordSupp';
+    const token = SessionPayrollStore.beginMutation(kind, { financePostingId: intent.financePostingId, retry: retry === true });
+    paint();
+    return settle(token, await FinanceExecutionApi.record(intent));
+  }
+  // AFI-4f: opens the Record payment form of the source shown — only when its posting is read,
+  // consistent and has no execution, and no posting or execution intent is unresolved. Nothing is
+  // sent; the form starts empty (no date, no method).
+  function openFinanceExecutionPanel(kind){
+    const s = SessionPayrollStore.snapshot();
+    if(s.panel || s.postIntent || s.execIntent) return;
+    const sourceKind = SESSION_FINANCE_EXECUTION_SOURCE_KIND[kind];
+    const source = sessionFinanceSource(s, sourceKind);
+    const status = sessionFinanceExecutionStatus(s, sourceKind, source);
+    if(!status || status.state !== 'unrecorded') return;
+    SessionPayrollStore.openPanel(kind, source.id);
+    SessionPayrollStore.resetPayDraft();
+    SessionPayrollStore.setFocus('panel');
+    paint();
+  }
+  // AFI-4f: ONE execution intent per deliberate confirmation — the posting's own amount string, the
+  // date and method entered, one Web Crypto key, frozen before anything is sent. A missing or
+  // invalid field sends nothing and keeps the form; without Web Crypto nothing is sent.
+  async function confirmFinanceExecution(s, a){
+    const sourceKind = SESSION_FINANCE_EXECUTION_SOURCE_KIND[a.kind];
+    const source = sessionFinanceSource(s, sourceKind);
+    const status = sessionFinanceExecutionStatus(s, sourceKind, source);
+    if(!source || source.id !== a.id || s.postIntent || s.execIntent || !status || status.state !== 'unrecorded'){ SessionPayrollStore.closePanel(); paint(); return; }
+    const d = s.payDraft;
+    const missing = [];
+    if(!financeExecutionIsDate(d.executedOn)) missing.push('executedOn');
+    if(!financeExecutionIsMethod(d.paymentMethod)) missing.push('paymentMethod');
+    if(missing.length){
+      SessionPayrollStore.setPayDraftMissing(missing);
+      SessionPayrollStore.setFocus('field:' + missing[0]);
+      paint();
+      return;
+    }
+    const intent = financeExecutionIntent(status.posting, d.executedOn, d.paymentMethod);
+    if(intent === null){
+      const token = SessionPayrollStore.beginMutation(a.kind, { financePostingId: status.posting.id, retry: false });
+      SessionPayrollStore.failMutation(token, SESSION_PAYROLL_MUTATION_STATUS.ERROR, { kind: 'CRYPTO_UNAVAILABLE' });
+      SessionPayrollStore.setFocus('message');
+      paint();
+      return;
+    }
+    SessionPayrollStore.setExecIntent(intent);
+    return sendRecord(SessionPayrollStore.snapshot().execIntent, sourceKind, false);
+  }
+
   // AFI-4c2: sends the commit intent once. A missing Web Crypto key sends nothing.
   async function sendCommit(intent, retry){
     const token = SessionPayrollStore.beginMutation('commit', { id: intent.id, version: intent.version, retry: retry === true });
@@ -1115,6 +1331,7 @@ const SessionPayroll = (function(){
       if(!canAct()) return;
       if(SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(kind) !== -1) return openSupplementalPanel(kind, planId);   // AFI-4d
       if(SESSION_FINANCE_PANEL_KINDS.indexOf(kind) !== -1) return openFinancePanel(kind);                     // AFI-4e
+      if(SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(kind) !== -1) return openFinanceExecutionPanel(kind);         // AFI-4f
       if(SESSION_PAYROLL_PANEL_KINDS.indexOf(kind) === -1) return;
       const s = SessionPayrollStore.snapshot();
       if(s.panel) return;
@@ -1145,6 +1362,7 @@ const SessionPayroll = (function(){
       if(!a) return;
       if(SESSION_SUPPLEMENTAL_PANEL_KINDS.indexOf(a.kind) !== -1) return confirmSupplemental(s, a);         // AFI-4d
       if(SESSION_FINANCE_PANEL_KINDS.indexOf(a.kind) !== -1) return confirmFinance(s, a);                   // AFI-4e
+      if(SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(a.kind) !== -1) return confirmFinanceExecution(s, a);       // AFI-4f
       if(a.kind === 'generate'){
         if(s.detailId || !OvertimeCalendar.isMonth(s.month)){ SessionPayrollStore.closePanel(); paint(); return; }
         const forMonth = s.month;
@@ -1213,6 +1431,38 @@ const SessionPayroll = (function(){
       const s = SessionPayrollStore.snapshot();
       if(s.finStatus !== SESSION_PAYROLL_STATUS.ERROR) return;
       const loading = loadFinance(s.month);
+      paint();
+      return loading;
+    },
+    // AFI-4f: the open Record payment form follows its fields as they change (no render: focus and
+    // the value typed stay); Record payment reads the values held here.
+    setPayDraft(name, value){
+      if(!canAct()) return;
+      const s = SessionPayrollStore.snapshot();
+      if(!s.panel || SESSION_FINANCE_EXECUTION_PANEL_KINDS.indexOf(s.panel.kind) === -1) return;
+      SessionPayrollStore.setPayDraft(name, value);
+    },
+    // AFI-4f (D-AFI4f-5 = A): after an unknown outcome whose reads still show the posting at the same
+    // amount with no execution, a deliberate click on the source's own detail sends the SAME intent —
+    // the same body and key — again. Never automatic; never a new key.
+    retryRecording(){
+      if(!canAct()) return;
+      const s = SessionPayrollStore.snapshot();
+      const i = s.execIntent;
+      if(s.panel || !i || sessionFinanceExecutionIntentState(s, i) !== 'unresolved') return;
+      const shown = ['payrollPlan', 'supplementalPayroll'].filter((k) => {
+        const st = sessionFinanceExecutionStatus(s, k, sessionFinanceSource(s, k));
+        return !!st && st.state === 'unrecorded' && st.posting.id === i.financePostingId;
+      });
+      if(shown.length !== 1) return;
+      return sendRecord(i, shown[0], true);
+    },
+    // AFI-4f: the month's executions again after their read failed (CEO).
+    retryFinanceExecutionStatus(){
+      if(!canAct()) return;
+      const s = SessionPayrollStore.snapshot();
+      if(s.execStatus !== SESSION_PAYROLL_STATUS.ERROR) return;
+      const loading = loadFinanceExecutions(s.month);
       paint();
       return loading;
     }
