@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace TamOs\Http;
 
+use TamOs\Controller\AuditController;
 use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\FinanceController;
@@ -65,6 +66,11 @@ use TamOs\Policy\Action;
  * month read adds no Action and is CEO-only (decided by the handler). There is no batch, automatic,
  * partial, reversal, correction or reconciliation route, and no posting route changes. ACTIONS stay 21.
  *
+ * BF-4g: the two CEO audit reads — a month of the Asia/Jakarta company calendar and the history of
+ * one record — add no Action and are CEO-only (decided by the handler before any lookup). They are
+ * GETs: no audit write, correction or deletion route exists, and the authentication log has no
+ * route. ACTIONS stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -84,7 +90,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions, AuditController $audit): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -151,6 +157,9 @@ final class Routes
             // BF-4f: Finance execution — one full execution per Planned posting, recorded under finance.execute.
             new Route('GET', '/api/finance-executions', $financeExecutions->month(...), ['month'], RouteAuth::Required),
             new Route('POST', '/api/finance-executions/execute', $financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceExecute),
+            // BF-4g: the CEO audit read — read-only, company scope, no Action.
+            new Route('GET', '/api/audit-events', $audit->month(...), ['month'], RouteAuth::Required),
+            new Route('GET', '/api/audit-events/record', $audit->record(...), ['entity', 'id'], RouteAuth::Required),
         ]);
     }
 

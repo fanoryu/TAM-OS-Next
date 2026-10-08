@@ -10,11 +10,13 @@ declare(strict_types=1);
 
 namespace TamOs;
 
+use TamOs\Audit\AuditService;
 use TamOs\Auth\AccountLifecycle;
 use TamOs\Auth\AccountRecovery;
 use TamOs\Auth\Authenticator;
 use TamOs\Config\ConfigError;
 use TamOs\Config\ConfigLoader;
+use TamOs\Controller\AuditController;
 use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\FinanceController;
@@ -126,6 +128,7 @@ function run(): void
         new SupplementalController(new SupplementalService($business)),
         new FinanceController(new FinancePostingService($business)),
         new FinanceExecutionController(new FinanceExecutionService($business)),
+        new AuditController(new AuditService($business)),
     );
     $kernel = new Kernel($routes, new SessionPrincipalResolver($auth), $config, $logger);
     $kernel->handle($request, $requestId, $started)->emit($request->method === 'HEAD');

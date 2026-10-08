@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace TamOs\Data;
 
+use TamOs\Data\Audit\AuditEventStore;
 use TamOs\Data\Audit\AuditLog;
 use TamOs\Data\Employee\EmployeeStore;
 use TamOs\Data\Finance\FinanceExecutionStore;
@@ -13,7 +14,7 @@ use TamOs\Data\Scope\ScopedDatabase;
 use TamOs\Data\Supplemental\SupplementalStore;
 
 /**
- * The business data access point (BF-4a1; overtime BF-4b1; payroll BF-4c1; supplemental payroll BF-4d; Finance posting BF-4e; Finance execution BF-4f): the scoped business stores over one lazily opened,
+ * The business data access point (BF-4a1; overtime BF-4b1; payroll BF-4c1; supplemental payroll BF-4d; Finance posting BF-4e; Finance execution BF-4f; the CEO audit read BF-4g): the scoped business stores over one lazily opened,
  * request-scoped connection — shared with TamOs\Data\Auth\AuthData in production, so the
  * session lookup and the business statements of a request use the same connection — and
  * atomically() for the transaction boundaries the business services own. The stores receive
@@ -30,6 +31,7 @@ final class BusinessData
     private ?FinancePostingStore $finance = null;
     private ?FinanceExecutionStore $financeExecutions = null;
     private ?AuditLog $audit = null;
+    private ?AuditEventStore $auditEvents = null;
 
     /** @param \Closure(): Database $connect */
     private function __construct(private readonly \Closure $connect)
@@ -81,6 +83,12 @@ final class BusinessData
     public function audit(): AuditLog
     {
         return $this->audit ??= new AuditLog($this->scoped());
+    }
+
+    /** BF-4g: the read-only CEO audit read; AuditLog stays the only writer of audit_events. */
+    public function auditEvents(): AuditEventStore
+    {
+        return $this->auditEvents ??= new AuditEventStore($this->scoped());
     }
 
     /**
