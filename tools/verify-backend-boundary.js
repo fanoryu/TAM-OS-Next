@@ -83,6 +83,13 @@
  *     statement lists drift from BackupTables or a migration adds a generated column it does not
  *     name; a backup is decrypted outside BackupVerifier, the secret key file is read outside the CLI,
  *     or the restore writer names the verifier, the parser or the cipher;
+ *   - (BF-4g) the CEO audit read (server/src/Audit/, AuditController, AuditEventStore) holds anything
+ *     but its two fixed, read-only SELECTs of audit_events in company scope — no write, lock, join,
+ *     other table, auth_events, Employee scope, SQL date function, BETWEEN, OR or inclusive upper bound;
+ *     the month is exactly occurred_at >= :from AND occurred_at < :to — or names the authentication
+ *     log, the audit writer, a transaction, an Action or another store; the company calendar drifts
+ *     from Asia/Jakarta; or the audit routes are anything but the two CEO GET reads (?month= and
+ *     ?entity=&id=, a session, no Action) — no audit write, correction, deletion or auth_events route;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -257,6 +264,20 @@ const RESTORE_EMPTY = /^SELECT 1 AS present FROM ([a-z_]+) LIMIT 1( LOCK IN SHAR
 const RESTORE_METADATA = new Set([
   "SELECT TABLE_NAME AS tbl, COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND IS_GENERATED <> 'NEVER' ORDER BY TABLE_NAME, ORDINAL_POSITION",
   'SELECT TABLE_NAME AS tbl, AUTO_INCREMENT AS next FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND AUTO_INCREMENT IS NOT NULL ORDER BY TABLE_NAME',
+]);
+
+// BF-4g (D-BF4g-1..4 = A; D-AB-2/3/4/15 = A): the CEO audit read is read-only by shape — two fixed
+// SELECTs of the stored audit_events columns in company scope, the Asia/Jakarta month as a half-open
+// UTC window — and its two GET routes declare no Action. AuditLog stays the only audit writer.
+const AUDIT_DIR = 'server/src/Audit/';
+const AUDIT_INPUT = 'server/src/Audit/AuditInput.php';
+const AUDIT_CONTROLLER = 'server/src/Controller/AuditController.php';
+const AUDIT_EVENT_STORE = 'server/src/Data/Audit/AuditEventStore.php';
+const AUDIT_READ_ROUTES = { 'GET /api/audit-events': "['month']", 'GET /api/audit-events/record': "['entity', 'id']" };
+const AUDIT_READ_SELECT = 'SELECT id, company_id, NULL AS owner_employee_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields FROM audit_events WHERE company_id = :company_id AND ';
+const AUDIT_READ_WHERE = new Set([
+  'occurred_at >= :from AND occurred_at < :to ORDER BY occurred_at, id LIMIT 2001',
+  'entity = :entity AND entity_id = :entity_id ORDER BY occurred_at, id LIMIT 2001',
 ]);
 
 // ---------------------------------------------------------------------------------------------
@@ -555,6 +576,20 @@ function checkRouteActions(src) {
     if (key !== FINANCE_READ_ROUTE && key !== FINANCE_EXECUTION_READ_ROUTE && !(m[1] === 'POST' && (FINANCE_ROUTES[m[2]] || m[2] === FINANCE_EXECUTION_ROUTE))) out.push('Routes.php: ' + key + ' — the only Finance routes are the two postings, the execution and their two month reads (no batch, payment, actual, reversal, correction or reconciliation route)');
     if ((key === FINANCE_READ_ROUTE || key === FINANCE_EXECUTION_READ_ROUTE) && /\bAction::/.test(m[3])) out.push('Routes.php: ' + key + ' is a read and declares no Action');
   }
+  // BF-4g: exactly the two CEO audit reads — GET, their exact query keys, a session and no Action —
+  // and no other audit or authentication-log route.
+  for (const [key, keys] of Object.entries(AUDIT_READ_ROUTES)) {
+    const [method, path] = key.split(' ');
+    const line = src.split('\n').find((l) => l.includes("new Route('" + method + "', '" + path + "', "));
+    if (!line) out.push('Routes.php: the audit read ' + key + ' is missing');
+    else if (!line.trim().endsWith(', ' + keys + ', RouteAuth::Required),')) out.push('Routes.php: the audit read ' + key + ' takes exactly ' + keys + ', requires a session and declares no Action');
+  }
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    if (!/^\/api\/(audit|auth[-_]?events?\b|activity)/i.test(m[2])) continue;
+    const key = m[1] + ' ' + m[2];
+    if (!AUDIT_READ_ROUTES[key]) out.push('Routes.php: ' + key + ' — the only audit routes are the two CEO reads (no audit write, correction, deletion, export or authentication-log route)');
+    else if (/\bAction::/.test(m[3])) out.push('Routes.php: ' + key + ' is a read and declares no Action');
+  }
   return out;
 }
 
@@ -700,6 +735,9 @@ function checkPhp(file, src) {
   for (const v of checkFinanceExecutionStatements(file, lex)) out.push(v);
   if (executionFile) for (const v of checkFinanceExecutionFirewall(lex)) out.push(v);
   if (file === FINANCE_EXECUTION_INPUT) for (const v of checkFinanceExecutionInput(lex)) out.push(v);
+  for (const v of checkAuditReadStatements(file, lex)) out.push(v);
+  if (file.startsWith(AUDIT_DIR) || file === AUDIT_CONTROLLER || file === AUDIT_EVENT_STORE) for (const v of checkAuditReadFirewall(lex)) out.push(v);
+  if (file === AUDIT_INPUT) for (const v of checkAuditInput(lex)) out.push(v);
   return out;
 }
 
@@ -994,6 +1032,48 @@ function checkFinanceExecutionInput(lex) {
   if (methods.length !== 1 || methods[0] !== PAYMENT_METHODS) out.push('the payment methods are exactly the closed list ' + PAYMENT_METHODS + ' (D-FEX-5 = A)');
   if (zone.length !== 1 || zone[0] !== 'Asia/Jakarta') out.push('executedOn is bounded by today in the Asia/Jakarta company calendar (D-FEX-8 = A)');
   return out;
+}
+
+// BF-4g: the audit read store holds exactly its two reads — the stored audit_events columns in company
+// scope, the half-open month (occurred_at >= :from AND occurred_at < :to) or one record (entity =
+// :entity AND entity_id = :entity_id), ordered by (occurred_at, id), LIMIT 2001 so the cap fails
+// closed — and nothing that writes, locks, joins, reads another table or auth_events, takes an
+// Employee scope, computes a date in SQL or widens the window (BETWEEN, OR, an inclusive bound).
+const AUDIT_READ_FORBIDDEN = /\b(INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|JOIN|UNION|FOR\s+UPDATE|LOCK|SHARE|BETWEEN|CONVERT_TZ|NOW|CURDATE|CURRENT_TIMESTAMP|UTC_TIMESTAMP|DATE_ADD|DATE_SUB|LAST_DAY|INTERVAL|OR)\b|auth_events|:self_employee_id|<=/i;
+function checkAuditReadStatements(file, lex) {
+  if (file !== AUDIT_EVENT_STORE) return [];
+  const out = [];
+  let reads = 0;
+  for (const s of lex.strings) {
+    if (!/\b(SELECT|INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|FROM|JOIN)\b/.test(s)) continue;
+    reads++;
+    if (!s.startsWith(AUDIT_READ_SELECT)) out.push('the audit read projects exactly the stored audit_events columns in company scope: "' + s.slice(0, 40) + '"');
+    else if (!AUDIT_READ_WHERE.has(s.slice(AUDIT_READ_SELECT.length))) out.push('the audit read is exactly the half-open month (occurred_at >= :from AND occurred_at < :to) or one record (entity = :entity AND entity_id = :entity_id), ordered by (occurred_at, id), LIMIT 2001');
+    if (AUDIT_READ_FORBIDDEN.test(s.slice(6))) out.push('the audit read is a plain company-scope SELECT: no write, lock, join, other table, auth_events, Employee scope, SQL date function, BETWEEN, OR or inclusive upper bound');
+  }
+  if (reads !== 2) out.push('AuditEventStore holds exactly its two reads; found ' + reads);
+  return out;
+}
+
+// BF-4g: the audit read code (domain, controller, store) reads only: it never names the
+// authentication log, writes or appends audit rows, opens a transaction, decides an Action, or calls
+// another store.
+function checkAuditReadFirewall(lex) {
+  const out = [];
+  const any = (re) => re.test(lex.code) || lex.strings.some((s) => re.test(s));
+  if (any(/auth_?events|AuthEvents|AuthData|login_(success|failure|locked)/i)) out.push('the audit read never names the authentication log (auth_events is not exposed)');
+  if (/->\s*audit\s*\(\s*\)|new\s+AuditLog\b|->\s*append\w*\s*\(/.test(lex.code)) out.push('the audit read never writes or appends an audit row (AuditLog stays the only writer)');
+  if (/->\s*(atomically|transaction)\s*\(/.test(lex.code)) out.push('the audit read opens no transaction (read-only)');
+  if (/\bAction::|\bPolicy::|\bAuthorization\b/.test(lex.code)) out.push('the audit read decides no Action — it is CEO-only by scope (ACTIONS stay 21)');
+  if (/->\s*(employees|overtime|payroll|supplemental|finance|financeExecutions)\s*\(\s*\)/.test(lex.code)) out.push('the audit read calls no other store');
+  return out;
+}
+
+// BF-4g, D-BF4g-1 = A: the audit month is a month of the Asia/Jakarta company calendar.
+function checkAuditInput(lex) {
+  const zone = [...lex.code.matchAll(/const COMPANY_TIMEZONE = '[^']*';/g)]
+    .map((m) => lex.spans.filter((sp) => sp.start >= m.index && sp.end <= m.index + m[0].length).map((sp) => sp.value).join(','));
+  return zone.length === 1 && zone[0] === 'Asia/Jakarta' ? [] : ['the audit month is a month of the Asia/Jakarta company calendar (D-BF4g-1 = A)'];
 }
 
 // BF-4b2, D-BF4b2-1 = A: exactly one statement writes the valuation snapshot or the Approved status
@@ -2308,6 +2388,51 @@ function selftest() {
     tables('a reader statement that drifts is caught', tablesSrc(inc, exc, app), readerSrc(inc, (t) => 'SELECT * FROM ' + t + ' ORDER BY id'), migs, 'must be exactly');
     tables('the real classification passes against the real migrations', fs.readFileSync(path.join(root, BACKUP_TABLES_FILE), 'utf8'), fs.readFileSync(path.join(root, BACKUP_READER), 'utf8'),
       fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => f.endsWith('.sql')).map((f) => fs.readFileSync(path.join(root, 'server', 'migrations', f), 'utf8')), 0);
+  }
+
+  // BF-4g: the CEO audit read — two fixed read-only SELECTs in company scope, the half-open Asia/Jakarta
+  // month, no write / lock / join / auth_events / Employee scope / SQL date function, no writer,
+  // transaction, Action or other store, and exactly the two GET routes with no Action.
+  {
+    const realAuditStore = fs.readFileSync(path.join(root, AUDIT_EVENT_STORE), 'utf8');
+    const auditSwap = (file, src, from, to) => { if (!src.includes(from)) throw new Error('selftest fixture drift: ' + from); return src.replace(from, to); };
+    const inAudit = (extra) => realAuditStore.replace('    public const LIST_CAP', '    ' + extra + '\n    public const LIST_CAP');
+    clean('the real AuditEventStore passes', AUDIT_EVENT_STORE, realAuditStore);
+    for (const f of ['AuditInput.php', 'AuditService.php', 'AuditEventView.php']) clean('the real ' + f + ' passes the audit read firewall', AUDIT_DIR + f, fs.readFileSync(path.join(root, AUDIT_DIR + f), 'utf8'));
+    clean('the real AuditController passes the audit read firewall', AUDIT_CONTROLLER, fs.readFileSync(path.join(root, AUDIT_CONTROLLER), 'utf8'));
+    dirty('an audit UPDATE in the read store is caught', AUDIT_EVENT_STORE, inAudit("public const U_SQL = 'UPDATE audit_events SET fields = NULL WHERE company_id = :company_id';"), 'append-only');
+    dirty('an audit INSERT in the read store is caught', AUDIT_EVENT_STORE, inAudit("public const I_SQL = 'INSERT INTO audit_events (company_id) VALUES (:company_id)';"), 'written only by');
+    dirty('a third read is caught', AUDIT_EVENT_STORE, inAudit("public const ALL_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM audit_events WHERE company_id = :company_id';"), 'exactly its two reads');
+    dirty('an auth_events read is caught (D-AB-15)', AUDIT_EVENT_STORE, inAudit("public const AUTH_SQL = 'SELECT id, :company_id AS company_id, NULL AS owner_employee_id, event FROM auth_events WHERE :company_id IS NOT NULL';"), 'plain company-scope SELECT');
+    dirty('a join to current user names is caught (D-BF4g-3)', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'fields FROM audit_events WHERE company_id = :company_id AND entity', 'fields, u.email FROM audit_events JOIN users u ON u.id = actor_user_id WHERE company_id = :company_id AND entity'), 'projects exactly the stored');
+    dirty('a locking read is caught', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, "entity_id = :entity_id ORDER BY occurred_at, id LIMIT 2001'", "entity_id = :entity_id ORDER BY occurred_at, id LIMIT 2001 FOR UPDATE'"), 'no write, lock');
+    dirty('an inclusive end of month is caught', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'AND occurred_at < :to ORDER BY', 'AND occurred_at <= :to ORDER BY'), 'inclusive upper bound');
+    dirty('BETWEEN is caught', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'occurred_at >= :from AND occurred_at < :to', 'occurred_at BETWEEN :from AND :to'), 'BETWEEN');
+    dirty('CONVERT_TZ in SQL is caught (the window is computed in PHP)', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'occurred_at >= :from AND occurred_at < :to', "CONVERT_TZ(occurred_at, '+00:00', '+07:00') >= :from AND CONVERT_TZ(occurred_at, '+00:00', '+07:00') < :to"), 'SQL date function');
+    dirty('a month predicate in SQL is caught', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'occurred_at >= :from AND occurred_at < :to', "DATE_FORMAT(occurred_at, '%Y-%m') = :from AND :to IS NOT NULL"), 'half-open month');
+    dirty('a widened record read is caught', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'entity = :entity AND entity_id = :entity_id', 'entity = :entity OR entity_id = :entity_id'), 'no write, lock');
+    dirty('an order without the total key is caught', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'occurred_at < :to ORDER BY occurred_at, id LIMIT 2001', 'occurred_at < :to ORDER BY occurred_at LIMIT 2001'), 'ordered by (occurred_at, id)');
+    dirty('a silent truncation limit is caught (D-BF4g-2)', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'occurred_at < :to ORDER BY occurred_at, id LIMIT 2001', 'occurred_at < :to ORDER BY occurred_at, id LIMIT 2000'), 'LIMIT 2001');
+    dirty('an Employee audit statement is caught (CEO only)', AUDIT_EVENT_STORE, auditSwap(AUDIT_EVENT_STORE, realAuditStore, 'entity = :entity AND entity_id = :entity_id', 'entity = :entity AND entity_id = :self_employee_id'), 'Employee scope');
+    const realAuditService = fs.readFileSync(path.join(root, AUDIT_DIR + 'AuditService.php'), 'utf8');
+    const svc = (from, to) => auditSwap(AUDIT_DIR + 'AuditService.php', realAuditService, from, to);
+    dirty('an audit append from the read is caught', AUDIT_DIR + 'AuditService.php', svc('        $scope = self::companyScope($actor);               // an Employee: 403 before any lookup\n        return self::capped($this->data->auditEvents()->month(', '        $scope = self::companyScope($actor);               // an Employee: 403 before any lookup\n        $this->data->audit()->appendExecution($x, $actor, $y, $z);\n        return self::capped($this->data->auditEvents()->month('), 'only writer');
+    dirty('a transaction in the read is caught', AUDIT_DIR + 'AuditService.php', svc('return self::capped($this->data->auditEvents()->record(', 'return $this->data->atomically(fn () => self::capped($this->data->auditEvents()->record('), 'no transaction');
+    dirty('an Action in the read is caught (no new Action)', AUDIT_DIR + 'AuditService.php', svc('        $scope = Scope::of($actor);\n', '        $scope = Policy::authorize($actor, Action::AuditRead)->scope;\n'), 'decides no Action');
+    dirty('another store from the read is caught', AUDIT_DIR + 'AuditService.php', svc('return self::capped($this->data->auditEvents()->record(', '$this->data->employees();\n        return self::capped($this->data->auditEvents()->record('), 'no other store');
+    dirty('the authentication log in the audit controller is caught (D-AB-15)', AUDIT_CONTROLLER, fs.readFileSync(path.join(root, AUDIT_CONTROLLER), 'utf8').replace("['auditEvents' => array_map(AuditEventView::event(...), $this->service->month(", "['authEvents' => [], 'auditEvents' => array_map(AuditEventView::event(...), $this->service->month("), 'authentication log');
+    const realAuditInput = fs.readFileSync(path.join(root, AUDIT_INPUT), 'utf8');
+    dirty('a UTC company calendar is caught (D-BF4g-1)', AUDIT_INPUT, auditSwap(AUDIT_INPUT, realAuditInput, "COMPANY_TIMEZONE = 'Asia/Jakarta';", "COMPANY_TIMEZONE = 'UTC';"), 'Asia/Jakarta');
+    const routesNow = fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8');
+    const monthLine = "            new Route('GET', '/api/audit-events', $audit->month(...), ['month'], RouteAuth::Required),\n";
+    const recordLine = "            new Route('GET', '/api/audit-events/record', $audit->record(...), ['entity', 'id'], RouteAuth::Required),\n";
+    if (!routesNow.includes(monthLine) || !routesNow.includes(recordLine)) throw new Error('selftest fixture drift: audit routes');
+    cases.push({ name: 'a missing audit record read is caught', run: () => checkRouteActions(routesNow.replace(recordLine, '')), expect: 'audit read GET /api/audit-events/record is missing' });
+    cases.push({ name: 'an Action on the audit month read is caught (no new Action)', run: () => checkRouteActions(routesNow.replace(monthLine, monthLine.replace('RouteAuth::Required)', 'RouteAuth::Required, Action::EmployeeUpdate)'))), expect: 'declares no Action' });
+    cases.push({ name: 'an audit read without a session is caught', run: () => checkRouteActions(routesNow.replace(monthLine, monthLine.replace('RouteAuth::Required', 'RouteAuth::Optional'))), expect: 'requires a session' });
+    cases.push({ name: 'a widened audit query key is caught', run: () => checkRouteActions(routesNow.replace(monthLine, monthLine.replace("['month']", "['month', 'companyId']"))), expect: 'takes exactly' });
+    cases.push({ name: 'an audit delete route is caught', run: () => checkRouteActions(routesNow.replace(monthLine, monthLine + "            new Route('POST', '/api/audit-events/delete', $audit->month(...), [], RouteAuth::Required, Action::EmployeeDelete),\n")), expect: 'the only audit routes' });
+    cases.push({ name: 'an authentication-log route is caught (D-AB-15)', run: () => checkRouteActions(routesNow.replace(monthLine, monthLine + "            new Route('GET', '/api/auth-events', $audit->month(...), ['month'], RouteAuth::Required),\n")), expect: 'the only audit routes' });
   }
 
   const contract = { API_HEADERS: { 'Cache-Control': 'no-store, private', 'X-Content-Type-Options': 'nosniff' }, HSTS_PRODUCTION: 'max-age=1' };

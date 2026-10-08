@@ -7548,6 +7548,68 @@ console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==')
     'OPS-1 (N14): AI_CONTEXT, ARCHITECTURE and the milestone record OPS-1 as merged (PR #54, canonical f48f5f12…) — never as a local candidate');
 }
 
+// ===== BF-4g — CEO AUDIT READ API (backend only, read-only) =====
+// Owner decisions D-BF4g-1..4 = A (on Audit & Backup D-AB-2/3/4/15 = A): two CEO-only GETs over the business audit
+// trail — a month of the Asia/Jakarta company calendar as a half-open UTC window computed in PHP (occurred_at is
+// UTC_TIMESTAMP(6) under a +00:00 session), and one record's history, [] when none and kept after a delete — projecting
+// the eleven stored historical fields without the company, failing closed above 2,000 rows, never exposing auth_events.
+// No Action, migration, frontend or package change; AUTH_MODE LOCAL. AuditLog stays the only audit writer.
+console.log('== BF-4g — CEO AUDIT READ API (BACKEND ONLY) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const routes = srv('src/Http/Routes.php');
+  const auditRoutes = routes.split('\n').filter((l) => /new Route\('[A-Z]+', '\/api\/(audit|auth[-_]?events)/i.test(l)).map((l) => l.trim());
+  check(auditRoutes.join('\n') === "new Route('GET', '/api/audit-events', $audit->month(...), ['month'], RouteAuth::Required),\nnew Route('GET', '/api/audit-events/record', $audit->record(...), ['entity', 'id'], RouteAuth::Required),",
+    'BF-4g: exactly two audit routes — GET /api/audit-events?month= and GET /api/audit-events/record?entity=&id=, a session, no Action — and no audit write or authentication-log route');
+  const store = srv('src/Data/Audit/AuditEventStore.php');
+  const cols = 'SELECT id, company_id, NULL AS owner_employee_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields FROM audit_events WHERE company_id = :company_id AND ';
+  check(store.includes("public const MONTH_SQL = '" + cols + "occurred_at >= :from AND occurred_at < :to ORDER BY occurred_at, id LIMIT 2001';")
+    && store.includes("public const RECORD_SQL = '" + cols + "entity = :entity AND entity_id = :entity_id ORDER BY occurred_at, id LIMIT 2001';")
+    && (noComments(store).match(/'(SELECT|INSERT|UPDATE|DELETE|REPLACE)\b/g) || []).length === 2 && /public const LIST_CAP = 2000;/.test(store) && /public const LIST_LIMIT = 2001;/.test(store),
+    'BF-4g: AuditEventStore holds exactly the two pinned company-scope SELECTs — the half-open month and the record, ordered by (occurred_at, id), LIMIT 2001 — and a 2,000-row cap');
+  const input = srv('src/Audit/AuditInput.php');
+  const view = srv('src/Audit/AuditEventView.php');
+  const service = srv('src/Audit/AuditService.php');
+  check(/public const COMPANY_TIMEZONE = 'Asia\/Jakarta';/.test(input) && /new \\DateInterval\('P1M'\)/.test(input) && /setTimezone\(\$utc\)->format\(self::UTC_FORMAT\)/.test(input)
+    && /public const UTC_FORMAT = 'Y-m-d H:i:s\.u';/.test(input) && !/CONVERT_TZ|BETWEEN/.test(noComments(srv('src/Data/Audit/AuditEventStore.php') + input)),
+    'BF-4g: the month is computed in PHP in the Asia/Jakarta calendar and bound as two UTC instants with six fractional digits (no CONVERT_TZ, no BETWEEN)');
+  check(/public const FIELDS = \['id', 'occurredAt', 'actorUserId', 'actorMembershipId', 'action', 'entity', 'entityId', 'operation', 'targetUserId', 'requestId', 'fields'\];/.test(view)
+    && /->format\('Y-m-d\\TH:i:s\.u\\Z'\)/.test(view) && /new \\DateTimeZone\('UTC'\)/.test(view) && !/company/i.test(noComments(view).replace(/@param[^\n]*/g, '')),
+    'BF-4g: the projection is exactly the eleven stored historical fields (never the company), occurredAt the stored UTC instant as YYYY-MM-DDTHH:MM:SS.ffffffZ');
+  check(/throw new ApiError\(ErrorCode::InternalError, 'audit read above its cap', logReason: 'audit_list_cap'\);/.test(service)
+    && /if \(\$scope->isSelf\(\)\) \{\n\s*throw new ApiError\(ErrorCode::Forbidden/.test(service) && !/Action::|Policy::|atomically|auth_events/i.test(noComments(service)),
+    'BF-4g: CEO-only (an Employee 403 before any lookup), no Action and no transaction; above the cap the read fails closed (500, audit_list_cap)');
+  const writers = [];
+  const walkSrc = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walkSrc(p); else if (/\.php$/.test(e.name) && /INSERT\s+INTO\s+audit_events/.test(read(p))) writers.push(path.relative(root, p).split(path.sep).join('/')); } };
+  walkSrc(path.join(root, 'server', 'src'));
+  check(writers.sort().join() === 'server/src/Data/Audit/AuditLog.php,server/src/Data/Backup/RestoreWriter.php',
+    'BF-4g: AuditLog stays the only audit writer (RestoreWriter re-inserts backed-up rows) — the read adds none' + (writers.join() === 'server/src/Data/Audit/AuditLog.php,server/src/Data/Backup/RestoreWriter.php' ? '' : ' >> ' + writers.join(', ')));
+  const jsFiles = [];
+  const walkJs = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walkJs(p); else if (/\.js$/.test(e.name)) jsFiles.push(p); } };
+  walkJs(path.join(root, 'js'));
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(!jsFiles.some((f) => /audit-events/.test(read(f))) && pkg.files.length === 100 && pkg.packageDigest === 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
+    && fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).length === 35
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4g: backend only — no frontend reference, the package unchanged (100 files at d030d544…), no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE LOCAL');
+  const unit = srv('tests/Unit/AuditReadTest.php'), http = srv('tests/Http/AuditRoutingTest.php'), db = srv('tests/Db/AuditReadTest.php'), hostile = srv('tests/Db/AuditHostileTest.php');
+  check(['leap February: 29 days', 'December → January rollover', 'the window does not depend on the PHP default timezone', 'an unreadable stored timestamp fails the row'].every((t) => unit.includes(t))
+    && ['no session: both audit reads are 401', 'an Employee is 403 on both reads', 'no audit write, correction, deletion, export or authentication-log route'].every((t) => http.includes(t))
+    && ['microsecond edges, total order', 'leap and common February, and the December → January rollover', 'a deleted record keeps its history', 'the cap: 2,000 rows are returned; 2,001 fail closed',
+      'the existing indexes serve both reads', 'never expose auth_events'].every((t) => db.includes(t))
+    && ['an Employee is 403 on every audit read', 'byte for byte', 'forged scope keys are 400', 'the scoped layer refuses a foreign row'].every((t) => hostile.includes(t)),
+    'BF-4g: the tests exist — Jakarta windows (microsecond edges, leap February, December rollover), routing refusals, the cap, deleted-record history, index use, auth_events never exposed, hostile principals');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md')), arch = read(path.join(root, 'ARCHITECTURE.md')), ms = read(path.join(root, 'docs', '05-milestones', 'Milestones.md'));
+  check(/D-BF4g-1 … D-BF4g-4 = A/.test(ctx) && /### CEO audit read — BF-4g/.test(arch) && /\*\*BF-4g\*\*/.test(ms) && /BF-4g Audit history/.test(read(path.join(root, 'CHANGELOG.md'))),
+    'BF-4g: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE), the milestone and the changelog');
+  // N15 (resolved in BF-4g's docs): OPS-2 is merged as PR #55 at its canonical merge, not deployed — no longer a local
+  // candidate; the restore rehearsal (E7 / D-AB-14) and the Hostinger SSH-tunnel evidence stay open.
+  check([ctx, arch, ms].every((t) => !/OPS-2[^.]*local candidate|local candidate on `feature\/ops-2-restore|OPS-2 \(below\), is a local candidate/.test(t) && /PR #55/.test(t) && /3732dfdca61b91aa6beba33d77f72b8224fdaa60/.test(t))
+    && /E7[^.]*open/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && /\*\*remains open\*\*/.test(ctx),
+    'OPS-2 (N15): AI_CONTEXT, ARCHITECTURE and the milestone record OPS-2 as merged (PR #55, canonical 3732dfdc…) — never as a local candidate; E7 stays open');
+}
+
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====
 // ci.yml runs exactly these deterministic identity/authorization harnesses as blocking
 // steps. The rest of the runtime suite (including the date-sensitive contract-timeline
