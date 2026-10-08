@@ -75,6 +75,14 @@
  *     another file; a migration creates a table that BackupTables does not classify exactly once
  *     (backed up or excluded), the excluded or append-only lists drift, the backed-up order breaks a
  *     foreign key, or the reader's per-table statements drift from that list;
+ *   - (OPS-2) server/src/Data/Backup/RestoreWriter.php — the one cross-company writer, exempt from the
+ *     per-table writer rules for that reason — holds anything but one plain INSERT per backed-up table
+ *     (every stored column bound, no generated column, no IGNORE / REPLACE / ON DUPLICATE KEY, no
+ *     UPDATE, DELETE, TRUNCATE, DDL or lock), emptiness reads of every classified table and its two
+ *     information_schema reads, or inserts into an excluded table or the migration history; its
+ *     statement lists drift from BackupTables or a migration adds a generated column it does not
+ *     name; a backup is decrypted outside BackupVerifier, the secret key file is read outside the CLI,
+ *     or the restore writer names the verifier, the parser or the cipher;
  *   - server/src/Http/ApiHeaders.php drifts from tools/package-headers.js (the canonical contract);
  *   - a server/ file is ignored by .gitignore (the `*secret*` / `*credentials*` traps) or is
  *     present but untracked.
@@ -239,6 +247,17 @@ const BACKUP_TABLES_FILE = 'server/src/Ops/BackupTables.php';
 const BACKUP_HOST_FILES = new Set(['server/src/Ops/BackupCreator.php', BACKUP_STORE, BACKUP_READER]);
 const BACKUP_EXCLUDED = 'account_tokens,auth_rate_limits,mail_outbox,sessions';
 const BACKUP_APPEND_ONLY = 'auth_events,audit_events';
+// OPS-2 (D-AB-11/12 = A, D-OPS2-1 = A): restore is the same operator tooling, off-host only. Its one
+// cross-company writer holds a closed set of plain INSERTs and emptiness reads; only the verifier
+// decrypts and only the CLI reads the secret key file.
+const RESTORE_WRITER = 'server/src/Data/Backup/RestoreWriter.php';
+const BACKUP_VERIFIER = 'server/src/Ops/BackupVerifier.php';
+const RESTORE_INSERT = /^INSERT INTO ([a-z_]+) \(([a-z_]+(?:, [a-z_]+)*)\) VALUES \((:[a-z_]+(?:, :[a-z_]+)*)\)$/;
+const RESTORE_EMPTY = /^SELECT 1 AS present FROM ([a-z_]+) LIMIT 1( LOCK IN SHARE MODE)?$/;
+const RESTORE_METADATA = new Set([
+  "SELECT TABLE_NAME AS tbl, COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND IS_GENERATED <> 'NEVER' ORDER BY TABLE_NAME, ORDINAL_POSITION",
+  'SELECT TABLE_NAME AS tbl, AUTO_INCREMENT AS next FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND AUTO_INCREMENT IS NOT NULL ORDER BY TABLE_NAME',
+]);
 
 // ---------------------------------------------------------------------------------------------
 // A small PHP lexer: splits source into code (comments removed, strings blanked) and the list
@@ -323,10 +342,15 @@ const CODE_RULES = [
   { id: 'account-admin-token', re: /\b(SessionToken|AccountTokenStore|ActivationMail|RecoveryMail|MailTransport)\b|->\s*issue\s*\(/, msg: 'Employee account administration never issues a token or builds a mail: it only queues delivery intent; the outbox worker issues the token at send time (SDR-0004 §4)', allow: (f) => !(f.startsWith(EMPLOYEE_DIR) || f === EMPLOYEE_CONTROLLER) },
   { id: 'dynamic-include', re: /\b(include|include_once|require|require_once)\b\s*\(?\s*\$/i, msg: 'include/require of a variable path is forbidden', allow: (f) => INCLUDE_ALLOWED.has(f) },
   // OPS-1: backups are operator tooling only — no route, controller, service or kernel names them.
-  { id: 'backup-surface', re: /\b(BackupReader|BackupCreator|BackupStore|BackupVerifier|BackupCipher|BackupParser|BackupFormat|BackupConfig|BackupTables)\b/, msg: 'the backup classes are named only by the backup tooling (' + OPS_DIR + ', ' + BACKUP_DATA_DIR + ', ' + BACKUP_CLI + '): backups have no HTTP surface (OPS-1)', allow: (f) => f.startsWith(OPS_DIR) || f.startsWith(BACKUP_DATA_DIR) || f === BACKUP_CLI },
+  { id: 'backup-surface', re: /\b(BackupReader|BackupCreator|BackupStore|BackupVerifier|BackupCipher|BackupParser|BackupFormat|BackupConfig|BackupTables|BackupRestorer|RestoreWriter)\b/, msg: 'the backup classes are named only by the backup tooling (' + OPS_DIR + ', ' + BACKUP_DATA_DIR + ', ' + BACKUP_CLI + '): backups have no HTTP surface (OPS-1)', allow: (f) => f.startsWith(OPS_DIR) || f.startsWith(BACKUP_DATA_DIR) || f === BACKUP_CLI },
   { id: 'sodium', re: /(?<![\w$>:])sodium_[a-z0-9_]+\s*\(|\bSODIUM_[A-Z0-9_]+\b/i, msg: 'libsodium is used only by ' + BACKUP_CIPHER, allow: (f) => f === BACKUP_CIPHER },
   { id: 'file-delete', re: /(?<![\w$>:])(?<!\bfunction\s+)(unlink|rename|rmdir)\s*\(/i, msg: 'files are deleted or renamed only by ' + BACKUP_STORE + ' (only its own backup names)', allow: (f) => f === BACKUP_STORE },
   { id: 'backup-host-decrypt', re: /\b(readSecretKeyFile|generateKeyPair|BackupVerifier|BackupParser|publicKeyOf)\b|\bBackupCipher\s*::\s*open\s*\(/, msg: 'the host-side backup path (create, store, reader) never names the secret key, decryption or the verifier: the host can encrypt a backup, never read one (SDR-0002 §16)', allow: (f) => !BACKUP_HOST_FILES.has(f) },
+  // OPS-2: decryption stays in the verifier (restore replays through it), the secret key file is read
+  // only by the CLI, and the restore writer only writes the rows it is handed.
+  { id: 'backup-decrypt', re: /\bBackupCipher\s*::\s*open\s*\(/, msg: 'a backup is decrypted only by ' + BACKUP_VERIFIER + ' (restore replays through it)', allow: (f) => f === BACKUP_VERIFIER },
+  { id: 'backup-secret-key', re: /\breadSecretKeyFile\s*\(/, msg: 'the secret key file is read only by ' + BACKUP_CLI, allow: (f) => f === BACKUP_CLI || f === BACKUP_CIPHER },
+  { id: 'restore-writer-decrypt', re: /\b(BackupVerifier|BackupParser|BackupCipher|readSecretKeyFile)\b/, msg: 'the restore writer never names the verifier, the parser or the cipher: it writes only the rows it is handed', allow: (f) => f !== RESTORE_WRITER },
 ];
 // Banned in every production file, the data layer included.
 const EVERYWHERE_RULES = [
@@ -354,35 +378,35 @@ const STRING_RULES = [
   { id: 'set-cookie', re: /^\s*set-cookie\s*:?\s*$/i, msg: 'the Set-Cookie header is added only by ' + KERNEL_FILE, allow: (f) => f === KERNEL_FILE },
   { id: 'http-cookie', re: /^HTTP_COOKIE$/, msg: 'HTTP_COOKIE is read only by ' + REQUEST_FILE, allow: (f) => f === REQUEST_FILE },
   { id: 'auth-events-rewrite', re: /\bauth_events\b[\s\S]*\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b|\b(UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b[\s\S]*\bauth_events\b/i, msg: 'auth_events is append-only: no UPDATE, DELETE, REPLACE, TRUNCATE, ALTER or DROP' },
-  { id: 'account-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?(companies|users|memberships)\b/i, msg: 'companies, users and memberships are written only by ' + ACCOUNT_STORE, allow: (f) => f === ACCOUNT_STORE },
+  { id: 'account-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?(companies|users|memberships)\b/i, msg: 'companies, users and memberships are written only by ' + ACCOUNT_STORE, allow: (f) => f === ACCOUNT_STORE || f === RESTORE_WRITER },
   { id: 'token-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?account_tokens\b/i, msg: 'account_tokens is written only by ' + TOKEN_STORE, allow: (f) => f === TOKEN_STORE },
   { id: 'outbox-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?mail_outbox\b/i, msg: 'mail_outbox is written only by ' + OUTBOX_STORE, allow: (f) => f === OUTBOX_STORE },
   // BF-4a1: employee.delete is a soft archive — no statement anywhere hard-deletes an employee;
   // the audit trail is append-only — nothing updates, deletes, replaces or truncates it.
-  { id: 'employee-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?employees\b/i, msg: 'employees is written only by ' + EMPLOYEE_STORE, allow: (f) => f === EMPLOYEE_STORE },
+  { id: 'employee-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+`?employees\b/i, msg: 'employees is written only by ' + EMPLOYEE_STORE, allow: (f) => f === EMPLOYEE_STORE || f === RESTORE_WRITER },
   { id: 'employee-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?employees\b/i, msg: 'an employee is never hard-deleted (employee.delete is a soft archive)' },
-  { id: 'overtime-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?overtime_records\b/i, msg: 'overtime_records is written only by ' + OVERTIME_STORE, allow: (f) => f === OVERTIME_STORE },
+  { id: 'overtime-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?overtime_records\b/i, msg: 'overtime_records is written only by ' + OVERTIME_STORE, allow: (f) => f === OVERTIME_STORE || f === RESTORE_WRITER },
   { id: 'overtime-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?overtime_records\b/i, msg: 'overtime_records is never truncated' },
   // BF-4c1: payroll_plans and payroll_plan_overtime have one writer; a plan is never deleted and
   // neither table is ever truncated.
-  { id: 'payroll-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plans\b/i, msg: 'payroll_plans is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE },
+  { id: 'payroll-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plans\b/i, msg: 'payroll_plans is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE || f === RESTORE_WRITER },
   { id: 'payroll-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?payroll_plans\b/i, msg: 'a payroll plan is never deleted (cancel is a status) and payroll_plans is never truncated' },
-  { id: 'payroll-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE },
+  { id: 'payroll-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is written only by ' + PAYROLL_STORE, allow: (f) => f === PAYROLL_STORE || f === RESTORE_WRITER },
   { id: 'payroll-link-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?payroll_plan_overtime\b/i, msg: 'payroll_plan_overtime is never truncated' },
   // BF-4d: supplemental_payrolls and supplemental_payroll_overtime have one writer; a document is
   // never deleted (cancel is a status) and neither table is ever truncated.
-  { id: 'supplemental-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payrolls\b/i, msg: 'supplemental_payrolls is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE },
+  { id: 'supplemental-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payrolls\b/i, msg: 'supplemental_payrolls is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE || f === RESTORE_WRITER },
   { id: 'supplemental-hard-delete', re: /^\s*(DELETE\s+FROM|TRUNCATE(\s+TABLE)?)\s+`?supplemental_payrolls\b/i, msg: 'a Supplemental document is never deleted (cancel is a status) and supplemental_payrolls is never truncated' },
-  { id: 'supplemental-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE },
+  { id: 'supplemental-link-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is written only by ' + SUPPLEMENTAL_STORE, allow: (f) => f === SUPPLEMENTAL_STORE || f === RESTORE_WRITER },
   { id: 'supplemental-link-truncate', re: /^\s*TRUNCATE(\s+TABLE)?\s+`?supplemental_payroll_overtime\b/i, msg: 'supplemental_payroll_overtime is never truncated' },
   // BF-4e: finance_postings has one writer, which only inserts — a posting is immutable.
-  { id: 'finance-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_postings\b/i, msg: 'finance_postings is written only by ' + FINANCE_STORE, allow: (f) => f === FINANCE_STORE },
+  { id: 'finance-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_postings\b/i, msg: 'finance_postings is written only by ' + FINANCE_STORE, allow: (f) => f === FINANCE_STORE || f === RESTORE_WRITER },
   { id: 'finance-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_postings\b/i, msg: 'a Finance posting is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_postings' },
   // BF-4f: finance_executions has one writer, which only inserts — an execution is immutable.
-  { id: 'finance-execution-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_executions\b/i, msg: 'finance_executions is written only by ' + FINANCE_EXECUTION_STORE, allow: (f) => f === FINANCE_EXECUTION_STORE },
+  { id: 'finance-execution-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_executions\b/i, msg: 'finance_executions is written only by ' + FINANCE_EXECUTION_STORE, allow: (f) => f === FINANCE_EXECUTION_STORE || f === RESTORE_WRITER },
   { id: 'finance-execution-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_executions\b/i, msg: 'a Finance execution is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_executions (no reversal, no correction)' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
-  { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG },
+  { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG || f === RESTORE_WRITER },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
   { id: 'recovery-link', re: /#recovery=/, msg: 'the recovery link is built only by ' + RECOVERY_MAIL + ' (from the configured origin)', allow: (f) => f === RECOVERY_MAIL },
   { id: 'activation-link', re: /#activation=/, msg: 'the activation link is built only by ' + ACTIVATION_MAIL + ' (from the configured origin)', allow: (f) => f === ACTIVATION_MAIL },
@@ -654,14 +678,15 @@ function checkPhp(file, src) {
   for (const v of checkBackupReader(file, lex)) out.push(v);
   for (const v of checkAuditInTransaction(lex)) out.push(v);
   for (const v of checkOvertimeDelete(lex)) out.push(v);
-  for (const v of checkOvertimeApproval(file, lex)) out.push(v);
+  // OPS-2: the restore writer re-inserts committed rows as they were; checkRestoreWriter pins its shapes.
+  if (file !== RESTORE_WRITER) for (const v of checkOvertimeApproval(file, lex)) out.push(v);
   if (file === OVERTIME_VALUATION) for (const v of checkIntegerValuation(lex)) out.push(v);
   if (file.startsWith(OVERTIME_DIR) || file === OVERTIME_STORE || file === OVERTIME_CONTROLLER) for (const v of checkOvertimeFirewall(lex)) out.push(v);
-  for (const v of checkPayrollStatements(file, lex)) out.push(v);
+  if (file !== RESTORE_WRITER) for (const v of checkPayrollStatements(file, lex)) out.push(v);
   if (file === PAYROLL_CALCULATION) for (const v of checkIntegerPayroll(lex)) out.push(v);
   if (file.startsWith(PAYROLL_DIR) || file === PAYROLL_STORE || file === PAYROLL_CONTROLLER) for (const v of checkPayrollFirewall(lex)) out.push(v);
   if (file === PAYROLL_INPUT) for (const v of checkPayrollInput(lex)) out.push(v);
-  for (const v of checkSupplementalStatements(file, lex)) out.push(v);
+  if (file !== RESTORE_WRITER) for (const v of checkSupplementalStatements(file, lex)) out.push(v);
   if (file.startsWith(SUPPLEMENTAL_DIR) || file === SUPPLEMENTAL_STORE || file === SUPPLEMENTAL_CONTROLLER) for (const v of checkSupplementalFirewall(lex)) out.push(v);
   if (file.startsWith(SUPPLEMENTAL_DIR)) for (const v of checkIntegerSupplemental(lex)) out.push(v);
   if (file === SUPPLEMENTAL_INPUT) for (const v of checkSupplementalInput(lex)) out.push(v);
@@ -1055,7 +1080,7 @@ function checkScopedData(file, src, lex) {
     const selfSql = /\bconst\s+(\w+_SELF_SQL)\s*=\s*(?:'([^']*)'|"([^"]*)")/g;
     let m;
     while ((m = selfSql.exec(src))) if (!/:self_employee_id\b/.test(m[2] ?? m[3])) out.push(m[1] + ' must name :self_employee_id');
-  } else if (file !== BACKUP_READER && sql.some(companyTableSql)) {
+  } else if (file !== BACKUP_READER && file !== RESTORE_WRITER && sql.some(companyTableSql)) {
     out.push('the company tables (' + [...COMPANY_TABLES].join(', ') + ') are read and written only by business stores under ScopedDatabase');
   }
   return out;
@@ -1067,7 +1092,8 @@ function checkScopedData(file, src, lex) {
 // server/src/Data/Backup/ holds nothing else.
 function checkBackupReader(file, lex) {
   if (!file.startsWith(BACKUP_DATA_DIR)) return [];
-  if (file !== BACKUP_READER) return [BACKUP_DATA_DIR + ' holds only BackupReader.php'];
+  if (file === RESTORE_WRITER) return checkRestoreWriter(lex);
+  if (file !== BACKUP_READER) return [BACKUP_DATA_DIR + ' holds only BackupReader.php and RestoreWriter.php'];
   const out = [];
   const sql = lex.strings.filter((s) => SQL_STRING.test(s) || /^\s*SELECT\b/i.test(s) || (SQL_VERB.test(s) && SQL_KEYWORD.test(s.replace(SQL_VERB, ''))));
   for (const s of sql) {
@@ -1078,6 +1104,69 @@ function checkBackupReader(file, lex) {
       if (m[2] !== 'tamos_backup') out.push('the backup reader takes only the tamos_backup advisory lock (the migration lock through MigrationHistory)');
     }
   }
+  return out;
+}
+
+// OPS-2: the restore writer's closed statement set — one plain INSERT per table binding exactly its
+// named columns (never into an excluded table or the history), emptiness reads (plain or shared-lock)
+// and its two information_schema reads. Nothing else: no UPDATE, DELETE, REPLACE, TRUNCATE, IGNORE,
+// ON DUPLICATE KEY, DDL, SET or advisory lock.
+function checkRestoreWriter(lex) {
+  const out = [];
+  for (const s of lex.strings) {
+    if (!/\b(SELECT|INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP|CREATE|GRANT|REVOKE|SET|LOCK|CALL|HANDLER|LOAD|DUPLICATE|GET_LOCK)\b/.test(s)) continue;
+    const insert = RESTORE_INSERT.exec(s);
+    if (insert) {
+      if (insert[3] !== insert[2].split(', ').map((c) => ':' + c).join(', ')) out.push('a restore INSERT binds exactly its named columns, in order: "' + s.slice(0, 40) + '"');
+      if (BACKUP_EXCLUDED.split(',').includes(insert[1]) || insert[1] === 'schema_migrations') out.push('the restore writer never inserts into an excluded table or the migration history: ' + insert[1]);
+      continue;
+    }
+    if (RESTORE_EMPTY.test(s) || RESTORE_METADATA.has(s)) continue;
+    out.push('the restore writer holds only plain INSERTs, emptiness reads and its two information_schema reads — no UPDATE, DELETE, REPLACE, TRUNCATE, IGNORE, ON DUPLICATE KEY, DDL or lock: "' + s.slice(0, 40) + '"');
+  }
+  return out;
+}
+
+// OPS-2: RestoreWriter's statement lists against the classification and the migrations — an INSERT
+// for exactly the backed-up tables, in order, naming exactly COLUMNS (never a generated column); an
+// emptiness read for every classified table, excluded ones included; a plain read for each excluded
+// table; and every generated column a migration declares is named in GENERATED.
+function checkRestoreWriterTables(tablesSrc, writerSrc, migrationSrcs) {
+  const included = phpStringList(tablesSrc, 'public const INCLUDED');
+  const excluded = phpStringList(tablesSrc, 'public const EXCLUDED');
+  if (!included || !excluded) return [BACKUP_TABLES_FILE + ': INCLUDED and EXCLUDED are not parseable'];
+  const out = [];
+  const block = (decl) => (new RegExp('(?:public|private) const ' + decl + ' = \\[([\\s\\S]*?)\\n    \\];').exec(writerSrc) || ['', ''])[1];
+  const entries = (decl) => [...block(decl).matchAll(/^\s*'([a-z0-9_]+)' => '([^']*)',?\s*$/gm)].map((e) => [e[1], e[2]]);
+  const lists = (decl) => new Map([...block(decl).matchAll(/^\s*'([a-z0-9_]+)' => \[([^\]]*)\],?\s*$/gm)].map((e) => [e[1], [...e[2].matchAll(/'([a-z0-9_]+)'/g)].map((x) => x[1])]));
+  const columns = lists('COLUMNS');
+  const generated = lists('GENERATED');
+  const inserts = entries('INSERT_SQL');
+  if (inserts.map((e) => e[0]).join() !== included.join()) out.push('RestoreWriter::INSERT_SQL covers exactly BackupTables::INCLUDED, in order (no excluded table, no history)');
+  if ([...columns.keys()].join() !== included.join()) out.push('RestoreWriter::COLUMNS covers exactly BackupTables::INCLUDED, in order');
+  for (const [t, sql] of inserts) {
+    const cols = columns.get(t) || [];
+    const shape = 'INSERT INTO ' + t + ' (' + cols.join(', ') + ') VALUES (:' + cols.join(', :') + ')';
+    if (sql !== shape) out.push("RestoreWriter::INSERT_SQL['" + t + "'] must be exactly: " + shape);
+    for (const g of generated.get(t) || []) if (cols.includes(g)) out.push('a generated column is never inserted: ' + t + '.' + g);
+  }
+  const locks = entries('LOCK_EMPTY_SQL');
+  if (locks.map((e) => e[0]).join() !== [...included, ...excluded].join()) out.push('RestoreWriter::LOCK_EMPTY_SQL covers exactly every classified table, backed up and excluded, in order');
+  for (const [t, sql] of locks) if (sql !== 'SELECT 1 AS present FROM ' + t + ' LIMIT 1 LOCK IN SHARE MODE') out.push("RestoreWriter::LOCK_EMPTY_SQL['" + t + "'] must be exactly: SELECT 1 AS present FROM " + t + ' LIMIT 1 LOCK IN SHARE MODE');
+  const empties = entries('EMPTY_SQL');
+  if (empties.map((e) => e[0]).join() !== excluded.join()) out.push('RestoreWriter::EMPTY_SQL covers exactly BackupTables::EXCLUDED, in order');
+  for (const [t, sql] of empties) if (sql !== 'SELECT 1 AS present FROM ' + t + ' LIMIT 1') out.push("RestoreWriter::EMPTY_SQL['" + t + "'] must be exactly: SELECT 1 AS present FROM " + t + ' LIMIT 1');
+  const declared = new Map();
+  for (const src of migrationSrcs) {
+    const owner = /^\s*(?:CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?|ALTER\s+TABLE\s+)`?(\w+)`?/i.exec(src);
+    if (!owner) continue;
+    for (const g of src.matchAll(/^\s*(?:ADD\s+(?:COLUMN\s+)?)?`?([a-z_][a-z0-9_]*)`?\s+[A-Za-z]+[^\n]*\bAS\s*\([^\n]*\)\s*(STORED|VIRTUAL|PERSISTENT)\b/gim)) {
+      const t = owner[1].toLowerCase();
+      declared.set(t, [...(declared.get(t) || []), g[1]]);
+    }
+  }
+  for (const [t, cols] of declared) if ((generated.get(t) || []).join() !== cols.join()) out.push('RestoreWriter::GENERATED must name ' + t + "'s generated columns: " + cols.join(', '));
+  for (const [t] of generated) if (!declared.has(t)) out.push('RestoreWriter::GENERATED names ' + t + ', which no migration gives a generated column');
   return out;
 }
 
@@ -1380,6 +1469,10 @@ function run() {
   const readerPath = path.join(root, BACKUP_READER);
   if (!fs.existsSync(tablesPath) || !fs.existsSync(readerPath)) failures.push(BACKUP_TABLES_FILE + ' / ' + BACKUP_READER + ': missing — the backup table classification cannot be checked');
   else for (const v of checkBackupTables(fs.readFileSync(tablesPath, 'utf8'), fs.readFileSync(readerPath, 'utf8'), files.filter((x) => x.endsWith('.sql')).map((f) => fs.readFileSync(path.join(root, f), 'utf8')))) failures.push(v);
+  // OPS-2: the restore writer's statement lists against the classification and the migrations.
+  const writerPath = path.join(root, RESTORE_WRITER);
+  if (!fs.existsSync(writerPath)) failures.push(RESTORE_WRITER + ': missing — the restore statement lists cannot be checked');
+  else if (fs.existsSync(tablesPath)) for (const v of checkRestoreWriterTables(fs.readFileSync(tablesPath, 'utf8'), fs.readFileSync(writerPath, 'utf8'), files.filter((x) => x.endsWith('.sql')).map((f) => fs.readFileSync(path.join(root, f), 'utf8')))) failures.push(v);
   for (const v of checkRouteActions(fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8'))) failures.push(v);
   for (const v of checkKernelCsrf(fs.readFileSync(path.join(root, KERNEL_FILE), 'utf8'))) failures.push(KERNEL_FILE + ': ' + v);
   const contract = require('./package-headers.js');
@@ -2125,6 +2218,75 @@ function selftest() {
   dirty('the backup reader taking the migration lock directly is caught', BACKUP_READER, S + "const Q = \"SELECT GET_LOCK('tamos_migrate', 0) AS a\";\n", 'only the tamos_backup advisory lock');
   dirty('another file in Data/Backup is caught', 'server/src/Data/Backup/BackupWriter.php', S + "final class BackupWriter {}\n", 'holds only BackupReader.php');
   dirty('a business store still may not skip :company_id', 'server/src/Data/Employee/EmployeeStore.php', S + "const Q = 'SELECT * FROM employees WHERE id > :after';\n", ':company_id');
+  // OPS-2: restore — the one cross-company writer and its closed statement set, decryption confined
+  // to the verifier, the secret key file to the CLI, and still no HTTP surface.
+  const RW = (body) => S + 'final class RestoreWriter {\n' + body + '}\n';
+  const RW_OK = "    private const I = ['companies' => 'INSERT INTO companies (id, created_at) VALUES (:id, :created_at)', 'audit_events' => 'INSERT INTO audit_events (id, company_id) VALUES (:id, :company_id)', 'payroll_plans' => 'INSERT INTO payroll_plans (id, status, committed_at) VALUES (:id, :status, :committed_at)', 'overtime_records' => 'INSERT INTO overtime_records (id, status, approved_amount) VALUES (:id, :status, :approved_amount)', 'supplemental_payrolls' => 'INSERT INTO supplemental_payrolls (id, status) VALUES (:id, :status)'];\n"
+    + "    private const L = ['auth_events' => 'SELECT 1 AS present FROM auth_events LIMIT 1 LOCK IN SHARE MODE', 'sessions' => 'SELECT 1 AS present FROM sessions LIMIT 1 LOCK IN SHARE MODE'];\n"
+    + "    private const E = ['mail_outbox' => 'SELECT 1 AS present FROM mail_outbox LIMIT 1'];\n"
+    + "    private const G = \"SELECT TABLE_NAME AS tbl, COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND IS_GENERATED <> 'NEVER' ORDER BY TABLE_NAME, ORDINAL_POSITION\";\n"
+    + "    private const A = 'SELECT TABLE_NAME AS tbl, AUTO_INCREMENT AS next FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND AUTO_INCREMENT IS NOT NULL ORDER BY TABLE_NAME';\n";
+  clean('the restore writer with plain INSERTs (committed rows included), emptiness reads and its metadata reads passes', RESTORE_WRITER, RW(RW_OK));
+  dirty('INSERT IGNORE in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'INSERT IGNORE INTO companies (id) VALUES (:id)';\n"), 'only plain INSERTs');
+  dirty('an upsert in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'INSERT INTO companies (id) VALUES (:id) ON DUPLICATE KEY UPDATE id = :id';\n"), 'only plain INSERTs');
+  dirty('REPLACE in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'REPLACE INTO employees (id) VALUES (:id)';\n"), 'only plain INSERTs');
+  dirty('UPDATE in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'UPDATE employees SET notes = :notes WHERE id = :id';\n"), 'only plain INSERTs');
+  dirty('DELETE in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'DELETE FROM finance_executions WHERE id = :id';\n"), 'only plain INSERTs');
+  dirty('TRUNCATE in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'TRUNCATE TABLE payroll_plans';\n"), 'only plain INSERTs');
+  dirty('DDL in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'ALTER TABLE companies DROP FOREIGN KEY f';\n"), 'only plain INSERTs');
+  dirty('switching foreign-key checks off in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = 'SET SESSION foreign_key_checks = 0';\n"), 'only plain INSERTs');
+  dirty('an advisory lock in the restore writer is caught', RESTORE_WRITER, RW("    private const Q = \"SELECT GET_LOCK('tamos_restore', 0) AS a\";\n"), 'only plain INSERTs');
+  dirty('an INSERT whose values are not its bound columns is caught', RESTORE_WRITER, RW("    private const Q = 'INSERT INTO companies (id, created_at) VALUES (:id, UTC_TIMESTAMP(6))';\n"), 'only plain INSERTs');
+  dirty('an INSERT binding its columns out of order is caught', RESTORE_WRITER, RW("    private const Q = 'INSERT INTO companies (id, created_at) VALUES (:created_at, :id)';\n"), 'binds exactly its named columns');
+  dirty('an INSERT into sessions is caught (never restored)', RESTORE_WRITER, RW("    private const Q = 'INSERT INTO sessions (token_hash, user_id) VALUES (:token_hash, :user_id)';\n"), 'never inserts into an excluded table');
+  dirty('an INSERT into the migration history is caught', RESTORE_WRITER, RW("    private const Q = 'INSERT INTO schema_migrations (version) VALUES (:version)';\n"), 'never inserts into an excluded table or the migration history');
+  dirty('a FOR UPDATE read of auth_events in the restore writer is caught (append-only rule)', RESTORE_WRITER, RW("    private const Q = 'SELECT 1 AS present FROM auth_events LIMIT 1 FOR UPDATE';\n"), 'append-only');
+  dirty('the restore writer naming the verifier is caught', RESTORE_WRITER, RW("    public function f(): void { $v = new BackupVerifier($k); }\n"), 'never names the verifier');
+  dirty('the restore writer naming the cipher is caught', RESTORE_WRITER, RW("    public function f(): void { $h = BackupCipher::readHeader($in); }\n"), 'never names the verifier');
+  dirty('another file inserting companies is still caught', 'server/src/Ops/BackupRestorer.php', S + "const Q = 'INSERT INTO companies (id, created_at) VALUES (:id, :created_at)';\n", 'written only by');
+  dirty('another file inserting audit rows is still caught', 'server/src/Data/Employee/EmployeeStore.php', S + "const Q = 'INSERT INTO audit_events (company_id) VALUES (:company_id)';\n", 'written only by');
+  clean('the restorer names the verifier, the reader and the writer', 'server/src/Ops/BackupRestorer.php', S + "final class BackupRestorer { public function __construct(private BackupVerifier $v, private \\Closure $c) {} public function f(RestoreWriter $w): BackupReader { return $w->reader('x'); } }\n");
+  dirty('the restorer naming the Database handle is caught (no DAL bypass)', 'server/src/Ops/BackupRestorer.php', S + "$db = new Database($c);\n", 'no DAL bypass');
+  dirty('the CLI naming the DatabaseConfig handle is caught (no DAL bypass)', BACKUP_CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$c = DatabaseConfig::fromConfig($t);\n", 'no DAL bypass');
+  dirty('the restorer decrypting by itself is caught', 'server/src/Ops/BackupRestorer.php', S + "$h = BackupCipher::open($in, $k, $sink);\n", 'decrypted only by');
+  dirty('the restorer reading the secret key file is caught', 'server/src/Ops/BackupRestorer.php', S + "$k = BackupCipher::readSecretKeyFile($f);\n", 'read only by');
+  clean('the CLI reads the secret key file', BACKUP_CLI, S + "if (PHP_SAPI !== 'cli') { exit(1); }\n$k = BackupCipher::readSecretKeyFile($o);\n");
+  dirty('a controller naming the restorer is caught (no HTTP surface)', 'server/src/Controller/RestoreController.php', S + "final class RestoreController { public function f(BackupRestorer $r): void {} }\n", 'no HTTP surface');
+  dirty('a route naming the restore writer is caught', ROUTES_FILE, S + "$w = RestoreWriter::fromConfig($c);\n", 'no HTTP surface');
+  {
+    const included = ['companies', 'users', 'audit_events', 'payroll_plans'];
+    const excluded = ['account_tokens', 'auth_rate_limits', 'mail_outbox', 'sessions'];
+    const tablesSrc = S + "final class BackupTables {\n    public const INCLUDED = [" + included.map((t) => "'" + t + "'").join(', ') + "];\n    public const EXCLUDED = [" + excluded.map((t) => "'" + t + "'").join(', ') + "];\n}\n";
+    const cols = { companies: ['id', 'created_at'], users: ['id', 'email'], audit_events: ['id', 'company_id'], payroll_plans: ['id', 'status'] };
+    const writerSrc = (o = {}) => {
+      const ins = o.inserts || included;
+      const c = o.columns || cols;
+      const gen = o.generated === undefined ? { payroll_plans: ['live_key'] } : o.generated;
+      const shape = o.shape || ((t) => 'INSERT INTO ' + t + ' (' + (c[t] || ['id']).join(', ') + ') VALUES (:' + (c[t] || ['id']).join(', :') + ')');
+      return S + 'final class RestoreWriter\n{\n'
+        + '    public const COLUMNS = [\n' + Object.keys(c).map((t) => "        '" + t + "' => ['" + c[t].join("', '") + "'],\n").join('') + '    ];\n\n'
+        + '    public const GENERATED = [\n' + Object.keys(gen).map((t) => "        '" + t + "' => ['" + gen[t].join("', '") + "'],\n").join('') + '    ];\n\n'
+        + '    private const INSERT_SQL = [\n' + ins.map((t) => "        '" + t + "' => '" + shape(t) + "',\n").join('') + '    ];\n\n'
+        + '    private const LOCK_EMPTY_SQL = [\n' + (o.locks || [...included, ...excluded]).map((t) => "        '" + t + "' => 'SELECT 1 AS present FROM " + t + " LIMIT 1" + (o.plainLock ? '' : ' LOCK IN SHARE MODE') + "',\n").join('') + '    ];\n\n'
+        + '    private const EMPTY_SQL = [\n' + (o.empties || excluded).map((t) => "        '" + t + "' => 'SELECT 1 AS present FROM " + t + " LIMIT 1',\n").join('') + '    ];\n}\n';
+    };
+    const migs = ['CREATE TABLE payroll_plans (\n  id CHAR(32) NOT NULL,\n  status VARCHAR(16) NOT NULL,\n  live_key TINYINT UNSIGNED AS (CASE WHEN status = \'Cancelled\' THEN NULL ELSE 1 END) STORED,\n  PRIMARY KEY (id)\n)'];
+    const writer = (name, o, m, expect) => cases.push({ name, run: () => checkRestoreWriterTables(tablesSrc, writerSrc(o), m || migs), expect });
+    writer('a complete restore writer passes', {}, null, 0);
+    writer('a restore writer missing a backed-up table is caught', { inserts: included.slice(0, 3) }, null, 'INSERT_SQL covers exactly');
+    writer('a restore writer inserting an excluded table is caught', { inserts: [...included, 'sessions'] }, null, 'INSERT_SQL covers exactly');
+    writer('a restore INSERT missing a column is caught', { shape: (t) => (t === 'users' ? 'INSERT INTO users (id) VALUES (:id)' : 'INSERT INTO ' + t + ' (' + cols[t].join(', ') + ') VALUES (:' + cols[t].join(', :') + ')') }, null, 'must be exactly');
+    writer('a generated column inserted is caught', { columns: { ...cols, payroll_plans: ['id', 'status', 'live_key'] } }, null, 'generated column is never inserted');
+    writer('an emptiness list without an excluded table is caught', { locks: included }, null, 'LOCK_EMPTY_SQL covers exactly every classified table');
+    writer('a non-locking emptiness read inside the transaction is caught', { plainLock: true }, null, 'LOCK IN SHARE MODE');
+    writer('an excluded-table read list that drifts is caught', { empties: excluded.slice(1) }, null, 'EMPTY_SQL covers exactly');
+    writer('a migration generated column the writer does not name is caught', { generated: {} }, null, 'GENERATED must name payroll_plans');
+    writer('a new generated column added by a later migration is caught', {}, [...migs, 'ALTER TABLE users\n  ADD COLUMN email_key TINYINT AS (1) STORED'], 'GENERATED must name users');
+    cases.push({ name: 'the real restore writer passes against the real classification and migrations', run: () => checkRestoreWriterTables(fs.readFileSync(path.join(root, BACKUP_TABLES_FILE), 'utf8'), fs.readFileSync(path.join(root, RESTORE_WRITER), 'utf8'),
+      fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => f.endsWith('.sql')).map((f) => fs.readFileSync(path.join(root, 'server', 'migrations', f), 'utf8'))), expect: 0 });
+    cases.push({ name: 'the real restore writer file passes every file rule', run: () => checkPhp(RESTORE_WRITER, fs.readFileSync(path.join(root, RESTORE_WRITER), 'utf8')), expect: 0 });
+    cases.push({ name: 'the real restorer passes every file rule', run: () => checkPhp('server/src/Ops/BackupRestorer.php', fs.readFileSync(path.join(root, 'server/src/Ops/BackupRestorer.php'), 'utf8')), expect: 0 });
+  }
   {
     const tablesSrc = (inc, exc, app) => S + 'final class BackupTables {\n    public const INCLUDED = [' + inc.map((t) => "'" + t + "'").join(', ') + '];\n    public const EXCLUDED = [' + exc.map((t) => "'" + t + "'").join(', ') + '];\n    public const APPEND_ONLY = [' + app.map((t) => "'" + t + "'").join(', ') + '];\n}\n';
     const readerSrc = (tables, page = (t) => 'SELECT * FROM ' + t + ' WHERE id > :after ORDER BY id LIMIT 500') => S + '    private const PAGE_SQL = [\n' + tables.map((t) => "        '" + t + "' => '" + page(t) + "',\n").join('') + '    ];\n    private const COUNT_SQL = [\n' + tables.map((t) => "        '" + t + "' => 'SELECT COUNT(*) AS n FROM " + t + "',\n").join('') + '    ];\n';
