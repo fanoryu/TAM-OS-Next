@@ -79,7 +79,9 @@ const API_BODY_KEY_EXCEPTION = Object.freeze({ method: 'POST', path: '/api/overt
 // Employee id pattern (server/src/Employee/EmployeeInput.php ID_PATTERN), which '1' also fits.
 // AFI-4b1: plus month (GET /api/overtime-records?month=YYYY-MM, which the same shape fits; the
 // overtime record id fits it too).
-const API_QUERY_KEYS = Object.freeze(['archived', 'id', 'month']);
+// AFI-4g (D-AFI4g-2 = A): plus entity (the CEO audit record read, entity=…&id=…: a stored audit
+// entity name and that entity's id, both of which the same shape fits). The value shape is unchanged.
+const API_QUERY_KEYS = Object.freeze(['archived', 'entity', 'id', 'month']);
 const API_QUERY_VALUE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // Server formats (server/src/Http/RequestId.php, server/src/Auth/SessionToken.php).
 const API_REQUEST_ID_PATTERN = /^[0-9a-f]{32}$/;

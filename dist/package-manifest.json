@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "d030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f",
+  "packageDigest": "097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3065375,
-    "sha256": "27220d8e644ac8463b381375cdb3377576d227b1412b9cdd93cf0f5e16d08af9"
+    "bytes": 3105710,
+    "sha256": "2a8e40b6b9eeeccab2fb1aa57b384021124724bd80ca300b1a79565a6500923c"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 9923,
-      "sha256": "d3948ffee0bfc04ab3b4f10c886216b6b7415c856c5e73863eda3091fd03cb4b"
+      "bytes": 10069,
+      "sha256": "c4ee50151deb8c96a3961c28cd1c22a2d17e89bf026a9ec59d68e9b67bfda211"
     },
     {
       "path": "js/analytics/compare.js",
@@ -108,9 +108,14 @@
       "sha256": "41001dfb98760570c4b706e6b3096d54283a34e4935ec9c1939cf23c99b71859"
     },
     {
+      "path": "js/core/audit-api.js",
+      "bytes": 11436,
+      "sha256": "1d36a8a7d581844dcd64b27b32c918cbf21884fa8c9e76b6e39d1b4902f4d5c2"
+    },
+    {
       "path": "js/core/auth-boot.js",
-      "bytes": 10460,
-      "sha256": "016c0a473c0c699815c2e30dbf6021c0a3500004d7a04dc04707ef514ae1e3db"
+      "bytes": 10543,
+      "sha256": "bc31c56a8e102bfcbbf24849a6aba7a41f346d80cfd8de1f2897f4efc4131bdd"
     },
     {
       "path": "js/core/auth-flow.js",
@@ -171,6 +176,11 @@
       "path": "js/core/payroll-api.js",
       "bytes": 50612,
       "sha256": "355dbfa7fa9a4837627830c61ce60cf7b898d49b9c62ab3283699da94a172a9f"
+    },
+    {
+      "path": "js/core/session-audit.js",
+      "bytes": 13125,
+      "sha256": "05b3fbf44668594a445866cf7e600c64ca6e807e0e893b4d73cdbebc298f51fc"
     },
     {
       "path": "js/core/session-employee.js",
@@ -444,8 +454,8 @@
     },
     {
       "path": "js/transport/api-client.js",
-      "bytes": 13316,
-      "sha256": "36e4793e388593903186ce9dac1cf65923ef4554c34fc17b725257dad4cbd24a"
+      "bytes": 13530,
+      "sha256": "67ed40f2a30a1e0a1b134369b322f17c31f79da9719b2d84d85d100151973342"
     },
     {
       "path": "js/transport/transport-adapter.js",
@@ -478,6 +488,11 @@
       "sha256": "028d690d49b7bd9fa3db8a0fd6d9b432d30e54932d2e0794a9fb2e8ba86b72bd"
     },
     {
+      "path": "js/ui/session-audit-view.js",
+      "bytes": 13631,
+      "sha256": "f2d4c4a803386ca5a4eed7d3b84b81ea8274b752ab6f47568b78df4865b4533e"
+    },
+    {
       "path": "js/ui/session-overtime-view.js",
       "bytes": 34270,
       "sha256": "9770fd1a68b6fc82b22cef8b88a23b48f3de2a79e4d9a18017c356838871706d"
@@ -489,8 +504,8 @@
     },
     {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 35928,
-      "sha256": "d09c547f818239e32cfcc7bbef3e01a06019111ff1055542420d9c14899dca43"
+      "bytes": 37258,
+      "sha256": "0ee85706c0fb619f63c7a6e20f1447accb01d0975c7d488b9468c159fd1983aa"
     },
     {
       "path": "js/ui/settings-about.js",

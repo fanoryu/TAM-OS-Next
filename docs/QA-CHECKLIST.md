@@ -45,6 +45,14 @@ release. Use fabricated placeholder data — never real company data.
 - [ ] **No duplicate records** produced by any repeated action
 - [ ] **Memory/leak sanity:** repeated navigation leaves `#menu-root` / `#modal-root` empty; single sidebar
 
+## SESSION mode (test-only servers)
+Run against `node tools/serve-auth-stub.js` (fabricated stub) and, when authorized, `node tools/serve-e2e-proxy.js` over a
+disposable local PHP + MariaDB backend — never a production backend or real data.
+- [ ] **Audit (AFI-4g):** the CEO's Audit section opens on the current Asia/Jakarta month; an event shows WIB and UTC; record
+      history opens from an event; empty, 403, 500 (with the informational 2,000-event note), 503 and malformed answers are
+      shown as such; an Employee has no Audit section; a 401 signs out; zero console errors other than the browser's own
+      network-status lines for deliberately failed requests, and zero CSP violations
+
 ## Data-safety confirmations
 - [ ] `SCHEMA_VERSION` unchanged (6) unless an intentional, documented migration
 - [ ] Storage keys and migration flags unchanged

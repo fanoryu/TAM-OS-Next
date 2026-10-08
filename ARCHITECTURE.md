@@ -1754,7 +1754,8 @@ is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AF
 `171392a16800c85e128c178f934d72c96a6255be`). Its SESSION frontend, AFI-4f (below), is merged (PR #53, canonical
 `a39b728f00688fb27e5983422c878a2f933b0e37`). Encrypted database backups follow: OPS-1 (below) is merged (PR #54, canonical
 `f48f5f127581655a68bec7d0e065cbefb8e88a74`). Its restore, OPS-2 (below), is merged (PR #55, canonical
-`3732dfdca61b91aa6beba33d77f72b8224fdaa60`). The CEO audit read, BF-4g (below), is a local candidate.
+`3732dfdca61b91aa6beba33d77f72b8224fdaa60`). The CEO audit read, BF-4g (below), is merged (PR #56, canonical
+`7ec760a5de92d804e5e33ed2f112a047e1552f94`). Its SESSION view, AFI-4g (below), is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2756,9 +2757,10 @@ concurrency (inserts wait; backup, migration, restore refused), a killed restore
 and the CLI end to end. The **rehearsal** (D-AB-14, SDR-0002 **E7**) is not a test: it stays open until a real off-host
 restore of an actual encrypted host backup into a separate, disposable MariaDB passes — see `DEPLOYMENT.md`.
 
-### CEO audit read — BF-4g (local candidate; backend only; read-only)
+### CEO audit read — BF-4g (merged as PR #56, canonical `7ec760a5`; backend only; read-only)
 
-BF-4g is a local candidate on `feature/bf-4g-audit-read` (not committed, pushed, merged or deployed), from the owner
+BF-4g is merged as source (PR #56, canonical merge `7ec760a5de92d804e5e33ed2f112a047e1552f94`, 2026-10-08; post-merge
+verification green; feature branch deleted; not deployed), from the owner
 decisions **D-BF4g-1 … D-BF4g-4 = A** (2026-10-08) on Audit & Backup D-AB-2/3/4/15 = A. It is the first server read of the
 business audit trail (`audit_events`, SDR-0002 §9.2): backend only, no Action (ACTIONS stay **21**), no migration (head
 **0035**), no frontend or package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL. `AuditLog` stays the only writer.
@@ -2813,6 +2815,66 @@ January rollover, total order, record filtering, a hard-deleted overtime Draft's
 index use via `EXPLAIN`, no write and no `auth_events`) and `server/tests/Db/AuditHostileTest.php` (Employees, another
 company's CEO with byte-identical unknown-record answers, forged scope keys, revoked and disabled identities, and the scoped
 layer refusing a foreign row).
+
+### CEO audit view — AFI-4g (local candidate; frontend only; read-only)
+
+AFI-4g is a local candidate on `feature/afi-4g-session-audit-ui` (not pushed, merged or deployed), from the owner decisions
+**D-AFI4g-1 … D-AFI4g-10 = A** (2026-10-08). It is the SESSION view of BF-4g: frontend only, no Action or permission
+(ACTIONS stay **21**), no migration (head **0035**), no backend or contract change, `AUTH_MODE` LOCAL. It needs BF-4g's two
+routes (see `docs/DEPLOYMENT.md`).
+
+**Modules (D-AFI4g-1 = A)** — loaded after the Payroll modules, before `core/employee-api.js`; the package grows from 100 to
+**103** files (89 modules):
+
+| Module | Role |
+|---|---|
+| `core/audit-api.js` | `AuditApi.month(monthKey)` / `AuditApi.record(entity, id)` — two bodiless GETs over `ApiClient` (`month`; `entity` + `id` as structured queries), refused locally outside the grammar; `AuditDecoders`; the company-calendar helpers `auditJakartaMonth` / `auditJakartaTime` (fixed UTC+7) |
+| `core/session-audit.js` | `SessionAuditStore` (memory only: month, list, record, history, selected event, error; generation + sequence tokens) and the `SessionAudit` controller — CEO only |
+| `ui/session-audit-view.js` | the month list, the event, the record history and their states; existing CSS classes only |
+
+`ApiClient` gains the query key `entity` (D-AFI4g-2 = A; the value shape `[A-Za-z0-9_-]{1,64}` is unchanged and fits every
+entity name and id format). `AuthBoot` clears the store with the identity; the workspace view adds the CEO's fourth section.
+
+**Decoding.** An event has exactly `AuditEventView::FIELDS`: a positive decimal id; `occurredAt` a real UTC instant
+`YYYY-MM-DDTHH:MM:SS.ffffffZ` from 1900; 32-hex actor, membership and request ids; one of migration 0035's twelve actions with
+the one entity it names, that entity's id format (`AuditInput::ENTITIES`) and the operation it requires (null when it
+requires none); a null or 32-hex target user; a list of field names. A list holds at most 2,000 events, each id once,
+strictly in `(occurredAt, id)` order; a month answer holds only events of that Asia/Jakarta month and a record answer only
+events of that record. Anything else is `INVALID_RESPONSE` and nothing of it is shown — an extra key such as a company
+included.
+
+**Behaviour.**
+
+| Decision | Behaviour |
+|---|---|
+| D-AFI4g-3 = A | The CEO's switch is Employees \| Overtime \| Payroll \| **Audit**; an Employee's has no Audit. Exactly one section is shown; every other section closes Audit, and leaving Audit forgets what it read. Every SessionAudit entry point checks the CEO; the server decides (an Employee is 403). |
+| D-AFI4g-4 = A | The section opens on the current Asia/Jakarta month; Previous / Next and a month field change it (a value outside `YYYY-MM` from 1900 is never sent). Rows show the WIB wall time; an event shows both the WIB time and the stored UTC instant. |
+| D-AFI4g-5 = A | "Show record history" reads the entity and id of the event shown — never a typed value. An empty history reads "No audit history is available for this record." whatever the reason. |
+| D-AFI4g-6 = A | A 500 is shown as "The audit history could not be loaded", its reference and Retry, plus a note that at most 2,000 events can be shown — "one possible reason, but TAM OS did not report the cause". 403 and 400 have no Retry; 429 shows the wait; 503, network and timeout offer Retry. Nothing is retried automatically. |
+| D-AFI4g-7 = A | Actor, membership, target and record ids are shown as stored; no Employee list or name is read. |
+
+A 401 on any read ends the session (`AuthBoot.sessionLost()`); a superseded read (another month, record, section or
+principal) is ignored whatever it answers. Nothing is written to storage, the URL or history; the LOCAL activity log is
+never reached. Focus moves to the heading of what was opened; loading is a busy status, failures are alerts, table headers
+are scoped, the month field is labelled and times are machine-readable `<time datetime>`.
+
+**Proof.** `tools/verify-session-audit-runtime.js` — the **eleventh** CI harness (D-AFI4g-9 = A) — covers who sees the
+section, the Jakarta calendar to the microsecond, every decoding rule, the states, months, stale answers, the event, the
+record history and its neutral empty state, the session end, a principal change, tab exclusivity, 2,000 rows and the absence
+of an identity join; `tools/serve-auth-stub.js` models the two reads (scenarios `audit-empty`, `audit-cap`,
+`audit-unavailable`, `audit-malformed`, `audit-session-lost`) for browser QA. The verifier pins the client to the server
+(fields, cap, vocabularies, entity formats), the CEO checks, the memory-only store, escaping and the package.
+
+**Authenticated end-to-end (D-AFI4g-8 = A).** `tools/serve-e2e-proxy.js` is a test-only loopback front: it serves the
+package under its production headers with `AUTH_MODE` SESSION in memory and forwards `/api` to the PHP development router, so
+the browser sees one origin (`http://localhost`, where the `__Host-` Secure session cookie is kept). On a disposable PHP
+8.3.35 + MariaDB 10.11.19 with fabricated data it proved real activation and login, a real audit row from an edit, the Jakarta
+month edges, a deleted record's history, 2,000 rows shown and 2,001 refused (server log `audit_list_cap`), an Employee's 403,
+another company's isolation (byte-identical record answers) and revocation ending the session. It is AFI-4g evidence only and
+does not satisfy the SDR-0002 §22 gate (item 8).
+
+**Known limitation (pre-existing).** Below about 700 px the SESSION workspace card is wider than the viewport for every
+section with a table (Payroll included); tables scroll inside `table-wrap`, but the frozen CSS does not constrain the card.
 
 ### Release engineering
 

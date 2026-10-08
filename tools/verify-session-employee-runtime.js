@@ -245,9 +245,12 @@ function firewall(rt, label){
   // buttons, with no Payroll. Was: exactly two buttons for both.
   // AFI-4c2 authorized revision: an Employee's switch also has a third button, "My payroll" (not
   // pressed — the section is never open in this harness). Was: exactly My profile | My overtime.
-  const SECTIONS = /<nav aria-label="Workspace sections"><div class="tabs">(<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>Employees<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>Overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button>|<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>My profile<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>My overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>My payroll<\/button>)<\/div><\/nav>/g;
+  // AFI-4g authorized revision (D-AFI4g-3 = A): the CEO's switch has a fourth button, Audit (not
+  // pressed — the Audit section is never open in this harness); an Employee's switch has none.
+  // Was: the CEO's switch ended at Payroll.
+  const SECTIONS = /<nav aria-label="Workspace sections"><div class="tabs">(<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>Employees<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>Overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><button class="tab" type="button" id="swSectionAudit" aria-pressed="false"( disabled)?>Audit<\/button>|<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>My profile<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>My overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>My payroll<\/button>)<\/div><\/nav>/g;
   const sections = html.match(SECTIONS) || [];
-  check(sections.length <= 1 && !/id="swo|id="swp|id="swSection/.test(html.replace(SECTIONS, ''))
+  check(sections.length <= 1 && !/id="swo|id="swp|id="swau|id="swSection/.test(html.replace(SECTIONS, ''))
     && !/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Overtime|Payroll|Finance|Smart Import|Backup|Restore|Start fresh/i.test(html.replace(SECTIONS, '')),
     label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool (beyond the exact SESSION section switch, Overtime not open)');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,

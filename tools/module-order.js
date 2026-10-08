@@ -155,6 +155,12 @@ module.exports = [
   'core/payroll-api.js',
   'core/session-payroll.js',
   'ui/session-payroll-view.js',
+  // --- AFI-4g SESSION Audit (CEO only, read only, BF-4g): the strict audit read client (over
+  //     ApiClient), the in-memory Audit section data and its controller, and its view (a section
+  //     of the SESSION workspace). Never State, never the LOCAL activity log; no write. ---
+  'core/audit-api.js',
+  'core/session-audit.js',
+  'ui/session-audit-view.js',
   // --- AFI-4a1 read-only SESSION Employee workspace: the strict Employee read client
   //     (over ApiClient), the in-memory SESSION Employee data and its controller, and
   //     the view auth-view.js renders while AUTHENTICATED. Defined before the auth

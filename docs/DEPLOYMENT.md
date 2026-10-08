@@ -179,6 +179,12 @@ offered), but that is not a supported configuration. AFI-4f changes no backend c
 and adds no other deploy-together constraint. The same backup prerequisite and SDR-0002 evidence apply before real payment
 records are entered. It is not deployed.
 
+**Deployment note — SESSION Audit history (AFI-4g).** AFI-4g calls BF-4g's two audit reads (`GET /api/audit-events` and
+`GET /api/audit-events/record`), so BF-4g must be deployed before AFI-4g or with it. BF-4g adds no migration (head **0035**)
+and AFI-4g changes no backend contract. Against a backend without the BF-4g routes the Audit section shows a failure and
+nothing else, but that is not a supported configuration. `tools/serve-e2e-proxy.js` is test-only and is never deployed. It
+is not deployed.
+
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
 | Facility | State |
