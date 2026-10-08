@@ -1752,7 +1752,8 @@ is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AF
 `e6ce440c1ea1e71d2d921a1119543592f4113d56`), and its SESSION frontend, AFI-4e (below), is merged (PR #51, canonical
 `d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`). Finance execution follows: BF-4f (below) is merged (PR #52, canonical
 `171392a16800c85e128c178f934d72c96a6255be`). Its SESSION frontend, AFI-4f (below), is merged (PR #53, canonical
-`a39b728f00688fb27e5983422c878a2f933b0e37`). Encrypted database backups follow: OPS-1 (below) is a local candidate.
+`a39b728f00688fb27e5983422c878a2f933b0e37`). Encrypted database backups follow: OPS-1 (below) is merged (PR #54, canonical
+`f48f5f127581655a68bec7d0e065cbefb8e88a74`). Its restore, OPS-2 (below), is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2543,12 +2544,12 @@ the Employee, hostile payloads), the auth stub's BF-4f model (`/__stub/fail-next
 (the earlier payment / execution bans are revised only by exact strips of the AFI-4f identifiers, routes, field names, the
 six codes, the label "Bank transfer" and the pinned word constants), and a deterministic frontend mutation campaign.
 
-### Encrypted database backup — OPS-1 (local candidate; operator tooling; no HTTP surface)
+### Encrypted database backup — OPS-1 (merged as PR #54, canonical `f48f5f12`; operator tooling; no HTTP surface)
 
-OPS-1 is a local candidate on `feature/ops-1-backup` (not committed, pushed, merged or deployed), from the Audit & Backup
-Phase 0 owner decisions D-AB-1 … D-AB-16 = recommended (2026-10-07). It implements the backup half of ADR-0004 §2.6 and
+OPS-1 is merged as source (PR #54, canonical merge `f48f5f127581655a68bec7d0e065cbefb8e88a74`, 2026-10-07; not deployed),
+from the Audit & Backup Phase 0 owner decisions D-AB-1 … D-AB-16 = recommended (2026-10-07). It implements the backup half of ADR-0004 §2.6 and
 SDR-0002 §16 as **operator tooling only**: no route, no UI, no Action (ACTIONS stay **21**), no migration (head **0035**), no
-package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL. Restore is OPS-2; the CEO audit read is BF-4g (D-AB-1 = B,
+package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL. Restore is OPS-2 (below); the CEO audit read is BF-4g (D-AB-1 = B,
 D-AB-16 = A).
 
 **Command contract — `server/bin/backup.php`** (CLI only; exit 0 done, 1 any refusal, failure, stale or damaged backup,
@@ -2642,6 +2643,116 @@ no path or key in the output) — no database; and `server/tests/Db/BackupCreate
 one snapshot with the database's own counts and `SUM()`, excluded state never copied, rows committed during the backup
 absent across page boundaries, the read-only snapshot, double invocation and a running migration, the pre-migration backup,
 the refusals, a failure part-way, retention through `create`, continuity end to end, and the CLI with its log line).
+
+### Database restore — OPS-2 (local candidate; operator tooling, off-host only; no HTTP surface)
+
+OPS-2 is a local candidate on `feature/ops-2-restore` (not committed, pushed, merged or deployed), built on OPS-1 under
+D-AB-11 = A, D-AB-12 = A, D-AB-14 = A and the owner decision **D-OPS2-1 = A** (2026-10-07). It implements the restore half
+of ADR-0004 §2.6 and SDR-0002 §16 as **operator tooling only**: no route, no UI, no Action (ACTIONS stay **21**), no
+migration (head **0035**), no package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL.
+
+**Where it runs (D-OPS2-1 = A).** Off-host only, from an owner-controlled machine. The OPS-1 trust split stays
+authoritative: the production host holds only the backup public key, and restore never makes the secret key available
+to it — `restore` and `verify-restore` refuse (`refused_on_production_host`) wherever the default configuration loads as
+the production one, exactly like `verify` and `keygen`. The target is named only by `--target-config` (never the default
+configuration); it may describe `env` production, in which case its database is reached only over an **SSH tunnel** to
+loopback — direct remote MySQL is not authorized under the current PDO/TLS model. Whether Hostinger allows SSH port
+forwarding is host evidence still required before PILOT-1; if it does not, D-OPS2-1 is not weakened and the key is not
+moved to the host — the question returns to the owner, and the provider restore remains the operational fallback. No
+superseding SDR is needed.
+
+**Command contract — `server/bin/backup.php`** (added to the OPS-1 commands; output is evidence only).
+
+| Command | Where | Needs | Does |
+|---|---|---|---|
+| `restore --file= --secret-key-file= --target-config= [--previous=]` | off-host | the secret key file, a target configuration | verifies the backup, then loads it into the empty, migrated target in one transaction and proves it |
+| `verify-restore --file= --secret-key-file= --target-config=` | off-host | the same | proves, read-only, that the target holds exactly the backup |
+
+Exit codes: **0** restored and proven (`restore: PASS`); **1** any refusal or failure — nothing was committed, the target
+is still empty; **2** usage (any unknown option, including `--yes` or `--force`, which do not exist); **3**
+`restore_unproven` — the restore committed, but its proof after commit failed or did not finish: run `verify-restore`, or
+drop and recreate the target. New reason codes: `schema_mismatch`, `target_not_empty`, `confirmation_refused`,
+`source_env_mismatch`, `restore_mismatch`, `restore_unproven`.
+
+**Order of operations (`TamOs\Ops\BackupRestorer`).**
+
+1. **Verify first.** `BackupVerifier::verify` checks the whole file — sidecar, name, key, every frame, the canonical
+   payload and every manifest claim (optionally `--previous` continuity) — before any connection to the target.
+2. **Compatibility.** The manifest's applied migration history must be exactly the code's migrations, one by one
+   (version, name, SHA-256), and its database head must be the code head (`schema_mismatch`). There is no downgrade and no
+   cross-version transformation: a pre-migration backup (D-AB-13) is restored with the code at its head, then migrated
+   forward with `migrate.php apply`.
+3. **Target, under the `tamos_backup` and `tamos_migrate` locks** (a concurrent backup, restore or migration is refused).
+   Restore runs **no DDL and no migration**: the target must already be migrated by `migrate.php apply`. Its history must
+   be complete, identical and current (the migration errors, or `schema_mismatch`); its schema must classify like a backup's
+   (`BackupCreator::plan`: no unclassified, non-InnoDB or wrongly keyed table) with the manifest's tables, absent tables,
+   columns and column-definition digests, and the generated columns `RestoreWriter` expects; and **every classified table —
+   the 13 backed up and the 4 excluded — must hold no row** (`target_not_empty`). Nothing is truncated, overwritten, merged
+   or upserted.
+4. **Production confirmation (D-AB-12).** A target whose configuration is `production` accepts only a backup whose source
+   is `production` (`source_env_mismatch`), shows the backup id, key fingerprint, source and target fingerprints and heads,
+   and reads one line from standard input that must equal exactly `RESTORE <backup id> INTO <first 16 hex of the target
+   fingerprint>` (`confirmation_refused`; no option skips it).
+5. **One InnoDB transaction.** Emptiness is proven again with shared-locking reads of all 17 tables — on an empty table the
+   next-key lock blocks every other insert until commit. The backup is replayed (`BackupVerifier::replay`: the same cipher,
+   parser and checks from the first byte; a row reaches the writer only after all its checks pass) into
+   `TamOs\Data\Backup\RestoreWriter`, and the replayed manifest must be byte-identical to the verified one — a file swapped
+   or modified in between is refused (`manifest_mismatch`, `tampered`, `truncated`, `name_mismatch`). Every backed-up table
+   is then re-read on the same connection and re-encoded by exactly the code that backs it up (`BackupCreator::copyTable`,
+   `BackupFormat`), which must reproduce the manifest's columns, column digests, row counts, maximum ids, row SHA-256s and
+   exact DECIMAL totals, with the excluded tables empty and the history unchanged (`restore_mismatch`). Only then does it
+   commit. Any failure before commit rolls back — including a killed process or a lost connection, which the server rolls
+   back — and leaves the target empty for a retry; a commit whose outcome is unknown is `restore_unproven`.
+6. **After commit, on a fresh connection**, the same proof runs again in a read-only snapshot, and every integer-keyed
+   restored table's auto-increment counter must be past its largest id; any failure is `restore_unproven` (exit 3).
+
+**Exact values (`TamOs\Data\Backup\RestoreWriter`).** The data layer's one cross-company writer, beside the one
+cross-company reader. It holds one plain `INSERT INTO <table> (<every stored column>) VALUES (<:every stored column>)` per
+backed-up table, in the FK-safe backup order, with foreign-key and unique checks left on — no `IGNORE`, `REPLACE`,
+`ON DUPLICATE KEY`, `UPDATE`, `DELETE` or `TRUNCATE`, and no statement for an excluded table or `schema_migrations`.
+Values are bound exactly as backed up — int, the database's text for DECIMAL / DATE / DATETIME(6), or null; never a float —
+under `STRICT_ALL_TABLES`, so any coercion is an error and any change shows in the digests. The stored generated columns
+(`payroll_plans.live_key`, `supplemental_payrolls.open_key`) are in the backup but never inserted; the server recomputes
+them and the row digests prove the recomputed values equal the backed-up ones. `sessions`, `account_tokens`,
+`auth_rate_limits` and `mail_outbox` are never restored and must be empty before and after: every user signs in again, and
+password hashes are restored, so no credential reset is needed. The audit and authentication history (`audit_events`,
+`auth_events`) is proven exactly by its row digests, and a first backup of the restored database verifies against the
+restored backup with `--previous` when the database keeps the same host, port and name.
+
+**Evidence.** `restore` and `verify-restore` print only: the backup id, the SHA-256 of the canonical manifest, the key
+fingerprint, the source and target (`env` + first 16 hex of their fingerprints), the backup / target / code heads, each
+table's row count, "decimal totals: matched (n columns)", "excluded: 4 empty", the verification stages, start and finish
+(UTC) and the duration — never a value, a total, a path, a key, a credential or a database name. Restore writes no log
+file; its standard output is the rehearsal evidence.
+
+**Residual risk.** The public key is not a secret, so anyone who holds it can build a well-formed backup: verification
+proves integrity, not origin. Origin rests on custody — restore a backup that was pulled and verified off-host (with its
+`verify --previous` chain recorded) before any incident.
+
+**Enforcement added to `tools/verify-backend-boundary.js`.** `server/src/Data/Backup/` holds exactly the reader and
+`RestoreWriter`; the restore writer is the one additional writer the per-table writer rules allow, and in exchange it holds
+only plain INSERTs that bind exactly their named columns (never into an excluded table or the history), its emptiness reads
+and two `information_schema` reads — no UPDATE, DELETE, REPLACE, TRUNCATE, IGNORE, upsert, DDL, `SET` or lock; its
+statement lists must equal `BackupTables` (13 INSERTs naming exactly `COLUMNS`, 17 shared-lock emptiness reads, 4 plain
+excluded-table reads) and its `GENERATED` list must equal the generated columns the migrations declare; a backup is
+decrypted only by `BackupVerifier`, the secret key file is read only by the CLI, and the restore writer never names the
+verifier, parser or cipher; `BackupRestorer` and `RestoreWriter` join the backup classes that no route, controller or kernel
+may name. The append-only, company-scope and Database-handle rules are unchanged — which is why the restore reads use
+`LOCK IN SHARE MODE` and the restorer reaches the database only through `RestoreWriter`.
+
+**Tests.** `server/tests/Unit/BackupRestoreTest.php` — the replay (sinks, a file changed after verification, a re-sealed
+file with another manifest after every row was handed over), the parser handing a row over only after its checks, the
+migration compatibility rule, verification before any connection, the confirmation phrase, `RestoreWriter`'s closed
+surface, and the CLI (usage without `--yes` / `--force`, the production-host refusal, a missing target configuration, no
+path or credential in the output). `server/tests/Db/BackupRestoreTest.php` against MariaDB — the round trip (DECIMAL edges,
+DATE, DATETIME(6), NULL, text, generated columns, a backup of the restored database equal to the original, continuity and
+auto-increment after it), `RestoreWriter`'s columns against `information_schema`, a single row in any of the 17 tables
+refused, emptiness re-proven under locks, swapped / tampered / truncated / re-sealed files rolled back, foreign-key and
+unique checks on with a forced failure rolled back, verification before commit, the fresh-connection proof after commit
+(`restore_unproven`), `verify-restore` detecting changed, removed and added rows, schema and history drift refused,
+concurrency (inserts wait; backup, migration, restore refused), a killed restore process rolled back, the production rules,
+and the CLI end to end. The **rehearsal** (D-AB-14, SDR-0002 **E7**) is not a test: it stays open until a real off-host
+restore of an actual encrypted host backup into a separate, disposable MariaDB passes — see `DEPLOYMENT.md`.
 
 ### Release engineering
 

@@ -19,6 +19,10 @@ namespace TamOs\Ops;
  * With a previous backup (which is verified the same way first), the two must come from the same
  * database, the previous one must be older, and every row the previous backup holds of an
  * append-only table must reappear byte-identical (D-AB-5 = B).
+ *
+ * OPS-2 restore verifies a backup completely first, then replays it (replay): the same checks run
+ * again from the first byte while the rows stream to the restore, and the replayed manifest must be
+ * byte-identical to the one verified — a file changed in between is refused, never imported.
  */
 final class BackupVerifier
 {
@@ -46,7 +50,7 @@ final class BackupVerifier
                 }
             }
         }
-        $manifest = $this->read($path, $continuity);
+        $manifest = $this->read($path, $continuity, null, null);
         if ($previous !== null && ($previous['source']['databaseFingerprint'] !== $manifest['source']['databaseFingerprint']
             || strcmp($previous['backupId'], $manifest['backupId']) >= 0)) {
             throw new BackupError(BackupError::PREVIOUS_MISMATCH);
@@ -55,13 +59,32 @@ final class BackupVerifier
     }
 
     /**
+     * Verifies $path again from its first byte, handing every table header and row to the sinks as
+     * the parser accepts them, and requires the result to be the manifest verify() returned. A sink
+     * runs before the whole file is proven: the caller must discard what it received unless this
+     * returns.
+     *
+     * @param array<string, mixed> $verified the manifest verify() returned for $path
+     * @param \Closure(string, list<string>): void $onTable
+     * @param \Closure(string, array<string, int|string|null>): void $onRow
+     * @throws BackupError
+     */
+    public function replay(string $path, array $verified, \Closure $onTable, \Closure $onRow): void
+    {
+        $manifest = $this->read($path, [], $onTable, $onRow);
+        if (BackupFormat::encode($manifest) !== BackupFormat::encode($verified)) {
+            throw new BackupError(BackupError::MANIFEST_MISMATCH);
+        }
+    }
+
+    /**
      * @param array<string, array{maxId: int, rows: int, sha256: string}> $continuity
      * @return array<string, mixed>
      */
-    private function read(string $path, array $continuity): array
+    private function read(string $path, array $continuity, ?\Closure $onTable, ?\Closure $onRow): array
     {
         $checked = BackupStore::checkFile($path);
-        $parser = new BackupParser($continuity);
+        $parser = new BackupParser($continuity, $onTable, $onRow);
         $in = fopen($path, 'rb');
         if ($in === false) {
             throw new BackupError(BackupError::MALFORMED);

@@ -425,8 +425,14 @@ recommended, 2026-10-07*: separate slices OPS-1 → OPS-2 → BF-4g → optional
 operator tooling — `server/bin/backup.php create | status | verify | keygen`: one read-only snapshot of every classified table
 with the security state excluded, a manifest of counts, digests and exact money totals, libsodium encryption to a host
 public key whose secret key stays off-host, atomic publication, host retention of 7, and an off-host audit-continuity check;
-no route, UI, Action, migration or package change) is a local candidate on a feature branch, not deployed. OPS-2 (restore
-into an empty database and the rehearsal) follows it. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+no route, UI, Action, migration or package change) is merged as source (PR #54, canonical merge
+`f48f5f127581655a68bec7d0e065cbefb8e88a74`), not deployed. **OPS-2** (restore into an empty, migrated database —
+`server/bin/backup.php restore | verify-restore`, off-host only (*D-OPS2-1 = A, 2026-10-07*: the secret key never reaches the
+host; a production database only over an SSH tunnel), verifying the whole backup first, replaying it in one transaction
+through the same verifier and parser, proving the target against the manifest before commit and again on a fresh
+connection after it; a production target needs a production backup and a typed confirmation; no route, UI, Action, migration
+or package change) is a local candidate on a feature branch, not deployed. The restore rehearsal (SDR-0002 E7, D-AB-14) stays
+open until a real off-host restore of an actual host backup passes, before PILOT-1. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

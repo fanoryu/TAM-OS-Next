@@ -7413,10 +7413,15 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
   const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
   const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const cli = srv('bin/backup.php');
+  // OPS-2 authorized revision (D-AB-11/12 = A, D-OPS2-1 = A): restore and verify-restore join the CLI and refuse on
+  // the production host like verify and keygen. Was: exactly create, status, verify and keygen, two refusals, no restore.
   check(/^if \(PHP_SAPI !== 'cli'\) \{\n    exit\(1\);\n\}$/m.test(cli) && /'create', 'status' => \$args === \[\] \? \[\] : null,/.test(cli)
     && /'verify' => backupOptions\(\$args, \['file', 'secret-key-file'\], \['previous'\]\),/.test(cli) && /'keygen' => backupOptions\(\$args, \['secret-key-file'\], \[\]\),/.test(cli)
-    && (cli.match(/refuseOnProductionHost\(\);/g) || []).length === 2 && !/restore|import|\bdelete\b/i.test(noComments(cli).replace(/['"][^'"\n]*['"]/g, '')),
-    'OPS-1: server/bin/backup.php is a SAPI-guarded CLI with exactly create, status, verify and keygen — verify and keygen refuse on the production host; no restore');
+    && /'restore' => backupOptions\(\$args, \['file', 'secret-key-file', 'target-config'\], \['previous'\]\),/.test(cli)
+    && /'verify-restore' => backupOptions\(\$args, \['file', 'secret-key-file', 'target-config'\], \[\]\),/.test(cli)
+    && (cli.match(/=> backupOptions\(|=> \$args === \[\]/g) || []).length === 5
+    && (cli.match(/refuseOnProductionHost\(\);/g) || []).length === 3 && !/import|\bdelete\b/i.test(noComments(cli).replace(/['"][^'"\n]*['"]/g, '')),
+    'OPS-1/OPS-2: server/bin/backup.php is a SAPI-guarded CLI with exactly create, status, verify, keygen, restore and verify-restore — verify, keygen, restore and verify-restore refuse on the production host');
   const tables = srv('src/Ops/BackupTables.php');
   const list = (name) => ((new RegExp('public const ' + name + ' = \\[([\\s\\S]*?)\\];').exec(tables) || ['', ''])[1].match(/'[a-z_]+'/g) || []).map((t) => t.slice(1, -1)).join();
   check(list('INCLUDED') === 'companies,users,employees,memberships,auth_events,audit_events,overtime_records,payroll_plans,payroll_plan_overtime,supplemental_payrolls,supplemental_payroll_overtime,finance_postings,finance_executions'
@@ -7467,6 +7472,80 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
   // N13 (resolved in OPS-1's docs commit): AFI-4f is merged as PR #53 at its canonical merge, not deployed — no longer a local candidate.
   check([ctx, arch, ms].every((t) => !/AFI-4f[^.]*local candidate|local candidate on `feature\/afi-4f|AFI-4f \(below\) is a local candidate/.test(t) && /PR #53/.test(t) && /a39b728f00688fb27e5983422c878a2f933b0e37/.test(t)),
     'AFI-4f (N13): AI_CONTEXT, ARCHITECTURE and the milestone record AFI-4f as merged (PR #53, canonical a39b728f…) — never as a local candidate');
+}
+
+// ===== OPS-2 — RESTORE INTO AN EMPTY DATABASE + REHEARSAL (operator tooling) =====
+// Audit & Backup owner decisions D-AB-11/12/14 = A and D-OPS2-1 = A: restore is server/bin/backup.php restore, off-host
+// only (the secret key never reaches the production host; a production database is reached over an SSH tunnel), into
+// an already migrated, completely empty target, never by HTTP or UI. The backup is verified completely first and then
+// replayed through the same verifier and parser inside one InnoDB transaction; the target is re-encoded exactly as a
+// backup and must reproduce the manifest before commit, and a fresh connection proves it again after commit (else
+// exit 3). A production target needs a production backup and the typed line RESTORE <backup id> INTO <fingerprint>.
+// No route, UI, Action, migration or package change; AUTH_MODE LOCAL. E7 / D-AB-14 stay open until a real rehearsal.
+console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==');
+{
+  const srv = (f) => { const p = path.join(root, 'server', f); return fs.existsSync(p) ? read(p) : ''; };
+  const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const cli = srv('bin/backup.php');
+  const restorer = noComments(srv('src/Ops/BackupRestorer.php'));
+  const writer = srv('src/Data/Backup/RestoreWriter.php');
+  const verifier = srv('src/Ops/BackupVerifier.php');
+  check(/\$target = ConfigLoader::load\(\$options\['target-config'\], null\);/.test(cli) && /static fn \(\): RestoreWriter => RestoreWriter::fromConfig\(\$target\)/.test(cli)
+    && /\$exit = \$reason === BackupError::UNPROVEN \? 3 : 1;/.test(cli) && /\nexit\(\$exit\);\s*$/.test(cli) && /\$line = fgets\(STDIN\);/.test(cli)
+    && !/--yes|--force|'yes'|'force'|'confirm'/.test(noComments(cli)),
+    'OPS-2: restore takes its target only from --target-config, reads the production confirmation from standard input, has no --yes / --force bypass, and exits 3 only for a committed but unproven restore');
+  const body = (name) => { const i = restorer.indexOf('public function ' + name + '('); return i < 0 ? '' : restorer.slice(i, restorer.indexOf('\n    }\n', i)); };
+  const restore = body('restore');
+  const at = (needle) => restore.indexOf(needle);
+  check(at('$this->verifier->verify($path, $previousPath)') > 0 && at('$this->verifier->verify($path, $previousPath)') < at('($this->connect)()')
+    && at('self::requireCompatible(') < at('($this->connect)()') && at('$reader->lock()') < at('$this->requireTarget(') && at('$this->requireTarget(') < at('$this->requireConfirmation(')
+    && at('$this->requireConfirmation(') < at('$writer->transaction(') && at('$writer->transaction(') < at('$this->verifier->replay(') && at('$this->verifier->replay(') < at('$this->requireRestored(')
+    && at('$this->requireRestored(') < at('$this->prove($manifest)') && (restore.match(/if \(!\$writer->isEmpty\(\)\) \{/g) || []).length === 2
+    && /throw new BackupError\(BackupError::UNPROVEN\);/.test(restore) && /\$e->operation === 'commit' \? new BackupError\(BackupError::UNPROVEN\)/.test(restore)
+    && body('verifyTarget').indexOf('$this->verifier->verify($path)') > 0 && body('verifyTarget').indexOf('$this->verifier->verify($path)') < body('verifyTarget').indexOf('$this->prove('),
+    'OPS-2: verify the whole backup → compatibility → lock → target history, schema and emptiness → confirmation → one transaction (emptiness again under locks, replay, verification) → commit → fresh-connection proof (else restore_unproven)');
+  check(/return 'RESTORE ' \. \$backupId \. ' INTO ' \. substr\(\$targetFingerprint, 0, 16\);/.test(restorer) && /if \(\$this->targetEnv !== 'production'\) \{\n\s*return;/.test(restorer)
+    && /if \(\$manifest\['source'\]\['env'\] !== 'production'\) \{\n\s*throw new BackupError\(BackupError::SOURCE_ENV_MISMATCH\);/.test(restorer)
+    && /if \(!is_string\(\$typed\) \|\| !hash_equals\(\$phrase, \$typed\)\) \{/.test(restorer),
+    'OPS-2: a production target needs a production backup and exactly RESTORE <backup id> INTO <target fingerprint, 16 hex> (D-AB-12)');
+  check(/\$manifest\['schema'\]\['databaseHead'\] !== count\(\$set\) \|\| \$manifest\['schema'\]\['migrations'\] !== \$code/.test(restorer)
+    && /count\(\$history\['applied'\]\) !== \$history\['codeHead'\] \|\| \$history\['applied'\] !== \$manifest\['schema'\]\['migrations'\]/.test(restorer)
+    && /BackupCreator::plan\(\$reader->schema\(\), \$history\['createdTables'\]\)/.test(restorer) && !/\b(CREATE|ALTER|DROP|TRUNCATE)\b|Migrator|->apply\(/.test(restorer.replace(/'[^'\n]*'/g, '')),
+    'OPS-2: the backup history, the code migrations and the target history must be identical (no downgrade, no transformation); restore runs no DDL and no migration');
+  const writerSql = (noComments(writer).match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g) || []).map((x) => x.slice(1, -1)).filter((x) => /^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|SET|ALTER|DROP|CREATE)\b/.test(x));
+  check(writerSql.filter((x) => /^INSERT INTO /.test(x)).length === 13 && writerSql.every((x) => /^INSERT INTO [a-z_]+ \([a-z_, ]+\) VALUES \([a-z_:, ]+\)$/.test(x) || /^SELECT /.test(x))
+    && !writerSql.some((x) => /\b(IGNORE|REPLACE|DUPLICATE|UPDATE|DELETE|TRUNCATE)\b/.test(x)) && !/foreign_key_checks|unique_checks/.test(writer)
+    && writerSql.filter((x) => / LOCK IN SHARE MODE$/.test(x)).length === 17 && !writerSql.some((x) => /^INSERT INTO (sessions|account_tokens|auth_rate_limits|mail_outbox|schema_migrations) /.test(x))
+    && /public const GENERATED = \[\n        'payroll_plans' => \['live_key'\],\n        'supplemental_payrolls' => \['open_key'\],\n    \];/.test(writer)
+    && !/live_key|open_key/.test(writerSql.join('\n')),
+    'OPS-2: RestoreWriter holds 13 plain INSERTs (no IGNORE, REPLACE, upsert, UPDATE, DELETE or TRUNCATE; never an excluded table or the history; generated columns never inserted) and 17 locked emptiness reads; foreign-key and unique checks stay on');
+  check(/public function replay\(string \$path, array \$verified, \\Closure \$onTable, \\Closure \$onRow\): void/.test(verifier) && /new BackupParser\(\$continuity, \$onTable, \$onRow\)/.test(verifier)
+    && /BackupFormat::encode\(\$manifest\) !== BackupFormat::encode\(\$verified\)/.test(verifier) && !/BackupCipher::open|new BackupParser|readSecretKeyFile/.test(restorer)
+    && !/BackupVerifier|BackupParser|BackupCipher|readSecretKeyFile/.test(noComments(writer)),
+    'OPS-2: the restore replays through the one verifier and parser (no second parser); only the verifier decrypts; the restore writer never names the verifier, the parser or the cipher');
+  const routes = noComments(srv('src/Http/Routes.php') + srv('src/bootstrap.php') + srv('src/Http/Kernel.php'));
+  check(!/restore/i.test(routes) && fs.readdirSync(path.join(root, 'server', 'src', 'Controller')).every((f) => !/restore|backup/i.test(f))
+    && fs.readdirSync(path.join(root, 'server', 'bin')).sort().join() === 'account.php,backup.php,mail.php,migrate.php',
+    'OPS-2: no route, controller, kernel or new CLI names a restore — operator tooling only, no HTTP surface');
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).length === 35
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && pkg.files.length === 100 && pkg.packageDigest === 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    'OPS-2: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE LOCAL, and the package unchanged — 100 files at digest d030d544…');
+  const dbTest = srv('tests/Db/BackupRestoreTest.php');
+  check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'BackupRestoreTest.php')) && ['round trip: every backed-up row returns exactly', 'any one row in any of the 17 classified tables',
+    'pass 2 never imports a file changed after pass 1', 'a killed restore process rolls back', 'after commit a fresh connection proves the target again', 'production: only a production backup',
+    'concurrency: during the import other inserts wait'].every((t) => dbTest.includes(t)),
+    'OPS-2: the restore tests exist — round trip, non-empty refusal, replay tampering, rollback, killed process, post-commit proof, production confirmation, concurrency');
+  const ctx = read(path.join(root, 'AI_CONTEXT.md')), arch = read(path.join(root, 'ARCHITECTURE.md')), ms = read(path.join(root, 'docs', '05-milestones', 'Milestones.md'));
+  const dep = read(path.join(root, 'docs', 'DEPLOYMENT.md'));
+  check(/D-OPS2-1 = A/.test(ctx) && /### Database restore — OPS-2/.test(arch) && /Deployment note — Restore and restore rehearsal \(OPS-2\)/.test(dep)
+    && /SSH tunnel/.test(dep) && /E7[^.]*open/.test(dep) && /\*\*OPS-2\*\*/.test(ms) && /OPS-2 Restore/.test(read(path.join(root, 'CHANGELOG.md')))
+    && /php server\/bin\/backup\.php restore/.test(read(path.join(root, 'tools', 'README.md'))),
+    'OPS-2: documented — the decision (AI_CONTEXT), the design (ARCHITECTURE), the runbook with the SSH tunnel and E7 still open (DEPLOYMENT), the milestone, the changelog and the tools README');
+  // N14 (resolved in OPS-2's docs commit): OPS-1 is merged as PR #54 at its canonical merge, not deployed — no longer a local candidate.
+  check([ctx, arch, ms].every((t) => !/OPS-1[^.]*local candidate|local candidate on `feature\/ops-1-backup|OPS-1 \(below\) is a local candidate/.test(t) && /PR #54/.test(t) && /f48f5f127581655a68bec7d0e065cbefb8e88a74/.test(t)),
+    'OPS-1 (N14): AI_CONTEXT, ARCHITECTURE and the milestone record OPS-1 as merged (PR #54, canonical f48f5f12…) — never as a local candidate');
 }
 
 // ===== CI-HARDEN-1 — RUNTIME HARNESSES IN CI (fixed allowlist) =====

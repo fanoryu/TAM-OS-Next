@@ -11,6 +11,10 @@ namespace TamOs\Ops;
  * With continuity expectations (from the previous backup's manifest) it also recomputes, for each
  * append-only table, the digest and count of the rows whose id is at most the previous maximum:
  * they must equal the previous backup's digest and count exactly (D-AB-5 = B).
+ *
+ * OPS-2 restore replays a backup through this same parser with sinks: $onTable receives each table
+ * header (name, columns) and $onRow each row (table, column => value) only after every check of
+ * that row has passed. What a sink received is unverified until finish() returns.
  */
 final class BackupParser
 {
@@ -26,9 +30,14 @@ final class BackupParser
 
     /**
      * @param array<string, array{maxId: int, rows: int, sha256: string}> $continuity per append-only table
+     * @param (\Closure(string, list<string>): void)|null $onTable
+     * @param (\Closure(string, array<string, int|string|null>): void)|null $onRow
      */
-    public function __construct(private readonly array $continuity = [])
-    {
+    public function __construct(
+        private readonly array $continuity = [],
+        private readonly ?\Closure $onTable = null,
+        private readonly ?\Closure $onRow = null,
+    ) {
     }
 
     /** Feeds the next decrypted bytes. @throws BackupError malformed | manifest_mismatch | continuity_broken */
@@ -145,6 +154,9 @@ final class BackupParser
         $this->table = ['name' => $name, 'columns' => $columns, 'decimals' => $indexes, 'rows' => 0, 'maxId' => null,
             'hash' => hash_init('sha256'), 'totals' => $totals, 'expect' => $expect, 'prefixRows' => 0, 'prefixHash' => hash_init('sha256')];
         $this->state = 'table';
+        if ($this->onTable !== null) {
+            ($this->onTable)($name, $columns);
+        }
     }
 
     /** @param list<mixed> $values */
@@ -180,6 +192,9 @@ final class BackupParser
         if ($t['expect'] !== null && is_int($values[0]) && $values[0] <= $t['expect']['maxId']) {
             hash_update($t['prefixHash'], $line . "\n");
             $t['prefixRows']++;
+        }
+        if ($this->onRow !== null) {
+            ($this->onRow)($t['name'], array_combine($t['columns'], $values));
         }
     }
 

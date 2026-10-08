@@ -75,7 +75,7 @@ final class BackupCreator
                 $format->begin($id);
                 $rows = 0;
                 foreach ($plan['present'] as $table => $definition) {
-                    $rows += $this->copyTable($format, $table, $definition);
+                    $rows += self::copyTable($this->reader, $format, $table, $definition);
                     if ($this->afterTable !== null) {
                         ($this->afterTable)($table);
                     }
@@ -169,20 +169,27 @@ final class BackupCreator
         return ['present' => $present, 'absent' => $absent];
     }
 
-    /** @param array<string, mixed> $definition */
-    private function copyTable(BackupFormat $format, string $table, array $definition): int
+    /**
+     * Streams one table through $format in primary-key pages and checks the rows against the
+     * table's COUNT(*) in the same transaction. Shared by create and by OPS-2's restore
+     * verification, so a restored table is measured by exactly the encoding that backed it up.
+     *
+     * @param array<string, mixed> $definition a plan() entry
+     * @throws BackupError snapshot_inconsistent | unsupported_value | unexpected_schema
+     */
+    public static function copyTable(BackupReader $reader, BackupFormat $format, string $table, array $definition): int
     {
         $format->beginTable($table, $definition['columns'], $definition['decimals'], $definition['columnsSha256']);
         $after = $definition['after'];
         do {
-            $page = $this->reader->page($table, $after);
+            $page = $reader->page($table, $after);
             foreach ($page as $row) {
                 $format->row($row);
                 $after = $row['id'];
             }
         } while (count($page) === BackupReader::PAGE);
         $rows = $format->endTable();
-        if ($rows !== $this->reader->count($table)) {
+        if ($rows !== $reader->count($table)) {
             throw new BackupError(BackupError::SNAPSHOT_INCONSISTENT);
         }
         return $rows;
