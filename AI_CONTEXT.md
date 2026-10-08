@@ -508,8 +508,9 @@ encrypted host backup into a separate disposable MariaDB passes (`DEPLOYMENT.md`
 backup is a documented residual risk: the public key is not secret, so origin is a custody question (restore a backup whose
 `verify --previous` chain was recorded off-host). ACTIONS stay **21**; migration head **0035**; the package keeps 100
 files at `d030d544…`; `AUTH_MODE` stays LOCAL.
-**BF-4g — CEO audit read API** (local candidate on `feature/bf-4g-audit-read`; not committed, pushed, merged or
-deployed; owner decisions **D-BF4g-1 … D-BF4g-4 = A**, 2026-10-08, on Audit & Backup D-AB-2/3/4/15 = A) is the third
+**BF-4g — CEO audit read API** (merged as source, PR #56, canonical merge
+`7ec760a5de92d804e5e33ed2f112a047e1552f94`, 2026-10-08; post-merge verification green; feature branch deleted; not deployed;
+owner decisions **D-BF4g-1 … D-BF4g-4 = A**, 2026-10-08, on Audit & Backup D-AB-2/3/4/15 = A) is the third
 slice: the first server **read** of the business audit trail, backend only — no Action (ACTIONS stay **21**), no migration
 (head **0035**), no frontend or package change (100 files at `d030d544…`), `AUTH_MODE` LOCAL. Two CEO-only GETs, decided
 by the handler before any lookup (an Employee is **403**, no session **401**; an unknown or repeated query key **400**):
@@ -530,7 +531,30 @@ truncated list. D-BF4g-4 = A: the record read takes one of the five stored entit
 answers `[]` for an unknown record — a deleted record keeps its history. `auth_events` is not exposed (D-AB-15 = A). The
 reads are two fixed SELECTs in `AuditEventStore` under `ScopedDatabase` (company scope only, no write, lock, transaction
 or join) served by the existing `audit_events_company_time` and `audit_events_entity` indexes, and the boundary tool pins
-that shape, the Asia/Jakarta calendar and the two routes. The SESSION view is the optional AFI-4g.
+that shape, the Asia/Jakarta calendar and the two routes. Its SESSION view is AFI-4g (below).
+**AFI-4g — SESSION Audit history (CEO, read only)** (local candidate on `feature/afi-4g-session-audit-ui`, from
+`7ec760a5de92d804e5e33ed2f112a047e1552f94`; not pushed, merged or deployed; owner decisions **D-AFI4g-1 … D-AFI4g-10 = A**,
+2026-10-08) is the fourth Audit & Backup slice: the SESSION view of BF-4g, **frontend only** — no Action or permission
+(ACTIONS stay **21**), no migration (head **0035**), no backend change, `AUTH_MODE` LOCAL. D-AFI4g-1 = A: three new
+modules — `core/audit-api.js` (the strict client of the two BF-4g reads), `core/session-audit.js` (the memory-only data and
+controller) and `ui/session-audit-view.js` — so the package grows from 100 to **103** files (`097f6b50…`, 89 modules).
+D-AFI4g-2 = A: `entity` joins the ApiClient query keys (the value shape is unchanged). D-AFI4g-3 = A: the CEO gets a fourth
+SESSION section, **Audit**; an Employee has none, every entry point checks the CEO again and the server decides (403).
+D-AFI4g-4 = A: it opens on the current **Asia/Jakarta** month (fixed UTC+7, never the browser's zone); rows show WIB wall
+times and an event shows the exact stored UTC instant too. D-AFI4g-5 = A: a record's history is opened only from an event
+shown — never from a typed entity or id — and an empty history is one neutral sentence that never says whether the record
+exists or was deleted. D-AFI4g-6 = A: no backend change — a 500 (which the 2,000-row cap produces, among other causes) is
+shown as a failure with its reference and an **informational** note about the 2,000-event limit that never claims the
+cause. D-AFI4g-7 = A: stored ids only, no identity join. The decoder accepts exactly the eleven fields, migration 0035's
+twelve actions, their entities and operations, at most 2,000 events in the server's `(occurredAt, id)` order, each of the
+Jakarta month (or the record) asked for — anything else shows nothing of the answer. A 401 ends the session; logout,
+session loss or another principal destroys the data; nothing is stored. D-AFI4g-9 = A:
+`tools/verify-session-audit-runtime.js` is the **eleventh** CI harness (repeated runs and a UTC−12 … UTC+14 matrix proved
+it deterministic). D-AFI4g-8 = A: a real authenticated end-to-end check ran on a disposable loopback PHP 8.3.35 + MariaDB
+10.11.19 through the test-only `tools/serve-e2e-proxy.js` (real activation, login, an audit-producing edit, Jakarta month
+edges, the cap, an Employee's 403, another company's isolation, revocation ending the session); it is AFI-4g evidence
+only and does **not satisfy** the SDR-0002 §22 "authenticated end-to-end tests pass" gate (item 8). D-AFI4g-10 = A: N16
+is resolved here.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

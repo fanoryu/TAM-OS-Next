@@ -436,8 +436,12 @@ restore rehearsal (SDR-0002 E7, D-AB-14) stays open until a real off-host restor
 PILOT-1. **BF-4g** (the CEO audit read API — `GET /api/audit-events?month=` in the Asia/Jakarta company calendar as a
 half-open UTC window, and `GET /api/audit-events/record?entity=&id=`; the eleven stored historical fields without the
 company, a 2,000-row cap failing closed, history kept for deleted records, `auth_events` not exposed; CEO-only, no Action,
-migration, frontend or package change; *D-BF4g-1..4 = A, 2026-10-08*) is a local candidate on a feature branch, not
-deployed; its SESSION view is the optional AFI-4g. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+migration, frontend or package change; *D-BF4g-1..4 = A, 2026-10-08*) is merged as source (PR #56, canonical merge
+`7ec760a5de92d804e5e33ed2f112a047e1552f94`), not deployed. **AFI-4g** (its SESSION view — the CEO's "Audit" section: the current
+Asia/Jakarta month in WIB, an event in full, a record's history from an event, an informational 2,000-event note on a 500,
+stored ids only; three new modules, 103 files, the eleventh CI harness; no Action, permission, migration or backend change;
+a real authenticated end-to-end check as AFI-4g evidence only, not the SDR-0002 §22 gate; *D-AFI4g-1..10 = A, 2026-10-08*)
+is a local candidate on a feature branch, not deployed. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **AFI-4g Audit history screen for the CEO (SESSION mode; not shipped).** The CEO now has an **Audit** section beside
+  Employees, Overtime and Payroll that shows the company's audit history, one calendar month at a time in Western Indonesia
+  Time (WIB), starting at the current month. Each entry can be opened to see everything that was recorded about it — when
+  (in WIB and in UTC), who, what was done to which record and which fields changed, never their values — and from there the
+  full history of that record, including a record that was later deleted. Employees have no Audit section. If a month or a
+  record cannot be loaded the screen says so, with a reference and a Retry button, and notes that at most 2,000 entries
+  can be shown at once, without claiming that this was the cause. Nothing can be changed or deleted here and nothing is
+  kept in the browser. The shipped `AUTH_MODE` stays **LOCAL**; the app is unchanged.
 - **BF-4g Audit history for the CEO (server only, not shipped).** The server can now show the CEO the company's audit
   history: every recorded change — employee edits and account actions, overtime, payroll, supplemental payroll, finance
   postings and recorded payments — either for one calendar month or for one record. Months follow the company calendar
