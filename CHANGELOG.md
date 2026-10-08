@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **BF-4g Audit history for the CEO (server only, not shipped).** The server can now show the CEO the company's audit
+  history: every recorded change — employee edits and account actions, overtime, payroll, supplemental payroll, finance
+  postings and recorded payments — either for one calendar month or for one record. Months follow the company calendar
+  (Western Indonesia Time), to the microsecond at the month edges. Each entry shows when it happened (in UTC), who did it,
+  what was done to which record and which fields changed — never the values, and never another company's history. A
+  record that was later deleted keeps its history. Employees cannot read it, and sign-in activity is not part of it. If a
+  month or record has more than 2,000 entries the request is refused rather than showing an incomplete list. Nothing can be
+  changed or deleted through it. There is no screen for it yet; the shipped `AUTH_MODE` stays **LOCAL**; the app is
+  unchanged.
 - **OPS-2 Restore of an encrypted backup into an empty database (operator tooling, not shipped).** The owner can now load
   an encrypted backup back into a new, empty TAM OS database from their own computer, with their separately kept key — the
   server never needs that key. Before anything is written the whole backup is checked; the target must already have the

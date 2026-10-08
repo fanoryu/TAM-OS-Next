@@ -20,7 +20,8 @@ return [
     // BF-4d authorized revision: the nine Supplemental Payroll routes follow (forty-seven). Was: thirty-eight.
     // BF-4e authorized revision: the three Finance posting routes follow (fifty). Was: forty-seven.
     // BF-4f authorized revision: the two Finance execution routes follow (fifty-two). Was: fifty.
-    'production has exactly fifty-two routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes; BF-4e: the three Finance posting routes; BF-4f: the two Finance execution routes); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll, Supplemental and Finance routes require one' => static function () use ($production): void {
+    // BF-4g authorized revision: the two CEO audit reads follow (fifty-four). Was: fifty-two.
+    'production has exactly fifty-four routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes; BF-4e: the three Finance posting routes; BF-4f: the two Finance execution routes; BF-4g: the two audit reads); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll, Supplemental, Finance and audit routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -76,6 +77,8 @@ return [
             ['POST', '/api/finance-postings/supplemental-payroll', [], RouteAuth::Required],
             ['GET', '/api/finance-executions', ['month'], RouteAuth::Required],
             ['POST', '/api/finance-executions/execute', [], RouteAuth::Required],
+            ['GET', '/api/audit-events', ['month'], RouteAuth::Required],
+            ['GET', '/api/audit-events/record', ['entity', 'id'], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

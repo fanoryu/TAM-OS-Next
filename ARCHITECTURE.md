@@ -1753,7 +1753,8 @@ is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AF
 `d5a5fad1783e42f0f75b8e692aa05af7fd1837f6`). Finance execution follows: BF-4f (below) is merged (PR #52, canonical
 `171392a16800c85e128c178f934d72c96a6255be`). Its SESSION frontend, AFI-4f (below), is merged (PR #53, canonical
 `a39b728f00688fb27e5983422c878a2f933b0e37`). Encrypted database backups follow: OPS-1 (below) is merged (PR #54, canonical
-`f48f5f127581655a68bec7d0e065cbefb8e88a74`). Its restore, OPS-2 (below), is a local candidate.
+`f48f5f127581655a68bec7d0e065cbefb8e88a74`). Its restore, OPS-2 (below), is merged (PR #55, canonical
+`3732dfdca61b91aa6beba33d77f72b8224fdaa60`). The CEO audit read, BF-4g (below), is a local candidate.
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2644,9 +2645,10 @@ one snapshot with the database's own counts and `SUM()`, excluded state never co
 absent across page boundaries, the read-only snapshot, double invocation and a running migration, the pre-migration backup,
 the refusals, a failure part-way, retention through `create`, continuity end to end, and the CLI with its log line).
 
-### Database restore — OPS-2 (local candidate; operator tooling, off-host only; no HTTP surface)
+### Database restore — OPS-2 (merged as PR #55, canonical `3732dfdc`; operator tooling, off-host only; no HTTP surface)
 
-OPS-2 is a local candidate on `feature/ops-2-restore` (not committed, pushed, merged or deployed), built on OPS-1 under
+OPS-2 is merged as source (PR #55, canonical merge `3732dfdca61b91aa6beba33d77f72b8224fdaa60`, 2026-10-08; not deployed),
+built on OPS-1 under
 D-AB-11 = A, D-AB-12 = A, D-AB-14 = A and the owner decision **D-OPS2-1 = A** (2026-10-07). It implements the restore half
 of ADR-0004 §2.6 and SDR-0002 §16 as **operator tooling only**: no route, no UI, no Action (ACTIONS stay **21**), no
 migration (head **0035**), no package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL.
@@ -2753,6 +2755,64 @@ unique checks on with a forced failure rolled back, verification before commit, 
 concurrency (inserts wait; backup, migration, restore refused), a killed restore process rolled back, the production rules,
 and the CLI end to end. The **rehearsal** (D-AB-14, SDR-0002 **E7**) is not a test: it stays open until a real off-host
 restore of an actual encrypted host backup into a separate, disposable MariaDB passes — see `DEPLOYMENT.md`.
+
+### CEO audit read — BF-4g (local candidate; backend only; read-only)
+
+BF-4g is a local candidate on `feature/bf-4g-audit-read` (not committed, pushed, merged or deployed), from the owner
+decisions **D-BF4g-1 … D-BF4g-4 = A** (2026-10-08) on Audit & Backup D-AB-2/3/4/15 = A. It is the first server read of the
+business audit trail (`audit_events`, SDR-0002 §9.2): backend only, no Action (ACTIONS stay **21**), no migration (head
+**0035**), no frontend or package change (100 files, `d030d544…`), `AUTH_MODE` LOCAL. `AuditLog` stays the only writer.
+
+**Routes** (both `RouteAuth::Required`, no Action, CEO-only by the handler before any lookup — an Employee is 403):
+
+| Route | Query keys | Answer |
+|---|---|---|
+| `GET /api/audit-events` | exactly `month` (`YYYY-MM`) | `{ auditEvents: [A…] }` — the company's rows of that Asia/Jakarta month |
+| `GET /api/audit-events/record` | exactly `entity`, `id` | `{ auditEvents: [A…] }` — the company's rows naming that record; `[]` when none |
+
+An unknown or repeated key is a 400 `invalid_query` from the kernel; a bad month is `invalid_query`, a bad entity or id
+`validation_failed` naming the field. There is no audit write, correction, deletion or export route and no
+authentication-log route.
+
+**Timezone (D-BF4g-1 = A).** `audit_events.occurred_at` is `DATETIME(6)` (no zone) holding UTC: every row is written with
+`UTC_TIMESTAMP(6)` by `AuditLog` over a connection whose init command pins `time_zone = '+00:00'`
+(`DatabaseConfig::INIT_COMMAND`, asserted by `DatabaseTest`), and OPS-2 restore copies the value verbatim. `AuditInput`
+turns the requested month of the Asia/Jakarta company calendar into its half-open window `[first instant, first instant
+of the next month)` in PHP, converts both bounds to UTC and formats them `Y-m-d H:i:s.u`; the store binds them as
+`occurred_at >= :from AND occurred_at < :to`. There is no `CONVERT_TZ` (the server's zone tables are not relied on), no
+`BETWEEN` and no inclusive end, so a row at `…16:59:59.999999` UTC on the last day belongs to that month and one at
+`…17:00:00.000000` to the next. Asia/Jakarta has been a fixed +07:00 since 1970, so the boundaries are the previous
+day's 17:00:00.000000 UTC (leap Februaries and the December → January rollover included). The result does not depend on
+PHP's default timezone.
+
+**Projection (D-BF4g-3 = A).** `AuditEventView::FIELDS` — `id`, `occurredAt`, `actorUserId`, `actorMembershipId`,
+`action`, `entity`, `entityId`, `operation`, `targetUserId`, `requestId`, `fields` — the stored historical fields only:
+never `company_id` and no join to current user names, emails or roles. `occurredAt` is the stored instant read as UTC and
+written `YYYY-MM-DDTHH:MM:SS.ffffffZ` with all six fractional digits; a stored value that is not an exact `DATETIME(6)`
+fails the read (500), never a shifted or partial value. `operation` and `targetUserId` are null when none was stored and
+`fields` is the stored field-name list (`[]` when none).
+
+**Store (`TamOs\Data\Audit\AuditEventStore`).** Two fixed SELECTs under `ScopedDatabase` in company scope — no write,
+lock, transaction, join, other table, `auth_events` or Employee statement — ordered by `(occurred_at, id)` and read with
+`LIMIT 2001`: the month (index `audit_events_company_time`, whose order serves the sort) and the record (`company_id,
+entity, entity_id`, index `audit_events_entity`). D-BF4g-2 = A: above **2,000** rows `AuditService` fails closed — 500
+`internal_error`, logged `audit_list_cap`, no partial list. D-BF4g-4 = A: the record read validates one of the five stored
+entities and that entity's id format but never looks the record up, so a deleted record keeps its history and an unknown
+one answers `[]`.
+
+**Boundary.** `tools/verify-backend-boundary.js` pins the store's two statements (projection, predicates, order, `LIMIT
+2001`; no write, lock, join, `auth_events`, Employee scope, SQL date function, `BETWEEN`, `OR` or `<=`), keeps the audit
+read code from naming the authentication log, the audit writer, a transaction, an Action or another store, requires
+`AuditInput::COMPANY_TIMEZONE` to be `Asia/Jakarta`, and allows exactly the two GET routes with their query keys and no
+Action.
+
+**Tests.** `server/tests/Unit/AuditReadTest.php` (windows, validation, projection, timestamps, store shape, 400 → 403
+before any lookup), `server/tests/Http/AuditRoutingTest.php` (401, 403, query keys, no write or auth-events route), and
+against MariaDB `server/tests/Db/AuditReadTest.php` (microsecond month edges, leap and common February, the December →
+January rollover, total order, record filtering, a hard-deleted overtime Draft's real history, the 2,000 / 2,001 cap,
+index use via `EXPLAIN`, no write and no `auth_events`) and `server/tests/Db/AuditHostileTest.php` (Employees, another
+company's CEO with byte-identical unknown-record answers, forged scope keys, revoked and disabled identities, and the scoped
+layer refusing a foreign row).
 
 ### Release engineering
 

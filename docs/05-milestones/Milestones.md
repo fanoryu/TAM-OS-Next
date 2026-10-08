@@ -431,8 +431,13 @@ no route, UI, Action, migration or package change) is merged as source (PR #54, 
 host; a production database only over an SSH tunnel), verifying the whole backup first, replaying it in one transaction
 through the same verifier and parser, proving the target against the manifest before commit and again on a fresh
 connection after it; a production target needs a production backup and a typed confirmation; no route, UI, Action, migration
-or package change) is a local candidate on a feature branch, not deployed. The restore rehearsal (SDR-0002 E7, D-AB-14) stays
-open until a real off-host restore of an actual host backup passes, before PILOT-1. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+or package change) is merged as source (PR #55, canonical merge `3732dfdca61b91aa6beba33d77f72b8224fdaa60`), not deployed. The
+restore rehearsal (SDR-0002 E7, D-AB-14) stays open until a real off-host restore of an actual host backup passes, before
+PILOT-1. **BF-4g** (the CEO audit read API — `GET /api/audit-events?month=` in the Asia/Jakarta company calendar as a
+half-open UTC window, and `GET /api/audit-events/record?entity=&id=`; the eleven stored historical fields without the
+company, a 2,000-row cap failing closed, history kept for deleted records, `auth_events` not exposed; CEO-only, no Action,
+migration, frontend or package change; *D-BF4g-1..4 = A, 2026-10-08*) is a local candidate on a feature branch, not
+deployed; its SESSION view is the optional AFI-4g. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.
