@@ -175,6 +175,19 @@
  *   /__stub/fail-next-execution   the next execution is APPLIED, then answered 503: an unknown
  *                                 outcome the page must reconcile by reading the executions again
  * The stub records a payment statement only: nothing here moves money, reverses or corrects anything.
+ *
+ * AFI-4g CEO audit read (a test-only model of BF-4g): GET /api/audit-events?month=YYYY-MM (the events
+ * of that Asia/Jakarta month, in (occurredAt, id) order) and GET /api/audit-events/record?entity=&id=
+ * (every event naming that record; [] for any other — the record is never looked up). CEO only: an
+ * Employee 403, no session 401, an unknown or repeated key 400 invalid_query, a bad entity or id 400
+ * validation_failed. The fabricated events sit in the current and the previous Jakarta month, at the
+ * month's first instant and its last microsecond, and include the history of a deleted overtime draft.
+ * The stub keeps no audit write: there is none.
+ *   /__stub/scenario/audit-empty          signed in as CEO; every audit read answers []
+ *   /__stub/scenario/audit-cap            signed in as CEO; every audit read answers 500 (as the cap does)
+ *   /__stub/scenario/audit-unavailable    signed in as CEO; every audit read answers 503
+ *   /__stub/scenario/audit-malformed      signed in as CEO; a non-empty answer carries a company key
+ *   /__stub/scenario/audit-session-lost   signed in as CEO; the first audit read ends the session (401)
  */
 'use strict';
 const http = require('http');
@@ -196,7 +209,7 @@ const SCENARIOS = ['signed-out', 'ceo', 'employee', 'me-unavailable', 'me-malfor
   'link-invalid', 'password-policy', 'forgot-rate-limited', 'reset-rate-limited', 'recovery-unavailable', 'recovery-malformed',
   'employees-unavailable', 'employee-self-missing', 'employees-session-lost',
   'write-validation', 'write-session-lost', 'write-denied', 'write-stale-csrf', 'write-conflict', 'write-rate-limited', 'write-error', 'write-unavailable',
-  'write-malformed', 'write-slow'];
+  'write-malformed', 'write-slow', 'audit-empty', 'audit-cap', 'audit-unavailable', 'audit-malformed', 'audit-session-lost'];
 // AFI-4a1 fabricated company records (the CEO detail DTO; the list and self views are projections).
 const STUB_EMPLOYEES = [
   { id: 'emp_stub_1', employeeCode: 'EMP-001', fullName: 'Fabricated Employee One', jobTitle: 'Engineer', department: 'Operations', employmentStatus: 'Active',
@@ -336,6 +349,29 @@ let finance = [];
 let failNextPosting = false;
 let executions = [];           // AFI-4f: this scenario's Finance executions (each with its key)
 let failNextExecution = false;
+let audit = [];                // AFI-4g: this scenario's audit events (fabricated; read only)
+// AFI-4g: the company calendar (Asia/Jakarta, UTC+7 all year) and the fabricated audit events.
+const JAKARTA_MS = 25200000;
+const auditMonthOf = (occurredAt) => new Date(Date.parse(occurredAt.slice(0, 19) + 'Z') + JAKARTA_MS).toISOString().slice(0, 7);
+const AUDIT_ENTITY_IDS = { employee: /^[A-Za-z0-9_-]{1,64}$/, overtime: /^[0-9a-f]{32}$/, payrollPlan: /^[0-9a-f]{32}$/, supplementalPayroll: /^[0-9a-f]{32}$/, financePosting: /^[0-9a-f]{32}$/ };
+function stubAudit(){
+  const m = new Date(Date.now() + JAKARTA_MS).toISOString().slice(0, 7);
+  const first = Date.UTC(+m.slice(0, 4), +m.slice(5, 7) - 1, 1) - JAKARTA_MS;      // the month's first instant, as UTC
+  const next = Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 1) - JAKARTA_MS;           // the next month's first instant
+  const at = (ms, micro) => new Date(ms).toISOString().slice(0, 19) + '.' + micro + 'Z';
+  const CEO = 'a'.repeat(32), CEO_M = 'b'.repeat(32), EMP = '1'.repeat(32), EMP_M = '2'.repeat(32);
+  const e = (id, occurredAt, o) => Object.assign({ id: String(id), occurredAt: occurredAt, actorUserId: CEO, actorMembershipId: CEO_M, action: 'employee.update',
+    entity: 'employee', entityId: 'emp_stub_1', operation: null, targetUserId: null, requestId: crypto.createHash('sha256').update('rq' + id).digest('hex').slice(0, 32), fields: ['jobTitle'] }, o || {});
+  return [
+    e(1, at(first - 3 * 86400000, '000000'), { action: 'employee.create', fields: ['employeeCode', 'fullName'] }),
+    e(2, at(first, '000000')),
+    e(3, at(first + 30 * 3600000, '250000'), { action: 'account.manage', operation: 'provision', targetUserId: EMP, fields: [] }),
+    e(4, at(first + 50 * 3600000, '000001'), { actorUserId: EMP, actorMembershipId: EMP_M, action: 'overtime.createSelfDraft', entity: 'overtime', entityId: '9'.repeat(32), fields: ['hours', 'monthKey'] }),
+    e(5, at(first + 51 * 3600000, '000001'), { actorUserId: EMP, actorMembershipId: EMP_M, action: 'overtime.deleteSelfDraft', entity: 'overtime', entityId: '9'.repeat(32), fields: [] }),
+    e(6, at(first + 60 * 3600000, '500000'), { action: 'payroll.manage', entity: 'payrollPlan', entityId: '7'.repeat(32), operation: 'commit', fields: [] }),
+    e(7, at(next - 1000, '999999'), { action: 'employee.update', fields: ['department', 'phone'] })
+  ];
+}
 // The exact sum of some Approved records (test-only mirror of PayrollCalculation::overtime).
 function spSum(records){
   let rupiah = 0n, quarters = 0n;
@@ -384,7 +420,8 @@ function reset(name){
   failNextSuppCommit = false; lateSeq = 0;
   finance = []; failNextPosting = false;   // AFI-4e
   executions = []; failNextExecution = false;   // AFI-4f
-  session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
+  audit = stubAudit();                           // AFI-4g
+  session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-') || name.startsWith('audit-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
 function api(res, status, payload, extra, fields){
@@ -547,6 +584,31 @@ async function handleApi(req, res, p, query){
     return api(res, 200, { financePostings: finance.filter((x) => x.monthKey === month)
       .sort((a, c) => (a.employeeId < c.employeeId ? -1 : a.employeeId > c.employeeId ? 1 : a.sourceKind < c.sourceKind ? -1 : a.sourceKind > c.sourceKind ? 1 : a.seq - c.seq))
       .map((x) => pick(x, FP_VIEW)) });
+  }
+  // AFI-4g: the CEO audit read — CEO only, read only (a test-only model of BF-4g).
+  if((p === '/api/audit-events' || p === '/api/audit-events/record') && req.method === 'GET'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(scenario === 'audit-session-lost'){ session = null; return api(res, 401, 'unauthenticated'); }
+    const keys = [...query.keys()];
+    let rows;
+    if(p === '/api/audit-events'){
+      if(keys.join() !== 'month') return api(res, 400, 'invalid_query');
+      if(!otMonth(query.get('month'))) return api(res, 400, 'invalid_query');
+      if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+      rows = audit.filter((x) => auditMonthOf(x.occurredAt) === query.get('month'));
+    } else {
+      if(keys.slice().sort().join() !== 'entity,id') return api(res, 400, 'invalid_query');
+      const entity = query.get('entity'), id = query.get('id');
+      if(!Object.prototype.hasOwnProperty.call(AUDIT_ENTITY_IDS, entity)) return api(res, 400, 'validation_failed', null, ['entity']);
+      if(!AUDIT_ENTITY_IDS[entity].test(id)) return api(res, 400, 'validation_failed', null, ['id']);
+      if(session.user.role !== 'ceo') return api(res, 403, 'forbidden');
+      rows = audit.filter((x) => x.entity === entity && x.entityId === id);
+    }
+    if(scenario === 'audit-unavailable') return api(res, 503, 'service_unavailable');
+    if(scenario === 'audit-cap') return api(res, 500, 'internal_error');
+    if(scenario === 'audit-empty') rows = [];
+    if(scenario === 'audit-malformed' && rows.length) rows = rows.map((x, i) => (i === 0 ? { ...x, companyId: 'cmp_stub_other' } : x));
+    return api(res, 200, { auditEvents: rows });
   }
   // AFI-4f: the Finance execution read — CEO only.
   if(p === '/api/finance-executions' && req.method === 'GET'){

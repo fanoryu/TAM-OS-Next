@@ -318,12 +318,15 @@ function firewall(rt, label){
   // Payroll / Finance text still fails. Was: no "Payroll" text at all.
   // AFI-4c2 authorized revision: an Employee's switch carries "My payroll" (not pressed — never
   // open here), removed the same way. Was: an Employee's switch had no third button.
-  const PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><\/div><\/nav>/;
+  // AFI-4g authorized revision (D-AFI4g-3 = A): the CEO's Payroll button is followed by a fourth,
+  // Audit (not pressed — never open here), removed together with it; no Audit control (swau*) is
+  // ever rendered here. Was: the CEO's switch ended at Payroll.
+  const PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><button class="tab" type="button" id="swSectionAudit" aria-pressed="false"( disabled)?>Audit<\/button><\/div><\/nav>/;
   const MY_PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>My payroll<\/button><\/div><\/nav>/;
   const pNow = rt.AuthBoot.snapshot().principal;
   const ceoNow = !!pNow && pNow.principalType === 'ceo';
   const TAB = ceoNow ? PAYROLL_TAB : MY_PAYROLL_TAB;
-  check((html.match(/id="swSectionPayroll"/g) || []).length === (TAB.test(html) ? 1 : 0) && !/id="swp/.test(html),
+  check((html.match(/id="swSectionPayroll"/g) || []).length === (TAB.test(html) ? 1 : 0) && !/id="swp|id="swau/.test(html),
     label + ': the Payroll section button (CEO "Payroll", Employee "My payroll") exists unpressed only; no Payroll section control is ever rendered here');
   const denyHtml = html.replace(TAB, '</div></nav>');
   check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Payslip|Finance|ledger|journal|payment|\btax\b|Smart Import|Backup|Restore|Start fresh|Commit|Post to/i.test(denyHtml) && !/id="swp/.test(html),
