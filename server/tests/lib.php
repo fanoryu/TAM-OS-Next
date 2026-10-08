@@ -338,7 +338,7 @@ function runAccountCli(array $args, ?string $configFile): array
  * @param list<string> $args
  * @return array{exit: int, stdout: string, stderr: string}
  */
-function runCli(string $script, array $args, ?string $configFile): array
+function runCli(string $script, array $args, ?string $configFile, ?string $stdin = null): array
 {
     $env = getenv();
     unset($env['TAMOS_CONFIG']);
@@ -353,6 +353,9 @@ function runCli(string $script, array $args, ?string $configFile): array
     $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
     if (!is_resource($proc)) {
         fail('cannot start ' . $script);
+    }
+    if ($stdin !== null) {
+        fwrite($pipes[0], $stdin);
     }
     fclose($pipes[0]);
     $stdout = (string) stream_get_contents($pipes[1]);
@@ -603,12 +606,13 @@ function resealSidecar(string $path): void
 }
 
 /**
- * Runs server/bin/backup.php (OPS-1) in a child process with the given config file.
+ * Runs server/bin/backup.php (OPS-1, OPS-2) in a child process with the given config file and,
+ * for restore's production confirmation, the given standard input.
  *
  * @param list<string> $args
  * @return array{exit: int, stdout: string, stderr: string}
  */
-function runBackupCli(array $args, ?string $configFile): array
+function runBackupCli(array $args, ?string $configFile, ?string $stdin = null): array
 {
-    return runCli('backup.php', $args, $configFile);
+    return runCli('backup.php', $args, $configFile, $stdin);
 }
