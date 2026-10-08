@@ -16,6 +16,9 @@
    js/ui/session-payroll-view.js, SessionPayroll's memory-only data) — never the LOCAL
    Payroll Workspace. AFI-4c2: an Employee's third section is "My payroll" — their own
    Committed payroll only, through the same SessionPayroll data; never the CEO's controls.
+   AFI-4g: the CEO gets a fourth section, "Audit" (renderSessionAuditHTML(),
+   js/ui/session-audit-view.js, SessionAudit's memory-only data) — read only; an Employee has
+   no Audit section (D-AFI4g-3 = A).
 
      CEO       Employees: Active / Archived tabs, the company list, a record's
                detail; the derived account state is status text only.
@@ -341,15 +344,16 @@ function sessionWorkspaceSelfHTML(w){
 
 // AFI-4b1: the two SESSION sections. A section button shows its section; neither switches while
 // a write of either section is in flight. AFI-4c1: the CEO's third section, Payroll. AFI-4c2: the
-// Employee's third section, My payroll.
-function sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll){
+// Employee's third section, My payroll. AFI-4g: the CEO's fourth section, Audit.
+function sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll, audit){
   const dis = busy ? ' disabled' : '';
   const tab = function(id, label, current){
     return '<button class="tab' + (current ? ' active' : '') + '" type="button" id="' + id + '" aria-pressed="' + current + '"' + dis + '>' + label + '</button>';
   };
   return '<nav aria-label="Workspace sections"><div class="tabs">'
-    + tab('swSectionMain', ceo ? 'Employees' : 'My profile', !overtime && !payroll) + tab('swSectionOvertime', ceo ? 'Overtime' : 'My overtime', overtime)
+    + tab('swSectionMain', ceo ? 'Employees' : 'My profile', !overtime && !payroll && !audit) + tab('swSectionOvertime', ceo ? 'Overtime' : 'My overtime', overtime)
     + tab('swSectionPayroll', ceo ? 'Payroll' : 'My payroll', payroll === true)
+    + (ceo ? tab('swSectionAudit', 'Audit', audit === true) : '')
     + '</div></nav>';
 }
 
@@ -362,12 +366,14 @@ function sessionWorkspaceHTML(auth, w){
   const pr = SessionPayrollStore.snapshot();
   const payroll = (ceo || employee) && pr.open;                        // AFI-4c1 CEO Payroll; AFI-4c2 Employee My payroll
   const overtime = (ceo || employee) && ot.open && !payroll;
+  const audit = ceo && SessionAuditStore.snapshot().open && !payroll && !overtime;   // AFI-4g: the CEO's Audit
   const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING || ot.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING
     || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING;
   let title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
   let body;
   if(payroll){ title = renderSessionPayrollTitle(pr, principal); body = renderSessionPayrollHTML(principal, pr); }
   else if(overtime){ title = renderSessionOvertimeTitle(principal, ot); body = renderSessionOvertimeHTML(principal, ot); }
+  else if(audit){ const au = SessionAuditStore.snapshot(); title = renderSessionAuditTitle(au); body = renderSessionAuditHTML(au); }
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
   else body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_WORKSPACE_ERRORS.UNAVAILABLE) + '</p>';
@@ -375,7 +381,7 @@ function sessionWorkspaceHTML(auth, w){
     + '<div class="page-head"><div><h1 class="auth-title" id="authTitle" tabindex="-1">' + escapeHtml(title) + '</h1>'
     + '<p class="auth-lead">Signed in as <strong>' + escapeHtml(who) + '</strong>.</p></div>'
     + '<div class="auth-actions"><button class="btn" id="authSignOutBtn" type="button"' + (auth.busy ? ' disabled aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>'
-    + (ceo || employee ? sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll) : '')
+    + (ceo || employee ? sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll, audit) : '')
     + body + '</section></main>';
 }
 
@@ -384,20 +390,23 @@ function bindSessionWorkspace(app){
   on('authSignOutBtn', function(){ AuthBoot.signOut(); });
   // AFI-4b1: the section switch — never while an Employee write is in flight. AFI-4c1: nor while
   // an Overtime or Payroll write is; SessionPayroll.show decides who may open it (the CEO's Payroll,
-  // AFI-4c2 an Employee's My payroll).
+  // AFI-4c2 an Employee's My payroll). AFI-4g: every other section closes Audit; SessionAudit.show
+  // opens it for the CEO only.
   const idle = function(){
     return SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING
       && SessionOvertimeStore.snapshot().mutation.status !== SESSION_OVERTIME_MUTATION_STATUS.PENDING
       && SessionPayrollStore.snapshot().mutation.status !== SESSION_PAYROLL_MUTATION_STATUS.PENDING;
   };
   const sectionTo = function(overtime){
-    return function(){ if(!idle()) return; SessionPayroll.show(false); SessionOvertime.show(overtime); };
+    return function(){ if(!idle()) return; SessionPayroll.show(false); SessionAudit.show(false); SessionOvertime.show(overtime); };
   };
   on('swSectionMain', sectionTo(false));
   on('swSectionOvertime', sectionTo(true));
-  on('swSectionPayroll', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(true); });
+  on('swSectionPayroll', function(){ if(!idle()) return; SessionOvertime.show(false); SessionAudit.show(false); SessionPayroll.show(true); });
+  on('swSectionAudit', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionAudit.show(true); });
   if(SessionPayrollStore.snapshot().open){ bindSessionPayroll(app); return; }
   if(SessionOvertimeStore.snapshot().open){ bindSessionOvertime(app); return; }
+  if(SessionAuditStore.snapshot().open){ bindSessionAudit(app); return; }
   on('swActiveTab', function(){ SessionWorkspace.showArchived(false); });
   on('swArchivedTab', function(){ SessionWorkspace.showArchived(true); });
   on('swBackBtn', function(){ SessionWorkspace.back(); });
@@ -479,6 +488,7 @@ function renderSessionWorkspace(app, auth){
   SessionWorkspace.ensureLoaded(auth.principal);
   SessionOvertime.ensureLoaded(auth.principal);                // AFI-4b1: binds (or destroys) the Overtime data too
   SessionPayroll.ensureLoaded(auth.principal);                 // AFI-4c1: and the Payroll data (AFI-4c2: My payroll too)
+  SessionAudit.ensureLoaded(auth.principal);                   // AFI-4g: and the CEO's Audit data
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
@@ -487,6 +497,7 @@ function renderSessionWorkspace(app, auth){
   const hint = SessionEmployeeStore.takeFocus();
   const otHint = SessionOvertimeStore.takeFocus();
   const prHint = SessionPayrollStore.takeFocus();
+  const auHint = SessionAuditStore.takeFocus();
   if(SessionPayrollStore.snapshot().open){
     const el = sessionPayrollFocusTarget(app, prHint);
     if(el && typeof el.focus === 'function'){ el.focus(); return; }
@@ -496,6 +507,11 @@ function renderSessionWorkspace(app, auth){
     const el = sessionOvertimeFocusTarget(app, otHint);
     if(el && typeof el.focus === 'function'){ el.focus(); return; }
     return sessionWorkspaceFocus(app, otHint ? 'heading' : null, kept);
+  }
+  if(SessionAuditStore.snapshot().open){
+    const el = sessionAuditFocusTarget(app, auHint);
+    if(el && typeof el.focus === 'function'){ el.focus(); return; }
+    return sessionWorkspaceFocus(app, auHint ? 'heading' : null, kept);
   }
   sessionWorkspaceFocus(app, hint, kept);
 }
