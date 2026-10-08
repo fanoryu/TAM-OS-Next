@@ -4,9 +4,9 @@ declare(strict_types=1);
 namespace TamOs\Ops;
 
 /**
- * A refused or failed backup operation (OPS-1). The reason is a fixed, value-free code: it is
- * printed by server/bin/backup.php and logged, so it never carries a path, a key, a row value,
- * SQL or a driver message.
+ * A refused or failed backup or restore operation (OPS-1, OPS-2). The reason is a fixed, value-free
+ * code: it is printed by server/bin/backup.php and logged, so it never carries a path, a key, a row
+ * value, SQL or a driver message.
  */
 final class BackupError extends \RuntimeException
 {
@@ -56,8 +56,20 @@ final class BackupError extends \RuntimeException
     public const PREVIOUS_MISMATCH = 'previous_mismatch';
     /** Rows of an append-only table already present in the previous backup changed or disappeared (verify --previous). */
     public const CONTINUITY_BROKEN = 'continuity_broken';
-    /** verify and keygen never run on a host whose configuration is the production one: the secret key stays off-host. */
+    /** verify, keygen, restore and verify-restore never run on a host whose configuration is the production one: the secret key stays off-host. */
     public const PRODUCTION_HOST = 'refused_on_production_host';
+    /** restore: the backup's migration history, the code's migrations and the target's history or schema are not identical (no downgrade, no transformation). */
+    public const SCHEMA_MISMATCH = 'schema_mismatch';
+    /** restore: a backed-up or excluded table of the target already holds a row; nothing is overwritten or merged. */
+    public const TARGET_NOT_EMPTY = 'target_not_empty';
+    /** restore: the typed production confirmation was missing or not exact. */
+    public const CONFIRMATION_REFUSED = 'confirmation_refused';
+    /** restore: a production target accepts only a backup of a production database. */
+    public const SOURCE_ENV_MISMATCH = 'source_env_mismatch';
+    /** restore, verify-restore: the target's rows are not exactly the backup's (before commit: rolled back). */
+    public const RESTORE_MISMATCH = 'restore_mismatch';
+    /** restore: committed, but the fresh-connection verification after commit failed or did not finish (exit 3). */
+    public const UNPROVEN = 'restore_unproven';
     /** libsodium (or zlib) is not available to this PHP. */
     public const UNAVAILABLE = 'crypto_unavailable';
 

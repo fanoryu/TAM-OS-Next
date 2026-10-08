@@ -12,13 +12,24 @@ declare(strict_types=1);
  *   php server/bin/backup.php keygen --secret-key-file=<new key file>
  *                                       # off-host only: a new key pair; prints the public key for the
  *                                       # host configuration and writes the secret key file (never on the host)
+ *   php server/bin/backup.php restore --file=<backup> --secret-key-file=<key> --target-config=<config> [--previous=<older backup>]
+ *                                       # off-host only (OPS-2): verify the backup completely, then load it into
+ *                                       # the empty, migrated database of <config> in one transaction and prove it
+ *   php server/bin/backup.php verify-restore --file=<backup> --secret-key-file=<key> --target-config=<config>
+ *                                       # off-host only: prove, read-only, that the target holds exactly the backup
  *
  * create and status read the `backup` section of the configuration (dir, public_key) and the
- * database; verify and keygen need no configuration and refuse to run where the configuration is
- * the production one, so the secret key never has to exist on the host.
+ * database; verify, keygen, restore and verify-restore refuse to run where the configuration is the
+ * production one, so the secret key never has to exist on the host (D-OPS2-1 = A). restore and
+ * verify-restore take their target only from --target-config; a production target (a production
+ * database reached over an SSH tunnel from the owner's machine) accepts only a production backup
+ * and asks, on standard input, for the exact line RESTORE <backup id> INTO <target fingerprint>.
+ * There is no option that skips it.
  *
- * Exit codes: 0 done (status: a fresh, intact newest backup), 1 any refusal, failure, stale or
- * damaged backup, 2 usage. Output is reason codes, backup ids, counts and digests only — never a
+ * Exit codes: 0 done (status: a fresh, intact newest backup; restore: restored and proven), 1 any
+ * refusal, failure, stale or damaged backup (restore: nothing was committed — the target is still
+ * empty), 2 usage, 3 restore committed but its proof after commit failed or did not finish — the
+ * target holds data that is not proven (run verify-restore, or drop and recreate it). Output is reason codes, backup ids, counts and digests only — never a
  * path, a key, a row value, the DSN, a credential, SQL or a driver message. It lives outside the
  * web root and refuses any non-CLI SAPI.
  */
@@ -32,6 +43,7 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 use TamOs\Config\ConfigError;
 use TamOs\Config\ConfigLoader;
 use TamOs\Data\Backup\BackupReader;
+use TamOs\Data\Backup\RestoreWriter;
 use TamOs\Data\DatabaseError;
 use TamOs\Data\Migration\MigrationError;
 use TamOs\Log\Logger;
@@ -39,6 +51,7 @@ use TamOs\Ops\BackupCipher;
 use TamOs\Ops\BackupConfig;
 use TamOs\Ops\BackupCreator;
 use TamOs\Ops\BackupError;
+use TamOs\Ops\BackupRestorer;
 use TamOs\Ops\BackupStore;
 use TamOs\Ops\BackupVerifier;
 
@@ -47,7 +60,9 @@ use TamOs\Ops\BackupVerifier;
 
 const USAGE = "usage: php server/bin/backup.php create|status\n"
     . "       php server/bin/backup.php verify --file=<backup> --secret-key-file=<key> [--previous=<backup>]\n"
-    . "       php server/bin/backup.php keygen --secret-key-file=<new key file>\n";
+    . "       php server/bin/backup.php keygen --secret-key-file=<new key file>\n"
+    . "       php server/bin/backup.php restore --file=<backup> --secret-key-file=<key> --target-config=<config> [--previous=<backup>]\n"
+    . "       php server/bin/backup.php verify-restore --file=<backup> --secret-key-file=<key> --target-config=<config>\n";
 
 /** @return array<string, string>|null the --name=value options, or null for anything else */
 function backupOptions(array $args, array $required, array $optional): ?array
@@ -67,7 +82,7 @@ function backupOptions(array $args, array $required, array $optional): ?array
     return $out;
 }
 
-/** verify and keygen refuse where the configuration is the production one. @throws BackupError */
+/** verify, keygen, restore and verify-restore refuse where the configuration is the production one. @throws BackupError */
 function refuseOnProductionHost(): void
 {
     try {
@@ -86,6 +101,8 @@ $options = match ($command) {
     'create', 'status' => $args === [] ? [] : null,
     'verify' => backupOptions($args, ['file', 'secret-key-file'], ['previous']),
     'keygen' => backupOptions($args, ['secret-key-file'], []),
+    'restore' => backupOptions($args, ['file', 'secret-key-file', 'target-config'], ['previous']),
+    'verify-restore' => backupOptions($args, ['file', 'secret-key-file', 'target-config'], []),
     default => null,
 };
 if ($options === null) {
@@ -95,6 +112,7 @@ if ($options === null) {
 
 $logger = null;
 $started = hrtime(true);
+$exit = 1;
 try {
     if ($command === 'keygen') {
         refuseOnProductionHost();
@@ -125,6 +143,46 @@ try {
         echo 'schema: database head ' . $manifest['schema']['databaseHead'] . ', code head ' . $manifest['schema']['codeHead'] . "\n";
         echo 'source: ' . $manifest['source']['env'] . ' ' . substr($manifest['source']['databaseFingerprint'], 0, 16) . "\n";
         echo 'continuity: ' . (isset($options['previous']) ? 'verified' : 'not checked') . "\n";
+        exit(0);
+    }
+
+    if ($command === 'restore' || $command === 'verify-restore') {
+        refuseOnProductionHost();
+        $target = ConfigLoader::load($options['target-config'], null);
+        $restorer = new BackupRestorer(
+            new BackupVerifier(BackupCipher::readSecretKeyFile($options['secret-key-file'])),
+            static fn (): RestoreWriter => RestoreWriter::fromConfig($target),
+            $target->env,
+            RestoreWriter::fingerprintOf($target),
+            dirname(__DIR__) . '/migrations',
+            static function (array $identity): ?string {
+                fwrite(STDERR, "restore into a PRODUCTION database\n");
+                foreach (['backup', 'key', 'source', 'target', 'schema'] as $name) {
+                    fwrite(STDERR, $name . ': ' . $identity[$name] . "\n");
+                }
+                fwrite(STDERR, 'type exactly: ' . $identity['phrase'] . "\n");
+                $line = fgets(STDIN);
+                return $line === false ? null : rtrim($line, "\r\n");
+            },
+        );
+        $evidence = $command === 'restore' ? $restorer->restore($options['file'], $options['previous'] ?? null) : $restorer->verifyTarget($options['file']);
+        echo $command . ": PASS\n";
+        echo 'backup: ' . $evidence['backupId'] . "\n";
+        echo 'manifest: ' . $evidence['manifestSha256'] . "\n";
+        echo 'key: ' . $evidence['keyFingerprint'] . "\n";
+        echo 'source: ' . $evidence['source'] . "\n";
+        echo 'target: ' . $evidence['target'] . "\n";
+        echo 'schema: backup head ' . $evidence['backupHead'] . ', target head ' . $evidence['targetHead'] . ', code head ' . $evidence['codeHead'] . "\n";
+        foreach ($evidence['tables'] as $table => $rows) {
+            echo 'table: ' . $table . ' rows ' . $rows . " ok\n";
+        }
+        echo 'tables: ' . count($evidence['tables']) . ' verified, rows ' . array_sum($evidence['tables']) . "\n";
+        echo 'decimal totals: matched (' . $evidence['decimalColumns'] . " columns)\n";
+        echo 'excluded: ' . $evidence['excluded'] . " empty\n";
+        echo $command === 'restore' ? "verified: in-transaction yes, post-commit yes\n" : "verified: target snapshot yes\n";
+        echo 'started: ' . $evidence['started'] . "\n";
+        echo 'finished: ' . $evidence['finished'] . "\n";
+        echo 'duration_ms: ' . $evidence['durationMs'] . "\n";
         exit(0);
     }
 
@@ -173,6 +231,7 @@ try {
     exit(0);
 } catch (BackupError $e) {
     $reason = $e->reason;
+    $exit = $reason === BackupError::UNPROVEN ? 3 : 1;
     fwrite(STDERR, $command . ': ' . $reason . "\n");
 } catch (ConfigError $e) {
     $reason = 'config_' . $e->reason;
@@ -190,4 +249,4 @@ try {
 if ($command === 'create' && $logger !== null) {
     $logger->backup('failed', null, 0, intdiv(hrtime(true) - $started, 1000000), $reason);
 }
-exit(1);
+exit($exit);
