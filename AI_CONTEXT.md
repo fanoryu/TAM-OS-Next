@@ -476,8 +476,8 @@ requires every migrated table to be classified for backup exactly once, in forei
 migration head **0035**; the package keeps 100 files at `d030d544…`; `AUTH_MODE` stays LOCAL. Host evidence still
 required before production (SDR-0002 E2/E4/E7): PHP CLI under hPanel cron, the `sodium` and `zlib` extensions, the
 time and memory limits, and an off-host restore rehearsal (OPS-2).
-**OPS-2 — Restore into an empty database + restore rehearsal** (local candidate on `feature/ops-2-restore`; not
-committed, pushed, merged or deployed; built on OPS-1 under D-AB-11 = A, D-AB-12 = A and D-AB-14 = A and the owner
+**OPS-2 — Restore into an empty database + restore rehearsal** (merged as source, PR #55, canonical merge
+`3732dfdca61b91aa6beba33d77f72b8224fdaa60`, 2026-10-08; not deployed; built on OPS-1 under D-AB-11 = A, D-AB-12 = A and D-AB-14 = A and the owner
 decision **D-OPS2-1 = A**, 2026-10-07) is the second slice: `server/bin/backup.php restore` and `verify-restore`,
 **operator tooling only** — no route, no UI, no Action, no migration, no package change. D-OPS2-1 = A: restore runs
 **off-host only**, from an owner-controlled machine; the backup secret key never reaches the production host (`restore`
@@ -508,6 +508,29 @@ encrypted host backup into a separate disposable MariaDB passes (`DEPLOYMENT.md`
 backup is a documented residual risk: the public key is not secret, so origin is a custody question (restore a backup whose
 `verify --previous` chain was recorded off-host). ACTIONS stay **21**; migration head **0035**; the package keeps 100
 files at `d030d544…`; `AUTH_MODE` stays LOCAL.
+**BF-4g — CEO audit read API** (local candidate on `feature/bf-4g-audit-read`; not committed, pushed, merged or
+deployed; owner decisions **D-BF4g-1 … D-BF4g-4 = A**, 2026-10-08, on Audit & Backup D-AB-2/3/4/15 = A) is the third
+slice: the first server **read** of the business audit trail, backend only — no Action (ACTIONS stay **21**), no migration
+(head **0035**), no frontend or package change (100 files at `d030d544…`), `AUTH_MODE` LOCAL. Two CEO-only GETs, decided
+by the handler before any lookup (an Employee is **403**, no session **401**; an unknown or repeated query key **400**):
+`GET /api/audit-events?month=YYYY-MM` and `GET /api/audit-events/record?entity=…&id=…`, each answering
+`{ auditEvents: [A…] }`. D-BF4g-1 = A: the month is a month of the **Asia/Jakarta** company calendar. `occurred_at` is
+stored as UTC — every row is written with `UTC_TIMESTAMP(6)` by `AuditLog` (its only writer) over a session pinned to
+`time_zone = '+00:00'`, and restore copies it verbatim — so the month's half-open window `[first instant, first instant of
+the next month)` is computed in PHP, converted to UTC and bound as two `Y-m-d H:i:s.u` strings: `occurred_at >= :from AND
+occurred_at < :to` (no `CONVERT_TZ`, `BETWEEN` or inclusive end; Jakarta has had no offset change since 1970, so October
+is `[2026-09-30 17:00:00.000000, 2026-10-31 17:00:00.000000)` UTC). D-BF4g-3 = A: A is exactly the eleven stored
+historical fields — `id`, `occurredAt` (the stored UTC instant as `YYYY-MM-DDTHH:MM:SS.ffffffZ`, all six fractional
+digits), `actorUserId`, `actorMembershipId`, `action`, `entity`, `entityId`, `operation` (or null), `targetUserId` (or
+null), `requestId`, `fields` (the stored field-name list, `[]` when none) — never `company_id`, and no join to current
+user names, emails or roles; an unreadable stored row fails the whole read. Order is `(occurred_at, id)`. D-BF4g-2 = A: a
+read above **2,000** rows (read with `LIMIT 2001`) fails closed — 500 `internal_error`, logged `audit_list_cap` — never a
+truncated list. D-BF4g-4 = A: the record read takes one of the five stored entities (`employee`, `overtime`,
+`payrollPlan`, `supplementalPayroll`, `financePosting`) and an id in that entity's format, never looks the record up, and
+answers `[]` for an unknown record — a deleted record keeps its history. `auth_events` is not exposed (D-AB-15 = A). The
+reads are two fixed SELECTs in `AuditEventStore` under `ScopedDatabase` (company scope only, no write, lock, transaction
+or join) served by the existing `audit_events_company_time` and `audit_events_entity` indexes, and the boundary tool pins
+that shape, the Asia/Jakarta calendar and the two routes. The SESSION view is the optional AFI-4g.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
