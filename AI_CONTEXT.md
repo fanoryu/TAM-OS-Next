@@ -433,8 +433,9 @@ wording bans are revised only by exact strips of the AFI-4f identifiers, routes,
 "Bank transfer" and the approved word constants, all pinned in its own AFI-4f section; the dedicated Payroll harness is
 extended (sections X–X9; CI stays at ten harnesses). AFI-4f needs BF-4f (migrations `0034`–`0035`) deployed first or with
 it. `AUTH_MODE` stays LOCAL.
-**OPS-1 — Encrypted database backup: create, status, verify** (local candidate on `feature/ops-1-backup`; not committed,
-pushed, merged or deployed; the Audit & Backup Phase 0 owner decisions D-AB-1 … D-AB-16 = recommended, 2026-10-07) is the
+**OPS-1 — Encrypted database backup: create, status, verify** (merged as source, PR #54, canonical merge
+`f48f5f127581655a68bec7d0e065cbefb8e88a74`, 2026-10-07; not deployed; the Audit & Backup Phase 0 owner decisions
+D-AB-1 … D-AB-16 = recommended, 2026-10-07) is the
 first slice of the roadmap's audit/backup step, **operator tooling only** — no route, no UI, no Action, no migration, no
 package change. The decisions: D-AB-1 = B (Audit and Backup are separate slices: OPS-1 backup create + verify → OPS-2
 restore into an empty database + rehearsal → BF-4g the CEO-only audit read API → optionally AFI-4g its SESSION view;
@@ -475,6 +476,38 @@ requires every migrated table to be classified for backup exactly once, in forei
 migration head **0035**; the package keeps 100 files at `d030d544…`; `AUTH_MODE` stays LOCAL. Host evidence still
 required before production (SDR-0002 E2/E4/E7): PHP CLI under hPanel cron, the `sodium` and `zlib` extensions, the
 time and memory limits, and an off-host restore rehearsal (OPS-2).
+**OPS-2 — Restore into an empty database + restore rehearsal** (local candidate on `feature/ops-2-restore`; not
+committed, pushed, merged or deployed; built on OPS-1 under D-AB-11 = A, D-AB-12 = A and D-AB-14 = A and the owner
+decision **D-OPS2-1 = A**, 2026-10-07) is the second slice: `server/bin/backup.php restore` and `verify-restore`,
+**operator tooling only** — no route, no UI, no Action, no migration, no package change. D-OPS2-1 = A: restore runs
+**off-host only**, from an owner-controlled machine; the backup secret key never reaches the production host (`restore`
+and `verify-restore` refuse where the configuration is the production one, like `verify` and `keygen`), a production
+database is reached only over an **SSH tunnel** to loopback (direct remote MySQL is not authorized under the current
+PDO/TLS model), and no superseding SDR is needed. Whether Hostinger allows SSH port forwarding is host evidence still
+required before PILOT-1; if it does not, the decision is not weakened and the key does not move to the host — it returns
+to the owner, and the provider restore stays the fallback. The target comes only from `--target-config`. `restore`
+verifies the whole backup first (`BackupVerifier::verify`, before any connection to the target); requires its migration
+history to be exactly the code's migrations (no downgrade, no transformation — a pre-migration backup is restored with the
+code at its head and then migrated forward); under the backup and migration locks requires the target's history to be the
+same and current, its schema to classify like a backup's with identical columns, column-definition digests and generated
+columns, and **all 17 classified tables (13 backed up + 4 excluded) to be empty** — restore runs no DDL and never
+truncates, overwrites, merges or upserts; a production target accepts only a production backup and the typed line
+`RESTORE <backup id> INTO <target fingerprint, 16 hex>` on standard input (no `--yes`/`--force`); then, in **one InnoDB
+transaction**, proves emptiness again under shared locks (blocking every other insert until commit), replays the backup
+through the same verifier and parser into `RestoreWriter`'s 13 fixed INSERTs (stored generated columns
+`payroll_plans.live_key` and `supplemental_payrolls.open_key` are never inserted; foreign-key and unique checks stay on;
+DECIMAL, DATE and DATETIME stay exact text) — the replayed manifest must equal the verified one — and re-encodes every
+table exactly as a backup encodes it, which must reproduce the manifest's columns, counts, maximum ids, row digests and
+DECIMAL totals with the excluded tables empty and the history unchanged; only then it commits. Any failure before commit
+rolls back (a killed process too) and leaves the target empty for a retry; after commit a **fresh connection** repeats the
+proof and checks the auto-increment counters — a failure there, or a commit whose outcome is unknown, is
+`restore_unproven`, **exit 3**. `verify-restore` repeats that proof read-only. Output is evidence only — ids, fingerprints,
+heads, per-table row counts, "decimal totals: matched", timings — never a value, path, key or credential. The rehearsal
+(D-AB-14 / SDR-0002 **E7**) is operational evidence and **remains open** until a real off-host restore of an actual
+encrypted host backup into a separate disposable MariaDB passes (`DEPLOYMENT.md`); tests never satisfy it. A forged
+backup is a documented residual risk: the public key is not secret, so origin is a custody question (restore a backup whose
+`verify --previous` chain was recorded off-host). ACTIONS stay **21**; migration head **0035**; the package keeps 100
+files at `d030d544…`; `AUTH_MODE` stays LOCAL.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

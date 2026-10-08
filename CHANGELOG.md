@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- **OPS-2 Restore of an encrypted backup into an empty database (operator tooling, not shipped).** The owner can now load
+  an encrypted backup back into a new, empty TAM OS database from their own computer, with their separately kept key — the
+  server never needs that key. Before anything is written the whole backup is checked; the target must already have the
+  database structure of the same version and contain no data at all, or nothing happens. The data is loaded in one step:
+  every record count, checksum and money total is compared with the backup before the result is kept, and checked once
+  more afterwards; if anything differs or the load is interrupted, the target is left empty and can be tried again.
+  Signed-in sessions, open activation links, sign-in counters and the mail queue are never restored — everyone signs in
+  again with their existing password. Loading into the production database is reached only through a secure tunnel, needs
+  a backup of the production database and asks the owner to type an exact confirmation line. A separate check command
+  confirms that a database still equals a backup. A full practice restore of a real backup must still be done before the
+  pilot. There is no screen and no web address for it. The shipped `AUTH_MODE` stays **LOCAL**; the app is unchanged.
 - **OPS-1 Encrypted database backups (operator tooling, not shipped).** The server can now make an encrypted backup of its
   database from a nightly scheduled command: one consistent copy of every employee, account, overtime, payroll,
   supplemental payroll, finance and audit record, taken while TAM OS keeps running. Signed-in sessions, open activation

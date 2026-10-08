@@ -86,6 +86,20 @@ Backup tests write keys and backups only to temporary directories; the database 
 rows only. The boundary tool requires every migrated table to be classified for backup exactly once
 (`server/src/Ops/BackupTables.php`) — see `ARCHITECTURE.md` → Encrypted database backup — OPS-1.
 
+Restore (OPS-2, D-OPS2-1 = A) runs off-host only, with the secret key file, into an already migrated and
+completely empty database named by `--target-config` (a production database only over an SSH tunnel); both
+commands refuse where the default configuration is the production one, and there is no `--yes` or `--force`:
+
+```bash
+php server/bin/backup.php restore --file=<backup> --secret-key-file=<key> --target-config=<config> [--previous=<older backup>]
+php server/bin/backup.php verify-restore --file=<backup> --secret-key-file=<key> --target-config=<config>
+```
+
+Exit 0 restored and proven, 1 refused or failed with nothing committed, 2 usage, 3 committed but not proven
+(`restore_unproven`). Restore tests restore only into the guarded test database after a reset, from
+fabricated rows; the boundary tool confines the one restore writer (`server/src/Data/Backup/RestoreWriter.php`)
+to plain INSERTs and emptiness reads — see `ARCHITECTURE.md` → Database restore — OPS-2.
+
 Mail tests use the in-memory `RecordingMailTransport` (`server/tests/lib.php`) and the Resend adapter
 with an injected poster: no test reaches a network or sends mail, and the CLI tests run the worker
 only over an empty outbox.

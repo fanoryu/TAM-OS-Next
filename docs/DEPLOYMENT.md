@@ -308,6 +308,59 @@ Host evidence still needed (SDR-0002 E2, E4, E7): the PHP CLI that hPanel cron r
 extensions; its time and memory limits for a full backup; and an off-host restore rehearsal with reconciled row counts and
 money totals (OPS-2) before PILOT-1 (D-AB-14).
 
+**Deployment note — Restore and restore rehearsal (OPS-2).** OPS-2 implements item 3 as operator tooling,
+`server/bin/backup.php restore` and `verify-restore` (see `ARCHITECTURE.md` → Database restore — OPS-2). It adds no route,
+migration, Action or package file and nothing runs on the host, so it has no deploy-together constraint. It is not
+deployed. Restore runs **off-host only** (D-OPS2-1 = A): the backup secret key never goes to the production host, and both
+commands refuse where the default configuration is the production one. Every value — key file, target configuration,
+evidence — stays in the private layer.
+
+**Restore rehearsal (D-AB-14, SDR-0002 E7) — required before PILOT-1.** CI and the test suites prove the tool, not the
+recovery; E7 stays open until this rehearsal passes with an actual encrypted host backup:
+
+1. **Machine.** The owner's machine with PHP 8.3 (`pdo_mysql`, `sodium`, `zlib`) and a clean checkout of the merged commit
+   that is being relied on; record `git rev-parse HEAD`.
+2. **Separate, disposable database.** A MariaDB server on that machine (record its version — ideally the host's major
+   version) with a new, empty database used for nothing else, and a target configuration file for it in the private layer
+   (`env` development, `db` pointing at it).
+3. **Migrate it:** `TAMOS_CONFIG=<rehearsal config> php server/bin/migrate.php apply` → `migrations: current`.
+4. **An actual backup.** Take the newest backup pulled from the host and verify it with its chain:
+   `php server/bin/backup.php verify --file=<backup> --secret-key-file=<key> --previous=<the last verified backup>` → exit 0.
+5. **Restore:** `php server/bin/backup.php restore --file=<backup> --secret-key-file=<key> --target-config=<rehearsal config>`
+   → exit 0, `restore: PASS`. Keep the standard output: it is the evidence.
+6. **Prove it independently:** `php server/bin/backup.php verify-restore` with the same arguments → exit 0.
+7. **Tear down:** drop the rehearsal database and delete its configuration file.
+
+**Evidence to keep** (none of it is a secret or a business value): the backup id; the manifest SHA-256; the key
+fingerprint; the source and target fingerprints and environments; the backup, target and code migration heads; each
+table's row count with "ok", "decimal totals: matched", "excluded: 4 empty", the verification stages; start, finish and
+duration; both exit codes and the final PASS / FAIL; the git commit and the MariaDB version. Never keep or paste row
+values, money totals, the key, the configuration or any credential. Repeat the rehearsal periodically and after real data
+is entered.
+
+**Production restore (disaster recovery).** Only from the owner's machine, never on the host:
+
+1. Put the site into maintenance so the API writes nothing; provision a new, empty production database (or empty the
+   damaged one by the provider's tools — restore itself never truncates) and run `php server/bin/migrate.php apply` on the
+   host so its schema is at the backup's head. A backup taken before a migration (D-AB-13) is restored with the code at its
+   own migration head and migrated forward afterwards.
+2. Open an **SSH tunnel** from the owner's machine to the database (`ssh -L <local port>:<database host>:3306 <account>`)
+   and write an off-host target configuration with `env` production and `db.host` 127.0.0.1 and the local port. Direct
+   remote MySQL is not authorized under the current PDO/TLS model. If the hosting cannot forward the port, stop: the key
+   is never moved to the host — the question returns to the owner, and the provider restore is the fallback.
+3. Choose a backup that was pulled and verified off-host, with its `--previous` chain recorded, from before the incident —
+   the public key is not secret, so a backup's origin rests on that custody.
+4. Run `restore` with that configuration. It shows the backup id, key, source and target and asks for the exact line
+   `RESTORE <backup id> INTO <target fingerprint>`; anything else writes nothing. A backup of a non-production database is
+   refused for a production target.
+5. Exit 0 is the only success. Exit 1 committed nothing — fix the cause and retry. Exit 3 (`restore_unproven`) means the
+   restore committed but was not proven: run `verify-restore`; if it fails, empty and recreate the database and restore again.
+6. Run `verify-restore`, end maintenance, and keep the evidence. Everyone signs in again; passwords are unchanged. Take
+   and verify a new backup.
+
+Host evidence still needed for production restore: whether Hostinger allows SSH port forwarding to the database (before
+PILOT-1). E7 remains open until the restore rehearsal above passes.
+
 **Cutover gate.** TAM OS replaces the default page at `finance.reliabilityindonesia.com` — and real
 company data may be entered — only when **all** of the following hold. A visible login form is not
 readiness.
