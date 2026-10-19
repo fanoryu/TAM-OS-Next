@@ -30,7 +30,8 @@ no third-party request, so it runs under a strict Content-Security-Policy (heade
 next version. The published **v2.11.0 (Identity Refresh)** single-file artifact, `dist/tam-os-v2.11.0.html`
 (typography embedded, XLSX parser CDN-loaded), stays in `dist/` as frozen history, pinned by digest.
 The pilot has **not** launched — **PILOT-1 remains ON HOLD** pending the multi-user readiness gate (no VPS
-is required; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8); backend **NOT STARTED**.
+is required; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8); the backend is **source only and not
+deployed** (see *Backend foundation — BF-1* onward).
 The prior **v2.9.0** release remains published and immutable (no longer Latest) — annotated tag
 `v2.9.0` on commit `598edef0`; its published asset (`tam-os-v2.9.0.html`, **1,049,018 bytes**, SHA-256
 `e7470ff5261896b8d7d1f8645294d2abd6a72e9820df94b799973627ddcaf3ea`) is unchanged and is the pilot
@@ -49,18 +50,21 @@ against a pinned SHA-256 of `concat(css/*.css)` — currently
 `6d9c21375bdc608e99a56a3a65bc6fc293bbc506cda1b521742560902e3b4b96` (last revised for UX-006D3:
 cross-surface presentation consistency) — with every superseded anchor kept
 in [`audit/ux-002b-2026-08-05/`](docs/99-archive/audit/ux-002b-2026-08-05/CSS-GOLDEN-MASTER-REVISION.md).
-**Shape today:** a modular source of **73 classic-script JS modules** (in `core/ ui/ finance/ people/
-import/ analytics/ domain/ platform/ transport/ repository/ cli/`) + 5 CSS files, assembled into one
-portable `dist/tam-os-v${APP_VERSION}.html`. **72 of the 73 are browser-loaded** — the
-load-order manifest and `index.html` agree on all 72 — and `js/cli/cli.js` is the CLI-only ingress,
-deliberately outside the browser load order. Still one shared global scope — no ES modules,
+**Shape today:** a modular source whose `js/` holds **91 JavaScript files** — **89 ordered
+browser-loaded modules**
+(in `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/`),
+one pre-paint browser boot script (`js/boot/theme-boot.js`) and one Node-only CLI file
+(`js/cli/cli.js`) — plus 6 CSS files, copied byte-for-byte into the Distribution-1 deployment package
+(`dist/package/`; the published v2.11.0 remains the single file `dist/tam-os-v2.11.0.html`). The
+load-order manifest and `index.html` agree on all **89** ordered modules; `index.html` loads the pre-paint
+boot script before them, and `js/cli/cli.js` is the CLI-only ingress, deliberately outside the browser
+load order. Still one shared global scope — no ES modules,
 no bundler. `SCHEMA_VERSION` is 6 and `ACTIONS` is 21 (20 in the v2.11.0 release; BF-4a2 added `account.manage`,
 SDR-0004, as vocabulary only — no frontend feature consumes it).
-**Verification:** `tools/verify-build.js` — **2443** checks; **thirty-four** Node runtime harnesses —
-**2921** checks (largest: contract timeline 349, authz C2C-4 164, integrity warning rules 146, integrity
-payroll rules 144, Contract Core 129, authz C2C-3 129, UX-006D2 presentation 127, employee read scope 119,
-monthly plan 118, finance/import mutation enforcement 118, payroll posting 106, authz 104,
-Readiness-2 E2E 96, authz integration 91).
+**Verification:** `tools/verify-build.js` — **2985** checks; **forty-two** Node runtime harnesses —
+**7,171** checks, 12 of them run in CI (largest: SESSION payroll 1998, SESSION employee 800, SESSION
+overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-backend-boundary.js`
+(selftest 739) and PHP tests (467 without the database, 874 with it).
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
@@ -103,8 +107,9 @@ presentation/counter — plus a dedicated 349-check runtime harness.
 
 ## Diagrams
 
-These diagrams reflect the actual implementation. There is **no server, database, API, or external
-service** — the app is client-only; Node is used solely for the build/verify tooling.
+These diagrams show the **shipped client-only application** and its build. The backend under
+`server/` (same-origin PHP + MariaDB, ADR-0004) is source only and not deployed; it is described from
+*Backend foundation — BF-1* onward. Node is used solely for the build/verify tooling.
 
 ### A. Application structure
 
@@ -112,13 +117,13 @@ service** — the app is client-only; Node is used solely for the build/verify t
 flowchart TD
   subgraph SRC["Modular source (edited by hand)"]
     IDX["index.html<br/>ordered CSS link + JS script tags, mount points"]
-    CSS["css/ — tokens, base, shell, components, charts"]
-    subgraph JSMOD["js/ — 78 modules: 77 browser-loaded (one global scope) + 1 CLI-only"]
+    CSS["css/ — fonts, tokens, base, shell, components, charts"]
+    subgraph JSMOD["js/ — 91 files: 89 ordered browser-loaded modules (one global scope) + 1 pre-paint boot script + 1 CLI-only"]
       CORE["core/ — constants, state, storage-adapter,<br/>state-load-migrations, domain-services, bootstrap"]
       DOM["domain/ — aggregates, aggregate-helpers,<br/>commands, queries, domain-layer"]
       PLAT["platform/ + transport/ — application-gateway,<br/>transport-adapter, api-client"]
       REPO["repository/ — employee-repository,<br/>contract-repository, payroll-repository"]
-      UI["ui/ — shell-render, charts, settings-about, activity-log"]
+      UI["ui/ — shell-render, identity-selector, auth-view,<br/>session-*-view, charts, settings-about, activity-log"]
       FIN["finance/ — dashboard, transactions, execution-center,<br/>cashflow, budget, add-upload"]
       PPL["people/ — employees, contracts, overtime,<br/>payroll-ops-engine, payroll-workspace, monthly-plan"]
       IMP["import/ — parser, smart-import-*"]
@@ -749,7 +754,7 @@ nothing below should be read as scheduled work.
 Generic compound-persistence coordination has **not** been approved. The verifier actively asserts that
 SPR-077, SPR-078, SPR-079, SPR-081 and SPR-082 each introduced no transaction abstraction.
 
-### Security boundary — current vs. target (target accepted, not implemented)
+### Security boundary — current vs. target (target implemented as source; not deployed)
 
 | | Current (shipped) | Target ([ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md)) |
 |---|---|---|
@@ -757,7 +762,7 @@ SPR-077, SPR-078, SPR-079, SPR-081 and SPR-082 each introduced no transaction ab
 | Boundary | **None.** A trust-based product control; anyone holding the file and a devtools console can call any handler | **Server-enforced** by the PHP policy and data-access layer (there is no database RLS backstop). The browser is untrusted and never reaches the database; client checks are UX affordance only |
 | Data | One independent dataset per browser profile | One authoritative company dataset |
 
-Until the target exists, the product provides **no** authenticated identity, no confidentiality between
+Until the target is deployed and cut over, the **shipped** product provides **no** authenticated identity, no confidentiality between
 users, no shared data, no server-side denial, no actor-bearing audit and no managed backup.
 
 **"Acting as" stays until the target is proven.** It is removed from production only after, in order:
@@ -1755,7 +1760,9 @@ is merged (PR #48, canonical `ab5e10c1e02a251e701c05c52574a8c86d838120`), and AF
 `a39b728f00688fb27e5983422c878a2f933b0e37`). Encrypted database backups follow: OPS-1 (below) is merged (PR #54, canonical
 `f48f5f127581655a68bec7d0e065cbefb8e88a74`). Its restore, OPS-2 (below), is merged (PR #55, canonical
 `3732dfdca61b91aa6beba33d77f72b8224fdaa60`). The CEO audit read, BF-4g (below), is merged (PR #56, canonical
-`7ec760a5de92d804e5e33ed2f112a047e1552f94`). Its SESSION view, AFI-4g (below), is a local candidate.
+`7ec760a5de92d804e5e33ed2f112a047e1552f94`). Its SESSION view, AFI-4g (below), is merged (PR #57, canonical `a9b1bf0f4e9b77342c05dae6a3678bdbd9bfb98f`).
+Development identity isolation, AFI-5a (below), is merged (PR #60, canonical
+`113f0184101404cf71f4438ed2328969b56e039d`).
 
 ### SESSION Overtime workspace — AFI-4b1 (merged as PR #41, canonical `77332ca2`; frontend; SESSION mode only)
 
@@ -2816,9 +2823,9 @@ index use via `EXPLAIN`, no write and no `auth_events`) and `server/tests/Db/Aud
 company's CEO with byte-identical unknown-record answers, forged scope keys, revoked and disabled identities, and the scoped
 layer refusing a foreign row).
 
-### CEO audit view — AFI-4g (local candidate; frontend only; read-only)
+### CEO audit view — AFI-4g (merged as PR #57, canonical `a9b1bf0f`; frontend only; read-only)
 
-AFI-4g is a local candidate on `feature/afi-4g-session-audit-ui` (not pushed, merged or deployed), from the owner decisions
+AFI-4g is merged to `main` as source (PR #57, canonical merge `a9b1bf0f4e9b77342c05dae6a3678bdbd9bfb98f`; not deployed), from the owner decisions
 **D-AFI4g-1 … D-AFI4g-10 = A** (2026-10-08). It is the SESSION view of BF-4g: frontend only, no Action or permission
 (ACTIONS stay **21**), no migration (head **0035**), no backend or contract change, `AUTH_MODE` LOCAL. It needs BF-4g's two
 routes (see `docs/DEPLOYMENT.md`).
@@ -2876,7 +2883,7 @@ does not satisfy the SDR-0002 §22 gate (item 8).
 **Known limitation (pre-existing).** Below about 700 px the SESSION workspace card is wider than the viewport for every
 section with a table (Payroll included); tables scroll inside `table-wrap`, but the frozen CSS does not constrain the card.
 
-### Development identity isolation — AFI-5a (tooling only; package unchanged)
+### Development identity isolation — AFI-5a (merged as PR #60, canonical `113f0184`; tooling only; package unchanged)
 
 AFI-5 retires the production "Acting as" selection in favour of the SESSION identity (owner decisions D-AFI5-1 … D-AFI5-3).
 AFI-5a is its first slice and changes **no** application file: it proves that a development persona kept outside `js/`

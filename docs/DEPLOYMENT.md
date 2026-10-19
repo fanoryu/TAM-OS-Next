@@ -29,7 +29,8 @@ deployment-specific configuration or secrets. A ready-to-use template for this l
 
 ## 2. Running the app
 
-The app is a single-page, client-only application with **no backend, database or API**; its only
+The shipped app is a single-page, client-only application that uses **no backend, database or API**
+(`AUTH_MODE` LOCAL; the backend under `server/` is source only and not deployed — §8); its only
 runtime dependency is the vendored, pinned SheetJS parser. It is distributed as the **deployment
 package** (Distribution-1, [ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)
 Model B) and runs **over HTTP**:
@@ -111,10 +112,10 @@ The same host will serve both halves of TAM OS from one origin:
 - `/api/*` — a PHP 8.3 backend over MariaDB/MySQL (InnoDB).
 
 The browser never reaches the database. **No separate managed backend service and no VPS are
-required.** The backend is **not deployed** and only its foundation (HTTP, data layer, migration
-machinery, the BF-3A authentication schema and session endpoints, and the BF-3B account lifecycle and
-operator CLI — no authorization policy or business schema) exists in source; it is **not
-production-ready**. See [`Milestones.md`](05-milestones/Milestones.md)
+required.** The backend is **not deployed**. Its source covers the foundation, sign-in and sessions, the
+account lifecycle, recovery mail, authorization and data scope, and the Employee, Overtime, Payroll,
+Supplemental, Finance posting/execution and Audit domains, with backup and restore tooling (migrations
+`0001`–`0035`); it is **not production-ready**. See [`Milestones.md`](05-milestones/Milestones.md)
 for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
 
 **Deployment dependency — Overtime approval (owner decision D-BF4b2-5 = A).**
@@ -182,8 +183,8 @@ records are entered. It is not deployed.
 **Deployment note — SESSION Audit history (AFI-4g).** AFI-4g calls BF-4g's two audit reads (`GET /api/audit-events` and
 `GET /api/audit-events/record`), so BF-4g must be deployed before AFI-4g or with it. BF-4g adds no migration (head **0035**)
 and AFI-4g changes no backend contract. Against a backend without the BF-4g routes the Audit section shows a failure and
-nothing else, but that is not a supported configuration. `tools/serve-e2e-proxy.js` is test-only and is never deployed. It
-is not deployed.
+nothing else, but that is not a supported configuration. `tools/serve-e2e-proxy.js` is test-only and is never deployed; so are `tools/serve-local-dev.js` and `tools/dev/` (AFI-5a). AFI-4g
+itself is not deployed.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 
@@ -251,7 +252,7 @@ long-lived caching are a possible later optimization, not a requirement.
 **Schema changes.** The database schema changes only through `php server/bin/migrate.php apply`
 (`status` reports without changing anything); there is no migration endpoint and nothing migrates at
 start-up. `/api/ready` answers 503 until the schema is exactly current. How that command will be run on
-Hostinger — SSH is currently inactive — is a pre-deployment decision, as is whether migrations use
+Hostinger — SSH availability is to be confirmed — is a pre-deployment decision, as is whether migrations use
 separate database credentials from the runtime API.
 
 **Mandatory pre-deployment verifications (backend):**

@@ -5,8 +5,8 @@
 # TAM OS
 
 **Integrated Management Intelligence for PT Total Asset Manajemen** — a single-page finance,
-payroll, and operations workspace. It runs entirely in the browser today and is architected to
-support backend capabilities in future roadmap phases.
+payroll, and operations workspace. The shipped application runs entirely in the browser; a
+same-origin backend for future multi-user use is being built as source only and is not deployed.
 
 </div>
 
@@ -15,7 +15,7 @@ support backend capabilities in future roadmap phases.
 ![Version](https://img.shields.io/badge/version-2.11.0-blue)
 ![License](https://img.shields.io/badge/license-see%20LICENSE-red)
 ![JavaScript](https://img.shields.io/badge/JavaScript-vanilla%20%C2%B7%20no%20framework-f7df1e)
-![HTML](https://img.shields.io/badge/HTML-single--file%20app-e34f26)
+![HTML](https://img.shields.io/badge/HTML-static%20package-e34f26)
 ![Core](https://img.shields.io/badge/core-source%20repository-blue)
 
 > **Publicly viewable source — company data is separate.** This is the **source core** of TAM
@@ -34,15 +34,18 @@ support backend capabilities in future roadmap phases.
 
 TAM OS is an internal operations tool for **PT Total Asset Manajemen**. It manages the
 monthly cycle for finance and people operations — employees and contracts, overtime, payroll
-generation and posting, transaction execution, cash flow, budgeting, and reporting — as one
-self-contained HTML application.
+generation and posting, transaction execution, cash flow, budgeting, and reporting — as a
+browser application. The published v2.11.0 release is one self-contained HTML file; the unreleased
+`main` builds a static deployment package (Distribution-1) for future releases.
 
 Design principles:
 
 - **Client-side today.** All data is currently stored locally in the browser's `localStorage` (or the
   Claude Artifact storage environment); the shipped application sends nothing to a server. Backend
   capabilities are a **future roadmap direction** and are introduced only under a separate, explicitly
-  approved architecture decision — the current release remains client-only.
+  approved architecture decision. That decision is ADR-0004; its backend under `server/` is **source only
+  and not deployed**, and both the published release and the current `main` build remain client-only
+  (`AUTH_MODE` LOCAL).
 - **No build framework, one pinned dependency.** The app is plain HTML, CSS, and classic-script
   JavaScript sharing one global scope; its only runtime dependency is the vendored, integrity-checked
   SheetJS parser. Node.js is used **only** for the build/verify tooling, never to run the app.
@@ -50,8 +53,9 @@ Design principles:
 - **One canonical distribution.** The modular source is assembled, byte-for-byte, into a static
   **deployment package** that runs over HTTP under a strict Content-Security-Policy (Distribution-1).
   Published single-file releases remain available as frozen history.
-- **Data-safety first.** A 2443-check verifier guards the persisted-data schema, storage keys,
-  migration flags, and build fidelity on every change.
+- **Data-safety first.** An invariant verifier and a suite of runtime harnesses guard the persisted-data
+  schema, storage keys, migration flags, and build fidelity on every change (current counts:
+  [`tools/README.md`](tools/README.md)).
 
 ---
 
@@ -95,7 +99,8 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 > Fonts dependency). `APP_VERSION` **2.11.0**, `SCHEMA_VERSION` **6**, `ACTIONS` **20** — no authorization,
 > data-model, financial-logic or backend change. The **controlled internal pilot has not launched** —
 > **PILOT-1 remains ON HOLD** until the multi-user readiness gate (no VPS is required — see
-> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8) — and backend work is **NOT STARTED**.
+> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8) — and the backend exists **as source only** (not
+> deployed; see *Unreleased on `main`* below).
 
 > **Previous release — v2.10.0 (Governed Workspace).** v2.10.0 remains **published** and intact (now the
 > prior release, no longer Latest). It was **originally published** from the predecessor repository
@@ -129,6 +134,14 @@ authorization, business calculations, schema, storage keys or data migration —
 viable. The BRAND-1 line completed in v2.10.0 (the UX-006 authorization / personal-workspace programme and
 Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v2.11.0.html`.
 
+> **Unreleased on `main`.** Since v2.11.0, `main` carries work that no release has shipped: the
+> Distribution-1 deployment package; the same-origin PHP + MariaDB backend under `server/` (migrations to
+> `0035`) — **source only, not deployed**; a SESSION-mode frontend that signs in against that backend
+> (AFI-1 … AFI-4g) — present but **dormant**, because the shipped `AUTH_MODE` is **LOCAL** and "Acting as" is
+> retained; and AFI-5a, test-only development identity tooling outside the app. Frontend hosting state:
+> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8. Removing "Acting as" (AFI-5b) and closing the SDR-0002 §22
+> gate (AFI-5c) are **on hold**. See [`CHANGELOG.md`](CHANGELOG.md) → Unreleased.
+
 > **Trust model.** "Acting as" is a **local, trust-based application context**, not authentication. It is
 > not a security boundary against anyone with local access to the device, browser profile or portable
 > file. Authorization and read-scope are product behaviour under that trust model.
@@ -150,14 +163,15 @@ Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v
 **Two computers running v2.10.0 hold two independent datasets.** There is no server, no sync, and no
 shared database in this release.
 
-A future shared multi-user architecture has been **decided but not built**: Multi-User-0 is
+A future shared multi-user architecture has been **decided and is partly built as source**: Multi-User-0 is
 **merged/frozen**, and the current decision is
 [ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) (**Accepted**; it superseded
 the Supabase-based [ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md)). It
 places a same-origin PHP + MariaDB backend at `/api/*` on the existing company web hosting at
 `finance.reliabilityindonesia.com`, beside the frontend. `CLAUDE.md` §4.3 permits **only** that
-backend, but **implementation has not started and is not authorized**. The hostname does **not** serve
-TAM OS yet, and will not until the production cutover gate in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+backend, implemented through separately authorized milestones. The backend is **source only and not
+deployed**, production SESSION mode is **not enabled**, and the hostname does **not** serve TAM OS yet,
+and will not until the production cutover gate in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 §8 is met. Nothing in that direction ships in v2.11.0.
 
 ### Running it
@@ -207,7 +221,7 @@ Source and distribution:
 
 | Form | What it is | Where |
 |---|---|---|
-| **A. Modular development source** | `index.html` + `css/` (6 files) + `js/` (78 classic-script modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/ cli/` — 77 browser-loaded in one shared global scope, plus the CLI-only module) + the pre-paint `js/boot/theme-boot.js` + vendored SheetJS under `vendor/`; no ES modules | project root |
+| **A. Modular development source** | `index.html` + `css/` (6 files) + `js/` (91 JavaScript files: 89 ordered browser-loaded modules across `core/ ui/ finance/ people/ import/ analytics/ domain/ platform/ transport/ repository/` in one shared global scope, one pre-paint browser boot script `js/boot/theme-boot.js`, and one Node-only CLI script under `cli/`) + vendored SheetJS under `vendor/`; no ES modules | project root |
 | **B. Deployment package** (canonical, Distribution-1) | the static document root: every runtime file copied byte-for-byte from the source, no inline script, no third-party request, strict CSP ([ADR-0002](docs/03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) Model B) | built into `dist/package/` + ZIP; recorded by `dist/package-manifest.json` |
 | **C. Historical single-file release** | the published v2.11.0 portable file — frozen, digest-pinned, never rebuilt | `dist/tam-os-v2.11.0.html` |
 
@@ -295,7 +309,7 @@ flowchart LR
   subgraph Source["Modular source"]
     IDX["index.html<br/>(ordered script tags)"]
     CSS["css/ (6 files)"]
-    JS["js/ (73 classic-script modules)<br/>core · ui · finance · people · import · analytics<br/>domain · platform · transport · repository · cli"]
+    JS["js/ (89 ordered modules + boot + CLI)<br/>core · ui · finance · people · import · analytics<br/>domain · platform · transport · repository · cli"]
   end
   subgraph Runtime["Browser runtime (client-only)"]
     STATE["State (in-memory)"]
@@ -318,10 +332,14 @@ flowchart LR
   BUILD --> VERIFY
 ```
 
-The 77 browser-loaded modules are **classic scripts** sharing one global scope; their **load order** is the single
-critical invariant and lives once in `tools/module-order.js` (mirrored by `index.html`). The build
-inlines CSS + JS into one portable file; the verifier asserts the dist equals the concatenated
-source and that the version identity, schema, storage keys, and decomposition are all consistent.
+`js/` contains 91 JavaScript files: 89 ordered browser-loaded modules, one pre-paint browser boot script,
+and one Node-only CLI script. The 89 ordered modules are **classic scripts** sharing one global scope;
+their **load order** is the single critical invariant and lives once in `tools/module-order.js` (mirrored
+by `index.html`, which loads the pre-paint `js/boot/theme-boot.js` before them). The build copies every
+file `index.html` references byte-for-byte into the deployment package — no inlining or concatenation —
+and the verifier asserts that each package file equals its source, that the committed manifest equals a
+fresh, deterministic assembly, and that the version identity, schema, storage keys and decomposition are
+all consistent.
 Historical payroll rendering is centralized through a single stage-aware helper,
 `payrollHistoricalSnapshot()`, so Posted/Executed figures and reports are deterministic and read
 from immutable committed evidence rather than live master data. See
@@ -333,36 +351,54 @@ diagrams (payroll workflow, release pipeline).
 ## Project structure
 
 ```
-index.html                         Modular entry: meta, external deps, pre-paint theme
-                                   script, ordered CSS <link> + JS <script> tags, mounts
-css/                               Extracted styles (load order fixed)
-  tokens.css base.css shell.css components.css charts.css
-js/                                78 classic-script modules (77 browser-loaded, one shared
-                                   global scope; cli/ is Node-only)
-  core/       constants, utils, storage-adapter, state, state-load-migrations,
-              domain-services, hr-persistence-portability, stabilization,
-              onboarding-reset, app-bootstrap
-  ui/         charts, shell-render, settings-about, activity-log
-  finance/    dashboard, execution-center, transaction-modals, transactions,
-              add-upload, cashflow, budget
-  people/     people-core, employees, contracts, payroll-planning, recurring-expenses,
-              monthly-plan, legacy-mapping, hr-dashboard-reports, overtime,
-              employee-dedup, payroll-ops-engine, payroll-workspace, supplemental-engine
-  import/     parser, import-preview, smart-import-extract, smart-import-commit,
-              smart-import-ui
-  analytics/  plan-vs-actual, compare, trends, executive-dashboard,
-              executive-insights, reports
+index.html                         Modular entry: meta, ordered CSS <link> + JS <script> tags
+                                   (no inline script), mount points
+css/                               6 stylesheets (load order fixed)
+  fonts.css tokens.css base.css shell.css components.css charts.css
+js/                                91 JavaScript files: 89 ordered browser-loaded modules
+                                   (tools/module-order.js, one shared global scope), one
+                                   pre-paint browser boot script, one Node-only CLI script
+  boot/        theme-boot (pre-paint; loaded before the ordered modules)
+  core/        constants, utils, identity, session-identity, workspace, authz, storage-adapter,
+               state, state-load-migrations, domain-services, auth-flow, auth-boot,
+               session-employee / -overtime / -payroll / -audit, employee- / overtime- /
+               payroll- / audit-api, app-bootstrap, …
+  transport/   api-client, transport-adapter
+  platform/    application-gateway
+  domain/      aggregates, aggregate-helpers, commands, queries, events, domain-layer,
+               contract-* / employee-* / payroll-lifecycle aggregates
+  repository/  employee-, contract-, payroll-repository
+  ui/          shell-render, identity-selector, auth-view, session-workspace- / -overtime- /
+               -payroll- / -audit-view, global-search-ui, charts, settings-about, activity-log
+  finance/     dashboard, execution-center, transaction-modals, transactions,
+               add-upload, cashflow, budget
+  people/      people-core, employees, contracts, payroll-planning, recurring-expenses,
+               monthly-plan, legacy-mapping, hr-dashboard-reports, overtime,
+               employee-dedup, payroll-ops-engine, payroll-workspace, supplemental-engine
+  import/      parser, import-preview, smart-import-extract, smart-import-commit,
+               smart-import-ui
+  analytics/   plan-vs-actual, compare, trends, executive-dashboard,
+               executive-insights, reports
+  cli/         cli (Node-only; never loaded by the browser)
+server/                            Same-origin PHP 8.3 + MariaDB backend (ADR-0004) — source only,
+                                   not deployed: src/, migrations/ (0001–0035), bin/ (operator CLIs),
+                                   public/, dev/, tests/, config/ (example only — no secrets)
 tools/
   module-order.js                  Single source of truth for JS load order
   app-version.js                   Single source of truth for the version (reads constants.js)
   build-package.js                 Modular source -> deployment package + ZIP + manifest (Distribution-1)
   package-headers.js               Production response-header contract (CSP, security, cache)
   serve-package.js                 Local loopback server applying that contract (validation only)
+  serve-auth-stub.js               Test-only loopback server: SESSION-mode QA against fabricated answers
+  serve-e2e-proxy.js               Test-only loopback front for authenticated E2E against a local backend
+  serve-local-dev.js               Test-only loopback server: LOCAL mode with a development persona
+  dev/                             Test-only development identity fixture (never in the package)
   build-single-file.js             RETIRED — refuses to run (frozen single-file releases)
   verify-build.js                  Package + invariant + focus-fix + decomposition + audit verification
+  verify-backend-boundary.js       Static boundary check for the PHP backend under server/
   check-commit-attribution.js      Owner-only authorship policy — shared by the hook and CI
   install-hooks.js                 Points this clone at .githooks/ (repository-local)
-  verify-*-runtime.js              34 behavioural regression harnesses
+  verify-*-runtime.js              42 behavioural regression harnesses (12 run in CI)
   README.md                        Tool index: build, verify, and the runtime harness suite
 .githooks/                         Tracked Git hooks (survive a fresh clone)
   commit-msg                       Rejects AI-attribution trailers; activate via install-hooks.js
@@ -375,6 +411,7 @@ tam-intelligence-os-v2.5.2.html    Retained legacy JS-provenance regression comp
 .github/                           Repository governance & delivery
   workflows/ci.yml                 Verify + build the package on push/PR to main; uploads the package ZIP
   workflows/attribution.yml        verify-attribution: owner-only authorship on every PR/push
+  workflows/backend.yml            Backend boundary tool + PHP tests (non-DB and MariaDB) on push/PR to main
   workflows/codeql.yml             CodeQL security scan on push/PR to main
   workflows/release.yml            Tag-triggered (v*) GitHub Release; publishes the package ZIP + manifest
   ISSUE_TEMPLATE/                  bug_report.yml, feature_request.yml, config.yml
@@ -482,8 +519,8 @@ flowchart LR
   GATE -->|no| STOP["fail: publish nothing"]
 ```
 
-The **CI** workflow (`.github/workflows/ci.yml`) builds + verifies on every push/PR to `main` and
-uploads the portable HTML as a build artifact.
+The **CI** workflow (`.github/workflows/ci.yml`) builds + verifies on every push/PR to `main`, runs
+the 12 allowlisted runtime harnesses, and uploads the deployment package ZIP as a build artifact.
 
 ---
 
@@ -623,7 +660,8 @@ Also complete since then:
   ([ADR-0003](docs/03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** as the architecture
   *baseline*, since superseded by
   [ADR-0004](docs/03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) — same-origin PHP + MariaDB on
-  the existing Hostinger hosting). **Implementation has not started and is not authorized.**
+  the existing Hostinger hosting). **Implementation proceeds only through separately authorized
+  milestones** (item 3 below).
 
 Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2):
 
@@ -634,7 +672,12 @@ Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2)
 3. **Multi-User implementation** — backend foundation, authentication/session, authoritative identity,
    authorization/data scope, audit/backup, authenticated E2E, "Acting as" removal — then production
    readiness with an external security review, and the `finance.reliabilityindonesia.com` cutover
-   ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8).
+   ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8). **Status:** in progress **as source only** — backend
+   foundation, sign-in/sessions, identity, authorization/scope and the Employee, Overtime, Payroll,
+   Supplemental, Finance posting/execution and Audit domains plus backup/restore are merged; the SESSION
+   frontend (AFI-1 … AFI-4g) is merged but dormant; AFI-5a development identity tooling is merged. The
+   backend is not deployed and production SESSION mode is not enabled. **AFI-5b** ("Acting as" removal) and
+   **AFI-5c** (SDR-0002 §22 closure) are **ON HOLD**.
 4. **PILOT-1** — real operational use with company data. The v2.10.0 controlled pilot was approved but
    **never launched** and is **ON HOLD** until this point; no real company data has been entered.
    Publishing v2.10.0 made the verified artifact obtainable; **it did not launch the pilot**.

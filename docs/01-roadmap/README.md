@@ -6,8 +6,8 @@ truth; the [Governance](../00-governance/README.md) layer above it is timeless a
 
 ## Authoritative roadmap state
 
-Current as of `main` in the canonical repository **`fanoryu/TAM-OS-Next`**, after the **v2.11.0 official
-release** (Identity Refresh; the prior v2.10.0 release remains published and intact).
+Current as of `main` @ `113f0184` (2026-10-19) in the canonical repository **`fanoryu/TAM-OS-Next`**, after
+the **v2.11.0 official release** (Identity Refresh; the prior v2.10.0 release remains published and intact).
 
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in
@@ -24,13 +24,14 @@ release** (Identity Refresh; the prior v2.10.0 release remains published and int
 | 3 | Readiness-2 — End-to-End User Journey Acceptance | **MERGED / FROZEN** (`580d8999`) |
 | 4 | Readiness-3 — Release Candidate & Pilot Package | **MERGED / FROZEN** (`61ddd939`) |
 | 5 | Controlled Pilot Sign-off | **APPROVED** (`df76ec20`) |
-| 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED / LATEST — in both repositories** — **originally published** from annotated tag `v2.10.0` on predecessor release commit `335d53ed` in `fanoryu/TAM-OS`, and **canonically re-published unchanged** from annotated tag `v2.10.0` here, peeling to `856e3ca6`. Asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical across both Releases and to `dist/`. Not a new product version |
-| 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12; **superseded 2026-09-29** by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md), same-origin PHP + MariaDB on Hostinger). **Implementation NOT authorized** |
+| 6 | **v2.10.0 Official Release** | **RELEASED / PUBLISHED** — still marked Latest in the predecessor `fanoryu/TAM-OS`; superseded as Latest here by v2.11.0 — **originally published** from annotated tag `v2.10.0` on predecessor release commit `335d53ed` in `fanoryu/TAM-OS`, and **canonically re-published unchanged** from annotated tag `v2.10.0` here, peeling to `856e3ca6`. Asset `tam-os-v2.10.0.html`, 1,151,267 B, SHA-256 `60382271…2c7fa704`, byte-identical across both Releases and to the `dist/` copy tracked at that tag. Not a new product version |
+| 6a | **v2.11.0 Official Release — Identity Refresh** | **RELEASED / PUBLISHED / LATEST** in `fanoryu/TAM-OS-Next` — annotated tag `v2.11.0` peeling to `04c1503d`; asset `tam-os-v2.11.0.html`, 1,676,709 B, SHA-256 `57d8b0c2…2358557`, byte-identical to `dist/` |
+| 7 | Multi-User-0 — Shared Multi-User Architecture Decision | **MERGED / FROZEN** — architecture baseline only ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md) **Accepted** 2026-08-12; **superseded 2026-09-29** by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md), same-origin PHP + MariaDB on Hostinger). Implementation proceeds only through separately authorized milestones (row 12) |
 | 8 | **Controlled Pilot** (PILOT-1) | **APPROVED, NOT YET LAUNCHED — ON HOLD** until the multi-user readiness gate |
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |
 | 10 | Pilot Exit Review | **UPCOMING** |
 | 11 | Distribution-1 — Modular Distribution Migration | **COMPLETED** (2026-09-29) — strict-CSP deployment package; unreleased until the next version |
-| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **FUTURE — NOT AUTHORIZED, NOT STARTED** (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; SDR-0002 Accepted; Distribution-1 completed; still blocked on per-milestone authorization) |
+| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **IN PROGRESS — source only; backend not deployed; production SESSION mode not enabled.** Merged: BF-1 … BF-4g, OPS-1, OPS-2, AFI-1 … AFI-4g, AFI-5a (PR #60). **On hold:** AFI-5b, AFI-5c, deployment and cutover. SDR-0002 §22 gate open (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; each milestone separately authorized) |
 | 13 | General-Use Readiness / Hardening | **FUTURE** |
 | 14 | UX-006F / v3.0.0 | **FUTURE** |
 
@@ -63,8 +64,8 @@ Four points the ordering is there to make unambiguous:
   computers running v2.10.0 hold **two independent datasets**.
   [Multi-User-0](Multi-User-0-Shared-Multi-User-Architecture-Decision.md) is an **architecture decision
   only**: its ADR-0003 was **superseded by ADR-0004** (same-origin PHP + MariaDB), but shared backend, shared database, real
-  authentication, server-side authorization, server-side read scope and data migration are all
-  **NOT IMPLEMENTED**, and implementation **has not started**. The two must never be conflated — the
+  authentication, server-side authorization and server-side read scope exist **as source only** (backend not
+  deployed; production SESSION mode not enabled), and data migration is **not implemented**. The two must never be conflated — the
   pilot's trust model is unchanged and must not be described as improved by a *planned* architecture.
 
 Milestone-level detail lives in [Milestones.md](../05-milestones/Milestones.md).

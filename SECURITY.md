@@ -93,8 +93,10 @@ unsure. Over-reporting privately is preferred to under-reporting publicly.
 
 ## Security model
 
-Scope your report against what the software actually claims. TAM Intelligence OS is client-only:
-there is no server, database, API, or account system.
+Scope your report against what the software actually claims. The shipped TAM Intelligence OS
+application is client-only: it uses no server, database, API, or account system (`AUTH_MODE` LOCAL). The
+repository also contains an unreleased same-origin PHP backend under `server/`, which is source only and
+not deployed; reports about that source are welcome through the same private channel.
 
 - **There is no authentication.** The "Acting as" principal is a **local, trust-based application
   context**, not a login. It is spoofable by anyone who can open the application, and it is
@@ -120,8 +122,9 @@ Only the current codebase receives security fixes. Older builds are not maintain
 > **Provenance.** `fanoryu/TAM-OS-Next` is the canonical repository going forward. v2.10.0 was
 > **originally published** from the predecessor repository `fanoryu/TAM-OS`, which is retained as a
 > read-only archive, and the same byte-identical artifact is **canonically re-published** from this
-> repository under the tag `v2.10.0`. It is the same version, not a new one. The portable artifact for
-> the current codebase is tracked here as `dist/tam-os-v2.10.0.html`.
+> repository under the tag `v2.10.0`. It is the same version, not a new one. The latest published
+> artifact is tracked here as `dist/tam-os-v2.11.0.html` (frozen); the current codebase is distributed as
+> the deployment package recorded by `dist/package-manifest.json`.
 
 ## Response expectations
 

@@ -52,6 +52,8 @@
 ## Checklist
 - [ ] `node tools/build-package.js` succeeds
 - [ ] `node tools/verify-build.js` passes (all checks)
+- [ ] The 12 CI runtime harnesses pass, plus any `tools/verify-*-runtime.js` harness for the area changed
+- [ ] Backend changes: `node tools/verify-backend-boundary.js` (and `--selftest`) and `php server/tests/run.php` pass
 - [ ] The served package boots with **zero console errors** and **zero CSP violations**
 - [ ] `dist/package-manifest.json` is regenerated and committed with the source
 - [ ] `CHANGELOG.md` (and `RELEASE_NOTES.md` for a release) is updated
