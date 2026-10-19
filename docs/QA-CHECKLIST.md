@@ -53,6 +53,14 @@ disposable local PHP + MariaDB backend — never a production backend or real da
       shown as such; an Employee has no Audit section; a 401 signs out; zero console errors other than the browser's own
       network-status lines for deliberately failed requests, and zero CSP violations
 
+## LOCAL development persona (test-only server, AFI-5a)
+Run against `node tools/serve-local-dev.js --as ceo` and `--as employee` after `node tools/build-package.js`, with
+fabricated data only; clear the dev origin's site data afterwards. The shipped package is unchanged.
+- [ ] **Persona (AFI-5a):** the "DEVELOPMENT — LOCAL DATA — NOT AUTHENTICATED" banner is shown; `--as ceo` gives the
+      Executive workspace, `--as employee` the Personal workspace (no linked record → no workspace, never company-wide);
+      the "Acting as" control cannot replace the dev persona; `node tools/serve-package.js` still shows today's
+      "Acting as" with no persona selected; zero console errors and zero CSP violations in both
+
 ## Data-safety confirmations
 - [ ] `SCHEMA_VERSION` unchanged (6) unless an intentional, documented migration
 - [ ] Storage keys and migration flags unchanged

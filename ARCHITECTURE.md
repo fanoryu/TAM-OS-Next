@@ -2876,6 +2876,27 @@ does not satisfy the SDR-0002 §22 gate (item 8).
 **Known limitation (pre-existing).** Below about 700 px the SESSION workspace card is wider than the viewport for every
 section with a table (Payroll included); tables scroll inside `table-wrap`, but the frozen CSS does not constrain the card.
 
+### Development identity isolation — AFI-5a (tooling only; package unchanged)
+
+AFI-5 retires the production "Acting as" selection in favour of the SESSION identity (owner decisions D-AFI5-1 … D-AFI5-3).
+AFI-5a is its first slice and changes **no** application file: it proves that a development persona kept outside `js/`
+reproduces today's fixture identity exactly, which is the precondition for AFI-5b moving the fixtures out of the product.
+
+| Component | Role |
+|---|---|
+| `tools/dev/local-identity-fixture.js` | Test-only persona. Declares only new names — `TAM_DEV_LOCAL` (marker), `DEV_PERSONA` (null on disk), `DEV_FIXTURE_PRINCIPALS` (deep copy of `FIXTURE_PRINCIPALS`), `DevLocalIdentity` (`principals()`, `install(id)`, `current()`) — so it loads beside the unchanged `identity.js` in one classic global scope. `install` uses only `setIdentityProviderForTesting`; an unknown id installs nothing. No State, storage, network or "Acting as" API |
+| `tools/serve-local-dev.js` | Test-only loopback server (127.0.0.1). Serves `dist/package/` under the production headers; in memory only, inserts `<script src="dev/local-identity-fixture.js">` right after the `js/core/identity.js` tag and sets `DEV_PERSONA` from the required `--as ceo\|employee`. The persona installs before boot and a fixed "DEVELOPMENT — LOCAL DATA — NOT AUTHENTICATED" banner is shown (an inline style attribute, which the CSP's `style-src-attr` permits). `/api/*` answers 404 |
+| `tools/verify-dev-local-runtime.js` | Runs the real module set with the dev file appended. Parity (P): CEO, Employee and no persona give identical `getCurrentUser`, `getCurrentWorkspace`, `getScopedRecords` (six entity types), `getScopedRecordById` and `can` (21 ACTIONS over every fabricated record) to `LocalIdentityProvider.selectPrincipal(sameId)`, with a non-vacuity check. Isolation (I): null on disk installs nothing; unknown persona never a CEO; no storage write; no network; nothing on `window`; the dev-server rewrite installs at load with one banner. Mutation self-test (M): six seeded defects are each caught |
+
+While a dev persona is installed the test seam holds it, so the shipped "Acting as" control cannot replace it (dev only).
+
+**Verifier (Stage 1, additive).** `verify-build.js` AFI-5a V-a1 … V-a6: no `dev/` path or fixture file in the package; no
+package file contains a dev-only name; `index.html` and `module-order.js` load nothing from `dev/` or `tools/`; no `js/`
+file references the dev file; the dev file's static shape (null on disk, seam only, no State/storage/network/"Acting as" API,
+no name the application declares); the dev server is loopback-only and writes nothing. The shipped fixture tokens
+("Acting as") are deliberately not checked until AFI-5b, where the confinement checks are replaced by absence checks of
+equal or greater strength.
+
 ### Release engineering
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the

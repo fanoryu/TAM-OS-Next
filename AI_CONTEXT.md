@@ -555,6 +555,21 @@ it deterministic). D-AFI4g-8 = A: a real authenticated end-to-end check ran on a
 edges, the cap, an Employee's 403, another company's isolation, revocation ending the session); it is AFI-4g evidence
 only and does **not satisfy** the SDR-0002 §22 "authenticated end-to-end tests pass" gate (item 8). D-AFI4g-10 = A: N16
 is resolved here.
+
+**AFI-5a — development identity isolation (tooling only)** (local candidate, uncommitted, from `d97c1bc`; owner decisions
+**D-AFI5-1 … D-AFI5-3**, 2026-10-18; Implementation GO for AFI-5a only) is the first AFI-5 slice. D-AFI5-1: LOCAL-only
+modules are preserved and stay out of production until they have a secure backend path. D-AFI5-2: SESSION is the production
+target; LOCAL may remain only as an isolated development/testing capability. D-AFI5-3: local candidate only — deployment,
+hosting, migrations and release stay on HOLD. AFI-5a adds, **outside the application**, a test-only development persona
+(`tools/dev/local-identity-fixture.js`: a deep copy of the shipped fixture principals under new names, installed only
+through the existing test seam, null on disk), a loopback dev server (`tools/serve-local-dev.js --as ceo|employee`, in-memory
+injection after `js/core/identity.js`, a "not authenticated" banner) and `tools/verify-dev-local-runtime.js` (**117
+checks**: parity with "Acting as" for the CEO, the Employee and no persona over all six scoped entity types and all 21
+ACTIONS, isolation, and a six-mutant self-test; the twelfth CI harness, D-1). `verify-build.js` gains six additive checks
+(AFI-5a V-a1 … V-a6, **2985** checks) keyed only on dev-only names and paths. **No change** to `js/`, `css/`, `index.html`,
+`dist/`, `server/` or the package (`dist/package-manifest.json` unchanged): the shipped `AUTH_MODE` stays LOCAL and "Acting
+as" is unchanged. AFI-5b (mode flip and "Acting as" removal) is not started; per Atlas ruling B-1 it is not merged before
+SDR-0002 §22 items 1 and 8 hold.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
