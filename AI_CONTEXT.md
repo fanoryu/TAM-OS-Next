@@ -532,8 +532,8 @@ answers `[]` for an unknown record — a deleted record keeps its history. `auth
 reads are two fixed SELECTs in `AuditEventStore` under `ScopedDatabase` (company scope only, no write, lock, transaction
 or join) served by the existing `audit_events_company_time` and `audit_events_entity` indexes, and the boundary tool pins
 that shape, the Asia/Jakarta calendar and the two routes. Its SESSION view is AFI-4g (below).
-**AFI-4g — SESSION Audit history (CEO, read only)** (local candidate on `feature/afi-4g-session-audit-ui`, from
-`7ec760a5de92d804e5e33ed2f112a047e1552f94`; not pushed, merged or deployed; owner decisions **D-AFI4g-1 … D-AFI4g-10 = A**,
+**AFI-4g — SESSION Audit history (CEO, read only)** (merged to `main` as source, PR #57, canonical merge
+`a9b1bf0f4e9b77342c05dae6a3678bdbd9bfb98f`; not deployed; owner decisions **D-AFI4g-1 … D-AFI4g-10 = A**,
 2026-10-08) is the fourth Audit & Backup slice: the SESSION view of BF-4g, **frontend only** — no Action or permission
 (ACTIONS stay **21**), no migration (head **0035**), no backend change, `AUTH_MODE` LOCAL. D-AFI4g-1 = A: three new
 modules — `core/audit-api.js` (the strict client of the two BF-4g reads), `core/session-audit.js` (the memory-only data and
@@ -556,7 +556,9 @@ edges, the cap, an Employee's 403, another company's isolation, revocation endin
 only and does **not satisfy** the SDR-0002 §22 "authenticated end-to-end tests pass" gate (item 8). D-AFI4g-10 = A: N16
 is resolved here.
 
-**AFI-5a — development identity isolation (tooling only)** (local candidate, uncommitted, from `d97c1bc`; owner decisions
+**AFI-5a — development identity isolation (tooling only)** (merged to `main` as source, PR #60, canonical merge
+`113f0184101404cf71f4438ed2328969b56e039d`, 2026-10-19, after a true merge with PR #59; feature branch deleted; not
+deployed; owner decisions
 **D-AFI5-1 … D-AFI5-3**, 2026-10-18; Implementation GO for AFI-5a only) is the first AFI-5 slice. D-AFI5-1: LOCAL-only
 modules are preserved and stay out of production until they have a secure backend path. D-AFI5-2: SESSION is the production
 target; LOCAL may remain only as an isolated development/testing capability. D-AFI5-3: local candidate only — deployment,
@@ -569,7 +571,7 @@ ACTIONS, isolation, and a six-mutant self-test; the twelfth CI harness, D-1). `v
 (AFI-5a V-a1 … V-a6, **2985** checks) keyed only on dev-only names and paths. **No change** to `js/`, `css/`, `index.html`,
 `dist/`, `server/` or the package (`dist/package-manifest.json` unchanged): the shipped `AUTH_MODE` stays LOCAL and "Acting
 as" is unchanged. AFI-5b (mode flip and "Acting as" removal) is not started; per Atlas ruling B-1 it is not merged before
-SDR-0002 §22 items 1 and 8 hold.
+SDR-0002 §22 items 1 and 8 hold. AFI-5b and AFI-5c are **on hold** pending separate Owner approval.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
@@ -1127,9 +1129,10 @@ A capability status matrix (Available / Planned) is maintained in [`README.md`](
 
 Client-only, single shared global scope of classic-script modules organized into
 `core / ui / finance / people / import / analytics / domain / platform / transport / repository / cli`,
-assembled into one portable HTML file. **73 JS modules** exist in the source: **72 are browser-loaded**
-(the load-order manifest and `index.html` agree on all 72), and `js/cli/cli.js` is the CLI-only ingress,
-deliberately outside the browser load order. There are no ES modules and no bundler; module load order is
+copied byte-for-byte into the Distribution-1 deployment package (the published v2.11.0 is one portable
+HTML file). `js/` holds **91 JavaScript files**: **89 ordered browser-loaded modules** (the load-order
+manifest and `index.html` agree on all 89), one pre-paint boot script `js/boot/theme-boot.js`, and
+`js/cli/cli.js`, the CLI-only ingress, deliberately outside the browser load order. There are no ES modules and no bundler; module load order is
 the critical invariant. The full structure, provenance, and diagrams (application structure, payroll
 workflow, release pipeline) live in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -1300,17 +1303,23 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ## 15. CI/CD Overview
 
-- **CI** (`ci.yml`) builds + verifies on every push/PR to the main branch and uploads the portable HTML
-  as a build artifact; permissions are read-only.
+- **CI** (`ci.yml`) builds + verifies on every push/PR to the main branch, runs the 12 allowlisted runtime
+  harnesses (CI-HARDEN-1), and uploads the deployment package ZIP as a build artifact; permissions are
+  read-only.
 - **CodeQL** (`codeql.yml`) runs code scanning on push/PR with two Analyze jobs
   (`javascript-typescript` and `actions`).
 - **Release** (`release.yml`) is tag-triggered, re-derives the version, enforces the tag-equals-version
-  guardrail, and creates/refreshes the GitHub Release idempotently, uploading the portable HTML as the
-  release asset. It titles the Release `TAM OS <tag>` — the short convention, which is why the latest
-  published Release title reads `TAM OS v2.9.0` rather than including the release name. (Releases published
+  guardrail, and creates/refreshes the GitHub Release idempotently, uploading the deployment package ZIP and
+  `dist/package-manifest.json` as release assets (v2.11.0 and earlier shipped a single HTML file). It titles
+  the Release `TAM OS <tag>` — the short convention, which is why the latest published Release, v2.11.0
+  (2026-08-14), is titled `TAM OS v2.11.0` rather than including the release name. (Releases published
   before the branding change carry the older `TAM Intelligence OS <tag>` title and are never rewritten.)
   It resolves the Release body from `RELEASE_NOTES.md` at the tagged commit. Shipped releases are never
   rewritten.
+- **Backend** (`backend.yml`) runs the backend boundary tool and its selftest, the PHP tests, and the database
+  suite against a MariaDB 10.11 service.
+- **Attribution** (`attribution.yml`) checks every commit in a pull request or push to `main` for prohibited
+  AI-attribution trailers.
 - Workflows use **official GitHub Actions only**, on current stable major versions, with minimal
   permissions.
 
@@ -1359,15 +1368,15 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 - **Smart Import undo has no pre-operation backup.** Employee Merge and Smart Import **commit** each
   snapshot a pre-operation safety backup before writing; **Smart Import undo does not** take an
   equivalent snapshot, so there is no undo-specific restore point to fall back on.
-- **No backend, server-side transaction, or multi-user synchronisation exists** — the application is
-  client-only by [`CLAUDE.md`](CLAUDE.md) §4.3, so cross-key atomicity cannot be delegated to a server.
+- **The shipped application has no backend, server-side transaction, or multi-user synchronisation** — it
+  is client-only (`AUTH_MODE` LOCAL), so cross-key atomicity cannot be delegated to a server. The backend
+  under `server/` is source only and not deployed.
 - **Supplemental Payments** (v2.7.0) settle overtime drift only; other adjustment sources (bonuses,
   reimbursements) are not yet implemented (the engine is designed to extend).
-- **No automated browser/unit test suite** — QA is the invariant verifier (**2443** checks on `main`)
-  plus **thirty-four** Node runtime harnesses (**2921** checks total; the largest are contract timeline
-  349, authz C2C-4 164, integrity warning rules 146, integrity payroll rules 144, Contract Core 129,
-  authz C2C-3 129, UX-006D2 presentation 127, employee read scope 119, monthly plan 118, finance/import
-  mutation enforcement 118, payroll posting 106, authz 104, Readiness-2 E2E 96, authz integration 91)
+- **No automated browser/unit test suite** — QA is the invariant verifier (**2985** checks on `main`)
+  plus **forty-two** Node runtime harnesses (**7,171** checks total, 12 of them run in CI; the largest are
+  SESSION payroll 1998, SESSION employee 800, SESSION overtime 656, contract timeline 349, SESSION audit
+  219, AFI-3 credential flows 176, authz C2C-4 164, AFI-1 session identity 155)
   plus manual browser validation. The runtime harnesses drive real
   behaviour against the live engine and UI seams, but they are not a general test suite.
 - **One theme-blind colour path remains.** UX-002B tokenized every chart series colour, but the shared
@@ -1505,12 +1514,18 @@ Directions (no committed release numbers unless already approved):
   inlined single file cannot carry a strict CSP (ADR-0002 carries appended notes; its decision is
   unchanged) — see
   [`docs/05-milestones/Milestones.md`](docs/05-milestones/Milestones.md).
+  **Status at `main` @ `113f0184` (2026-10-19).** Along that sequence the backend foundation,
+  authentication/session, authoritative identity, authorization/data scope and audit/backup are merged
+  **as source**, as are the SESSION frontend (AFI-1 … AFI-4g) and the AFI-5a development identity tooling.
+  The backend is not deployed and production SESSION mode is not enabled (`AUTH_MODE` LOCAL).
+  Authenticated E2E for the §22 gate, "Acting as" removal (AFI-5b), production readiness, cutover and
+  PILOT-1 have **not** happened; AFI-5b and AFI-5c are on hold.
 
 The canonical roadmap lives in [`README.md`](README.md#roadmap).
 
 ## 18. Technical Debt
 
-- No general automated regression suite; coverage is the invariant verifier plus thirty-four targeted runtime
+- No general automated regression suite; coverage is the invariant verifier plus forty-two targeted runtime
   harnesses, with the remaining behavioural coverage manual.
 - Heavy use of direct DOM string rendering — safe today because user data is escaped, but a
   standing reason to keep escaping disciplined.

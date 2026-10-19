@@ -116,7 +116,7 @@ TAM OS **v2.11.0 — Identity Refresh** is **published and marked Latest** in `f
 annotated tag `v2.11.0` (peeling to `04c1503d`); asset `tam-os-v2.11.0.html` (1,676,709 B, SHA-256
 `57d8b0c2…2358557`). Presentation/identity only — no authorization, schema, data or backend change
 (`SCHEMA_VERSION` 6, `ACTIONS` 20). **PILOT-1 remains ON HOLD** pending the multi-user readiness gate
-(the earlier "pending VPS" assumption was retired by HOSTING-0 — no VPS is required); backend **NOT STARTED**.
+(the earlier "pending VPS" assumption was retired by HOSTING-0 — no VPS is required); backend **NOT STARTED** (at release, 2026-08-14).
 
 ## v2.10.0 Official Release — **Completed · Published (prior release)**
 **Theme:** the Governed Workspace release ships.
@@ -325,7 +325,7 @@ needs runtime configuration and a deployable static bundle, so Model B is effect
 rather than a parallel track. ADR-0002 is **not** invalidated. *(ARCH-GOV-2: the runtime-configuration
 reason lapsed with ADR-0004's same-origin API; Distribution-1 now precedes the backend for a strict CSP.)*
 
-## Multi-User-1…8 — Shared Multi-User Implementation — **Future · not authorized**
+## Multi-User-1…8 — Shared Multi-User Implementation — **In progress · source only (backend not deployed)**
 **Theme:** building the [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md) backend — same-origin PHP + MariaDB on Hostinger.
 
 Proposed decomposition: **MU-1** governance & backend foundation · **MU-2** authentication & identity
@@ -441,7 +441,11 @@ migration, frontend or package change; *D-BF4g-1..4 = A, 2026-10-08*) is merged 
 Asia/Jakarta month in WIB, an event in full, a record's history from an event, an informational 2,000-event note on a 500,
 stored ids only; three new modules, 103 files, the eleventh CI harness; no Action, permission, migration or backend change;
 a real authenticated end-to-end check as AFI-4g evidence only, not the SDR-0002 §22 gate; *D-AFI4g-1..10 = A, 2026-10-08*)
-is a local candidate on a feature branch, not deployed. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+is merged as source (PR #57, canonical merge `a9b1bf0f4e9b77342c05dae6a3678bdbd9bfb98f`), not deployed.
+**AFI-5a** (development identity isolation — a test-only persona, a loopback dev server and its parity harness, the
+twelfth CI harness; *D-AFI5-1..3*, 2026-10-18) is merged as source (PR #60, canonical merge
+`113f0184101404cf71f4438ed2328969b56e039d`), tooling only, with no package change. **AFI-5b** ("Acting as" removal)
+and **AFI-5c** (SDR-0002 §22 closure) are **on hold**. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

@@ -10,7 +10,7 @@ are made, verified, and released.
    Complete Backup JSON. **The repository contains no real company workbook or confidential
    operational dataset.** Development, examples, and testing must use fabricated or appropriately
    sanitized data. Never commit confidential company information.
-2. **Never hand-edit `dist/`.** The portable HTML is generated. Edit the modular source, then build.
+2. **Never hand-edit `dist/`.** The deployment package and its manifest are generated. Edit the modular source, then build.
 3. **Preserve data-safety invariants.** Do not change `SCHEMA_VERSION`, storage keys, migration
    flags, calculations, or the backup format unless the change is an intentional, documented
    migration.

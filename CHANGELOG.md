@@ -160,6 +160,11 @@
   CEO reviews or rejects. A Draft can be edited or deleted; nothing else can. Every change is checked against the
   version it was made from and recorded in the audit trail. Overtime pay, approval and payroll are not part of this
   step, and the application does not use these routes yet; the shipped `AUTH_MODE` stays **LOCAL**.
+- **N1-B more runtime checks in CI (development tooling, not shipped).** The automatic checks that run on every
+  change now also run the SESSION sign-in, the account activation and password-reset flows, and the SESSION
+  Employee workspace runtime harnesses, eight in all. Each was shown to give the same result on repeated runs
+  and in different time zones before it was added, and the build verifier pins the exact list. The app is
+  unchanged.
 - **AFI-4a3 CEO login administration (frontend; SESSION mode only, not shipped).** On an Employee record the CEO
   can create a login (entering the login email; it is never taken from the contact email), resend the activation
   email, disable a login and enable it again — only the actions TAM OS's server allows for that record, each after
@@ -208,6 +213,59 @@
   read once, stripped from the address bar at once and kept in memory only; a new password is entered twice and
   only one copy is sent. The shipped `AUTH_MODE` stays **LOCAL**, so users see no change. No backend, schema
   (`SCHEMA_VERSION` **6**), storage-key, ACTIONS (**20**) or CSS change; no deployment.
+- **AFI-2 SESSION sign-in screen (SESSION mode only; not shipped).** TAM OS gains a second, switchable start-up
+  mode for the future server: it checks for a signed-in session first, offers sign-in and sign-out, and shows
+  a neutral "checking" screen and a retry screen when the server cannot be reached. Identity is taken only
+  from the server's answer about the current session, never from the sign-in reply. In this mode no local data
+  is loaded and neither "Acting as" nor the business screens appear. The switch is one source setting,
+  `AUTH_MODE`, which stays **LOCAL**, so users see no change. A small set of sign-in screen styles was added.
+  No schema, storage-key or ACTIONS (**20**) change; no deployment.
+- **CI-HARDEN-1 runtime checks in CI (development tooling, not shipped).** Five identity and authorization
+  runtime harnesses now run automatically on every change, after the build verifier, and fail the build
+  if they fail. They use no network, clock or credentials, and the verifier pins the exact list. The app is
+  unchanged.
+- **AFI-1 session identity groundwork (not wired; not shipped).** The browser side gains the pieces it will
+  need to talk to the future server safely: a single same-origin request client with a time limit, and a
+  provider that would read the signed-in user from the server, keeping its security token in memory only.
+  Nothing uses them yet: "Acting as" is unchanged, and no request is made.
+- **BF-3D password recovery and governed email (backend source only; not deployed).** "Forgot password"
+  and "reset password" on the server, with one identical answer for every address, request limits per
+  address and per network, single-use links that expire after 30 minutes, and every session signed out on a
+  reset. Email is queued in the database and sent by a scheduled command through one approved provider
+  (SDR-0003). Migrations `0011`–`0013`. No email account or key exists yet; there is no screen for it yet.
+- **BF-3C server permissions and data scope (backend source only; not deployed).** The server gains the same
+  20 permission rules as the app, checked to match in CI, and decides every action itself, refusing anything
+  not allowed by default. Which company and whose records a user can see always comes from the signed-in user,
+  never from what the browser sends. Migrations `0009`–`0010` (a minimal employee anchor). No business
+  feature uses it yet.
+- **BF-3B account lifecycle (backend source only; not deployed).** Accounts are activated from a one-time
+  link; users can change their password and sign out everywhere. The first company and CEO can be created
+  only by an operator command (`server/bin/account.php`), never through the web, and that command also
+  provides an emergency credential reset. Migrations `0007`–`0008`.
+- **BF-3A sign-in and sessions (backend source only; not deployed).** The server can sign users in and out
+  and tell who is signed in, with passwords stored as secure hashes, sessions held in the database, protection
+  against cross-site requests and repeated guessing, and a security event log. Migrations `0001`–`0006`
+  (companies, users, memberships, sessions, sign-in limits, events) — no rows are created.
+- **BF-2B database migrations and readiness (backend source only; not deployed).** Database structure
+  changes only through an operator command (`server/bin/migrate.php`), which records each change and refuses
+  to continue if the record has been altered; `GET /api/ready` reports whether the database is current. No
+  production migration was included.
+- **BF-2A database access (backend source only; not deployed).** The server's database layer — prepared
+  statements, transactions and classified errors — and an automatic check against a real MariaDB database
+  in CI. No tables were created.
+- **BF-1 backend foundation (backend source only; not deployed).** The start of the same-origin PHP 8.3
+  server under `server/` (ADR-0004), with one health-check address (`GET /api/health`), a static boundary
+  check (`tools/verify-backend-boundary.js`), backend tests and a CI job. It has no database or sign-in yet,
+  and the app does not call it.
+- **Distribution-1 deployment package (build change on `main`; not yet in a published release).** TAM OS now
+  builds a static deployment package on `main`, replacing the former single-file build process for future
+  releases. The package has not yet shipped in a published release; v2.11.0 remains the latest published
+  single-file release. Every page, style, script and licence file is copied unchanged into `dist/package/`,
+  recorded with checksums in `dist/package-manifest.json`, and zipped. The page runs no inline script and
+  contacts no other website — the spreadsheet reader is now included instead of downloaded — so it can run
+  under a strict Content-Security-Policy, and it is opened over HTTP rather than as a file. Future releases
+  will attach the zip and manifest. The single-file builder is retired; published single-file releases stay unchanged. No data,
+  schema, ACTIONS (**20**) or behaviour change.
 
 ## 2.11.0 — Identity Refresh
 
