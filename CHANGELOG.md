@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **AFI-5a Development persona for LOCAL testing (tooling only, not shipped).** Developers can now run the local
+  version of TAM OS as the sample CEO or the sample Employee from a test-only local server
+  (`node tools/serve-local-dev.js --as ceo|employee`), which shows a clear "development — not authenticated" banner. The
+  sample people are an exact copy of those behind today's "Acting as" choice, kept outside the app; a new check proves
+  they see and may do exactly the same things, and the build verifier makes sure none of this can reach the app package.
+  This prepares the later removal of "Acting as" from the app (AFI-5b), which has not started. The app, its package and
+  "Acting as" are unchanged; the shipped `AUTH_MODE` stays **LOCAL**.
 - **AFI-4g Audit history screen for the CEO (SESSION mode; not shipped).** The CEO now has an **Audit** section beside
   Employees, Overtime and Payroll that shows the company's audit history, one calendar month at a time in Western Indonesia
   Time (WIB), starting at the current month. Each entry can be opened to see everything that was recorded about it — when

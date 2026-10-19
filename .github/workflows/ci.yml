@@ -72,6 +72,9 @@ jobs:
       - name: Runtime harness - SESSION Audit (AFI-4g)
         run: node tools/verify-session-audit-runtime.js
 
+      - name: Runtime harness - development identity isolation (AFI-5a)
+        run: node tools/verify-dev-local-runtime.js
+
       - name: Build deployment package
         run: node tools/build-package.js
 

@@ -7771,21 +7771,73 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
 // repeated-run and timezone (UTC-12 … UTC+14) determinism proof. Was: nine.
 // D-AFI4g-9 authorized revision: the dedicated SESSION Audit harness is the eleventh, added after its
 // repeated-run and timezone (UTC-12 … UTC+14) determinism proof. Was: ten.
+// AFI-5a D-1 authorized revision: the development identity isolation harness is the twelfth, added after its
+// repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof. Was: eleven.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
     'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js',
     'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js',
-    'verify-session-overtime-runtime.js', 'verify-session-payroll-runtime.js', 'verify-session-audit-runtime.js'];
+    'verify-session-overtime-runtime.js', 'verify-session-payroll-runtime.js', 'verify-session-audit-runtime.js',
+    'verify-dev-local-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the eleven allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the twelve allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');
   check(!/continue-on-error|\|\|\s*true|\|\|\s*:|set\s+\+e|allow-failure/.test(ciWf), 'CI-HARDEN-1: no failure bypass in ci.yml (continue-on-error, || true, set +e)');
+}
+
+// ===== AFI-5a — DEVELOPMENT IDENTITY ISOLATION (additive, Stage 1) =====
+// The test-only development persona (tools/dev/local-identity-fixture.js) and its loopback
+// server (tools/serve-local-dev.js) stay OUTSIDE the application and the package. These checks
+// key ONLY on dev-only names and paths: the shipped fixture identity ("Acting as") is still
+// legitimately in the package until AFI-5b, so its tokens are deliberately not checked here
+// (design Addendum A1 §3). Behaviour and parity are proven by tools/verify-dev-local-runtime.js.
+console.log('== AFI-5a — DEVELOPMENT IDENTITY ISOLATION ==');
+{
+  const DEV_TOKENS = /\b(TAM_DEV_LOCAL|DEV_FIXTURE_PRINCIPALS|DEV_PERSONA|DevLocalIdentity)\b/;
+  const devPath = path.join(root, 'tools', 'dev', 'local-identity-fixture.js');
+  const devSrc = fs.existsSync(devPath) ? read(devPath) : '';
+  const devCode = stripComments(devSrc).replace(/\s\/\/\s.*$/gm, '');
+  const pkgManifestPath = path.join(root, 'dist', 'package-manifest.json');
+  const pkgPaths = fs.existsSync(pkgManifestPath) ? (JSON.parse(read(pkgManifestPath)).files || []).map((e) => e.path) : null;
+  // V-a1 — no development path in the package.
+  check(Array.isArray(pkgPaths) && pkgPaths.length > 0 && !pkgPaths.some((p) => /^dev\//.test(p) || /local-identity-fixture/.test(p)),
+    'AFI-5a V-a1: the package carries no dev/ path and no local-identity-fixture file');
+  // V-a2 — no development token in any package text file (package files equal their sources).
+  const pkgTextHits = (pkgPaths || []).filter((p) => /\.(html|js|css|txt|json|md)$/i.test(p) && fs.existsSync(path.join(root, p))
+    && DEV_TOKENS.test(read(path.join(root, p))));
+  check(Array.isArray(pkgPaths) && pkgTextHits.length === 0,
+    'AFI-5a V-a2: no package file contains TAM_DEV_LOCAL, DEV_FIXTURE_PRINCIPALS, DEV_PERSONA or DevLocalIdentity' + (pkgTextHits.length ? ' >> ' + pkgTextHits.join(', ') : ''));
+  // V-a3 — the application load list never references tools/ or dev/.
+  check(!jsFiles.some((f) => /^(dev|tools)\/|\.\.\//.test(f)) && !/(src|href)="(\.\/)?(dev|tools)\//.test(indexHtml),
+    'AFI-5a V-a3: index.html and tools/module-order.js load nothing from dev/ or tools/');
+  // V-a4 — no application file depends on the development file.
+  const jsDevHits = jsFiles.concat(['boot/theme-boot.js']).filter((f) => {
+    const p = path.join(root, 'js', f); return fs.existsSync(p) && (DEV_TOKENS.test(read(p)) || /tools\/dev/.test(read(p)));
+  });
+  check(jsDevHits.length === 0, 'AFI-5a V-a4: no js/ file references the development identity file or its names' + (jsDevHits.length ? ' >> ' + jsDevHits.join(', ') : ''));
+  // V-a5 — the development file's static shape: persona null on disk, the seam only, no
+  // State/storage/network, no shipped selection API, and no top-level name the application declares.
+  const topNames = (c) => (c.match(/^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm) || []).map((d) => d.split(/\s+/)[1]);
+  const appNames = new Set([].concat.apply([], jsFiles.map((f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? topNames(stripComments(read(p))) : []; })));
+  const devNames = topNames(devCode);
+  check(!!devSrc && devSrc.split('const DEV_PERSONA = null;').length === 2
+    && /setIdentityProviderForTesting\(provider\)/.test(devCode)
+    && !/selectPrincipal|getAvailablePrincipals|LocalIdentityProvider|\bState\b|localStorage|sessionStorage|StorageAdapter|\bfetch\b|ApiClient|XMLHttpRequest|indexedDB/.test(devCode)
+    && devNames.slice().sort().join() === ['DEV_FIXTURE_PRINCIPALS', 'DEV_PERSONA', 'DevLocalIdentity', 'TAM_DEV_LOCAL'].join()
+    && !devNames.some((n) => appNames.has(n)),
+    'AFI-5a V-a5: tools/dev/local-identity-fixture.js is null on disk, installs only through the test seam, touches no State/storage/network or "Acting as" API, and declares no application name');
+  // V-a6 — the development server: loopback only, writes nothing, calls nothing external.
+  const devServerPath = path.join(root, 'tools', 'serve-local-dev.js');
+  const devServer = fs.existsSync(devServerPath) ? read(devServerPath) : '';
+  check(!!devServer && /\.listen\(port, '127\.0\.0\.1'/.test(devServer)
+    && !/writeFileSync|appendFileSync|createWriteStream|https?:\/\/(?!127\.0\.0\.1)/.test(devServer.replace(/\/\*[\s\S]*?\*\//, '')),
+    'AFI-5a V-a6: tools/serve-local-dev.js is loopback-only, writes nothing to disk and calls nothing external');
 }
 
 console.log('');
