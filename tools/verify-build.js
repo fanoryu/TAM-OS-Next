@@ -4265,11 +4265,17 @@ const afi5Code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])
 const afi5AllJs = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : [])
   .flatMap((d) => d.isDirectory() ? afi5AllJs(path.join(dir, d.name)) : (/\.js$/.test(d.name) ? [path.join(dir, d.name)] : []));
 const afi5ProdJs = afi5AllJs(path.join(root, 'js')).map((p) => ({ f: path.relative(root, p).replace(/\\/g, '/'), c: afi5Code(read(p)) }));
-const afi5PkgRoot = path.join(root, 'dist', 'package');
 const pkgManifestPathA5 = path.join(root, 'dist', 'package-manifest.json');
-const afi5PkgJs = afi5AllJs(afi5PkgRoot).map((p) => ({ f: 'package:' + path.relative(afi5PkgRoot, p).replace(/\\/g, '/'), c: afi5Code(read(p)) }));
+// Every AFI-5b package scan reads the in-memory assembly (pkgA: assembled twice and proven deterministic,
+// equal to the committed manifest and byte-equal to source above) — never the ignored, possibly absent
+// or stale dist/package/ directory. afi5PkgReady is ANDed into each package scan so none can pass
+// vacuously: the package must have assembled, with JS files and every text file non-empty.
+const afi5PkgFiles = (pkgA ? pkgA.files : []).map((x) => ({ path: x.path, text: x.data.toString('utf8') }));
+const afi5PkgJs = afi5PkgFiles.filter((x) => /\.js$/.test(x.path)).map((x) => ({ f: 'package:' + x.path, c: afi5Code(x.text) }));
+const afi5PkgText = afi5PkgFiles.filter((x) => /\.(html|js|css)$/i.test(x.path)).map((x) => ({ f: 'package:' + x.path, t: x.text }));
+const afi5PkgReady = afi5PkgJs.length > 0 && afi5PkgText.length > 0 && afi5PkgText.every((x) => x.t.length > 0);
 const selectionLeak = afi5ProdJs.concat(afi5PkgJs).filter((x) => /\b(getAvailablePrincipals|selectPrincipal)\b/.test(x.c)).map((x) => x.f);
-check(afi5ProdJs.length > 0 && afi5PkgJs.length > 0 && selectionLeak.length === 0,
+check(afi5ProdJs.length > 0 && afi5PkgReady && selectionLeak.length === 0,
   'UX-006A/D1/AFI-5b: no production file (any js/** file, registered or not, or any package JS file) defines or calls the selection/enumeration API — zero allowed' + (selectionLeak.length ? (' >> VIOLATION: ' + selectionLeak.join(', ')) : ''));
 check(idxOrder !== -1, 'UX-006A: identity module is in the assembled build');
 // Test-only provider override: it is a TEST SEAM, never a production API. It
@@ -4516,8 +4522,6 @@ check(/not\s+a\s+server\s+security|UX enforcement only/i.test(azSrc) && /spoofab
 const selPath = path.join(root, 'js', 'ui', 'identity-selector.js');
 check(!fs.existsSync(selPath), 'UX-006D1/AFI-5b: js/ui/identity-selector.js is deleted');
 const afi5DevCode = afi5Code(afi5DevSrcA);
-const afi5PkgText = (fs.existsSync(pkgManifestPathA5) ? (JSON.parse(read(pkgManifestPathA5)).files || []).map((e) => e.path) : [])
-  .filter((x) => /\.(html|js|css)$/i.test(x)).map((x) => ({ f: 'package:' + x, t: fs.existsSync(path.join(afi5PkgRoot, x)) ? read(path.join(afi5PkgRoot, x)) : '' }));
 // Registration: gone from module-order.js, index.html and the package.
 check(jsFiles.indexOf('ui/identity-selector.js') === -1, 'UX-006D1/AFI-5b: ui/identity-selector.js is not registered in module-order.js');
 check(!/identity-selector/.test(indexHtml), 'UX-006D1/AFI-5b: index.html loads no identity-selector script');
@@ -4527,7 +4531,7 @@ check(fs.existsSync(path.join(root, 'tools', 'verify-identity-selection-runtime.
   'UX-006D1: runtime harness present — tools/verify-identity-selection-runtime.js (production absence + development isolation)');
 // Public surface: no production or package code declares or exposes the selector functions.
 const afi5SelFnLeak = afi5ProdJs.concat(afi5PkgJs).filter((x) => /\b(renderIdentitySelectorHTML|bindIdentitySelector|syncIdentitySelector)\b/.test(x.c)).map((x) => x.f);
-check(afi5SelFnLeak.length === 0,
+check(afi5PkgReady && afi5SelFnLeak.length === 0,
   'UX-006D1/AFI-5b: no production or package code declares, exposes or calls renderIdentitySelectorHTML/bindIdentitySelector/syncIdentitySelector'
   + (afi5SelFnLeak.length ? ' >> ' + afi5SelFnLeak.join(', ') : ''));
 // Shell wiring removed: no mount, bind or sync.
@@ -4538,11 +4542,11 @@ check(!/bindIdentitySelector/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell bin
 check(!/syncIdentitySelector/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell syncs no selector in syncShellState');
 // Fixture/adapter isolation: no production or package code names the adapter or the fixtures.
 const adapterOffenders = afi5ProdJs.concat(afi5PkgJs).filter((x) => /\b(LocalIdentityProvider|FIXTURE_PRINCIPALS)\b/.test(x.c)).map((x) => x.f);
-check(adapterOffenders.length === 0,
+check(afi5PkgReady && adapterOffenders.length === 0,
   'UX-006D1/AFI-5b: no production or package code names LocalIdentityProvider or FIXTURE_PRINCIPALS (the adapter lives only in tools/dev)' + (adapterOffenders.length ? (' >> VIOLATION: ' + adapterOffenders.join(', ')) : ''));
 // No default/implicit principal: no fixture id anywhere in production or package code.
 const afi5FixtureIdLeak = afi5ProdJs.concat(afi5PkgJs).filter((x) => /user_ceo_fixture|user_employee_fixture|emp_fixture_self/.test(x.c)).map((x) => x.f);
-check(afi5FixtureIdLeak.length === 0,
+check(afi5PkgReady && afi5FixtureIdLeak.length === 0,
   'UX-006D1/AFI-5b: no production or package code carries a fixture principal id (no hardcoded CEO, no default selection)' + (afi5FixtureIdLeak.length ? ' >> ' + afi5FixtureIdLeak.join(', ') : ''));
 const afi5NullFallback = afi5ProdJs.filter((x) => /getCurrentUser\s*\(\s*\)\s*\|\|/.test(x.c)).map((x) => x.f);
 check(afi5NullFallback.length === 0,
@@ -4557,14 +4561,14 @@ check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'const
 // The "Acting as" label: absent from production code and from every package text file.
 const afi5LabelLeak = afi5ProdJs.filter((x) => />Acting as</.test(x.c)).map((x) => x.f)
   .concat(afi5PkgText.filter((x) => />\s*Acting as\s*</.test(x.t)).map((x) => x.f));
-check(afi5LabelLeak.length === 0, 'UX-006D1/AFI-5b: the "Acting as" label is absent from production code and every package file' + (afi5LabelLeak.length ? ' >> ' + afi5LabelLeak.join(', ') : ''));
+check(afi5PkgReady && afi5LabelLeak.length === 0, 'UX-006D1/AFI-5b: the "Acting as" label is absent from production code and every package file' + (afi5LabelLeak.length ? ' >> ' + afi5LabelLeak.join(', ') : ''));
 // Trust boundary stated in the successor (anti-overclaim).
 check(/NOT AUTHENTICATION/.test(afi5DevSrcA) && /spoofable/i.test(afi5DevSrcA),
   'UX-006D1/AFI-5b: the development identity states the trust boundary (not authentication, spoofable)');
 // Selector DOM: no production or package file carries the selector's ids or classes.
 const afi5DomLeak = afi5ProdJs.filter((x) => /identityPrincipal(Select|Help|Rail|Context)|IDENTITY_(CONTEXT|RAIL)_ID|identity-(selector|select|context|rail)\b/.test(x.c)).map((x) => x.f)
   .concat(afi5PkgText.filter((x) => /identityPrincipal(Select|Help|Rail|Context)|IDENTITY_(CONTEXT|RAIL)_ID|\.identity-(selector|select|context|rail)\b|class="identity-(selector|context|rail)/.test(/\.js$/.test(x.f) ? afi5Code(x.t) : x.t)).map((x) => x.f));
-check(afi5DomLeak.length === 0, 'UX-006D1/AFI-5b: no production or package file carries a selector, context-block or rail-chip id or class' + (afi5DomLeak.length ? ' >> ' + afi5DomLeak.join(', ') : ''));
+check(afi5PkgReady && afi5DomLeak.length === 0, 'UX-006D1/AFI-5b: no production or package file carries a selector, context-block or rail-chip id or class' + (afi5DomLeak.length ? ' >> ' + afi5DomLeak.join(', ') : ''));
 check(!!afi5DevCode && !/authz|can\(|ACTIONS|getScopedRecords/.test(afi5DevCode),
   'UX-006D1/AFI-5b: the development identity wires no authorization or scope (identity only)');
 // R1 remains frozen: Global Search engine untouched by D1.
@@ -5172,7 +5176,7 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
     'UX-006D2/AFI-5b: no production code renders the workspace/principal context block');
   check(!afi5ProdJs.some((x) => /IDENTITY_RAIL_ID|identityPrincipalRail/.test(x.c)),
     'UX-006D2/AFI-5b: no production code renders the collapsed-rail principal chip');
-  check(!/\.identity-(context|rail|selector|select)\b/.test(d2Shell + d2Comp) && !!d2PkgCss && !/\.identity-(context|rail|selector|select)\b/.test(d2PkgCss),
+  check(!/\.identity-(context|rail|selector|select)\b/.test(d2Shell + d2Comp) && afi5PkgReady && /\S/.test(d2PkgCss) && !/\.identity-(context|rail|selector|select)\b/.test(d2PkgCss),
     'UX-006D2/AFI-5b: no context-block, rail-chip or selector rule in css/shell.css, css/components.css or the package CSS');
   check(!afi5ProdJs.some((x) => /data-principal-state/.test(x.c)),
     'UX-006D2/AFI-5b: no production code emits the selector presentation-state attribute');
@@ -5278,7 +5282,7 @@ console.log('== UX-006D3 — CROSS-SURFACE PRESENTATION CONSISTENCY ==');
   check(/data-authz-denied="1"/.test(read(path.join(root, 'js', 'core', 'stabilization.js'))),
     'UX-006D3: the D2 availability marker is unchanged');
   // AFI-5b authorized revision: the D2 surfaces were selector presentation and are removed.
-  check(!fs.existsSync(path.join(root, 'js', 'ui', 'identity-selector.js'))
+  check(!fs.existsSync(path.join(root, 'js', 'ui', 'identity-selector.js')) && afi5PkgReady
     && !afi5ProdJs.concat(afi5PkgJs).some((x) => /IDENTITY_CONTEXT_ID|IDENTITY_RAIL_ID/.test(x.c)),
     'UX-006D3/AFI-5b: the D2 principal/workspace presentation surfaces are removed (no context/rail id in production or package code)');
 }
@@ -7948,7 +7952,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   const NAME = /\blocalDevReady\b/g;
   const count = (t) => (t.match(NAME) || []).length;
   const prodFiles = afi5AllJs(path.join(root, 'js')).map((x) => ({ f: path.relative(root, x).replace(/\\/g, '/'), t: afi5bScan(read(x)) }));
-  const pkgFiles = afi5AllJs(afi5PkgRoot).map((x) => ({ f: 'package:' + path.relative(afi5PkgRoot, x).replace(/\\/g, '/'), t: afi5bScan(read(x)) }));
+  const pkgFiles = afi5PkgFiles.filter((x) => /\.js$/.test(x.path)).map((x) => ({ f: 'package:' + x.path, t: afi5bScan(x.text) }));
   const idT = (prodFiles.find((x) => x.f === 'js/core/identity.js') || {}).t || '';
   const bootT = (prodFiles.find((x) => x.f === 'js/core/app-bootstrap.js') || {}).t || '';
   // The LOCAL branch: the first statement of init(), extracted by balanced braces.
@@ -7972,7 +7976,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   }
   if(others.length) r3Problems.push('referenced outside identity.js / the LOCAL branch: ' + others.join(', '));
   if(count(pkgId) !== 1 || count(pkgBoot) !== 1) r3Problems.push('package copies of identity.js / app-bootstrap.js do not mirror the one definition / one call');
-  check(prodFiles.length > 0 && pkgFiles.length > 0 && r3Problems.length === 0,
+  check(prodFiles.length > 0 && afi5PkgReady && pkgFiles.length > 0 && r3Problems.length === 0,
     'AFI-5b R3-CONFINEMENT: localDevReady is one lexical definition in identity.js and one call inside the LOCAL branch of app-bootstrap.js — no other reference, alias, window/globalThis property or string anywhere in production or package code'
     + (r3Problems.length ? ' >> ' + r3Problems.join(' | ') : ''));
   check(!/\bwindow\s*\.\s*localDevReady|globalThis\s*\[|localDevReady\s*[,;)]/.test(idT.replace('const localDevReady = function()', '')),
