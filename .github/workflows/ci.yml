@@ -75,6 +75,9 @@ jobs:
       - name: Runtime harness - development identity isolation (AFI-5a)
         run: node tools/verify-dev-local-runtime.js
 
+      - name: Runtime harness - identity transition (AFI-5b)
+        run: node tools/verify-afi5-runtime.js
+
       - name: Build deployment package
         run: node tools/build-package.js
 

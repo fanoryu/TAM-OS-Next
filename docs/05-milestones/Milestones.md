@@ -445,7 +445,9 @@ is merged as source (PR #57, canonical merge `a9b1bf0f4e9b77342c05dae6a3678bdbd9
 **AFI-5a** (development identity isolation — a test-only persona, a loopback dev server and its parity harness, the
 twelfth CI harness; *D-AFI5-1..3*, 2026-10-18) is merged as source (PR #60, canonical merge
 `113f0184101404cf71f4438ed2328969b56e039d`), tooling only, with no package change. **AFI-5b** ("Acting as" removal)
-and **AFI-5c** (SDR-0002 §22 closure) are **on hold**. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
+and **AFI-5c** (SDR-0002 §22 closure) are **on hold** for merge: AFI-5b is implemented only as an unmerged local
+candidate (`feature/afi-5b-identity-transition`, design Rev 1.2 + 1.2.1; Owner GO with B-3a/B-3b, 2026-10-19), not merged
+and not deployed, until SDR-0002 §22 items 1 and 8 hold on the production host. *(Owner decision D6, 2026-09-30, re-assigned BF-3C from
 recovery and mail to Policy; recovery and mail became BF-3D.)* MU-4's acceptance criterion — an
 authenticated Employee cannot fetch a colleague's payroll through the raw API — becomes provable only
 when payroll has a backend store; each domain migration extends the hostile-principal suite.

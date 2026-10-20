@@ -162,7 +162,17 @@ const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
 //     only: additive .auth-* rules for the SESSION-mode auth views, appended at the end of
 //     the file; no existing rule changed, no token change (tokens.css pin unchanged).
 //     Prior CSS golden pin was 84c3434f…4b500f7bae.
-const CSS_GOLDEN_SHA256 = 'be5eea17f71a9af7e4c28243d950be14e4385bb4c362318efcd24f095e230067';
+//   AFI-5b (current) — AUTHORIZED golden revision (owner approval B-3b, design Rev 1.2 §8),
+//     css/shell.css only, REMOVAL only: the "Acting as" selector is deleted from the
+//     application (B-3a), so its presentation goes with it — the 31 lines carrying the 37
+//     .identity-(selector|select|context|rail) class tokens (base, collapsed rail, desktop
+//     hover-peek and responsive drawer groups) and the 12 comment lines that described only
+//     them; 43 lines in all. Each removed rule group was selector-only; the neighbouring
+//     sidebar, brand, collapse, hover-peek and drawer rules are untouched, braces stay
+//     balanced, and the brand --identity-* custom properties live in tokens.css, which is
+//     byte-unchanged (pinned below). No token, colour, spacing or type-scale change.
+//     Prior CSS golden pin was be5eea17…5e230067.
+const CSS_GOLDEN_SHA256 = '5321928bcbfda491ccb7c128b78e0dea5f655471d29f9c4ae316d83bcfa6a42a';
 // UX-005C — tokens.css anti-drift pin. The design tokens are the single source of truth
 // for spacing/type/radius/color; this pin fails loudly if any token VALUE is changed,
 // so a "consistency" edit can never silently move the scale it normalizes onto.
@@ -4228,24 +4238,39 @@ check(fs.existsSync(path.join(root, 'tools', 'verify-identity-foundation-runtime
 // Contract: canonical principal types + both representative principals.
 check(/const PRINCIPAL_TYPES = Object\.freeze\(\{[^}]*CEO:\s*'ceo'[^}]*EMPLOYEE:\s*'employee'/.test(idSrc),
   'UX-006A: PRINCIPAL_TYPES defines exactly ceo + employee');
-check(/principalType:\s*PRINCIPAL_TYPES\.CEO/.test(idSrc) && /principalType:\s*PRINCIPAL_TYPES\.EMPLOYEE/.test(idSrc),
-  'UX-006A: CEO + Employee representative principals present');
-check(/employeeId:\s*'[^']+'/.test(idSrc), 'UX-006A: Employee fixture carries a non-empty opaque employeeId (forward reference)');
+// AFI-5b authorized revision (B-3a; implementation deviation IMP-DEV-3 — these two checks
+// carried none of the mapped tokens): the representative principals moved OUT of the
+// application into the development identity. Was: both principals and the Employee
+// fixture's employeeId present in identity.js. Now: identity.js declares no principal
+// literal at all, and the development file holds both, the Employee with its binding.
+const afi5DevPath = path.join(root, 'tools', 'dev', 'local-identity-fixture.js');
+const afi5DevSrcA = fs.existsSync(afi5DevPath) ? read(afi5DevPath) : '';
+check(!/principalType:\s*(PRINCIPAL_TYPES\.(CEO|EMPLOYEE)|'(ceo|employee)')/.test(idSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1'))
+  && /principalType: 'ceo'/.test(afi5DevSrcA) && /principalType: 'employee'/.test(afi5DevSrcA),
+  'UX-006A/AFI-5b: CEO + Employee representative principals exist only in the development identity (none in identity.js)');
+check(/employeeId: 'emp_fixture_self'/.test(afi5DevSrcA) && !/employeeId:\s*'[^']+'/.test(idSrc),
+  'UX-006A/AFI-5b: the development Employee fixture carries a non-empty opaque employeeId; identity.js carries none');
 // Canonical seam is minimal: IdentityProvider exposes ONLY getCurrentUser().
 check(/const IdentityProvider = Object\.freeze\(\{\s*getCurrentUser\(\)\{[^}]*\}\s*\}\)/.test(idSrc),
   'UX-006A: canonical IdentityProvider exposes only getCurrentUser()');
 check(/function getCurrentUser\(\)/.test(idSrc), 'UX-006A: single canonical getCurrentUser() consumer facade exists');
-// Selection is a LOCAL-adapter capability, never the canonical contract and
-// never a general application dependency. Only identity.js (its definition) and
-// the SANCTIONED UX-006D1 selector module (ui/identity-selector.js — the single
-// UI adapter) may call the local-only selection/enumeration APIs. No other
-// module may.
+// Selection is never the canonical contract and never an application dependency.
+// History: UX-006A/D1 confined the selection/enumeration APIs to identity.js and the
+// sanctioned UX-006D1 selector module (ui/identity-selector.js). AFI-5b authorized
+// revision (B-3a): the selector is deleted and identity.js ships no selection API, so
+// the allowance is now EMPTY — no production file at all, registered or not, may define
+// or call them (comment-aware scan of every js/** file and every package JS file).
 const idxOrder = jsFiles.indexOf('core/identity.js');
-const SELECTION_ADAPTER_ALLOWED = ['core/identity.js', 'ui/identity-selector.js'];
-const selectionLeak = jsFiles.filter((f) => SELECTION_ADAPTER_ALLOWED.indexOf(f) === -1)
-  .filter((f) => /\.(getAvailablePrincipals|selectPrincipal)\s*\(/.test(read(path.join(root, 'js', f))));
-check(selectionLeak.length === 0,
-  'UX-006A/D1: local-only selection APIs confined to identity.js + the D1 selector module (no other application module)' + (selectionLeak.length ? (' >> VIOLATION: ' + selectionLeak.join(', ')) : ''));
+const afi5Code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])\/\/.*$/gm, '$1');
+const afi5AllJs = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : [])
+  .flatMap((d) => d.isDirectory() ? afi5AllJs(path.join(dir, d.name)) : (/\.js$/.test(d.name) ? [path.join(dir, d.name)] : []));
+const afi5ProdJs = afi5AllJs(path.join(root, 'js')).map((p) => ({ f: path.relative(root, p).replace(/\\/g, '/'), c: afi5Code(read(p)) }));
+const afi5PkgRoot = path.join(root, 'dist', 'package');
+const pkgManifestPathA5 = path.join(root, 'dist', 'package-manifest.json');
+const afi5PkgJs = afi5AllJs(afi5PkgRoot).map((p) => ({ f: 'package:' + path.relative(afi5PkgRoot, p).replace(/\\/g, '/'), c: afi5Code(read(p)) }));
+const selectionLeak = afi5ProdJs.concat(afi5PkgJs).filter((x) => /\b(getAvailablePrincipals|selectPrincipal)\b/.test(x.c)).map((x) => x.f);
+check(afi5ProdJs.length > 0 && afi5PkgJs.length > 0 && selectionLeak.length === 0,
+  'UX-006A/D1/AFI-5b: no production file (any js/** file, registered or not, or any package JS file) defines or calls the selection/enumeration API — zero allowed' + (selectionLeak.length ? (' >> VIOLATION: ' + selectionLeak.join(', ')) : ''));
 check(idxOrder !== -1, 'UX-006A: identity module is in the assembled build');
 // Test-only provider override: it is a TEST SEAM, never a production API. It
 // must not be exposed on the production global, and no application module may
@@ -4263,16 +4288,22 @@ const overrideLeak = jsFiles.filter((f) => f !== 'core/identity.js')
   .filter((f) => /setIdentityProviderForTesting/.test(read(path.join(root, 'js', f))));
 check(overrideLeak.length === 0,
   'UX-006A: the internal test-only provider override is not used by any application module');
-// The canonical seam delegates through a single mutable active-provider handle,
-// so it is genuinely testable while still exposing only getCurrentUser().
-// AFI-2 authorized revision: the single indirection now resolves the provider from the
-// explicit AUTH_MODE at call time (LOCAL -> LocalIdentityProvider, SESSION ->
-// SessionIdentityProvider, anything else -> a null provider), with the test seam taking
-// precedence while set. Was: `let activeIdentityProvider = LocalIdentityProvider;`.
-check(/const modeIdentityProvider = function\(\)\{\s*if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;\s*if\(AUTH_MODE === AUTH_MODES\.SESSION && typeof SessionIdentityProvider !== 'undefined'\) return SessionIdentityProvider;\s*return NO_IDENTITY_PROVIDER;\s*\};/.test(idSrc)
-  && /getCurrentUser\(\)\{\s*return \(testIdentityProvider \|\| modeIdentityProvider\(\)\)\.getCurrentUser\(\);/.test(idSrc)
+// The canonical seam delegates through a single indirection, so it is genuinely
+// testable while still exposing only getCurrentUser().
+// AFI-2 authorized revision: the single indirection resolves the provider from the
+// explicit AUTH_MODE at call time. Was: `let activeIdentityProvider = LocalIdentityProvider;`.
+// AFI-5b authorized revision (design Rev 1.2 §3, SA-7): SESSION resolves to
+// SessionIdentityProvider FIRST and the test seam is never read there; LOCAL resolves only
+// to the provider installed through the seam, or the frozen null provider (no built-in
+// fixture); anything else -> the null provider. Was: LOCAL -> LocalIdentityProvider, with
+// the seam taking precedence over every mode while set.
+check(/let testIdentityProvider = null;/.test(idSrc)
+  && /const modeIdentityProvider = function\(\)\{\s*if\(AUTH_MODE === AUTH_MODES\.SESSION && typeof SessionIdentityProvider !== 'undefined'\) return SessionIdentityProvider;\s*if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return testIdentityProvider \|\| NO_IDENTITY_PROVIDER;\s*return NO_IDENTITY_PROVIDER;\s*\};/.test(idSrc)
+  && /getCurrentUser\(\)\{ return modeIdentityProvider\(\)\.getCurrentUser\(\); \}/.test(idSrc)
+  // exactly five uses: the declaration, the LOCAL branch, the setter and the two in localDevReady
+  && (idSrc.match(/testIdentityProvider/g) || []).length === 5
   && /const NO_IDENTITY_PROVIDER = Object\.freeze\(\{ getCurrentUser\(\)\{ return null; \} \}\);/.test(idSrc),
-  'UX-006A/AFI-2: canonical seam delegates via a single indirection resolved from AUTH_MODE (LOCAL -> LocalIdentityProvider; never the local adapter in SESSION)');
+  'UX-006A/AFI-2/AFI-5b: canonical seam delegates via a single indirection resolved from AUTH_MODE (SESSION -> the session provider, seam never read; LOCAL -> the installed development provider or null; no built-in fixture)');
 // The following boundary guards scan CODE only (comments stripped), so the
 // module's own trust-boundary prose does not trip them.
 const idCode = idSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
@@ -4474,67 +4505,75 @@ check(/not\s+a\s+server\s+security|UX enforcement only/i.test(azSrc) && /spoofab
 
 /* ============================================================
    UX-006D1 — REACHABLE PRINCIPAL SELECTION (structure guards)
-   The selector makes the existing UX-006A principals reachable in the running
-   app. Structure only; BEHAVIOUR is proven by tools/verify-identity-selection-runtime.js.
+   AFI-5b authorized revision (owner approval B-3a, design Rev 1.2 §6): the "Acting as"
+   selector is DELETED. Each former presence guard is replaced one-for-one by an absence
+   guard of equal or greater strength — scanning every production js/** file (registered
+   or not) and every package file, comment-aware, never a negative check over an empty
+   source. The selector's successor for development, tools/dev/local-identity-fixture.js,
+   inherits its negative guarantees. BEHAVIOUR (production absence + development
+   isolation) is proven by tools/verify-identity-selection-runtime.js (historical name).
    ============================================================ */
 const selPath = path.join(root, 'js', 'ui', 'identity-selector.js');
-check(fs.existsSync(selPath), 'UX-006D1: js/ui/identity-selector.js exists');
-const selSrc = fs.existsSync(selPath) ? read(selPath) : '';
-// Comment-stripped view for content-negative guards, so the module's own
-// disclaimer comments (which legitimately mention "persistence", "State.identity",
-// etc. only to say it has NONE) never trip a check meant to catch real CODE.
-const selCode = selSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-// Registration: module-order.js + index.html mirror, loaded after shell-render.js.
-check(jsFiles.indexOf('ui/identity-selector.js') !== -1, 'UX-006D1: ui/identity-selector.js registered in module-order.js');
-check(indexHtml.includes('<script src="js/ui/identity-selector.js"></script>'), 'UX-006D1: ui/identity-selector.js mirrored in index.html');
-check(jsFiles.indexOf('ui/identity-selector.js') > jsFiles.indexOf('ui/shell-render.js'),
-  'UX-006D1: identity-selector loads after shell-render.js (shell mounts/binds/syncs it)');
+check(!fs.existsSync(selPath), 'UX-006D1/AFI-5b: js/ui/identity-selector.js is deleted');
+const afi5DevCode = afi5Code(afi5DevSrcA);
+const afi5PkgText = (fs.existsSync(pkgManifestPathA5) ? (JSON.parse(read(pkgManifestPathA5)).files || []).map((e) => e.path) : [])
+  .filter((x) => /\.(html|js|css)$/i.test(x)).map((x) => ({ f: 'package:' + x, t: fs.existsSync(path.join(afi5PkgRoot, x)) ? read(path.join(afi5PkgRoot, x)) : '' }));
+// Registration: gone from module-order.js, index.html and the package.
+check(jsFiles.indexOf('ui/identity-selector.js') === -1, 'UX-006D1/AFI-5b: ui/identity-selector.js is not registered in module-order.js');
+check(!/identity-selector/.test(indexHtml), 'UX-006D1/AFI-5b: index.html loads no identity-selector script');
+check(afi5PkgText.length > 0 && !afi5PkgText.some((x) => /identity-selector/.test(x.f)),
+  'UX-006D1/AFI-5b: the package manifest lists no identity-selector file');
 check(fs.existsSync(path.join(root, 'tools', 'verify-identity-selection-runtime.js')),
-  'UX-006D1: runtime harness present — tools/verify-identity-selection-runtime.js');
-// Public surface the shell consumes.
-check(/window\.renderIdentitySelectorHTML\b/.test(selSrc) && /window\.bindIdentitySelector\b/.test(selSrc) && /window\.syncIdentitySelector\b/.test(selSrc),
-  'UX-006D1: selector exposes renderIdentitySelectorHTML/bindIdentitySelector/syncIdentitySelector on window');
-// Shell wiring: mount in .brand, bind once, sync in place.
+  'UX-006D1: runtime harness present — tools/verify-identity-selection-runtime.js (production absence + development isolation)');
+// Public surface: no production or package code declares or exposes the selector functions.
+const afi5SelFnLeak = afi5ProdJs.concat(afi5PkgJs).filter((x) => /\b(renderIdentitySelectorHTML|bindIdentitySelector|syncIdentitySelector)\b/.test(x.c)).map((x) => x.f);
+check(afi5SelFnLeak.length === 0,
+  'UX-006D1/AFI-5b: no production or package code declares, exposes or calls renderIdentitySelectorHTML/bindIdentitySelector/syncIdentitySelector'
+  + (afi5SelFnLeak.length ? ' >> ' + afi5SelFnLeak.join(', ') : ''));
+// Shell wiring removed: no mount, bind or sync.
 const shellSrc = read(path.join(root, 'js', 'ui', 'shell-render.js'));
-check(/renderIdentitySelectorHTML\(\)/.test(shellSrc), 'UX-006D1: shell mounts the selector (renderIdentitySelectorHTML) in renderShell');
-check(/bindIdentitySelector\(/.test(shellSrc), 'UX-006D1: shell binds the selector (bindIdentitySelector) in bindShell');
-check(/syncIdentitySelector\(/.test(shellSrc), 'UX-006D1: shell syncs the selector (syncIdentitySelector) in syncShellState');
-// ADAPTER ISOLATION: the local-only enumeration/selection API is referenced ONLY by
-// identity.js (its definition) and the dedicated selector module. It must not spread.
-const adapterOffenders = jsFiles.filter(function(f){
-  if(f === 'core/identity.js' || f === 'ui/identity-selector.js') return false;
-  return /getAvailablePrincipals|selectPrincipal/.test(read(path.join(root, 'js', f)));
-});
+const shellCodeA5 = afi5Code(shellSrc);
+check(!/renderIdentitySelectorHTML/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell mounts no selector in renderShell');
+check(!/bindIdentitySelector/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell binds no selector in bindShell');
+check(!/syncIdentitySelector/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell syncs no selector in syncShellState');
+// Fixture/adapter isolation: no production or package code names the adapter or the fixtures.
+const adapterOffenders = afi5ProdJs.concat(afi5PkgJs).filter((x) => /\b(LocalIdentityProvider|FIXTURE_PRINCIPALS)\b/.test(x.c)).map((x) => x.f);
 check(adapterOffenders.length === 0,
-  'UX-006D1: LocalIdentityProvider selection API confined to identity.js + identity-selector.js' + (adapterOffenders.length ? (' >> VIOLATION: ' + adapterOffenders.join(', ')) : ''));
-// No default/implicit CEO and no auto-selection introduced by the selector.
-check(!/selectPrincipal\(\s*['"]user_ceo_fixture['"]\s*\)/.test(selCode),
-  'UX-006D1: selector never auto-selects CEO (no hardcoded CEO selection)');
-check(!/getCurrentUser\s*\(\s*\)\s*\|\|/.test(selCode),
-  'UX-006D1: selector never treats null as a privileged fallback (no getCurrentUser()|| default)');
-// Ephemeral: no persistence, no State.identity, no schema change from D1.
-check(!/localStorage|StorageAdapter|persist|tam_[a-z]/i.test(selCode),
-  'UX-006D1: selector introduces no persistence (no localStorage/StorageAdapter/persist/tam_* key)');
-check(!/State\.identity/.test(selCode), 'UX-006D1: selector creates no State.identity slice');
+  'UX-006D1/AFI-5b: no production or package code names LocalIdentityProvider or FIXTURE_PRINCIPALS (the adapter lives only in tools/dev)' + (adapterOffenders.length ? (' >> VIOLATION: ' + adapterOffenders.join(', ')) : ''));
+// No default/implicit principal: no fixture id anywhere in production or package code.
+const afi5FixtureIdLeak = afi5ProdJs.concat(afi5PkgJs).filter((x) => /user_ceo_fixture|user_employee_fixture|emp_fixture_self/.test(x.c)).map((x) => x.f);
+check(afi5FixtureIdLeak.length === 0,
+  'UX-006D1/AFI-5b: no production or package code carries a fixture principal id (no hardcoded CEO, no default selection)' + (afi5FixtureIdLeak.length ? ' >> ' + afi5FixtureIdLeak.join(', ') : ''));
+const afi5NullFallback = afi5ProdJs.filter((x) => /getCurrentUser\s*\(\s*\)\s*\|\|/.test(x.c)).map((x) => x.f);
+check(afi5NullFallback.length === 0,
+  'UX-006D1/AFI-5b: no production module treats a null principal as a privileged fallback (no getCurrentUser()|| default, anywhere)' + (afi5NullFallback.length ? ' >> ' + afi5NullFallback.join(', ') : ''));
+// Ephemeral: the development identity (the selector's successor) persists nothing.
+check(!!afi5DevCode && !/localStorage|sessionStorage|StorageAdapter|persist/i.test(afi5DevCode) && !/tam_[a-z]/.test(afi5DevCode),
+  'UX-006D1/AFI-5b: the development identity introduces no persistence (no storage/StorageAdapter/persist/tam_* key)');
+const afi5IdentitySlice = afi5ProdJs.filter((x) => /State\.identity/.test(x.c)).map((x) => x.f);
+check(afi5IdentitySlice.length === 0 && !/State\.identity/.test(afi5DevCode), 'UX-006D1/AFI-5b: no production module or development identity creates a State.identity slice');
 check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
   'UX-006D1: SCHEMA_VERSION remains 6 (no D1 migration)');
-// NOT authentication: no auth/session/credential vocabulary anywhere in the selector surface.
-check(!/\b(password|oauth|accessToken|refreshToken|sessionToken|session|credential|authenticate|authentication|log[- ]?in|sign[- ]?in|logout)\b/i.test(selSrc),
-  'UX-006D1: no authentication/session/login vocabulary in identity-selector.js');
-// Trust boundary stated in-source (anti-overclaim).
-check(/not\s+a\s+security\s+boundary/i.test(selSrc) && /spoofable/i.test(selSrc),
-  'UX-006D1: selector states the trust boundary (identity selection, not a security boundary)');
-// Uses the EXISTING render facade, not a new bootstrap lifecycle.
-check(/render\(\)/.test(selSrc), 'UX-006D1: selector refreshes through the existing render() facade');
-check(!/authz|can\(|ACTIONS|getScopedRecords/.test(selSrc),
-  'UX-006D1: selector wires no authorization/scope enforcement (reachability only; C2/GS untouched)');
+// The "Acting as" label: absent from production code and from every package text file.
+const afi5LabelLeak = afi5ProdJs.filter((x) => />Acting as</.test(x.c)).map((x) => x.f)
+  .concat(afi5PkgText.filter((x) => />\s*Acting as\s*</.test(x.t)).map((x) => x.f));
+check(afi5LabelLeak.length === 0, 'UX-006D1/AFI-5b: the "Acting as" label is absent from production code and every package file' + (afi5LabelLeak.length ? ' >> ' + afi5LabelLeak.join(', ') : ''));
+// Trust boundary stated in the successor (anti-overclaim).
+check(/NOT AUTHENTICATION/.test(afi5DevSrcA) && /spoofable/i.test(afi5DevSrcA),
+  'UX-006D1/AFI-5b: the development identity states the trust boundary (not authentication, spoofable)');
+// Selector DOM: no production or package file carries the selector's ids or classes.
+const afi5DomLeak = afi5ProdJs.filter((x) => /identityPrincipal(Select|Help|Rail|Context)|IDENTITY_(CONTEXT|RAIL)_ID|identity-(selector|select|context|rail)\b/.test(x.c)).map((x) => x.f)
+  .concat(afi5PkgText.filter((x) => /identityPrincipal(Select|Help|Rail|Context)|IDENTITY_(CONTEXT|RAIL)_ID|\.identity-(selector|select|context|rail)\b|class="identity-(selector|context|rail)/.test(/\.js$/.test(x.f) ? afi5Code(x.t) : x.t)).map((x) => x.f));
+check(afi5DomLeak.length === 0, 'UX-006D1/AFI-5b: no production or package file carries a selector, context-block or rail-chip id or class' + (afi5DomLeak.length ? ' >> ' + afi5DomLeak.join(', ') : ''));
+check(!!afi5DevCode && !/authz|can\(|ACTIONS|getScopedRecords/.test(afi5DevCode),
+  'UX-006D1/AFI-5b: the development identity wires no authorization or scope (identity only)');
 // R1 remains frozen: Global Search engine untouched by D1.
 check(!/identity-selector|renderIdentitySelectorHTML|selectPrincipal/.test(read(path.join(root, 'js', 'core', 'global-search.js')))
   && !/identity-selector|renderIdentitySelectorHTML|selectPrincipal/.test(read(path.join(root, 'js', 'ui', 'global-search-ui.js'))),
   'UX-006D1: Global Search modules untouched (R1 scope wiring remains deferred)');
-// D1 itself wires no enforcement; the identity-selector module never calls can().
-check(!/\bcan\(/.test(read(path.join(root, 'js', 'ui', 'identity-selector.js'))),
-  'UX-006D1: the selector module wires no authorization (can() lives at the domain boundary, not the selector)');
+// D1 wired no enforcement; with the selector deleted, no production module that could
+// have hosted it calls can() from a selection path (the dev identity checked above).
+check(!afi5ProdJs.some((x) => /identity-selector/.test(x.f)), 'UX-006D1/AFI-5b: no production file named identity-selector exists anywhere under js/');
 // Bootstrap untouched: no new identity lifecycle at boot.
 check(!/selectPrincipal|renderIdentitySelectorHTML|getAvailablePrincipals/.test(read(path.join(root, 'js', 'core', 'app-bootstrap.js'))),
   'UX-006D1: app-bootstrap.js introduces no boot-time principal selection');
@@ -5114,40 +5153,45 @@ check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'const
    presentation surfaces must be present, and the frozen semantics beneath them must
    be provably unmoved. BEHAVIOUR is proven by
    tools/verify-ux006d2-presentation-runtime.js.
+   AFI-5b authorized revision (B-3a/B-3b): the selector's context block and rail chip were
+   selector presentation and are REMOVED with it. Each former presence guard below is
+   replaced by an absence guard over production code, shell.css and the package; the
+   semantics they displayed (derived workspace, no stored principal, no default principal)
+   are guarded on the modules that remain.
    ============================================================ */
 console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
 {
-  const d2Sel = read(path.join(root, 'js', 'ui', 'identity-selector.js'));
-  const d2SelCode = d2Sel.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
   const d2Shell = read(path.join(root, 'css', 'shell.css'));
   const d2Comp = read(path.join(root, 'css', 'components.css'));
   const d2Stab = read(path.join(root, 'js', 'core', 'stabilization.js'));
+  const d2Ws = afi5Code(read(path.join(root, 'js', 'core', 'workspace.js')));
+  const d2PkgCss = afi5PkgText.filter((x) => /\.css$/.test(x.f)).map((x) => x.t).join('\n');
 
-  // --- the presentation surfaces exist ---
-  check(/id="\s*'\s*\+\s*IDENTITY_CONTEXT_ID|IDENTITY_CONTEXT_ID/.test(d2SelCode),
-    'UX-006D2: the workspace/principal context block is rendered by the selector');
-  check(/IDENTITY_RAIL_ID/.test(d2SelCode),
-    'UX-006D2: the collapsed-rail principal chip is rendered by the selector');
-  check(/\.identity-context\{/.test(d2Shell) && /\.identity-rail\{/.test(d2Shell),
-    'UX-006D2: context block and rail chip are styled in css/shell.css');
-  check(/data-principal-state/.test(d2SelCode),
-    'UX-006D2: presentation state is exposed as a deterministic attribute');
+  // --- the presentation surfaces are removed ---
+  check(!afi5ProdJs.some((x) => /IDENTITY_CONTEXT_ID|identityPrincipalContext/.test(x.c)),
+    'UX-006D2/AFI-5b: no production code renders the workspace/principal context block');
+  check(!afi5ProdJs.some((x) => /IDENTITY_RAIL_ID|identityPrincipalRail/.test(x.c)),
+    'UX-006D2/AFI-5b: no production code renders the collapsed-rail principal chip');
+  check(!/\.identity-(context|rail|selector|select)\b/.test(d2Shell + d2Comp) && !!d2PkgCss && !/\.identity-(context|rail|selector|select)\b/.test(d2PkgCss),
+    'UX-006D2/AFI-5b: no context-block, rail-chip or selector rule in css/shell.css, css/components.css or the package CSS');
+  check(!afi5ProdJs.some((x) => /data-principal-state/.test(x.c)),
+    'UX-006D2/AFI-5b: no production code emits the selector presentation-state attribute');
 
   // --- the context is DERIVED, never stored ---
-  check(/getCurrentWorkspace/.test(d2SelCode),
-    'UX-006D2: workspace context is read from the frozen UX-006B derived selector');
-  check(!/State\.identity|State\.workspace|State\.principal/.test(d2SelCode),
-    'UX-006D2: no principal/workspace presentation state is stored in State');
-  check(!/localStorage|StorageAdapter/.test(d2SelCode),
-    'UX-006D2: presentation persists nothing');
-  check(!/getScopedRecords/.test(d2SelCode),
-    'UX-006D2: the selector performs no scope query (labels only — R1 remains deferred)');
+  check(/function getCurrentWorkspace\(\)/.test(d2Ws) && /getCurrentUser\(\)/.test(d2Ws),
+    'UX-006D2: the workspace is still derived from the current principal by the frozen UX-006B selector');
+  check(!afi5ProdJs.some((x) => /State\.identity|State\.workspace|State\.principal/.test(x.c)),
+    'UX-006D2/AFI-5b: no principal/workspace state is stored in State by any production module');
+  check(!/localStorage|StorageAdapter/.test(d2Ws),
+    'UX-006D2: workspace derivation persists nothing');
+  check(!afi5ProdJs.some((x) => /getScopedRecords/.test(x.c) && /identity/i.test(x.f)),
+    'UX-006D2/AFI-5b: no identity module performs a scope query');
 
-  // --- D1 remains frozen underneath D2 ---
-  check(/>Acting as</.test(d2Sel), 'UX-006D2: the frozen "Acting as" label is unchanged');
-  check(/selectPrincipal/.test(d2SelCode) && !/selectPrincipal\(\s*['"]user_ceo_fixture['"]\s*\)/.test(d2SelCode),
-    'UX-006D2: selection semantics unchanged (still no default/implicit CEO)');
-  check(/render\(\)/.test(d2SelCode),
+  // --- D1 is removed underneath D2 ---
+  check(!afi5ProdJs.some((x) => />Acting as</.test(x.c)), 'UX-006D2/AFI-5b: the "Acting as" label is absent from production code');
+  check(!afi5ProdJs.some((x) => /selectPrincipal|user_ceo_fixture/.test(x.c)),
+    'UX-006D2/AFI-5b: no production selection and no default/implicit CEO anywhere');
+  check(/function render\(\)\{/.test(afi5Code(read(path.join(root, 'js', 'ui', 'shell-render.js')))),
     'UX-006D2: the existing render() facade is still the only refresh path');
 
   // --- the denied affordance: marked, never hidden, never re-decided ---
@@ -5233,8 +5277,10 @@ console.log('== UX-006D3 — CROSS-SURFACE PRESENTATION CONSISTENCY ==');
   // D1 and D2 stay frozen underneath D3.
   check(/data-authz-denied="1"/.test(read(path.join(root, 'js', 'core', 'stabilization.js'))),
     'UX-006D3: the D2 availability marker is unchanged');
-  check(/IDENTITY_CONTEXT_ID|IDENTITY_RAIL_ID/.test(read(path.join(root, 'js', 'ui', 'identity-selector.js'))),
-    'UX-006D3: the D2 principal/workspace presentation surfaces are unchanged');
+  // AFI-5b authorized revision: the D2 surfaces were selector presentation and are removed.
+  check(!fs.existsSync(path.join(root, 'js', 'ui', 'identity-selector.js'))
+    && !afi5ProdJs.concat(afi5PkgJs).some((x) => /IDENTITY_CONTEXT_ID|IDENTITY_RAIL_ID/.test(x.c)),
+    'UX-006D3/AFI-5b: the D2 principal/workspace presentation surfaces are removed (no context/rail id in production or package code)');
 }
 
 /* ============================================================
@@ -5582,16 +5628,21 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
     'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1/AFI-4c1/AFI-4g: /api/ paths are named only by the session modules; audit-api.js names only the two BF-4g audit reads; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve), payroll-api.js only the nine BF-4c1/BF-4c2 Payroll routes and (AFI-4d) the nine BF-4d Supplemental routes');
-  check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && /if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return LocalIdentityProvider;/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
-    'AFI-1/AFI-2: LocalIdentityProvider is still the default provider (AUTH_MODE stays LOCAL, owner decision D1)');
+  // AFI-5b authorized revision (owner decisions D-AFI5-1..3, design Rev 1.2): the shipped mode
+  // is SESSION and the identity has no LOCAL fixture provider; SESSION dispatch comes first and
+  // never reads the test seam. Was: LocalIdentityProvider the default (AUTH_MODE LOCAL, D1).
+  check(/const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && /if\(AUTH_MODE === AUTH_MODES\.SESSION && typeof SessionIdentityProvider !== 'undefined'\) return SessionIdentityProvider;\s*if\(AUTH_MODE === AUTH_MODES\.LOCAL\) return testIdentityProvider \|\| NO_IDENTITY_PROVIDER;/.test(read(path.join(root, 'js', 'core', 'identity.js')))
+    && !/LocalIdentityProvider/.test(afi5Code(read(path.join(root, 'js', 'core', 'identity.js')))),
+    'AFI-1/AFI-2/AFI-5b: SessionIdentityProvider is the shipped provider (AUTH_MODE SESSION); LOCAL has no fixture provider');
   check(/u\.employeeId !== null/.test(read(path.join(root, 'js', 'core', 'identity.js'))),
     'AFI-1: the identity contract accepts a server CEO employee binding (absent / null / non-empty string)');
 }
 
 // ===== AFI-2 — AUTHENTICATED BOOT (explicit mode, SESSION boot firewall) =====
 // STRUCTURE only; behaviour is proven by tools/verify-auth-boot-runtime.js. Pins: one
-// explicit source constant that ships LOCAL; LOCAL boot unchanged; SESSION boot checks the
+// explicit source constant (shipped LOCAL until AFI-5b, SESSION since); LOCAL boot (development
+// only since AFI-5b) unchanged once a development identity is ready; SESSION boot checks the
 // session first and never loads local state, the shell or "Acting as"; login/logout only
 // through AuthBoot; no persistence, logging or environment inference in the auth modules;
 // the test-only auth stub stays out of the package.
@@ -5609,19 +5660,22 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
   check(jsFiles.indexOf('core/auth-boot.js') === iBoot - 2 && jsFiles.indexOf('ui/auth-view.js') === iBoot - 1 && iBoot === jsFiles.length - 1
     && indexHtml.includes('<script src="js/core/auth-boot.js"></script>\n<script src="js/ui/auth-view.js"></script>\n<script src="js/core/app-bootstrap.js"></script>'),
     'AFI-2: auth-boot.js and auth-view.js load immediately before app-bootstrap.js (manifest and index.html)');
-  // D1 — one explicit source constant, shipped LOCAL.
+  // D1 — one explicit source constant. AFI-5b authorized revision: shipped SESSION (was LOCAL).
   check(/const AUTH_MODES = Object\.freeze\(\{ LOCAL: 'local', SESSION: 'session' \}\);/.test(constCode)
-    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(constCode),
-    'AFI-2: AUTH_MODES is exactly { LOCAL, SESSION } and the shipped AUTH_MODE is LOCAL');
+    && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(constCode),
+    'AFI-2/AFI-5b: AUTH_MODES is exactly { LOCAL, SESSION } and the shipped AUTH_MODE is SESSION');
   const modeAssign = jsFiles.concat(['boot/theme-boot.js']).filter((f) => /\bAUTH_MODE\s*=[^=]/.test(code(rd(f))));
   check(modeAssign.join() === 'core/constants.js', 'AFI-2: AUTH_MODE is assigned exactly once, in constants.js' + (modeAssign.join() === 'core/constants.js' ? '' : ' >> ' + modeAssign.join(', ')));
   [['core/app-bootstrap.js', bootCode], ['core/auth-boot.js', abCode], ['ui/auth-view.js', avCode], ['core/constants.js', constCode]].forEach(([name, c]) => {
     check(!/\blocation\b|hostname|document\s*\.\s*cookie|localStorage|sessionStorage|StorageAdapter|URLSearchParams|navigator\s*\.\s*onLine/.test(c),
       'AFI-2: ' + name + ' infers nothing from the URL, hostname, cookies, storage or connectivity');
   });
-  // LOCAL boot unchanged; SESSION boot starts AuthBoot and nothing else.
-  check(/if\(AUTH_MODE === AUTH_MODES\.LOCAL\)\{\s*await loadState\(\);\s*applyTheme\(\);\s*installGlobalUIHandlers\(\);\s*render\(\);\s*maybeShowFirstRunChoice\(\);\s*return;\s*\}\s*AuthBoot\.start\(\);\s*\}\)\(\);/.test(bootCode),
-    'AFI-2: app-bootstrap.js keeps the LOCAL boot sequence verbatim and only starts AuthBoot otherwise');
+  // LOCAL boot unchanged once ready; SESSION boot starts AuthBoot and nothing else.
+  // AFI-5b authorized revision (D-01): the LOCAL branch first evaluates localDevReady() once;
+  // not ready -> the one fixed static notice through textContent and return (no loadState,
+  // no AuthBoot, no network); ready -> the unchanged boot order.
+  check(/if\(AUTH_MODE === AUTH_MODES\.LOCAL\)\{\s*if\(!localDevReady\(\)\)\{\s*const mount = document\.getElementById\('app'\);\s*if\(mount\) mount\.textContent = 'Development identity not installed';\s*return;\s*\}\s*await loadState\(\);\s*applyTheme\(\);\s*installGlobalUIHandlers\(\);\s*render\(\);\s*maybeShowFirstRunChoice\(\);\s*return;\s*\}\s*AuthBoot\.start\(\);\s*\}\)\(\);/.test(bootCode),
+    'AFI-2/AFI-5b: app-bootstrap.js guards LOCAL with localDevReady() (static notice + return when not ready), keeps the ready LOCAL boot order verbatim and only starts AuthBoot otherwise');
   check(/function render\(\)\{\s*closeFloatingMenu\(\);\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\)\{\s*if\(typeof renderAuthView === 'function'\) renderAuthView\(\);\s*return;\s*\}/.test(shellCode),
     'AFI-2: render() shows only the auth views outside LOCAL mode until a workspace is granted');
   check(/function openGlobalSearch\(\)\{\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\) return;/.test(gsCode),
@@ -5999,9 +6053,9 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
   // (BF-4d Supplemental Payroll). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'BF-4a3: no migration of its own (head 0035 after BF-4f), ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'BF-4a3: no migration of its own (head 0035 after BF-4f), ACTIONS stay 21, AUTH_MODE SESSION since AFI-5b');
 }
 
 // ===== AFI-4a3 — CEO SESSION ACCOUNT ADMINISTRATION =====
@@ -6261,9 +6315,9 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4b1: frontend only — migration head 0035 after BF-4f, ACTIONS stay 21, AUTH_MODE stays LOCAL');
+    'AFI-4b1: frontend only — migration head 0035 after BF-4f, ACTIONS stay 21, AUTH_MODE SESSION since AFI-5b');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-overtime-runtime.js')), 'AFI-4b1: runtime harness present — tools/verify-session-overtime-runtime.js');
 }
 
@@ -6313,8 +6367,8 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   check(/self::onlyKeys\(\$json, \['id', 'expectedVersion', 'expectedAmount'\]\);/.test(input),
     'BF-4b2: approve accepts exactly id, expectedVersion and expectedAmount (no salary, hours, rate, method, status or employee)');
   check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && !/overtime\.approve/.test(read(path.join(root, 'js', 'core', 'authz.js')) + read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
-    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4b2: ACTIONS stay 21 (no overtime.approve), AUTH_MODE stays LOCAL');
+    && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4b2: ACTIONS stay 21 (no overtime.approve), AUTH_MODE SESSION since AFI-5b');
   // AFI-4b2 authorized revision: the frontend counterpart now exists. Was: "backend only — the
   // frontend overtime client knows no Approved, approve, valuation or amount (AFI-4b2 not started)"
   // and "the production package is unchanged (97 files, digest c5d69dc1…)". BF-4b2 itself still
@@ -6330,9 +6384,9 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   // AFI-4g authorized revision: AFI-4g adds exactly its three Audit modules (100 → 103 files); the 100
   // are still the 97 plus the three AFI-4c1 modules. Was: 100 files.
   const AFI4G_MODULES = ['js/core/audit-api.js', 'js/core/session-audit.js', 'js/ui/session-audit-view.js'];
-  check(Array.isArray(manifest.files) && manifest.files.length === 103 && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
+  check(Array.isArray(manifest.files) && manifest.files.length === 102 && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
     && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
-    'BF-4b2 + AFI-4b2 + AFI-4c1 + AFI-4g: AFI-4b2 added no production module; the package now holds 103 files — the 97, exactly the three AFI-4c1 Payroll modules and exactly the three AFI-4g Audit modules');
+    'BF-4b2 + AFI-4b2 + AFI-4c1 + AFI-4g: AFI-4b2 added no production module; the package now holds 103 files, 102 since AFI-5b — the 97, exactly the three AFI-4c1 Payroll modules and exactly the three AFI-4g Audit modules');
   const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
   check(deployRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && deployRule.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))) && deployRule.test(read(path.join(root, 'ARCHITECTURE.md'))),
     'BF-4b2: the deployment dependency is documented — BF-4b2 and AFI-4b2 must be deployed together (AI_CONTEXT, ARCHITECTURE, DEPLOYMENT)');
@@ -6442,10 +6496,10 @@ console.log('== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL ==');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
     && (code(rd('transport/api-client.js')).match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4,
-    'AFI-4b2: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE LOCAL, the one D-AFI4b1-3 body-key exception unchanged');
+    'AFI-4b2: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE SESSION since AFI-5b, the one D-AFI4b1-3 body-key exception unchanged');
 }
 
 // ===== BF-4c1 — PAYROLL PLAN FOUNDATION (backend only) =====
@@ -6506,8 +6560,8 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
     && /public const OVERTIME_FIELDS = \['id', 'hours', 'amount'\];/.test(srv('src/Payroll/PayrollView.php')),
     'BF-4c1: the plan projection is exactly thirteen fields and the contributing overtime exactly { id, hours, amount }');
   check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
-    && /'payroll\.manage':\s+'payrollPlan'/.test(read(path.join(root, 'js', 'core', 'authz.js'))) && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4c1: ACTIONS stay 21 (payroll reuses payroll.manage on payrollPlan), AUTH_MODE stays LOCAL');
+    && /'payroll\.manage':\s+'payrollPlan'/.test(read(path.join(root, 'js', 'core', 'authz.js'))) && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4c1: ACTIONS stay 21 (payroll reuses payroll.manage on payrollPlan), AUTH_MODE SESSION since AFI-5b');
   const jsFiles = [];
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
   walkJs(path.join(root, 'js'));
@@ -6519,8 +6573,8 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   // AFI-4c1 authorized revision: BF-4c1 changed no package (it stayed 97 files, digest 2d826d4d…);
   // AFI-4c1 then added its three modules. Was: 97 files at digest 2d826d4d….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 103 && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions === 21,
-    'BF-4c1 + AFI-4c1: BF-4c1 changed no package; the package is now the AFI-4c1 one plus AFI-4g (103 files, no longer 2d826d4d…), ACTIONS 21');
+  check(manifest.files.length === 102 && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions === 21,
+    'BF-4c1 + AFI-4c1: BF-4c1 changed no package; the package is now the AFI-4c1 one plus AFI-4g (103 files, 102 since AFI-5b, no longer 2d826d4d…), ACTIONS 21');
   check(['Unit/PayrollCalculationTest.php', 'Unit/PayrollDomainTest.php', 'Http/PayrollRoutingTest.php', 'Db/PayrollSchemaTest.php', 'Db/PayrollWorkflowTest.php', 'Db/PayrollConcurrencyTest.php', 'Support/payroll-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))),
     'BF-4c1: the calculation, domain, routing, schema, workflow and concurrency tests exist');
@@ -6613,9 +6667,9 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4c1: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE LOCAL');
+    'AFI-4c1: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE SESSION since AFI-5b');
   const docs = read(path.join(root, 'AI_CONTEXT.md')) + read(path.join(root, 'ARCHITECTURE.md'));
   check(['D-AFI4c1-1 = A', 'D-AFI4c1-2 = A', 'D-AFI4c1-3 = A', 'D-AFI4c1-4 = A'].every((d) => docs.indexOf(d) !== -1) && /AFI-4c1/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
     'AFI-4c1: the four owner decisions are recorded (AI_CONTEXT, ARCHITECTURE) and the deployment note exists (DEPLOYMENT)');
@@ -6683,10 +6737,10 @@ console.log('== BF-4c2 — PAYROLL COMMIT + EMPLOYEE SELF-READ (BACKEND ONLY) ==
   // AFI-4c2 authorized revision: BF-4c2 left the package unchanged (100 files, a0a95b13…); AFI-4c2
   // changed four modules and so its digest. Was: digest a0a95b13….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 103 && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions === 21,
-    'BF-4c2 + AFI-4c2: BF-4c2 changed no package; the package is now the AFI-4c2 one plus AFI-4g (103 files, no longer a0a95b13…), ACTIONS 21');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4c2: ACTIONS stay 21 (commit reuses payroll.manage), AUTH_MODE stays LOCAL');
+  check(manifest.files.length === 102 && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions === 21,
+    'BF-4c2 + AFI-4c2: BF-4c2 changed no package; the package is now the AFI-4c2 one plus AFI-4g (103 files, 102 since AFI-5b, no longer a0a95b13…), ACTIONS 21');
+  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4c2: ACTIONS stay 21 (commit reuses payroll.manage), AUTH_MODE SESSION since AFI-5b');
   check(['Unit/PayrollCommitTest.php', 'Db/PayrollCommitTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
     && /'commit'/.test(srv('tests/Support/payroll-worker.php')) && /C8 race/.test(srv('tests/Db/PayrollConcurrencyTest.php')),
     'BF-4c2: the commit unit and database tests and the C1–C8 concurrency campaign exist');
@@ -6739,13 +6793,13 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 103 && manifest.actions === 21,
-    'AFI-4c2: no new production module — the package keeps 100 files (103 with the three AFI-4g Audit modules), ACTIONS 21');
+  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 && manifest.actions === 21,
+    'AFI-4c2: no new production module — the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'AFI-4c2: frontend only — migration head 0035 after BF-4f, AUTH_MODE LOCAL');
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'AFI-4c2: frontend only — migration head 0035 after BF-4f, AUTH_MODE SESSION since AFI-5b');
   const docRule = /D-AFI4c2-1 = A/;
   check(docRule.test(read(path.join(root, 'AI_CONTEXT.md'))) && /AFI-4c2/.test(read(path.join(root, 'ARCHITECTURE.md'))) && /AFI-4c2/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
     'AFI-4c2: documented — the decisions (AI_CONTEXT), the design (ARCHITECTURE) and the deployment note (DEPLOYMENT)');
@@ -6826,8 +6880,8 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
     'BF-4d: the one exact overtime sum (PayrollCalculation::overtime) for generate, eligibility and commit revalidation; READ COMMITTED for generate and commit only; no float, valuation, posting or paid state');
   check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
     && /self::SupplementalManage => Rule::CeoOnly,/.test(srv('src/Policy/Action.php')) && /self::SupplementalManage => null,/.test(srv('src/Policy/Action.php'))
-    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4d: ACTIONS stay 21 — the existing supplemental.manage, CEO-only and record-free; AUTH_MODE stays LOCAL');
+    && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4d: ACTIONS stay 21 — the existing supplemental.manage, CEO-only and record-free; AUTH_MODE SESSION since AFI-5b');
   const jsFiles = [];
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
   walkJs(path.join(root, 'js'));
@@ -6840,8 +6894,8 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
   // pinned in the AFI-4d section. Was: 100 files at digest 16e06b7e… (BF-4d left the package unchanged).
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 103 && manifest.actions === 21,
-    'BF-4d/AFI-4d: the production package keeps 100 files (103 with the three AFI-4g Audit modules) and ACTIONS 21 (BF-4d added no frontend; AFI-4d added no module)');
+  check(manifest.files.length === 102 && manifest.actions === 21,
+    'BF-4d/AFI-4d: the production package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector) and ACTIONS 21 (BF-4d added no frontend; AFI-4d added no module)');
   check(['Unit/SupplementalDomainTest.php', 'Http/SupplementalRoutingTest.php', 'Db/SupplementalSchemaTest.php', 'Db/SupplementalWorkflowTest.php', 'Db/SupplementalConcurrencyTest.php', 'Support/supplemental-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /C8 race/.test(srv('tests/Db/SupplementalConcurrencyTest.php')),
     'BF-4d: the domain, routing, schema, workflow and C1–C8 concurrency tests exist');
@@ -6951,14 +7005,14 @@ console.log('== AFI-4d — SESSION SUPPLEMENTAL PAYROLL ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') < mods.indexOf('core/session-payroll.js') && mods.indexOf('core/session-payroll.js') < mods.indexOf('ui/session-payroll-view.js')
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 103 && pkg.actions === 21,
+    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 && pkg.actions === 21,
     // AFI-4e authorized revision: the package changed with AFI-4e (frontend only) and its new digest
     // is pinned in the AFI-4e section. Was: digest 7768d72b… (AFI-4d).
-    'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules), ACTIONS 21 (its digest: the AFI-4e section)');
+    'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4e section)');
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'AFI-4d: frontend only — migration head 0035 after BF-4f, AUTH_MODE LOCAL');
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'AFI-4d: frontend only — migration head 0035 after BF-4f, AUTH_MODE SESSION since AFI-5b');
   const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js'));
   check(['S. ', 'S1. ', 'S2. ', 'S3. ', 'S4. ', 'S5. ', 'S6. ', 'S7. ', 'S8. '].every((t) => harness.indexOf("'" + t) !== -1) && /\/__stub\/fail-next-supplemental-commit/.test(read(path.join(root, 'tools', 'serve-auth-stub.js'))),
     'AFI-4d: the Payroll runtime harness proves Supplemental (sections S–S8) and the auth stub models BF-4d for the browser');
@@ -7038,8 +7092,8 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   check(!/->\s*finance\s*\(\s*\)|FinancePosting/.test(noComments(srv('src/Payroll/PayrollService.php')) + noComments(srv('src/Supplemental/SupplementalService.php')) + noComments(srv('src/Data/Payroll/PayrollStore.php')) + noComments(srv('src/Data/Supplemental/SupplementalStore.php'))),
     'BF-4e: Commit never posts — the Payroll and Supplemental code never call Finance (an explicit command per obligation, D-FIN-3 = A)');
   check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
-    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4e: ACTIONS stay 21 — no Finance posting Action; AUTH_MODE stays LOCAL');
+    && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4e: ACTIONS stay 21 — no Finance posting Action; AUTH_MODE SESSION since AFI-5b');
   const jsFiles = [];
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkJs(p); else if (e.name.endsWith('.js')) jsFiles.push(p); } };
   walkJs(path.join(root, 'js'));
@@ -7050,8 +7104,8 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   // route; the package unchanged at digest 7768d72b… (BF-4e backend only).
   check(jsFiles.filter((f) => /\/api\/finance/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 103 && manifest.actions === 21,
-    'BF-4e/AFI-4e: exactly one frontend module — core/payroll-api.js (AFI-4e FinancePostingApi) — names a Finance posting route; the package keeps 100 files (103 with the three AFI-4g Audit modules), ACTIONS 21');
+    && manifest.files.length === 102 && manifest.actions === 21,
+    'BF-4e/AFI-4e: exactly one frontend module — core/payroll-api.js (AFI-4e FinancePostingApi) — names a Finance posting route; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   check(['Unit/FinancePostingDomainTest.php', 'Http/FinanceRoutingTest.php', 'Db/FinancePostingSchemaTest.php', 'Db/FinancePostingWorkflowTest.php', 'Db/FinancePostingConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /F6 race/.test(srv('tests/Db/FinancePostingConcurrencyTest.php')),
     'BF-4e: the domain, routing, schema, workflow and F1–F6 concurrency tests exist');
@@ -7164,13 +7218,13 @@ console.log('== AFI-4e — SESSION FINANCE POSTING (CEO) ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 103 && pkg.actions === 21
+  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 && pkg.actions === 21
     && pkg.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
-    'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules), ACTIONS 21 (its digest: the AFI-4f section)');
+    'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
-  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
-    'AFI-4e: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE LOCAL');
+    'AFI-4e: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE SESSION since AFI-5b');
   const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js'));
   check(['F. ', 'F1. ', 'F2. ', 'F3. ', 'F4. ', 'F5. ', 'F6. ', 'F7. ', 'F8. ', 'F9. '].every((t) => harness.indexOf("'" + t) !== -1) && /\/__stub\/fail-next-posting/.test(read(path.join(root, 'tools', 'serve-auth-stub.js'))),
     'AFI-4e: the Payroll runtime harness proves Finance posting (sections F–F9) and the auth stub models BF-4e for the browser');
@@ -7261,8 +7315,8 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
     'BF-4f: posting, Payroll and Supplemental never execute — an execution is an explicit command per posting (no automatic or batch execution)');
   check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
     && /case FinanceExecute = 'finance\.execute';/.test(read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
-    && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4f: ACTIONS stay 21 — the existing finance.execute, no new Action; AUTH_MODE stays LOCAL');
+    && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4f: ACTIONS stay 21 — the existing finance.execute, no new Action; AUTH_MODE SESSION since AFI-5b');
   const jsFiles = [];
   const walkJs = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) walkJs(q); else if (e.name.endsWith('.js')) jsFiles.push(q); } };
   walkJs(path.join(root, 'js'));
@@ -7275,8 +7329,8 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   check(exeFiles.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
     && jsFiles.filter((f) => /finance-executions/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 103 && manifest.actions === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
-    'BF-4f/AFI-4f: exactly the three SESSION Payroll modules name a Finance execution and only core/payroll-api.js its routes; the package keeps 100 files (103 with the three AFI-4g Audit modules), ACTIONS 21 (its digest: the AFI-4f section)');
+    && manifest.files.length === 102 && manifest.actions === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    'BF-4f/AFI-4f: exactly the three SESSION Payroll modules name a Finance execution and only core/payroll-api.js its routes; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   check(['Unit/FinanceExecutionDomainTest.php', 'Http/FinanceExecutionRoutingTest.php', 'Db/FinanceExecutionSchemaTest.php', 'Db/FinanceExecutionWorkflowTest.php', 'Db/FinanceExecutionConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /X5 race/.test(srv('tests/Db/FinanceExecutionConcurrencyTest.php')) && /'execute' => '\/api\/finance-executions\/execute'/.test(srv('tests/Support/finance-worker.php')),
     'BF-4f: the domain, routing, schema, workflow and X1–X5 concurrency tests exist');
@@ -7412,12 +7466,12 @@ console.log('== AFI-4f — SESSION RECORD PAYMENT (CEO) ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added exactly its three Audit modules (86 → 89, 100 → 103 files) and so
   // changed the digest (its digest: the AFI-4g section). Was: 86 modules, 100 files at digest d030d544….
-  check(mods.length === new Set(mods).size && mods.length === 89 && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 103 && pkg.actions === 21
+  check(mods.length === new Set(mods).size && mods.length === 88 && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 && pkg.actions === 21
     && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
-    'AFI-4f: no new production module (module order and index.html unchanged by AFI-4f); the package kept 100 files at digest d030d544… until AFI-4g (now 103 files, its digest: the AFI-4g section), ACTIONS 21');
-  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql' && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    'AFI-4f: no new production module (module order and index.html unchanged by AFI-4f); the package kept 100 files at digest d030d544… until AFI-4g (now 103 files, 102 since AFI-5b, its digest: the AFI-4g section), ACTIONS 21');
+  check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql' && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /case FinanceExecute = 'finance\.execute';/.test(read(path.join(root, 'server', 'src', 'Policy', 'Action.php'))),
-    'AFI-4f: frontend only — migration head 0035 (BF-4f), ACTIONS 21 (the existing finance.execute), AUTH_MODE LOCAL');
+    'AFI-4f: frontend only — migration head 0035 (BF-4f), ACTIONS 21 (the existing finance.execute), AUTH_MODE SESSION since AFI-5b');
   const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js')), stub = read(path.join(root, 'tools', 'serve-auth-stub.js'));
   check(['X. ', 'X1. ', 'X2. ', 'X3. ', 'X4. ', 'X5. ', 'X6. ', 'X7. ', 'X8. ', 'X9. '].every((t) => harness.indexOf("'" + t) !== -1)
     && /\/__stub\/fail-next-execution/.test(stub) && /p === '\/api\/finance-executions\/execute' && req\.method === 'POST'/.test(stub) && /p === '\/api\/finance-executions' && req\.method === 'GET'/.test(stub),
@@ -7489,11 +7543,11 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
     'OPS-1: no route, controller or kernel names a backup — no HTTP surface (restore stays operator-only, OPS-2)');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql'
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-1 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 103 && pkg.actions === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
-    'OPS-1: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE LOCAL, and the package unchanged by OPS-1 (100 files at digest d030d544… until AFI-4g)');
+    && pkg.files.length === 102 && pkg.actions === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    'OPS-1: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-1 (100 files at digest d030d544… until AFI-4g)');
   check(['Unit/BackupFormatTest.php', 'Unit/BackupFileTest.php', 'Unit/BackupCliTest.php', 'Db/BackupCreateTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
     && /continuity end to end/.test(srv('tests/Db/BackupCreateTest.php')) && /rows committed while the backup runs are not in it/.test(srv('tests/Db/BackupCreateTest.php')),
     'OPS-1: the format, file, CLI and MariaDB backup tests exist (snapshot, continuity, refusals, failure, retention)');
@@ -7563,11 +7617,11 @@ console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==')
     'OPS-2: no route, controller, kernel or new CLI names a restore — operator tooling only, no HTTP surface');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).length === 35
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-2 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 103 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
-    'OPS-2: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE LOCAL, and the package unchanged by OPS-2 (100 files at digest d030d544… until AFI-4g)');
+    && pkg.files.length === 102 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    'OPS-2: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-2 (100 files at digest d030d544… until AFI-4g)');
   const dbTest = srv('tests/Db/BackupRestoreTest.php');
   check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'BackupRestoreTest.php')) && ['round trip: every backed-up row returns exactly', 'any one row in any of the 17 classified tables',
     'pass 2 never imports a file changed after pass 1', 'a killed restore process rolls back', 'after commit a fresh connection proves the target again', 'production: only a production backup',
@@ -7630,10 +7684,10 @@ console.log('== BF-4g — CEO AUDIT READ API (BACKEND ONLY) ==');
   // changed with it (103 files; its digest: the AFI-4g section). BF-4g itself stays backend only. Was:
   // no frontend module names an audit route; the package unchanged at 100 files, digest d030d544….
   check(jsFiles.filter((f) => /audit-events/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/audit-api.js'
-    && pkg.files.length === 103 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
+    && pkg.files.length === 102 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
     && fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).length === 35
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'BF-4g: backend only — its one frontend reference is AFI-4g\'s core/audit-api.js, the package changed only with AFI-4g (103 files, no longer d030d544…), no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE LOCAL');
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'BF-4g: backend only — its one frontend reference is AFI-4g\'s core/audit-api.js, the package changed only with AFI-4g (103 files, 102 since AFI-5b, no longer d030d544…), no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b');
   const unit = srv('tests/Unit/AuditReadTest.php'), http = srv('tests/Http/AuditRoutingTest.php'), db = srv('tests/Db/AuditReadTest.php'), hostile = srv('tests/Db/AuditHostileTest.php');
   check(['leap February: 29 days', 'December → January rollover', 'the window does not depend on the PHP default timezone', 'an unreadable stored timestamp fails the row'].every((t) => unit.includes(t))
     && ['no session: both audit reads are 401', 'an Employee is 403 on both reads', 'no audit write, correction, deletion, export or authentication-log route'].every((t) => http.includes(t))
@@ -7736,17 +7790,22 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   // Package, module order, invariants.
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(mods.length === 89 && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 103 && pkg.actions === 21
-    && pkg.packageDigest === '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4',
-    'AFI-4g: exactly three new production modules (89 modules); the package holds 103 files at digest 097f6b50…, ACTIONS 21');
+  check(mods.length === 88 && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 && pkg.actions === 21
+    && pkg.packageDigest !== '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4', // AFI-5b: historical (its digest: the AFI-5b section)
+    'AFI-4g: exactly three new production modules (89 modules, 88 since AFI-5b); the package held 103 files at digest 097f6b50… (102 since AFI-5b, its digest pinned in the AFI-5b section), ACTIONS 21');
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql'
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && !/'audit|audit\./.test((/const ACTIONS = Object\.freeze\(\{[\s\S]*?\}\);/.exec(read(path.join(root, 'js', 'core', 'authz.js'))) || [''])[0]),
-    'AFI-4g: frontend only — migration head 0035, ACTIONS 21 (no audit Action or permission), AUTH_MODE LOCAL');
+    'AFI-4g: frontend only — migration head 0035, ACTIONS 21 (no audit Action or permission), AUTH_MODE SESSION since AFI-5b');
   // Test-only tooling: the harness, the stub's audit model, the loopback E2E front.
   const proxy = read(path.join(root, 'tools', 'serve-e2e-proxy.js'));
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-audit-runtime.js')) && /\/api\/audit-events/.test(read(path.join(root, 'tools', 'serve-auth-stub.js')))
-    && /\.listen\(port, '127\.0\.0\.1'/.test(proxy) && /host: '127\.0\.0\.1'/.test(proxy) && /in memory only/.test(proxy) && /does not satisfy the SDR-0002 §22/.test(proxy)
+    && /\.listen\(port, '127\.0\.0\.1'/.test(proxy) && /host: '127\.0\.0\.1'/.test(proxy) && /does not satisfy the SDR-0002 §22/.test(proxy)
+    // AFI-5b authorized revision (implementation deviation IMP-DEV-1): was "/in memory only/" (the
+    // LOCAL->SESSION rewrite). The package is SESSION now: nothing is rewritten, the file is served as
+    // read, and a package that is not exactly one SESSION assignment is refused at startup.
+    && !/MODE_LINE|AUTH_MODES\.LOCAL|\b(src|body|html)\.replace\(/.test(stripComments(proxy)) && /const body = fs\.readFileSync\(file\);/.test(proxy)
+    && /pkgModeSrc\.split\(SESSION_LINE\)\.length !== 2/.test(proxy) && /process\.exit\(1\)/.test(proxy)
     && !mods.some((m) => /serve|e2e|stub/.test(m)) && !pkg.files.some((x) => /serve-|e2e|stub/.test(x.path)),
     'AFI-4g: the harness exists; the stub models the audit reads; the E2E front is test-only, loopback-only, never in the package, and claims no SDR-0002 §22 evidence');
   // Documentation.
@@ -7773,18 +7832,21 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
 // repeated-run and timezone (UTC-12 … UTC+14) determinism proof. Was: ten.
 // AFI-5a D-1 authorized revision: the development identity isolation harness is the twelfth, added after its
 // repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof. Was: eleven.
+// AFI-5b D-03 authorized revision: the identity transition harness (verify-afi5-runtime.js) is the thirteenth,
+// appended after the baseline order, after its repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14)
+// determinism proof and the six-case negative acceptance suite. Was: twelve.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
     'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js',
     'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js',
     'verify-session-overtime-runtime.js', 'verify-session-payroll-runtime.js', 'verify-session-audit-runtime.js',
-    'verify-dev-local-runtime.js'];
+    'verify-dev-local-runtime.js', 'verify-afi5-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the twelve allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the thirteen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');
@@ -7821,23 +7883,132 @@ console.log('== AFI-5a — DEVELOPMENT IDENTITY ISOLATION ==');
     const p = path.join(root, 'js', f); return fs.existsSync(p) && (DEV_TOKENS.test(read(p)) || /tools\/dev/.test(read(p)));
   });
   check(jsDevHits.length === 0, 'AFI-5a V-a4: no js/ file references the development identity file or its names' + (jsDevHits.length ? ' >> ' + jsDevHits.join(', ') : ''));
-  // V-a5 — the development file's static shape: persona null on disk, the seam only, no
-  // State/storage/network, no shipped selection API, and no top-level name the application declares.
+  // V-a5 — the development file's static shape. AFI-5b authorized revision (design Rev 1.2 D-02):
+  // the file is now the ONLY home of the fixtures and of the LocalIdentityProvider compatibility
+  // alias. Was: exactly four names, no selection API. Now: exactly five names (the alias added);
+  // persona null on disk; ONE seam call, installing the alias, reached at load only for an explicit
+  // persona; no State/storage/network; nothing on window/globalThis; no name the application declares.
   const topNames = (c) => (c.match(/^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm) || []).map((d) => d.split(/\s+/)[1]);
   const appNames = new Set([].concat.apply([], jsFiles.map((f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? topNames(stripComments(read(p))) : []; })));
   const devNames = topNames(devCode);
   check(!!devSrc && devSrc.split('const DEV_PERSONA = null;').length === 2
-    && /setIdentityProviderForTesting\(provider\)/.test(devCode)
-    && !/selectPrincipal|getAvailablePrincipals|LocalIdentityProvider|\bState\b|localStorage|sessionStorage|StorageAdapter|\bfetch\b|ApiClient|XMLHttpRequest|indexedDB/.test(devCode)
-    && devNames.slice().sort().join() === ['DEV_FIXTURE_PRINCIPALS', 'DEV_PERSONA', 'DevLocalIdentity', 'TAM_DEV_LOCAL'].join()
+    && (devCode.match(/setIdentityProviderForTesting\(/g) || []).length === 1 && /setIdentityProviderForTesting\(LocalIdentityProvider\);/.test(devCode)
+    && /if\(DEV_PERSONA !== null\)\{\s*const u = api\.install\(DEV_PERSONA\);/.test(devCode)
+    && !/\bState\b|localStorage|sessionStorage|StorageAdapter|\bfetch\b|ApiClient|XMLHttpRequest|indexedDB/.test(devCode)
+    && !/\bwindow\s*[.[]|\bglobalThis\s*[.[]/.test(devCode)
+    && devNames.slice().sort().join() === ['DEV_FIXTURE_PRINCIPALS', 'DEV_PERSONA', 'DevLocalIdentity', 'LocalIdentityProvider', 'TAM_DEV_LOCAL'].join()
     && !devNames.some((n) => appNames.has(n)),
-    'AFI-5a V-a5: tools/dev/local-identity-fixture.js is null on disk, installs only through the test seam, touches no State/storage/network or "Acting as" API, and declares no application name');
+    'AFI-5a V-a5 / AFI-5b D-02: tools/dev/local-identity-fixture.js declares exactly its five names (no application name), is null on disk, installs the alias through the test seam only for an explicit persona, touches no State/storage/network and puts nothing on window');
   // V-a6 — the development server: loopback only, writes nothing, calls nothing external.
   const devServerPath = path.join(root, 'tools', 'serve-local-dev.js');
   const devServer = fs.existsSync(devServerPath) ? read(devServerPath) : '';
   check(!!devServer && /\.listen\(port, '127\.0\.0\.1'/.test(devServer)
     && !/writeFileSync|appendFileSync|createWriteStream|https?:\/\/(?!127\.0\.0\.1)/.test(devServer.replace(/\/\*[\s\S]*?\*\//, '')),
     'AFI-5a V-a6: tools/serve-local-dev.js is loopback-only, writes nothing to disk and calls nothing external');
+}
+
+
+// ===== AFI-5b — IDENTITY TRANSITION: SESSION SHIPPED, "ACTING AS" REMOVED (design Rev 1.2 + 1.2.1) =====
+// The shipped AUTH_MODE is SESSION (AFI-2 pins above); the selector, the fixtures and the selection
+// API are gone from the application (UX-006A/D1/D2/D3 absence guards above); the development
+// identity lives only in tools/dev. This section adds what AFI-5b introduces:
+//   R3  confinement of the LOCAL readiness predicate localDevReady (design Rev 1.2.1 R-3);
+//   R2  the pinned parity oracle under tools/fixtures and its exclusion from the package;
+//   the AFI-5b package (102 files, 88 modules) pinned by digest; the runtime harness.
+// Explicit KEEP register (Rev 1.2.1 R-3; Forge note N-2 — the raw-read checks also scan comments):
+// UX-006A "app-bootstrap.js has no identity lifecycle", UX-006B "app-bootstrap.js not modified for
+// workspace/scope", UX-006C1 "app-bootstrap.js not modified for authorization", UX-006D1
+// "app-bootstrap.js introduces no boot-time principal selection", AFI-2 "infers nothing from the URL,
+// hostname, cookies, storage or connectivity" (bootstrap, auth-boot, auth-view, constants) and AFI-3
+// "only auth-flow.js handles the fragment" are KEPT unchanged and still pass over the D-01 branch.
+console.log('== AFI-5b — IDENTITY TRANSITION ==');
+{
+  /* R3 — a comment-aware scanner that KEEPS string contents (a string bearing the name counts as a
+     use) and skips regex literals, so neither comments nor quoting can spoof or hide a reference. */
+  const afi5bScan = function(src){
+    let out = ''; let i = 0; let prev = '';
+    while(i < src.length){
+      const c = src[i], n = src[i + 1];
+      if(c === '/' && n === '*'){ const e = src.indexOf('*/', i + 2); i = e === -1 ? src.length : e + 2; out += ' '; continue; }
+      if(c === '/' && n === '/'){ while(i < src.length && src[i] !== '\n') i++; continue; }
+      if(c === "'" || c === '"' || c === '\x60'){
+        let j = i + 1; out += c;
+        while(j < src.length && src[j] !== c){ if(src[j] === '\\'){ out += src[j] + (src[j + 1] || ''); j += 2; continue; } out += src[j]; j++; }
+        out += c; i = j + 1; prev = c; continue;
+      }
+      if(c === '/' && /[(,=:[!&|?{};]/.test(prev)){
+        let j = i + 1, cls = false;
+        while(j < src.length && (cls || src[j] !== '/') && src[j] !== '\n'){ if(src[j] === '\\') j++; else if(src[j] === '[') cls = true; else if(src[j] === ']') cls = false; j++; }
+        out += ' '; i = j + 1; prev = ')'; continue;
+      }
+      out += c; if(!/\s/.test(c)) prev = c; i++;
+    }
+    return out;
+  };
+  const NAME = /\blocalDevReady\b/g;
+  const count = (t) => (t.match(NAME) || []).length;
+  const prodFiles = afi5AllJs(path.join(root, 'js')).map((x) => ({ f: path.relative(root, x).replace(/\\/g, '/'), t: afi5bScan(read(x)) }));
+  const pkgFiles = afi5AllJs(afi5PkgRoot).map((x) => ({ f: 'package:' + path.relative(afi5PkgRoot, x).replace(/\\/g, '/'), t: afi5bScan(read(x)) }));
+  const idT = (prodFiles.find((x) => x.f === 'js/core/identity.js') || {}).t || '';
+  const bootT = (prodFiles.find((x) => x.f === 'js/core/app-bootstrap.js') || {}).t || '';
+  // The LOCAL branch: the first statement of init(), extracted by balanced braces.
+  const localBranch = (function(t){
+    const head = t.match(/\(async function init\(\)\{\s*if\(AUTH_MODE === AUTH_MODES\.LOCAL\)\{/);
+    if(!head) return null;
+    let depth = 1, j = head.index + head[0].length;
+    const from = j;
+    while(j < t.length && depth > 0){ if(t[j] === '{') depth++; else if(t[j] === '}') depth--; j++; }
+    return depth === 0 ? { from: from, to: j - 1, body: t.slice(from, j - 1) } : null;
+  })(bootT);
+  const others = prodFiles.concat(pkgFiles).filter((x) => !/^(js|package:js)\/core\/(identity|app-bootstrap)\.js$/.test(x.f) && count(x.t) > 0).map((x) => x.f);
+  const pkgId = (pkgFiles.find((x) => x.f === 'package:js/core/identity.js') || {}).t || '';
+  const pkgBoot = (pkgFiles.find((x) => x.f === 'package:js/core/app-bootstrap.js') || {}).t || '';
+  const r3Problems = [];
+  if(count(idT) !== 1 || !/const localDevReady = function\(\)\{/.test(idT)) r3Problems.push('js/core/identity.js: expected exactly one occurrence — the lexical const definition (found ' + count(idT) + ')');
+  if(!localBranch) r3Problems.push('js/core/app-bootstrap.js: the approved LOCAL branch shape (first statement of init) was not found');
+  else if(count(bootT) !== 1 || count(localBranch.body) !== 1 || !/^\s*if\(!localDevReady\(\)\)\{/.test(localBranch.body)) {
+    r3Problems.push('js/core/app-bootstrap.js: expected exactly one call, as the first condition inside the LOCAL branch (found ' + count(bootT) + ' in the file, '
+      + count(localBranch.body) + ' in the branch; offender at offset ' + bootT.search(NAME) + ')');
+  }
+  if(others.length) r3Problems.push('referenced outside identity.js / the LOCAL branch: ' + others.join(', '));
+  if(count(pkgId) !== 1 || count(pkgBoot) !== 1) r3Problems.push('package copies of identity.js / app-bootstrap.js do not mirror the one definition / one call');
+  check(prodFiles.length > 0 && pkgFiles.length > 0 && r3Problems.length === 0,
+    'AFI-5b R3-CONFINEMENT: localDevReady is one lexical definition in identity.js and one call inside the LOCAL branch of app-bootstrap.js — no other reference, alias, window/globalThis property or string anywhere in production or package code'
+    + (r3Problems.length ? ' >> ' + r3Problems.join(' | ') : ''));
+  check(!/\bwindow\s*\.\s*localDevReady|globalThis\s*\[|localDevReady\s*[,;)]/.test(idT.replace('const localDevReady = function()', '')),
+    'AFI-5b R3: identity.js neither exports localDevReady on window/globalThis nor aliases it');
+
+  /* R2 — the pinned parity oracle (test-only, never packaged). */
+  const ORACLE_REL = 'tools/fixtures/afi5-identity-baseline-36ec46b.json';
+  const ORACLE_SHA256 = 'd5ea9f80b5a71fdc8a7d598d68c6a27a04968abc5e9e1bcc56e81050cf5ffef8';
+  const oraclePath = path.join(root, ORACLE_REL);
+  const oracleBuf = fs.existsSync(oraclePath) ? fs.readFileSync(oraclePath) : null;
+  let oracle = null; try { oracle = oracleBuf ? JSON.parse(oracleBuf.toString('utf8')) : null; } catch(_e){ oracle = null; }
+  check(!!oracleBuf && crypto.createHash('sha256').update(oracleBuf).digest('hex') === ORACLE_SHA256,
+    'AFI-5b R2: ' + ORACLE_REL + ' matches its frozen SHA-256 pin (d5ea9f80…)');
+  const ORACLE_PINS = { 'js/core/constants.js': 'ad639d797de84243abc0291a21539c2db7811d38b19defc9d93dbfee12d70141',
+    'js/core/workspace.js': 'b2ce20aab542d3cc1fe21a8bd3c162fb146614882286bb3e3829891609d6376d',
+    'js/core/authz.js': 'fa449d17a34fc4863fb67155cce14f4db54fb116b80225bb3138c4324ba1ec05' };
+  const sha = (t) => crypto.createHash('sha256').update(Buffer.from(String(t), 'utf8')).digest('hex');
+  check(!!oracle && oracle.format === 'afi5-baseline-identity-oracle/v1' && oracle.baselineCommit === '36ec46bf8d5b5450dc9095603211cc5b57df9f46'
+    && oracle.sourcePath === 'js/core/identity.js' && oracle.sourceGitBlob === 'cc97da608c7c1feb93a5329d27744798a8e2ca66'
+    && sha(oracle.sourceUtf8) === 'ceb8ebcb348ccea2260bd3d559d77a7a2a2613b37fc0251c2b3176c8d67ede32'
+    && Array.isArray(oracle.referenceModules) && oracle.referenceModules.length === 3
+    && Object.keys(ORACLE_PINS).every((k) => oracle.referenceModules.filter((m) => m.path === k && sha(m.sourceUtf8) === ORACLE_PINS[k] && m.sourceSha256 === ORACLE_PINS[k]).length === 1),
+    'AFI-5b R2: the oracle carries the 36ec46b identity.js (blob cc97da60…) and exactly the three pinned reference modules (constants, workspace, authz)');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-dev-local-runtime.js')) && read(path.join(root, 'tools', 'verify-dev-local-runtime.js')).indexOf(ORACLE_SHA256) !== -1,
+    'AFI-5b R2: the parity harness pins the same oracle digest (provenance before parity)');
+  check(!jsFiles.some((f) => /fixtures/.test(f)) && !/tools\/fixtures|fixtures\//.test(indexHtml) && !(JSON.parse(read(pkgManifestPathA5)).files || []).some((e) => /fixtures|afi5-identity-baseline/.test(e.path)),
+    'AFI-5b R2: tools/fixtures is referenced by no module-order entry, no index.html tag and no package file');
+
+  /* The AFI-5b package: the selector module left it. */
+  const pkg5 = JSON.parse(read(pkgManifestPathA5));
+  check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
+    && !pkg5.files.some((e) => /identity-selector/.test(e.path))
+    && pkg5.packageDigest === '1cd8b4e5602e36930593914c19ad171a809251230245ff34d3e055fe1cc3cb09',
+    'AFI-5b: 88 modules; the package holds 102 files (the selector module removed) at digest 1cd8b4e5…');
+  check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
+    'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
 
 console.log('');

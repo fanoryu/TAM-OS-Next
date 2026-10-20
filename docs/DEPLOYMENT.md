@@ -30,7 +30,8 @@ deployment-specific configuration or secrets. A ready-to-use template for this l
 ## 2. Running the app
 
 The shipped app is a single-page, client-only application that uses **no backend, database or API**
-(`AUTH_MODE` LOCAL; the backend under `server/` is source only and not deployed — §8); its only
+(`AUTH_MODE` LOCAL; the backend under `server/` is source only and not deployed — §8; the unmerged AFI-5b candidate,
+which ships SESSION and removes "Acting as", is not merged and not deployed); its only
 runtime dependency is the vendored, pinned SheetJS parser. It is distributed as the **deployment
 package** (Distribution-1, [ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)
 Model B) and runs **over HTTP**:

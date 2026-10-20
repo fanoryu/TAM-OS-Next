@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **AFI-5b Sign-in becomes the only way in; "Acting as" is removed (local candidate — not merged, not shipped).**
+  On the candidate branch the app starts in SESSION mode: people sign in, and who they are comes only from the server.
+  The "Acting as" chooser, its sample people and its styles are removed from the app; the sample people now live only in
+  the development tools, for LOCAL testing, and the LOCAL mode refuses to start without one installed. Local data in the
+  browser is never read, changed or deleted by the signed-in app. This change is **held**: it may be merged only after
+  sign-in and the end-to-end checks have passed on the real production host (SDR-0002 §22 items 1 and 8), and it is
+  not deployed.
 - **AFI-5a Development persona for LOCAL testing (tooling only, not shipped).** Developers can now run the local
   version of TAM OS as the sample CEO or the sample Employee from a test-only local server
   (`node tools/serve-local-dev.js --as ceo|employee`), which shows a clear "development — not authenticated" banner. The

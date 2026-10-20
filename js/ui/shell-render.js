@@ -263,7 +263,6 @@ function renderShell(){
           <div class="mark">TAM&nbsp;<span class="os">OS</span></div>
         </div>
         <button class="sidebar-collapse-btn" id="sidebarCollapseBtn" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar"><span class="cbar" aria-hidden="true">«</span></button>
-        ${typeof renderIdentitySelectorHTML==='function'?renderIdentitySelectorHTML():''}
       </div>
       <nav class="nav" aria-label="Primary navigation">
         ${NAV_GROUPS.map(navGroupHTML).join('')}
@@ -273,9 +272,6 @@ function renderShell(){
     <main class="main" id="main" tabindex="-1"></main>
   `;
   bindShell(app);
-  // UX-006D1 — bind the reachable principal selector once against the persistent
-  // shell (mirrors the bind-once discipline of the nav listeners above).
-  if(typeof bindIdentitySelector==='function') bindIdentitySelector(app);
   sidebarApplyState(); // apply session collapse/drawer state to the freshly mounted shell
 }
 // Shell listeners are bound once, against nodes that now outlive navigation.
@@ -410,9 +406,6 @@ function syncShellState(){
   // UX-004E — re-assert sidebar collapse/drawer state after each in-place sync, so
   // the session interaction state survives navigation without a shell remount.
   sidebarApplyState();
-  // UX-006D1 — keep the "Acting as" selector consistent with getCurrentUser()
-  // after each in-place sync, without rebuilding the shell.
-  if(typeof syncIdentitySelector==='function') syncIdentitySelector();
 }
 /* ============================================================
    UX-004E — SIDEBAR INTERACTION (collapse, pin, hover-expand, responsive drawer)
@@ -499,8 +492,8 @@ function closeSidebarDrawer(){
 function render(){
   closeFloatingMenu();    // v2.6.3b — never leave a portaled Actions menu orphaned across a re-render
   // AFI-2 — outside LOCAL mode only the auth views render (js/ui/auth-view.js) until
-  // AuthBoot grants a workspace, which it never does in AFI-2. The shell, the views and
-  // "Acting as" are therefore never mounted in SESSION mode. LOCAL mode is unchanged.
+  // AuthBoot grants a workspace, which it never does in AFI-2. The shell and the views
+  // are therefore never mounted in SESSION mode. LOCAL (development only) is unchanged.
   if(AUTH_MODE !== AUTH_MODES.LOCAL && !(typeof AuthBoot !== 'undefined' && AuthBoot.allowsWorkspace())){
     if(typeof renderAuthView === 'function') renderAuthView();
     return;

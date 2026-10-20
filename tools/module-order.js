@@ -46,13 +46,6 @@ module.exports = [
   'core/domain-services.js',
   'import/parser.js',
   'ui/shell-render.js',
-  // UX-006D1 Reachable Principal Selection — a compact "Acting as" selector the
-  // shell mounts into .brand. Depends on identity (LocalIdentityProvider,
-  // getCurrentUser), utils (escapeHtml), and the shell facade (render) at CALL
-  // time; defines only functions at load time. Loads after shell-render.js (whose
-  // renderShell/bindShell/syncShellState call it) and before bootstrap. No State,
-  // no persistence, no schema.
-  'ui/identity-selector.js',
   'ui/global-search-ui.js',
   // --- finance pages (from 09) ---
   'finance/dashboard.js',

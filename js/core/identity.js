@@ -13,14 +13,14 @@
    future backend responsibility. No credential material is stored, verified,
    transmitted, or implied. Do NOT describe any check here as "secure login".
 
-   CANONICAL vs LOCAL (frozen, UX-006A plan §5):
+   CANONICAL seam (frozen, UX-006A plan §5):
    - IdentityProvider — the CANONICAL seam application consumers depend on.
-     Its ONLY method is getCurrentUser() -> User | null. A future backend
-     provider satisfies exactly this and need not enumerate or select.
-   - LocalIdentityProvider — a development/test ADAPTER that additionally
-     supports deterministic persona selection (getAvailablePrincipals /
-     selectPrincipal). These are local-adapter capabilities ONLY; normal
-     application modules must NEVER depend on them.
+     Its ONLY method is getCurrentUser() -> User | null. The SESSION provider
+     (js/core/session-identity.js) satisfies exactly this.
+   - AFI-5b: the application ships NO principal fixtures and NO enumeration or
+     selection API. LOCAL mode exists for development and testing only; its
+     identity is a development provider installed from outside the application
+     (never part of the package) through the internal test seam below.
 
    Identity state is provider-owned and PRIVATE (module closure). There is NO
    State.identity slice, NO bootstrap lifecycle, NO persistence, NO storage
@@ -60,96 +60,62 @@ function isValidUser(u){
   return true;
 }
 
-/* ---------- deterministic representative principals (fabricated) ----------
-   Two canonical access models must both be representable in v3.0.0 (frozen
-   Q2): CEO (Executive / ALL_COMPANY) and Employee (Personal / SELF). These
-   are obviously-fabricated development fixtures — no real PII. The Employee's
-   employeeId is a deterministic, non-empty OPAQUE forward reference: it does
-   not (yet) resolve to any State.employees record, and UX-006A must not imply
-   it does. */
-const FIXTURE_PRINCIPALS = Object.freeze([
-  Object.freeze({ id: 'user_ceo_fixture',      displayName: 'Executive (CEO)',  principalType: PRINCIPAL_TYPES.CEO }),
-  Object.freeze({ id: 'user_employee_fixture', displayName: 'Employee (Sample)', principalType: PRINCIPAL_TYPES.EMPLOYEE,
-                  employeeId: 'emp_fixture_self' })
-]);
-
-// Return a fresh shallow copy so callers cannot mutate a frozen fixture's
-// (already frozen) identity, and never hand out the internal array reference.
-function cloneUser(u){ return u ? Object.assign({}, u) : u; }
-
-/* ---------- LocalIdentityProvider (development/test adapter) ----------
-   Owns the PRIVATE selection state. Implements the canonical getCurrentUser()
-   AND the local-only enumeration/selection helpers. No persistence: selection
-   lives only in this closure and resets on reload. */
-const LocalIdentityProvider = (function(){
-  let selectedId = null;           // provider-private; null = no principal selected
-
-  function findFixture(id){
-    for(let i=0;i<FIXTURE_PRINCIPALS.length;i++){ if(FIXTURE_PRINCIPALS[i].id === id) return FIXTURE_PRINCIPALS[i]; }
-    return null;
-  }
-
-  return Object.freeze({
-    // CANONICAL method. Returns a validated User copy, or null (fail-closed).
-    getCurrentUser(){
-      if(selectedId === null) return null;
-      const u = findFixture(selectedId);
-      if(!isValidUser(u)) return null;   // never leak a malformed/partial principal
-      return cloneUser(u);
-    },
-    // LOCAL-ONLY: enumerate the selectable principals as defensive copies.
-    // Callers cannot corrupt the canonical fixture definitions.
-    getAvailablePrincipals(){
-      return FIXTURE_PRINCIPALS.map(cloneUser);
-    },
-    // LOCAL-ONLY: select by id. Unknown id is a safe no-op miss returning
-    // null — it never selects CEO and never fabricates a principal.
-    selectPrincipal(id){
-      const u = findFixture(id);
-      if(!u){ return null; }
-      selectedId = u.id;
-      return cloneUser(u);
-    }
-  });
-})();
-
-/* ---------- active provider: chosen by the explicit AUTH_MODE (AFI-2) ----------
+/* ---------- active provider: chosen by the explicit AUTH_MODE (AFI-2, AFI-5b) ----------
    The canonical seam delegates to the provider of the CURRENT mode, resolved at
    call time from the single source constant AUTH_MODE (js/core/constants.js):
-     LOCAL   -> LocalIdentityProvider (the shipped default; "Acting as" unchanged)
-     SESSION -> SessionIdentityProvider (js/core/session-identity.js), never the
-                local adapter — there is no fallback from one mode to the other
+     SESSION -> SessionIdentityProvider (js/core/session-identity.js) — the shipped
+                mode. The test seam below is IGNORED here: nothing installed through
+                it, or cleared through it, can change a SESSION principal.
+     LOCAL   -> the development provider explicitly installed through the test seam,
+                or NO_IDENTITY_PROVIDER when none is installed. LOCAL has no built-in
+                provider and never falls back to one.
      anything else, or SESSION before its provider exists -> NO_IDENTITY_PROVIDER
    It is NOT a product provider-selection API: there is no public setter and no
-   runtime switch UI. A harness may still install an alternative provider through
-   the internal test seam below, which wins over the mode while it is set. */
+   runtime switch UI. */
 const NO_IDENTITY_PROVIDER = Object.freeze({ getCurrentUser(){ return null; } });
+let testIdentityProvider = null;    // set only through setIdentityProviderForTesting
 const modeIdentityProvider = function(){
-  if(AUTH_MODE === AUTH_MODES.LOCAL) return LocalIdentityProvider;
   if(AUTH_MODE === AUTH_MODES.SESSION && typeof SessionIdentityProvider !== 'undefined') return SessionIdentityProvider;
+  if(AUTH_MODE === AUTH_MODES.LOCAL) return testIdentityProvider || NO_IDENTITY_PROVIDER;
   return NO_IDENTITY_PROVIDER;
 };
-let testIdentityProvider = null;    // set only through setIdentityProviderForTesting
 
 /* ---------- IdentityProvider (CANONICAL seam) ----------
-   The ONLY identity contract application consumers may depend on. In the
-   client build it is backed by the active provider (the local adapter), but it
-   exposes ONLY the universal getCurrentUser() — never enumeration or selection.
-   A future backend/authenticated provider implements exactly this one method. */
+   The ONLY identity contract application consumers may depend on. It exposes
+   ONLY the universal getCurrentUser() — never enumeration or selection. */
 const IdentityProvider = Object.freeze({
-  getCurrentUser(){ return (testIdentityProvider || modeIdentityProvider()).getCurrentUser(); }
+  getCurrentUser(){ return modeIdentityProvider().getCurrentUser(); }
 });
 
-/* INTERNAL TEST SEAM — installs an alternative provider behind the canonical
+/* INTERNAL TEST SEAM — installs a development provider behind the canonical
    seam. Declared as a top-level `const` (function EXPRESSION) on purpose: in a
    classic script a `const` creates a lexical binding but is NOT attached to the
    global `window` object (unlike a function declaration or `var`). So this seam
    is invisible on the production global, yet the runtime harness can still reach
    it — the harness's appended export runs in this same lexical script scope.
    Application modules must never call this — it is a test seam, not a
-   provider-selection API. */
+   provider-selection API. It takes effect in LOCAL mode only.
+   AFI-5b (R-1): null clears the test provider. LOCAL without an explicitly
+   installed provider resolves to NO_IDENTITY_PROVIDER (null identity; not ready);
+   it never restores or installs the development alias. Reinstall the alias
+   explicitly to resume LOCAL identity. SESSION ignores the seam, including null
+   resets. */
 const setIdentityProviderForTesting = function(provider){
-  testIdentityProvider = provider || null;   // null restores the mode's provider
+  testIdentityProvider = provider || null;
+};
+
+/* ---------- LOCAL development readiness (AFI-5b, D-01) ----------
+   True only in explicit LOCAL mode with an installed development provider whose
+   current principal is a valid User. The mode is tested first, so outside LOCAL
+   the seam is never read. A provider that throws is not ready. This is a boot
+   safety belt for development, not authentication: the shipped mode is SESSION.
+   Evaluated once by the LOCAL branch of js/core/app-bootstrap.js; nothing else
+   may reference it (tools/verify-build.js, AFI-5b R-3). Not exported on window. */
+const localDevReady = function(){
+  if(AUTH_MODE !== AUTH_MODES.LOCAL) return false;
+  if(testIdentityProvider === null) return false;
+  try { return isValidUser(testIdentityProvider.getCurrentUser()); }
+  catch(_e){ return false; }
 };
 
 /* ---------- getCurrentUser() — the single canonical consumer entry point ----------
@@ -167,6 +133,5 @@ function getCurrentUser(){
 if (typeof window !== 'undefined') {
   window.PRINCIPAL_TYPES = PRINCIPAL_TYPES;
   window.IdentityProvider = IdentityProvider;
-  window.LocalIdentityProvider = LocalIdentityProvider;
   window.getCurrentUser = getCurrentUser;
 }
