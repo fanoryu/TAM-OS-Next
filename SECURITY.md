@@ -96,7 +96,10 @@ unsure. Over-reporting privately is preferred to under-reporting publicly.
 Scope your report against what the software actually claims. The shipped TAM Intelligence OS
 application is client-only: it uses no server, database, API, or account system (`AUTH_MODE` LOCAL). The
 repository also contains an unreleased same-origin PHP backend under `server/`, which is source only and
-not deployed; reports about that source are welcome through the same private channel.
+not deployed; reports about that source are welcome through the same private channel. An unmerged local
+candidate (AFI-5b) removes "Acting as" and ships the sign-in (SESSION) mode. It is **not merged, not released and
+not deployed**, and it may merge only after production login and authenticated end-to-end tests pass (SDR-0002 §22).
+Until then the statements below describe the software.
 
 - **There is no authentication.** The "Acting as" principal is a **local, trust-based application
   context**, not a login. It is spoofable by anyone who can open the application, and it is

@@ -3,15 +3,16 @@
  * serve-auth-stub.js — TAM OS (AFI-2, owner decision D-B)
  * -----------------------------------------------------------------
  * TEST-ONLY. A loopback-only server for browser QA of the SESSION-mode auth views. It
- * serves dist/package/ under the production header contract (tools/package-headers.js),
- * except that js/core/constants.js is served IN MEMORY with AUTH_MODE set to SESSION —
- * nothing on disk changes and the shipped package stays LOCAL. /api/auth/me, /login and
+ * serves dist/package/ under the production header contract (tools/package-headers.js), byte for
+ * byte — the shipped package is SESSION since AFI-5b, so nothing is rewritten, in memory or on
+ * disk, and a stale LOCAL package is refused at startup. /api/auth/me, /login and
  * /logout answer with the canonical envelope and the AuthController projection, from a
  * deterministic scenario held in memory.
  *
  * It is NOT a backend: no database, no PHP, no real credentials, no real cookie session
  * (the HttpOnly cookie is invisible to the page anyway, so the stub keeps one in-memory
- * session instead). Real PHP + MariaDB authenticated E2E is still required before AFI-5.
+ * session instead). It proves browser behaviour only: it never satisfies SDR-0002 §22 items 1
+ * or 8, which need authenticated evidence on the production host.
  * It is never deployed, never part of the package and never a runtime dependency.
  *
  * Usage:  node tools/build-package.js && node tools/serve-auth-stub.js [port]   (default 8767)
@@ -199,7 +200,16 @@ const { STATIC_HEADERS, API_HEADERS } = require('./package-headers.js');
 const pkgRoot = path.resolve(__dirname, '..', 'dist', 'package');
 const port = Number(process.argv[2]) || 8767;
 const ORIGIN = 'http://127.0.0.1:' + port;
-const MODE_LINE = 'const AUTH_MODE = AUTH_MODES.LOCAL;';
+const SESSION_LINE = 'const AUTH_MODE = AUTH_MODES.SESSION;';
+
+// AFI-5b: the package is served exactly as built. Refuse to start unless it ships exactly one
+// AUTH_MODE assignment and that assignment is SESSION (a stale LOCAL package fails clearly).
+const pkgConstants = path.join(pkgRoot, 'js', 'core', 'constants.js');
+const pkgModeSrc = fs.existsSync(pkgConstants) ? fs.readFileSync(pkgConstants, 'utf8') : '';
+if((pkgModeSrc.match(/const AUTH_MODE = [^;\n]+;/g) || []).length !== 1 || pkgModeSrc.split(SESSION_LINE).length !== 2){
+  console.error('dist/package/ is missing or is not a SESSION package — run node tools/build-package.js first.');
+  process.exit(1);
+}
 const STUB_PASSWORD = 'stub-only-password';
 const USERS = {
   'ceo@example.invalid': { userId: 'u_stub_ceo', membershipId: 'm_stub_ceo', role: 'ceo', employeeId: null },
@@ -1163,12 +1173,7 @@ http.createServer((req, res) => {
   if(!file.startsWith(pkgRoot + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()){
     res.writeHead(404, { ...STATIC_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Not found');
   }
-  let body = fs.readFileSync(file);
-  if(rel === 'js/core/constants.js'){
-    const src = body.toString('utf8');
-    if(src.split(MODE_LINE).length !== 2){ res.writeHead(500); return res.end('auth mode line not found'); }
-    body = src.replace(MODE_LINE, 'const AUTH_MODE = AUTH_MODES.SESSION;');   // in memory only
-  }
+  const body = fs.readFileSync(file);
   res.writeHead(200, { ...STATIC_HEADERS, 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
   res.end(req.method === 'HEAD' ? '' : body);
 }).listen(port, '127.0.0.1', () => {

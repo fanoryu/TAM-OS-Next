@@ -6,7 +6,7 @@
    tools/verify-build.js proves the STRUCTURE of AFI-4g. This harness proves its BEHAVIOUR by
    executing every production module (module-order.js, the boot included) in the dependency-free
    Node `vm` loader of the other SESSION harnesses, with the ONE source line
-   `const AUTH_MODE = AUTH_MODES.LOCAL;` rewritten to SESSION in the concatenated text — the
+   `const AUTH_MODE = AUTH_MODES.SESSION;` loaded as SESSION in the concatenated text — the
    committed value is untouched.
 
    DETERMINISTIC: fetch is a stub answering by URL (path + query) from a script; the API timeout
@@ -43,8 +43,11 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
 const ME_EMP = { userId: 'u_emp_1', membershipId: 'm_emp_1', role: 'employee', employeeId: 'emp_srv_1', csrfToken: CSRF };
 const FIXED_NOW = Date.UTC(2031, 3, 15, 12, 0, 0);       // 2031-04-15T12:00:00Z
 const MONTH = '2031-04';
+// AFI-5b (H-1): the three deleted selector functions, probed lexically and on window/globalThis.
+const SELECTOR_PROBE = '[typeof renderIdentitySelectorHTML, typeof bindIdentitySelector, typeof syncIdentitySelector, typeof window.renderIdentitySelectorHTML, typeof window.bindIdentitySelector, typeof window.syncIdentitySelector, typeof globalThis.renderIdentitySelectorHTML, typeof globalThis.bindIdentitySelector, typeof globalThis.syncIdentitySelector].join()';
+const SELECTOR_ABSENT = 'undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined';
 const NEVER = ['loadState', 'saveState', 'applyTheme', 'installGlobalUIHandlers', 'maybeShowFirstRunChoice', 'startFresh',
-  'renderShell', 'renderView', 'renderIdentitySelectorHTML', 'restoreCompleteBackup', 'renderSmartImport', 'openGlobalSearch',
+  'renderShell', 'renderView', 'restoreCompleteBackup', 'renderSmartImport', 'openGlobalSearch',
   'renderActivityLog', 'renderEmployees', 'renderEmployeeDetail', 'persistEmployees', 'logActivity',
   'renderOvertime', 'renderPayrollWorkspace', 'renderPayrollDetail', 'renderDashboard', 'renderExecutiveDashboard',
   'renderTransactions', 'renderExecutionCenter'];
@@ -143,12 +146,15 @@ function loadRuntime(routes){
       src = src.replace(assigns[0], 'const AUTH_MODE = AUTH_MODES.SESSION;');
     }
     if(f === 'core/app-bootstrap.js'){
-      src = NEVER.map((n) => 'try { ' + n + ' = (function(){ return function(){ __spy.push("' + n + '"); return ""; }; })(); } catch(_e){ __spyErr.push("' + n + '"); }').join('\n') + '\n' + src;
+      // AFI-5b (H-1): the selector functions no longer exist. Their absence is probed in the
+      // shared lexical scope (and on window / globalThis) BEFORE any spy is installed — a spy
+      // assignment to a missing name would otherwise create it and hide the absence.
+      src = 'var __selectorBeforeSpies = ' + SELECTOR_PROBE + ';\n' + NEVER.map((n) => 'try { ' + n + ' = (function(){ return function(){ __spy.push("' + n + '"); return ""; }; })(); } catch(_e){ __spyErr.push("' + n + '"); }').join('\n') + '\n' + src;
     }
     return src;
   });
   const src = parts.join('\n')
-    + '\n;window.__TAM__ = { State: State, AuthBoot: AuthBoot, AUTH_STATES: AUTH_STATES, API_RESULT_KINDS: API_RESULT_KINDS,'
+    + '\n;window.__TAM__ = { selectorBeforeSpies: __selectorBeforeSpies, selectorNow: function(){ return ' + SELECTOR_PROBE + '; }, State: State, AuthBoot: AuthBoot, AUTH_STATES: AUTH_STATES, API_RESULT_KINDS: API_RESULT_KINDS,'
     + ' ApiClient: ApiClient, AuditApi: AuditApi, AuditDecoders: AuditDecoders, auditJakartaTime: auditJakartaTime, auditJakartaMonth: auditJakartaMonth,'
     + ' auditIsRecord: auditIsRecord, AUDIT_LIST_CAP: AUDIT_LIST_CAP, SessionAuditStore: SessionAuditStore, SessionAudit: SessionAudit,'
     + ' sessionAuditCurrentMonth: sessionAuditCurrentMonth, SessionOvertimeStore: SessionOvertimeStore, SessionPayrollStore: SessionPayrollStore,'
@@ -252,6 +258,8 @@ function firewall(rt, label){
   check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0,
     label + ': zero localStorage / sessionStorage / cookie access');
   check(rt.spy.length === 0 && rt.spyErr.length === 0, label + ': no LOCAL boot, shell, "Acting as", activity log, local data tool or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
+  check(rt.selectorBeforeSpies === SELECTOR_ABSENT && rt.selectorNow() === SELECTOR_ABSENT,
+    label + ': AFI-5b — the selector functions do not exist (lexically or on window/globalThis), before the spies and now');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');
   const html = rt.appHTML();
   check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Smart Import|Backup|Restore|Start fresh|<script|\son[a-z]+=|style="/i.test(html),

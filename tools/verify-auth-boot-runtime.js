@@ -10,8 +10,11 @@
    in-memory window/document/localStorage.
 
    The auth mode is set per scenario by rewriting the ONE source line
-   `const AUTH_MODE = AUTH_MODES.LOCAL;` in the concatenated text before it runs;
-   the committed value is asserted separately. fetch is a deterministic stub that
+   `const AUTH_MODE = AUTH_MODES.SESSION;` in the concatenated text before it runs;
+   the committed value is asserted separately. AFI-5b: the shipped mode is SESSION and the
+   application has no "Acting as"; a LOCAL scenario loads the development identity
+   (tools/dev/local-identity-fixture.js) right after identity.js, and installs a persona
+   before bootstrap only when the scenario asks for one. fetch is a deterministic stub that
    answers by path from a script; the API timeout timer is recorded, never awaited.
    No network, no clock, no credentials: every identity, token and password here is
    fabricated.
@@ -28,14 +31,17 @@ function check(cond, label){
 }
 
 const root = path.resolve(__dirname, '..');
-const MODE_LINE = 'const AUTH_MODE = AUTH_MODES.LOCAL;';
+const MODE_LINE = 'const AUTH_MODE = AUTH_MODES.SESSION;';
+const DEV_IDENTITY = fs.readFileSync(path.join(__dirname, 'dev', 'local-identity-fixture.js'), 'utf8');
 const CSRF_A = 'A'.repeat(21) + '_' + 'b'.repeat(21);
 const CSRF_B = 'Z'.repeat(20) + '-' + '9'.repeat(22);
 const RID = '0123456789abcdef0123456789abcdef';
 const PASSWORD = 'fabricated-Passw0rd-afi2';
 const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employeeId: null, csrfToken: CSRF_A };
 const ME_EMP = { userId: 'u_emp_1', membershipId: 'm_emp_1', role: 'employee', employeeId: 'emp_srv_1', csrfToken: CSRF_A };
-const BOOT_SPIES = ['loadState', 'applyTheme', 'installGlobalUIHandlers', 'maybeShowFirstRunChoice', 'renderIdentitySelectorHTML', 'renderShell'];
+// AFI-5b: renderIdentitySelectorHTML is gone from the application; its absence is asserted
+// directly (selectorDeclared) instead of spying on a name that no longer exists.
+const BOOT_SPIES = ['loadState', 'applyTheme', 'installGlobalUIHandlers', 'maybeShowFirstRunChoice', 'renderShell'];
 
 /* ---------- scripted responses ---------- */
 function resp(status, body, headers){
@@ -63,16 +69,23 @@ function loadRuntime(opts){
       if(assigns.length !== 1) throw new Error('expected exactly one AUTH_MODE assignment');
       src = src.replace(assigns[0], 'const AUTH_MODE = ' + mode + ';');
     }
+    if(f === 'core/identity.js' && mode === LOCAL){
+      // The development identity, as tools/serve-local-dev.js injects it; a persona only on request.
+      src += '\n' + DEV_IDENTITY + (opts.persona ? '\n;DevLocalIdentity.install(' + JSON.stringify(opts.persona) + ');' : '');
+    }
     if(f === 'core/app-bootstrap.js'){
       // Record (and neutralise) the local boot steps; render() stays real.
-      src = BOOT_SPIES.concat(opts.spyRender ? ['render'] : []).map((n) => n + ' = (function(orig){ return function(){ __spy.push("' + n + '"); return "' + n + '" === "renderIdentitySelectorHTML" ? "" : undefined; }; })(' + n + ');').join('\n') + '\n' + src;
+      src = BOOT_SPIES.concat(opts.spyRender ? ['render'] : []).map((n) => n + ' = (function(orig){ return function(){ __spy.push("' + n + '"); return undefined; }; })(' + n + ');').join('\n') + '\n' + src;
     }
     return src;
   });
   const src = parts.join('\n')
     + '\n;window.__TAM__ = { State: State, AuthBoot: AuthBoot, AUTH_STATES: AUTH_STATES, AUTH_MODE: AUTH_MODE,'
     + ' AUTH_MODES: AUTH_MODES, getCurrentUser: getCurrentUser, CsrfHolder: CsrfHolder,'
-    + ' SessionIdentityProvider: SessionIdentityProvider, LocalIdentityProvider: LocalIdentityProvider,'
+    + ' SessionIdentityProvider: SessionIdentityProvider,'
+    + (mode === LOCAL ? ' LocalIdentityProvider: LocalIdentityProvider,' : '')
+    + ' setIdentityProviderForTesting: setIdentityProviderForTesting, localDevReady: localDevReady,'
+    + ' selectorDeclared: typeof renderIdentitySelectorHTML + typeof bindIdentitySelector + typeof syncIdentitySelector,'
     + ' authSessionMutation: authSessionMutation, render: render, openGlobalSearch: openGlobalSearch,'
     + ' API_RESULT_KINDS: API_RESULT_KINDS,'
     // A request body built in the PAGE realm, as a real caller would.
@@ -123,12 +136,15 @@ function loadRuntime(opts){
   const rt = sandbox.__TAM__;
   rt.w = sandbox; rt.net = net; rt.memStore = memStore; rt.reads = reads; rt.spy = sandbox.__spy;
   rt.appHTML = () => (els.app ? els.app.innerHTML : '');
+  rt.appText = () => (els.app ? els.app.textContent : '');
   rt.tamReads = () => reads.filter((k) => /^tam_/.test(k));
   return rt;
 }
+const LOCAL = 'AUTH_MODES.LOCAL';
+// AFI-5b: a seam provider that would be a CEO if it were ever consulted outside LOCAL.
+const HOSTILE = { getCurrentUser(){ return { id: 'user_ceo_fixture', displayName: 'Hostile', principalType: 'ceo' }; } };
 const flush = async (n) => { for(let i = 0; i < (n || 6); i++) await new Promise((r) => setImmediate(r)); };
 const SESSION = 'AUTH_MODES.SESSION';
-const LOCAL = 'AUTH_MODES.LOCAL';
 const calls = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
 // No local business data, shell or "Acting as" anywhere — the AFI-2 firewall.
 function firewall(rt, label){
@@ -137,39 +153,50 @@ function firewall(rt, label){
     label + ': no loadState, no first-run choice, no local business key read');
   check(rt.State.txns.length === 0 && rt.State.employees.length === 0 && rt.State.storageReady === false,
     label + ': no business state in memory');
-  check(!/identityPrincipalSelect|Acting as|class="sidebar"|id="sidebar"|data-nav=/.test(html) && rt.spy.indexOf('renderIdentitySelectorHTML') === -1,
-    label + ': no shell and no "Acting as" mounted');
+  check(!/identityPrincipalSelect|Acting as|class="sidebar"|id="sidebar"|data-nav=/.test(html) && rt.selectorDeclared === 'undefinedundefinedundefined',
+    label + ': no shell and no "Acting as" mounted (the selector functions do not exist)');
 }
 
 (async function main(){
   console.log('== AFI-2 AUTHENTICATED BOOT — RUNTIME VERIFICATION ==');
   console.log('   Explicit auth mode / SESSION boot state machine / login / logout /');
-  console.log('   bounded 403 recovery / business-state firewall / LOCAL unchanged.');
+  console.log('   bounded 403 recovery / business-state firewall / LOCAL development boot (AFI-5b).');
   console.log('');
 
   /* ---------- 0. the shipped mode ---------- */
   {
     const constants = fs.readFileSync(path.join(root, 'js', 'core', 'constants.js'), 'utf8');
     check(constants.split(MODE_LINE).length === 2 && (constants.match(/const AUTH_MODE\b/g) || []).length === 1,
-      'mode: the committed source sets AUTH_MODE = AUTH_MODES.LOCAL, exactly once');
-    const rt = loadRuntime({ mode: LOCAL });
-    check(rt.AUTH_MODE === 'local' && rt.AUTH_MODES.LOCAL === 'local' && rt.AUTH_MODES.SESSION === 'session' && Object.isFrozen(rt.AUTH_MODES),
+      'mode: the committed source sets AUTH_MODE = AUTH_MODES.SESSION, exactly once (AFI-5b)');
+    const rt = loadRuntime({ mode: SESSION });
+    check(rt.AUTH_MODE === 'session' && rt.AUTH_MODES.LOCAL === 'local' && rt.AUTH_MODES.SESSION === 'session' && Object.isFrozen(rt.AUTH_MODES),
       'mode: exactly LOCAL and SESSION, frozen');
     check(rt.w.AUTH_MODE === undefined && rt.w.AuthBoot === undefined, 'mode: AUTH_MODE and AuthBoot are not exposed on window');
   }
 
-  /* ---------- A. LOCAL mode boot unchanged ---------- */
+  /* ---------- A. LOCAL development boot (AFI-5b D-01) ---------- */
   {
     // render is recorded too here: the real business render needs a real DOM, and the
-    // contract under test is the boot ORDER, unchanged from before AFI-2.
-    const rt = loadRuntime({ mode: LOCAL, boot: true, spyRender: true });
+    // contract under test is the boot ORDER, unchanged from before AFI-2 once a
+    // development identity is ready.
+    const rt = loadRuntime({ mode: LOCAL, boot: true, spyRender: true, persona: 'user_ceo_fixture' });
     await flush();
     check(rt.spy.join() === 'loadState,applyTheme,installGlobalUIHandlers,render,maybeShowFirstRunChoice',
-      'A. LOCAL boot: loadState -> applyTheme -> installGlobalUIHandlers -> render -> first-run choice (unchanged)');
+      'A. LOCAL boot with a ready development identity: loadState -> applyTheme -> installGlobalUIHandlers -> render -> first-run choice (unchanged)');
     check(rt.net.calls.length === 0, 'A. LOCAL boot makes no API request');
     check(!/auth-screen/.test(rt.appHTML()), 'A. LOCAL boot renders no auth view');
-    rt.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
-    check((rt.getCurrentUser() || {}).id === 'user_ceo_fixture', 'A. LOCAL: "Acting as" selection still establishes identity');
+    check((rt.getCurrentUser() || {}).id === 'user_ceo_fixture' && rt.localDevReady() === true,
+      'A. LOCAL: the installed development persona establishes identity');
+  }
+  {
+    const rt = loadRuntime({ mode: LOCAL, boot: true, spyRender: true });
+    await flush();
+    check(rt.spy.length === 0 && rt.net.calls.length === 0 && rt.tamReads().length === 0,
+      'A. D01-ABSENT: LOCAL without a development identity: no boot step, no render, no request, no local key read');
+    check(rt.AuthBoot.snapshot().state === 'CHECKING_SESSION' && rt.spy.indexOf('render') === -1,
+      'A. D01-ABSENT: AuthBoot is never started on the not-ready path (state untouched, nothing painted)');
+    check(rt.appText() === 'Development identity not installed' && rt.appHTML() === '' && rt.getCurrentUser() === null && rt.localDevReady() === false,
+      'A. D01-ABSENT: only the fixed static notice is shown (textContent), with no identity');
   }
 
   /* ---------- B–E. SESSION boot ---------- */
@@ -197,8 +224,10 @@ function firewall(rt, label){
     firewall(rt, 'D. AUTHENTICATED CEO');
     check(rt.AuthBoot.allowsWorkspace() === false, 'D. AuthBoot grants no workspace (D-A)');
     check((rt.getCurrentUser() || {}).id === 'u_ceo_1' && rt.CsrfHolder.get() === CSRF_A, 'D. identity from /me; CSRF in memory');
-    rt.LocalIdentityProvider.selectPrincipal('user_employee_fixture');
-    check((rt.getCurrentUser() || {}).id === 'u_ceo_1', 'K. a local "Acting as" selection cannot change the SESSION identity');
+    rt.setIdentityProviderForTesting(HOSTILE);
+    check((rt.getCurrentUser() || {}).id === 'u_ceo_1' && rt.localDevReady() === false,
+      'K. a provider installed through the test seam cannot change the SESSION identity (AFI-5b: the seam is inert)');
+    rt.setIdentityProviderForTesting(null);
     rt.render();
     check(!/sidebar|identityPrincipalSelect/.test(rt.appHTML()), 'K. render() in SESSION mode never mounts the shell');
     const createdBefore = rt.net.created;
@@ -230,7 +259,7 @@ function firewall(rt, label){
   ];
   for(const [label, answer, expect] of meCases){
     const rt = loadRuntime({ mode: SESSION, boot: true, routes: { '/api/auth/me': [answer] } });
-    rt.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
+    rt.setIdentityProviderForTesting(HOSTILE);
     await flush();
     const s = rt.AuthBoot.snapshot();
     check(s.state === expect && rt.getCurrentUser() === null && rt.CsrfHolder.get() === null, label + ' (no identity, no CSRF, no local fallback)');
@@ -247,7 +276,7 @@ function firewall(rt, label){
   {
     // An invalid mode never reaches the API and never falls back to LOCAL.
     const rt = loadRuntime({ mode: "'something-else'", boot: true, routes: { '/api/auth/me': [ok(ME_CEO)] } });
-    rt.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
+    rt.setIdentityProviderForTesting(HOSTILE);
     await flush();
     check(rt.AuthBoot.snapshot().state === 'UNAVAILABLE' && rt.net.calls.length === 0 && rt.getCurrentUser() === null,
       'mode: an invalid AUTH_MODE fails closed (UNAVAILABLE, no request, no identity, no LOCAL fallback)');
@@ -355,8 +384,9 @@ function firewall(rt, label){
     const s = rt.AuthBoot.snapshot();
     check(s.state === 'SIGNED_OUT' && s.message === 'signed_out' && rt.getCurrentUser() === null && rt.CsrfHolder.get() === null,
       'R. logout success -> SIGNED_OUT, identity and CSRF cleared');
-    rt.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
-    check(rt.getCurrentUser() === null, 'R. after logout no local identity can take over');
+    rt.setIdentityProviderForTesting(HOSTILE);
+    check(rt.getCurrentUser() === null, 'R. after logout no local identity can take over (a seam provider is ignored)');
+    rt.setIdentityProviderForTesting(null);
     firewall(rt, 'R. after logout');
   }
   for(const [label, answer] of [['S. logout 503', err(503, 'service_unavailable')], ['S. logout network failure', NETFAIL], ['S. logout 500', err(500, 'internal_error')]]){

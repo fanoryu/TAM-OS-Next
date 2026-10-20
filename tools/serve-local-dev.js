@@ -3,12 +3,14 @@
  * serve-local-dev.js — TAM OS (AFI-5a, owner decision D-AFI5-2)
  * -----------------------------------------------------------------
  * TEST-ONLY. A loopback-only server for browser QA of LOCAL mode with a DEVELOPMENT persona
- * from tools/dev/local-identity-fixture.js instead of the "Acting as" selection. It serves
- * dist/package/ under the production header contract (tools/package-headers.js, its
- * Content-Security-Policy included) with exactly two changes, both IN MEMORY only:
- *   1. index.html gains <script src="dev/local-identity-fixture.js"></script> immediately
+ * from tools/dev/local-identity-fixture.js (the application ships no selection since AFI-5b).
+ * It serves dist/package/ under the production header contract (tools/package-headers.js, its
+ * Content-Security-Policy included) with exactly three changes, all IN MEMORY only:
+ *   1. js/core/constants.js has its ONE AUTH_MODE assignment rewritten from SESSION (the
+ *      shipped mode) to LOCAL — exactly once; any other shape is refused;
+ *   2. index.html gains <script src="dev/local-identity-fixture.js"></script> immediately
  *      after the js/core/identity.js tag, so the persona installs before boot;
- *   2. that dev file is served from tools/dev/ with its DEV_PERSONA line set to the persona
+ *   3. that dev file is served from tools/dev/ with its DEV_PERSONA line set to the persona
  *      chosen by the required --as argument.
  * Nothing on disk changes, dist/package/ is never written, and the dev file is never part of
  * the package. There is no in-app persona switch: restart with another --as to change it.
@@ -32,6 +34,7 @@ const PERSONAS = { ceo: 'user_ceo_fixture', employee: 'user_employee_fixture' };
 const IDENTITY_TAG = '<script src="js/core/identity.js"></script>';
 const DEV_TAG = '<script src="dev/local-identity-fixture.js"></script>';
 const PERSONA_LINE = 'const DEV_PERSONA = null;';
+const SESSION_LINE = 'const AUTH_MODE = AUTH_MODES.SESSION;';
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '': 'text/plain; charset=utf-8' };
 
 const args = process.argv.slice(2);
@@ -69,6 +72,13 @@ http.createServer((req, res) => {
       return send(res, 404, { ...STATIC_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }, 'Not found');
     }
     body = fs.readFileSync(file);
+    if(rel === 'js/core/constants.js'){
+      const src = body.toString('utf8');
+      if((src.match(/const AUTH_MODE = [^;\n]+;/g) || []).length !== 1 || src.split(SESSION_LINE).length !== 2){
+        return send(res, 500, STATIC_HEADERS, 'auth mode line not found');
+      }
+      body = src.replace(SESSION_LINE, 'const AUTH_MODE = AUTH_MODES.LOCAL;');               // in memory only
+    }
     if(rel === 'index.html'){
       const html = body.toString('utf8');
       if(html.split(IDENTITY_TAG).length !== 2) return send(res, 500, STATIC_HEADERS, 'identity script tag not found');

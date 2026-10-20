@@ -29,6 +29,20 @@
 
 const fs = require('fs');
 const path = require('path');
+// AFI-5b (design Rev 1.2 §3, D-02) — this harness runs LOCAL mode. The shipped AUTH_MODE is
+// SESSION, so the loader rewrites its one assignment to LOCAL in memory, loads the development
+// identity (tools/dev/local-identity-fixture.js) right after core/identity.js and installs its
+// LocalIdentityProvider alias through the test seam once, before any test runs.
+const AFI5_DEV_IDENTITY = fs.readFileSync(path.join(__dirname, 'dev', 'local-identity-fixture.js'), 'utf8');
+function afi5LocalSource(f, src){
+  if(f === 'core/constants.js'){
+    const assigns = src.match(/const AUTH_MODE = [^;\n]+;/g) || [];
+    if(assigns.length !== 1) throw new Error('expected exactly one AUTH_MODE assignment');
+    return src.replace(assigns[0], 'const AUTH_MODE = AUTH_MODES.LOCAL;');
+  }
+  return f === 'core/identity.js' ? src + '\n' + AFI5_DEV_IDENTITY : src;
+}
+const AFI5_LOCAL_INSTALL = '\n;setIdentityProviderForTesting(LocalIdentityProvider); window.LocalIdentityProvider = LocalIdentityProvider;';
 const vm = require('vm');
 
 let passed = 0; const failures = [];
@@ -53,7 +67,7 @@ const ADR014_NOT_OWNED = ['status','startDate','durationMonths','endDate','updat
 function loadRuntime(){
   const root = path.resolve(__dirname, '..');
   const jsFiles = require(path.join(root,'tools','module-order.js')).filter(f => f !== 'core/app-bootstrap.js');
-  const src = jsFiles.map(f => fs.readFileSync(path.join(root,'js',f),'utf8')).join('\n')
+  const src = jsFiles.map(f => afi5LocalSource(f, fs.readFileSync(path.join(root,'js',f),'utf8'))).join('\n') + AFI5_LOCAL_INSTALL
     + '\n;window.__TAM__ = { State: State, Domain: Domain, ContractCoreAggregate: ContractCoreAggregate,'
     + ' ContractRepository: ContractRepository, CONTRACT_CORE_FIELDS: CONTRACT_CORE_FIELDS,'
     + ' CONTRACT_CORE_SCHEDULE_FIELDS: CONTRACT_CORE_SCHEDULE_FIELDS, DOMAIN_COMMANDS: DOMAIN_COMMANDS };';

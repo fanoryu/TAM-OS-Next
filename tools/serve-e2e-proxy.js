@@ -4,9 +4,9 @@
  * -----------------------------------------------------------------
  * TEST-ONLY. A loopback-only front for the REAL authenticated end-to-end check of the SESSION
  * workspace against the real PHP backend: it serves dist/package/ under the production header
- * contract (tools/package-headers.js, its Content-Security-Policy included) with
- * js/core/constants.js served IN MEMORY with AUTH_MODE set to SESSION — nothing on disk changes
- * and the shipped package stays LOCAL — and forwards every /api request, byte for byte, to a PHP
+ * contract (tools/package-headers.js, its Content-Security-Policy included), byte for byte — the
+ * shipped package is SESSION since AFI-5b, so nothing is rewritten, in memory or on disk; a stale
+ * LOCAL package is refused at startup — and forwards every /api request, byte for byte, to a PHP
  * built-in server on loopback running the development router (server/dev/router.php). The browser
  * sees ONE origin, so the session cookie, the Origin check and the CSRF header are the backend's
  * own, unchanged.
@@ -31,7 +31,16 @@ const { STATIC_HEADERS } = require('./package-headers.js');
 const pkgRoot = path.resolve(__dirname, '..', 'dist', 'package');
 const port = Number(process.argv[2]) || 8768;
 const apiPort = Number(process.argv[3]) || 8769;
-const MODE_LINE = 'const AUTH_MODE = AUTH_MODES.LOCAL;';
+const SESSION_LINE = 'const AUTH_MODE = AUTH_MODES.SESSION;';
+
+// AFI-5b: the package is served exactly as built. Refuse to start unless it ships exactly one
+// AUTH_MODE assignment and that assignment is SESSION (a stale LOCAL package fails clearly).
+const pkgConstants = path.join(pkgRoot, 'js', 'core', 'constants.js');
+const pkgModeSrc = fs.existsSync(pkgConstants) ? fs.readFileSync(pkgConstants, 'utf8') : '';
+if((pkgModeSrc.match(/const AUTH_MODE = [^;\n]+;/g) || []).length !== 1 || pkgModeSrc.split(SESSION_LINE).length !== 2){
+  console.error('dist/package/ is missing or is not a SESSION package — run node tools/build-package.js first.');
+  process.exit(1);
+}
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '': 'text/plain; charset=utf-8' };
 const HOP = ['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer'];
 
@@ -62,12 +71,7 @@ http.createServer((req, res) => {
   if(!file.startsWith(pkgRoot + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()){
     res.writeHead(404, { ...STATIC_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Not found');
   }
-  let body = fs.readFileSync(file);
-  if(rel === 'js/core/constants.js'){
-    const src = body.toString('utf8');
-    if(src.split(MODE_LINE).length !== 2){ res.writeHead(500); return res.end('auth mode line not found'); }
-    body = src.replace(MODE_LINE, 'const AUTH_MODE = AUTH_MODES.SESSION;');   // in memory only
-  }
+  const body = fs.readFileSync(file);
   res.writeHead(200, { ...STATIC_HEADERS, 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
   res.end(req.method === 'HEAD' ? '' : body);
 }).listen(port, '127.0.0.1', () => {

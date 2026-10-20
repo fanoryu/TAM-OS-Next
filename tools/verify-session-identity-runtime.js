@@ -13,6 +13,10 @@
    NO NETWORK: fetch is a deterministic stub that records every call and answers
    from a scripted response. The request timeout is driven by a controllable
    timer, never by waiting. All identities and tokens are fabricated.
+
+   AFI-5b: the shipped AUTH_MODE is SESSION, so the canonical seam dispatches to
+   SessionIdentityProvider for real (no test-seam install) and the test seam is inert:
+   a provider installed through it is never consulted. There is no local fixture.
    ============================================================ */
 
 const fs = require('fs');
@@ -28,6 +32,8 @@ function check(cond, label){
 const CSRF_A = 'A'.repeat(21) + '_' + 'b'.repeat(21);          // 43 chars, token shape
 const CSRF_B = 'Z'.repeat(20) + '-' + '9'.repeat(22);
 const RID = '0123456789abcdef0123456789abcdef';
+// A provider that would be a CEO if the test seam were ever consulted in SESSION.
+const HOSTILE = { calls: 0, getCurrentUser(){ HOSTILE.calls++; return { id: 'user_ceo_fixture', displayName: 'Hostile', principalType: 'ceo' }; } };
 const RID2 = 'fedcba9876543210fedcba9876543210';
 const API_TIMEOUT_EXPECTED = 10000;
 
@@ -72,7 +78,7 @@ function loadRuntime(){
     + '\n;window.__TAM__ = { State: State, ApiClient: ApiClient, API_RESULT_KINDS: API_RESULT_KINDS,'
     + ' API_TIMEOUT_MS: API_TIMEOUT_MS, CsrfHolder: CsrfHolder, SessionIdentityProvider: SessionIdentityProvider,'
     + ' mapSessionProjection: mapSessionProjection, getCurrentUser: getCurrentUser, isValidUser: isValidUser,'
-    + ' getCurrentWorkspace: getCurrentWorkspace, LocalIdentityProvider: LocalIdentityProvider,'
+    + ' getCurrentWorkspace: getCurrentWorkspace,'
     + ' setIdentityProviderForTesting: setIdentityProviderForTesting, API_BODY_KEY_EXCEPTION: API_BODY_KEY_EXCEPTION,'
     // Builds a request body in the PAGE realm, as a real caller would (a plain object
     // from this Node realm has a different Object.prototype).
@@ -125,17 +131,18 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
   console.log('   /api/auth/me projection / CEO binding / no fallback. Inert foundation.');
   console.log('');
 
-  /* ---------- 0. inert at load: no request, no window exposure, Local provider active ---------- */
+  /* ---------- 0. inert at load: no request, no window exposure, inert test seam ---------- */
   {
     const rt = loadRuntime();
     check(rt.net.calls.length === 0, 'inert: loading every production module performs no fetch');
     check(rt.w.ApiClient === undefined && rt.w.SessionIdentityProvider === undefined && rt.w.CsrfHolder === undefined,
       'inert: ApiClient / SessionIdentityProvider / CsrfHolder are not exposed on window');
     check(rt.getCurrentUser() === null, 'inert: boot identity is still null (no session lookup, no default principal)');
-    rt.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
+    rt.setIdentityProviderForTesting(HOSTILE);
     const u = rt.getCurrentUser();
-    check(!!u && u.id === 'user_ceo_fixture' && rt.net.calls.length === 0,
-      'inert: LocalIdentityProvider remains the active provider ("Acting as" selection works, no request)');
+    check(u === null && HOSTILE.calls === 0 && rt.net.calls.length === 0,
+      'inert: SESSION is the shipped mode — a provider installed through the test seam is never consulted (null, no request)');
+    rt.setIdentityProviderForTesting(null);
     check(rt.API_TIMEOUT_MS === API_TIMEOUT_EXPECTED, 'timeout: API_TIMEOUT_MS is a fixed 10000 ms');
   }
 
@@ -423,8 +430,7 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
   /* ---------- 10. SessionIdentityProvider through the canonical seam ---------- */
   {
     const rt = loadRuntime(); const K = rt.API_RESULT_KINDS;
-    rt.setIdentityProviderForTesting(rt.SessionIdentityProvider);
-    check(rt.getCurrentUser() === null && rt.net.calls.length === 0, 'session: installed but not refreshed -> null, no request');
+    check(rt.getCurrentUser() === null && rt.net.calls.length === 0, 'session: the shipped SESSION provider, not refreshed -> null, no request');
     rt.net.responder = () => resp(200, okEnv(ME_CEO));
     const r = await rt.SessionIdentityProvider.refresh();
     check(r.ok === true && r.requestId === RID, 'session: refresh succeeds on a valid /me');
@@ -475,7 +481,6 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
   /* ---------- 11. Employee binding and no client authority ---------- */
   {
     const rt = loadRuntime(); const K = rt.API_RESULT_KINDS;
-    rt.setIdentityProviderForTesting(rt.SessionIdentityProvider);
     // Client-controlled values that must never become authority.
     rt.State.employees = [{ id: 'local_uid_1', name: 'Fabricated Local' }];
     rt.State.settings.role = 'ceo';
@@ -492,17 +497,16 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
     check(miss.ok === false && miss.kind === K.UNAVAILABLE && rt.getCurrentUser() === null, 'session: Employee without a binding -> no principal');
   }
 
-  /* ---------- 12. no LocalIdentityProvider fallback; nothing persisted ---------- */
+  /* ---------- 12. no local fallback; nothing persisted ---------- */
   {
     const rt = loadRuntime();
-    rt.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');        // a local selection exists...
-    rt.setIdentityProviderForTesting(rt.SessionIdentityProvider);         // ...but the session provider is active
-    check(rt.getCurrentUser() === null, 'no fallback: unauthenticated session provider -> null despite a local CEO selection');
+    rt.setIdentityProviderForTesting(HOSTILE);                            // a CEO behind the test seam...
+    check(rt.getCurrentUser() === null, 'no fallback: unauthenticated session provider -> null despite a CEO provider behind the test seam');
     for(const r of [resp(401, errEnv('unauthenticated')), resp(503, errEnv('service_unavailable')),
                     resp(200, okEnv({ bad: true })), new TypeError('offline')]){
       rt.net.responder = () => r;
       await rt.SessionIdentityProvider.refresh();
-      check(rt.getCurrentUser() === null, 'no fallback: failed refresh never yields the local fixture or any principal');
+      check(rt.getCurrentUser() === null, 'no fallback: failed refresh never yields the seam provider or any principal');
     }
     rt.net.responder = () => resp(200, okEnv(ME_CEO));
     await rt.SessionIdentityProvider.refresh();

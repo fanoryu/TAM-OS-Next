@@ -10,11 +10,13 @@
    move.
 
    Proves:
-     D2-1  the "Acting as" selector still renders, still enumerates CEO-first, and
-           still starts unselected (D1 contract intact)
-     D2-2  principal & workspace context is VISIBLE and truthful for CEO / Employee /
-           null, and is derived per render (no stale provenance across a switch)
-     D2-3  the collapsed rail no longer hides WHICH principal is active
+     D2-1..3  AFI-5b: the "Acting as" selector, its workspace context block and its
+           collapsed-rail chip are REMOVED with the selector (design Rev 1.2, B-3a/B-3b):
+           no selector function exists, shell.css carries no selector rule, the shell
+           mounts nothing; what stays true underneath — no default principal, the frozen
+           UX-006B fail-closed workspace, zero storage writes on a principal switch — is
+           still proved, in a LOCAL runtime with the development identity
+           (tools/dev/local-identity-fixture.js) installed through the test seam
      D2-4  all 43 frozen UX-006C3 integration entries are still present and are
            never hidden or disabled for any principal
      D2-5  the seven frozen single-capability controls stay VISIBLE + DISABLED when
@@ -35,6 +37,19 @@ const vm = require('vm');
 const MANIFEST = require('./integration-surface-manifest.js');
 
 const ROOT = path.resolve(__dirname, '..');
+// AFI-5b (design Rev 1.2 §3, D-02) — this harness runs LOCAL mode. The shipped AUTH_MODE is
+// SESSION, so the loader rewrites its one assignment to LOCAL in memory, loads the development
+// identity right after core/identity.js and installs its LocalIdentityProvider alias once.
+const AFI5_DEV_IDENTITY = fs.readFileSync(path.join(__dirname, 'dev', 'local-identity-fixture.js'), 'utf8');
+function afi5LocalSource(f, src){
+  if(f === 'core/constants.js'){
+    const assigns = src.match(/const AUTH_MODE = [^;\n]+;/g) || [];
+    if(assigns.length !== 1) throw new Error('expected exactly one AUTH_MODE assignment');
+    return src.replace(assigns[0], 'const AUTH_MODE = AUTH_MODES.LOCAL;');
+  }
+  return f === 'core/identity.js' ? src + '\n' + AFI5_DEV_IDENTITY : src;
+}
+const AFI5_LOCAL_INSTALL = '\n;setIdentityProviderForTesting(LocalIdentityProvider); window.LocalIdentityProvider = LocalIdentityProvider;';
 let passed = 0; const failures = [];
 function check(cond, label){
   if(cond){ passed++; console.log('  [PASS] ' + label); }
@@ -81,13 +96,12 @@ function qsa(root, selector){
 /* ---------- runtime loader ---------- */
 function loadRuntime(){
   const jsFiles = require(path.join(ROOT,'tools','module-order.js')).filter(f => f !== 'core/app-bootstrap.js');
-  const src = jsFiles.map(f => fs.readFileSync(path.join(ROOT,'js',f),'utf8')).join('\n')
+  const src = jsFiles.map(f => afi5LocalSource(f, fs.readFileSync(path.join(ROOT,'js',f),'utf8'))).join('\n') + AFI5_LOCAL_INSTALL
     + '\n;window.__TAM__ = { State: State, LocalIdentityProvider: LocalIdentityProvider,'
     + ' getCurrentUser: getCurrentUser, getCurrentWorkspace: getCurrentWorkspace,'
-    + ' can: can, ACTIONS: ACTIONS, authzDisabled: authzDisabled,'
-    + ' renderIdentitySelectorHTML: renderIdentitySelectorHTML,'
-    + ' syncIdentitySelector: syncIdentitySelector, quickActionsFor: quickActionsFor,'
-    + ' identityAvailablePrincipals: identityAvailablePrincipals };';
+    + ' can: can, ACTIONS: ACTIONS, authzDisabled: authzDisabled, quickActionsFor: quickActionsFor,'
+    + ' selectorDeclared: [typeof renderIdentitySelectorHTML, typeof syncIdentitySelector,'
+    + ' typeof bindIdentitySelector, typeof identityAvailablePrincipals] };';
   const noop = function(){};
   const memStore = {};
   const writes = [];
@@ -96,21 +110,11 @@ function loadRuntime(){
     setItem:(k,v)=>{ writes.push(k); memStore[k]=String(v); },
     removeItem:(k)=>{ delete memStore[k]; }
   };
-  // Shell tree carrying the nodes syncIdentitySelector() writes to.
+  // Shell tree (AFI-5b: no selector nodes exist any more).
   const app = El('div'); app.setAttribute('id','app');
   const brand = El('div'); brand.classList.add('brand'); app.appendChild(brand);
-  const wrap = El('div'); wrap.classList.add('identity-selector'); wrap.setAttribute('data-principal-state','none'); brand.appendChild(wrap);
-  const rail = El('div'); rail.classList.add('identity-rail'); rail.setAttribute('id','identityPrincipalRail');
-  rail.setAttribute('data-principal-state','none'); wrap.appendChild(rail);
-  const sel = El('select'); sel.setAttribute('id','identityPrincipalSelect'); wrap.appendChild(sel);
-  const help = El('p'); help.setAttribute('id','identityPrincipalHelp'); wrap.appendChild(help);
-  const ctx = El('div'); ctx.classList.add('identity-context'); ctx.setAttribute('id','identityPrincipalContext');
-  ctx.setAttribute('data-principal-state','none'); wrap.appendChild(ctx);
-  const ctxName = El('span'); ctxName.classList.add('identity-context-name'); ctx.appendChild(ctxName);
-  const ctxDetail = El('span'); ctxDetail.classList.add('identity-context-detail'); ctx.appendChild(ctxDetail);
   const main = El('main'); main.setAttribute('id','main'); app.appendChild(main);
-  const byId = { app:app, main:main, identityPrincipalSelect:sel, identityPrincipalHelp:help,
-    identityPrincipalRail:rail, identityPrincipalContext:ctx };
+  const byId = { app:app, main:main };
   const sandbox = {
     console:{ log:noop, warn:noop, error:noop }, navigator:{ userAgent:'tam-ux006d2' },
     setTimeout:function(){ return 0; }, clearTimeout:clearTimeout,
@@ -126,7 +130,7 @@ function loadRuntime(){
   vm.runInContext(src, vm.createContext(sandbox), { filename:'tam-ux006d2-runtime.js' });
   sandbox.render = noop; sandbox.showSuccess = noop; sandbox.showError = noop; sandbox.showWarning = noop;
   const rt = sandbox.__TAM__;
-  rt.w = sandbox; rt.dom = { app, wrap, rail, sel, help, ctx, ctxName, ctxDetail }; rt.writes = writes;
+  rt.w = sandbox; rt.dom = { app, brand, main }; rt.writes = writes;
   return rt;
 }
 const N = '2025-01-01T00:00:00.000Z';
@@ -165,113 +169,36 @@ const attrOf = (html, id, attr) => {
   const EMP_P = 'user_employee_fixture';
   const PRINCIPALS = [['CEO', CEO_P], ['employee', EMP_P], ['null', null]];
 
-  /* 1. D2-1 — the D1 selector contract is intact */
-  console.log('-- 1. D2-1 : the UX-006D1 selector contract is unchanged --');
+  /* 1-3. AFI-5b — the selector, its context block and its rail chip are removed */
+  console.log('-- 1. D2-1..3 : the selector presentation is removed with the selector (AFI-5b) --');
   { const rt = loadRuntime(); seed(rt, null);
-    const html = rt.w.renderIdentitySelectorHTML();
-    check(/id="identityPrincipalSelect"/.test(html), 'the "Acting as" select still renders');
-    check(/<label[^>]*for="identityPrincipalSelect"[^>]*>Acting as<\/label>/.test(html),
-      'the "Acting as" label still names the select (unchanged wording)');
+    check(rt.selectorDeclared.join() === 'undefined,undefined,undefined,undefined',
+      'no selector function exists (render / sync / bind / enumeration helpers are gone)');
     check(rt.w.getCurrentUser() === null, 'initial state is still unselected (no default principal)');
-    check(/<option value="">/.test(html), 'the non-value placeholder is still present (never auto-selects)');
-    const order = rt.w.identityAvailablePrincipals().map(function(p){ return p.principalType; });
-    check(order[0] === 'ceo', 'enumeration is still CEO-first (deterministic order preserved)'); }
-
-  /* 2. D2-2 — principal & workspace context is visible and truthful */
-  console.log('-- 2. D2-2 : principal & workspace context is visible and truthful --');
-  { const expect = { CEO:'Executive workspace', employee:'Personal workspace', null:'No workspace' };
-    for(const [label, principal] of PRINCIPALS){
-      const rt = loadRuntime(); seed(rt, principal);
-      const html = rt.w.renderIdentitySelectorHTML();
-      check(html.indexOf('id="identityPrincipalContext"') !== -1,
-        label + ': the workspace context block is rendered (never omitted)');
-      check(html.indexOf('>' + expect[label] + '<') !== -1,
-        label + ': the active workspace context reads "' + expect[label] + '"');
-      const state = attrOf(html, 'identityPrincipalContext', 'data-principal-state');
-      check(state === (principal ? 'active' : 'none'),
-        label + ': the context block carries the correct data-principal-state');
-      if(principal){
-        const cur = rt.w.getCurrentUser();
-        check(html.indexOf('Acting as ' + cur.displayName + '.') !== -1,
-          label + ': the helper line names the active principal');
-      } else {
-        check(html.indexOf('No principal selected') !== -1,
-          'null: the unselected state is stated, not blank');
-      }
-    } }
-
-  /* 2a. the TWO causes of a null workspace are presented distinctly.
-     A fresh install has no Employee records, so an employee principal resolves —
-     correctly, per the frozen UX-006B fail-closed rule — to NO workspace. Telling
-     that active principal to "select a principal" would be false. */
-  console.log('-- 2a. D2-2 : the two causes of a null workspace read differently --');
-  { const rtNone = loadRuntime(); seed(rtNone, null);
-    const htmlNone = rtNone.w.renderIdentitySelectorHTML();
-    check(htmlNone.indexOf('Select a principal to begin') !== -1,
-      'no principal: the context invites a selection');
-    const rtUnlinked = loadRuntime(); seed(rtUnlinked, null);
+    const shell = read('css/shell.css');
+    check(!/\.identity-(selector|select|context|rail)\b/.test(shell),
+      'shell.css carries no selector, context-block or rail-chip rule');
+    check(/\.sidebar\.collapsed \.sidebar-collapse-btn\{/.test(shell) && /\.sidebar\.collapsed:hover \.nav-label/.test(shell),
+      'the neighbouring collapsed-rail and hover-peek rules are preserved');
+    const shellJs = read('js/ui/shell-render.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    check(!/IdentitySelector|identityPrincipal|identity-(selector|context|rail)/.test(shellJs),
+      'the shell mounts, binds and syncs no selector'); }
+  { const rtUnlinked = loadRuntime(); seed(rtUnlinked, null);
     rtUnlinked.State.employees = [];                       // linkage deliberately removed
     rtUnlinked.w.LocalIdentityProvider.selectPrincipal(EMP_P);
-    const htmlUnlinked = rtUnlinked.w.renderIdentitySelectorHTML();
     check(rtUnlinked.w.getCurrentWorkspace() === null,
-      'unlinked employee: the frozen UX-006B rule still fails closed to no workspace');
-    check(htmlUnlinked.indexOf('No linked employee record') !== -1,
-      'unlinked employee: the context names the real cause');
-    check(htmlUnlinked.indexOf('Select a principal to begin') === -1,
-      'unlinked employee: an ACTIVE principal is never told to select a principal');
-    check(htmlUnlinked.indexOf('Acting as ') !== -1,
-      'unlinked employee: the active principal is still named (presentation stays truthful)'); }
-
-  /* 2b. derived per render — no stale provenance across a principal switch */
-  console.log('-- 2b. D2-2 : context is derived per render (no stale provenance) --');
-  // NOTE: the frozen D1 contract has no de-selection — selectPrincipal() treats an
-  // unknown id as a safe no-op miss, and `null` is reachable only as the initial
-  // load state (selection is ephemeral and resets on reload). The switch sequence
-  // therefore covers null -> CEO -> employee -> CEO, exactly as C3 froze it.
-  { const seq = [['CEO', CEO_P, 'Executive workspace'], ['employee', EMP_P, 'Personal workspace'],
-                 ['CEO again', CEO_P, 'Executive workspace']];
+      'unlinked employee: the frozen UX-006B rule still fails closed to no workspace'); }
+  { const seq = [['CEO', CEO_P, 'executive'], ['employee', EMP_P, 'personal'], ['CEO again', CEO_P, 'executive']];
     const rt = loadRuntime(); seed(rt, null);
-    rt.w.syncIdentitySelector();
-    check(rt.dom.ctxName.textContent === 'No workspace',
-      'initial (null): context reads "No workspace" before any switch');
     let ok = true;
     for(const [label, principal, want] of seq){
       rt.w.LocalIdentityProvider.selectPrincipal(principal);
-      rt.w.syncIdentitySelector();
-      const got = rt.dom.ctxName.textContent;
-      const st = rt.dom.ctx.getAttribute('data-principal-state');
-      if(got !== want || st !== 'active') ok = false;
-      check(got === want, 'switch -> ' + label + ': context re-derives to "' + want + '"');
-      check(st === 'active', 'switch -> ' + label + ': state attribute tracks the current principal');
+      const ws = rt.w.getCurrentWorkspace();
+      if(!ws || ws.type !== want) ok = false;
+      check(!!ws && ws.type === want, 'switch -> ' + label + ': the workspace re-derives to ' + want);
     }
     check(ok, 'no stale workspace provenance survives any switch in the sequence');
-    check(rt.writes.length === 0, 'presentation sync performs ZERO storage writes'); }
-
-  /* 3. D2-3 — the collapsed rail carries the active principal */
-  console.log('-- 3. D2-3 : the collapsed rail no longer hides which principal is active --');
-  { const shell = read('css/shell.css');
-    check(/\.sidebar\.collapsed \.identity-rail\{display:block;\}/.test(shell),
-      'collapsed rail reveals the principal chip');
-    check(/\.sidebar\.collapsed:hover \.identity-rail\{display:none;\}/.test(shell),
-      'hover-peek hides the chip (the full selector takes over — never both)');
-    for(const [label, principal] of PRINCIPALS){
-      const rt = loadRuntime(); seed(rt, principal);
-      const html = rt.w.renderIdentitySelectorHTML();
-      check(html.indexOf('id="identityPrincipalRail"') !== -1, label + ': the rail chip is rendered');
-      const st = attrOf(html, 'identityPrincipalRail', 'data-principal-state');
-      check(st === (principal ? 'active' : 'none'), label + ': the rail chip reports the correct state');
-      const title = attrOf(html, 'identityPrincipalRail', 'title');
-      check(!!title && title.length > 0, label + ': the rail chip still carries the readable principal text');
-    }
-    // The chip must read as initials, not as stray punctuation from a display name
-    // like "Executive (CEO)".
-    const rtC = loadRuntime(); seed(rtC, CEO_P);
-    const chip = rtC.dom && rtC.w.renderIdentitySelectorHTML().match(/id="identityPrincipalRail"[^>]*>([^<]*)</);
-    check(!!chip && /^[A-Z0-9]{1,2}$/.test(chip[1]),
-      'the rail chip is alphanumeric initials only (no punctuation leakage)');
-    const rtN = loadRuntime(); seed(rtN, null);
-    const chipN = rtN.w.renderIdentitySelectorHTML().match(/id="identityPrincipalRail"[^>]*>([^<]*)</);
-    check(!!chipN && chipN[1] === '—', 'the unselected rail chip shows a neutral placeholder'); }
+    check(rt.writes.length === 0, 'a principal switch performs ZERO storage writes'); }
 
   /* 4. D2-4 — the 43 frozen integration entries are untouched by D2 */
   console.log('-- 4. D2-4 : the frozen UX-006C3 integration surface is unchanged --');
@@ -338,11 +265,13 @@ const attrOf = (html, id, attr) => {
   console.log('-- 7. D2-7 : D2 introduced no authorization-dependent hiding --');
   // Comment-stripped, like the UX-006D1 structural guard: these are claims about
   // CODE, and prose that merely names a forbidden symbol must not fail them.
-  { const selSrc = read('js/ui/identity-selector.js');
-    const sel = selSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-    check(!/getScopedRecords/.test(sel), 'the selector still performs no scope query');
-    check(!/localStorage|StorageAdapter/.test(sel), 'the selector still stores nothing');
-    check(!/State\.identity/.test(sel), 'the selector still creates no State.identity slice');
+  // AFI-5b: the selector is deleted; its successor, the development identity, carries the
+  // same three guarantees.
+  { const devSrc = read('tools/dev/local-identity-fixture.js');
+    const dev = devSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    check(!/getScopedRecords/.test(dev), 'the development identity performs no scope query');
+    check(!/localStorage|StorageAdapter/.test(dev), 'the development identity stores nothing');
+    check(!/State\.identity/.test(dev), 'the development identity creates no State.identity slice');
     const css = read('css/shell.css') + read('css/components.css');
     check(!/\.nav-item\[[^\]]*authz[^\]]*\]/.test(css), 'no navigation item is styled by an authorization attribute');
     check(!/quick-action[^{]*\{[^}]*display:\s*none/.test(css), 'no Quick Action is hidden by CSS');

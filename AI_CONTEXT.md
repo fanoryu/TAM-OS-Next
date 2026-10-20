@@ -572,6 +572,19 @@ ACTIONS, isolation, and a six-mutant self-test; the twelfth CI harness, D-1). `v
 `dist/`, `server/` or the package (`dist/package-manifest.json` unchanged): the shipped `AUTH_MODE` stays LOCAL and "Acting
 as" is unchanged. AFI-5b (mode flip and "Acting as" removal) is not started; per Atlas ruling B-1 it is not merged before
 SDR-0002 §22 items 1 and 8 hold. AFI-5b and AFI-5c are **on hold** pending separate Owner approval.
+
+**AFI-5b — identity transition (UNMERGED LOCAL CANDIDATE; merge HOLD)** (Owner limited Implementation GO with B-3a selector
+deletion and B-3b CSS golden-master revision, 2026-10-19; design AFI-5 Rev 1.2 + micro-addendum Rev 1.2.1, Atlas design
+acceptance) is implemented on the local branch `feature/afi-5b-identity-transition` from `36ec46b` only — **not merged,
+not pushed, not deployed**. On that branch: `AUTH_MODE` is **SESSION**; `js/core/identity.js` ships no fixture, no
+`LocalIdentityProvider` and no selection API, SESSION dispatch never reads the test seam, and LOCAL (development only)
+resolves only an explicitly installed development provider (a `null` reset clears it — R-1); `js/core/app-bootstrap.js`
+boots LOCAL only when `localDevReady()` holds, otherwise shows a fixed static notice (D-01); `js/ui/identity-selector.js`
+is deleted and unregistered and its 31 `css/shell.css` selector lines go with it (new golden pin `5321928b…`); the
+package holds **102** files (88 modules, digest `1cd8b4e5…`). `tools/dev/local-identity-fixture.js` is the only home of
+the fixtures and the `LocalIdentityProvider` compatibility alias (D-02); `tools/fixtures/afi5-identity-baseline-36ec46b.json`
+is the pinned parity oracle (R-2); `tools/verify-afi5-runtime.js` is the thirteenth CI harness (D-03). Merge stays held
+until SDR-0002 §22 items 1 and 8 hold on the production host (B-1); stub and loopback evidence never satisfies them.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

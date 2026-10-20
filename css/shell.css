@@ -20,25 +20,6 @@
 .brand-monogram{width:34px;height:34px;flex:0 0 auto;display:block;}
 .brand .mark{font-family:var(--display);font-weight:600;font-size:var(--fs-5);letter-spacing:0.3px;color:var(--text);white-space:nowrap;line-height:1.2;}
 .brand .mark .os{color:var(--identity-teal);}
-/* UX-006D1 — reachable principal selector ("Acting as"), lives in the brand block. */
-.identity-selector{margin-top:var(--space-3);}
-.identity-selector-label{display:block;font-size:var(--fs-1);color:var(--text-faint);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:var(--space-1);}
-.identity-selector .identity-select{width:100%;}
-.identity-selector-help{font-size:var(--fs-1);color:var(--text-faint);margin-top:var(--space-1);line-height:1.3;}
-/* UX-006D2 — principal & workspace context presentation. Presentation only: the
-   unselected state is a real state, so it is given a visible cue instead of the
-   same faint grey as an ordinary hint; the active workspace context is labelled
-   because the operator previously had no way to see it. Token-driven throughout. */
-.identity-selector[data-principal-state="none"] .identity-selector-help{color:var(--text-dim);}
-.identity-context{margin-top:var(--space-2);padding:var(--space-2);border:1px solid var(--border-soft);border-radius:var(--radius-md);background:var(--surface-2);display:flex;flex-direction:column;gap:2px;}
-.identity-context-name{font-size:var(--fs-2);font-weight:600;color:var(--text);line-height:1.3;}
-.identity-context-detail{font-size:var(--fs-1);color:var(--text-faint);line-height:1.3;}
-.identity-context[data-principal-state="none"]{background:transparent;border-style:dashed;}
-.identity-context[data-principal-state="none"] .identity-context-name{color:var(--text-dim);font-weight:500;}
-/* The rail chip is the collapsed-sidebar carrier of the same truth; it is hidden
-   whenever the full selector is visible, so the two never show at once. */
-.identity-rail{display:none;width:28px;height:28px;margin:0 auto;border-radius:var(--radius-md);background:var(--interactive-soft);color:var(--interactive);font-size:var(--fs-1);font-weight:700;line-height:28px;text-align:center;letter-spacing:.5px;}
-.identity-rail[data-principal-state="none"]{background:transparent;border:1px dashed var(--border);color:var(--text-faint);line-height:26px;}
 
 /* ===== UX-004E — sidebar interaction (collapse / pin / hover-expand / drawer) ===== */
 .nav-label{white-space:nowrap;overflow:hidden;}
@@ -58,15 +39,6 @@
 /* Collapsed rail shows the monogram only. The wordmark text is visually hidden but kept
    in the DOM so the brand retains an accessible name for screen readers. */
 .sidebar.collapsed .brand .mark{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;}
-/* UX-006D2 — the collapsed rail keeps the full selector hidden (unchanged), but no
-   longer hides WHICH principal is active: the block itself stays, its inner controls
-   collapse to the compact chip. */
-.sidebar.collapsed .identity-selector{display:block;}
-.sidebar.collapsed .identity-selector-label,
-.sidebar.collapsed .identity-selector .identity-select,
-.sidebar.collapsed .identity-selector-help,
-.sidebar.collapsed .identity-context{display:none;}
-.sidebar.collapsed .identity-rail{display:block;}
 .sidebar.collapsed .sidebar-collapse-btn{position:static;display:block;margin:var(--space-2) auto 0;right:auto;}
 .sidebar.collapsed .nav{padding:0 var(--space-1);}
 .sidebar.collapsed .nav-label,
@@ -86,14 +58,6 @@
   /* Hover-peek is the expanded lockup — restore the 34px mark and the full wordmark. */
   .sidebar.collapsed:hover .brand .brand-monogram{width:34px;height:34px;}
   .sidebar.collapsed:hover .brand .mark{position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;border:0;}
-  .sidebar.collapsed:hover .identity-selector{display:block;}
-  /* UX-006D2 — hover-peek restores the full selector, so the rail chip stands down. */
-  .sidebar.collapsed:hover .identity-selector-label,
-  .sidebar.collapsed:hover .identity-selector-help,
-  .sidebar.collapsed:hover .identity-context{display:block;}
-  .sidebar.collapsed:hover .identity-selector .identity-select{display:block;}
-  .sidebar.collapsed:hover .identity-context{display:flex;}
-  .sidebar.collapsed:hover .identity-rail{display:none;}
   .sidebar.collapsed:hover .sidebar-collapse-btn{position:absolute;margin:0;right:var(--space-3);}
   .sidebar.collapsed:hover .nav{padding:0 var(--space-2);}
   .sidebar.collapsed:hover .nav-label,
@@ -121,13 +85,6 @@
   /* Drawer shows the expanded lockup — restore the 34px mark and the full wordmark. */
   .sidebar.collapsed .brand .brand-monogram{width:34px;height:34px;}
   .sidebar.collapsed .brand .mark{position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;border:0;}
-  .sidebar.collapsed .identity-selector{display:block;}
-  /* UX-006D2 — the drawer always shows the full selector, never the rail chip. */
-  .sidebar.collapsed .identity-selector-label,
-  .sidebar.collapsed .identity-selector-help{display:block;}
-  .sidebar.collapsed .identity-selector .identity-select{display:block;}
-  .sidebar.collapsed .identity-context{display:flex;}
-  .sidebar.collapsed .identity-rail{display:none;}
   .sidebar.collapsed .nav-label,
   .sidebar.collapsed .nav-preview-tag,
   .sidebar.collapsed .nav-group-head > span:first-child,

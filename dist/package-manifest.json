@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4",
+  "packageDigest": "1cd8b4e5602e36930593914c19ad171a809251230245ff34d3e055fe1cc3cb09",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3105710,
-    "sha256": "2a8e40b6b9eeeccab2fb1aa57b384021124724bd80ca300b1a79565a6500923c"
+    "bytes": 3088703,
+    "sha256": "316ed21c41712e28f9901562290d6207748e88188b3dc04a7d7d3cbbbe5d3f2f"
   },
   "files": [
     {
@@ -54,8 +54,8 @@
     },
     {
       "path": "css/shell.css",
-      "bytes": 17248,
-      "sha256": "d1ad2b206ed9ba00ef5db35b799a08740b232888c2a0534ab1d331b3c0710924"
+      "bytes": 13765,
+      "sha256": "0a4e9973075dcd3d1bc14577785422af2e766e1ccd7f2d69dd51dd10acff56b3"
     },
     {
       "path": "css/tokens.css",
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 10069,
-      "sha256": "c4ee50151deb8c96a3961c28cd1c22a2d17e89bf026a9ec59d68e9b67bfda211"
+      "bytes": 10018,
+      "sha256": "25cbd94dc8c174c13ca484ddd601edbd1c1e3ff80dd358fbaf1d60182390cbff"
     },
     {
       "path": "js/analytics/compare.js",
@@ -104,8 +104,8 @@
     },
     {
       "path": "js/core/app-bootstrap.js",
-      "bytes": 567,
-      "sha256": "41001dfb98760570c4b706e6b3096d54283a34e4935ec9c1939cf23c99b71859"
+      "bytes": 897,
+      "sha256": "76d26c43b25facf3d1f2d8cf523eda0f523c2ebc96ebe84aca0109702efc720d"
     },
     {
       "path": "js/core/audit-api.js",
@@ -129,8 +129,8 @@
     },
     {
       "path": "js/core/constants.js",
-      "bytes": 18991,
-      "sha256": "ad639d797de84243abc0291a21539c2db7811d38b19defc9d93dbfee12d70141"
+      "bytes": 19207,
+      "sha256": "5fe57bc6244c7cd30585863e9fc33fe294ad134cb31f1f212533a1d24c36e784"
     },
     {
       "path": "js/core/data-grid.js",
@@ -159,8 +159,8 @@
     },
     {
       "path": "js/core/identity.js",
-      "bytes": 9498,
-      "sha256": "ceb8ebcb348ccea2260bd3d559d77a7a2a2613b37fc0251c2b3176c8d67ede32"
+      "bytes": 8024,
+      "sha256": "1b5adccf03a3c6ce35fb91d0cc296c74240d68b12efa2d1d976e007a265befb5"
     },
     {
       "path": "js/core/onboarding-reset.js",
@@ -483,11 +483,6 @@
       "sha256": "2ba274257e2b5c7399c97712c507e13bd398b6f3e4da321b72bc9d5eda05a36c"
     },
     {
-      "path": "js/ui/identity-selector.js",
-      "bytes": 11883,
-      "sha256": "028d690d49b7bd9fa3db8a0fd6d9b432d30e54932d2e0794a9fb2e8ba86b72bd"
-    },
-    {
       "path": "js/ui/session-audit-view.js",
       "bytes": 13631,
       "sha256": "f2d4c4a803386ca5a4eed7d3b84b81ea8274b752ab6f47568b78df4865b4533e"
@@ -514,8 +509,8 @@
     },
     {
       "path": "js/ui/shell-render.js",
-      "bytes": 42818,
-      "sha256": "df702da40136ef4221dda0ed10ebe090eff43a33ffd1a553ce44c0d776e22570"
+      "bytes": 42284,
+      "sha256": "5b79287a91142ba1b197cf764c1369ca235aaddf32273213497231746496fb90"
     },
     {
       "path": "vendor/sheetjs/LICENSE",

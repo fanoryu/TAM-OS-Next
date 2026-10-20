@@ -64,7 +64,9 @@ SDR-0004, as vocabulary only — no frontend feature consumes it).
 **Verification:** `tools/verify-build.js` — **2985** checks; **forty-two** Node runtime harnesses —
 **7,171** checks, 12 of them run in CI (largest: SESSION payroll 1998, SESSION employee 800, SESSION
 overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-backend-boundary.js`
-(selftest 739) and PHP tests (467 without the database, 874 with it).
+(selftest 739) and PHP tests (467 without the database, 874 with it). *(These figures describe `main`. The
+unmerged AFI-5b candidate — see "Identity transition — AFI-5b" below — has 2993 verifier checks, forty-three harnesses
+(7,273 checks, 13 in CI), 88 modules and a 102-file package.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
@@ -2903,6 +2905,30 @@ file references the dev file; the dev file's static shape (null on disk, seam on
 no name the application declares); the dev server is loopback-only and writes nothing. The shipped fixture tokens
 ("Acting as") are deliberately not checked until AFI-5b, where the confinement checks are replaced by absence checks of
 equal or greater strength.
+
+### Identity transition — AFI-5b (UNMERGED LOCAL CANDIDATE; merge on HOLD; not deployed)
+
+AFI-5b exists only on the local branch `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
+micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b). It may merge only after SDR-0002 §22 items 1 and 8 hold on the
+production host (B-1). Stub and loopback evidence never satisfies them.
+
+| Component | AFI-5b behaviour on the candidate |
+|---|---|
+| `js/core/constants.js` | `AUTH_MODE = AUTH_MODES.SESSION`. LOCAL remains a development/testing mode reached only by an in-memory rewrite (D-AFI5-2) |
+| `js/core/identity.js` | No fixtures, no `LocalIdentityProvider`, no selection API, no `window` export of either. SESSION dispatch resolves `SessionIdentityProvider` first and never reads the test seam (SA-7). LOCAL resolves only the provider installed through `setIdentityProviderForTesting`, else `NO_IDENTITY_PROVIDER`; a `null` reset clears it and never restores an alias (R-1). `localDevReady()` — a lexical, unexported predicate — is true only in LOCAL with an installed provider whose principal is valid; a throwing provider is not ready (D-01) |
+| `js/core/app-bootstrap.js` | The LOCAL branch calls `localDevReady()` once. If it is false, the branch writes the fixed `textContent` "Development identity not installed" and returns: no `loadState`, no AuthBoot, no request. If it is true, the boot order is unchanged. SESSION is unchanged |
+| `js/ui/identity-selector.js` | Deleted (B-3a), together with its `module-order.js`/`index.html` registration and its three shell call sites |
+| `css/shell.css` | The 31 lines carrying `.identity-(selector|select|context|rail)` and 12 selector-only comment lines are removed (B-3b). Golden pin `5321928b…`; `tokens.css` is unchanged |
+| `tools/dev/local-identity-fixture.js` | The only home of the fixtures and the `LocalIdentityProvider` compatibility alias. It declares exactly five names (D-02, V-a5 revised). It is null on disk and installs the alias through the seam only for an explicit persona |
+| `tools/fixtures/afi5-identity-baseline-36ec46b.json` | The parity oracle: the baseline `identity.js` plus the three pinned reference modules (`constants`, `workspace`, `authz`), SHA-256 `d5ea9f80…` (R-2). It is test-only and never packaged |
+| `tools/verify-afi5-runtime.js` | The thirteenth CI harness (D-03). It covers shipped SESSION behaviour, LOCAL readiness, local-data preservation and an in-memory mutation register |
+
+**Verifier.** `verify-build.js` replaces each former selector or fixture guard with an absence guard of equal or greater
+strength over every `js/**` file (registered or not) and every package file, and inverts the shipped-mode pins to SESSION.
+It adds R3-CONFINEMENT, a comment- and string-aware check that allows one definition of `localDevReady` and one call
+inside the LOCAL branch. It also pins the oracle and the 102-file package and moves the CI allowlist to thirteen
+entries. Every LOCAL runtime harness rewrites the one mode assignment in memory, loads the development identity after
+`identity.js` and installs the alias once.
 
 ### Release engineering
 

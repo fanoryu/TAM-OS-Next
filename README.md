@@ -142,6 +142,13 @@ Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v
 > [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8. Removing "Acting as" (AFI-5b) and closing the SDR-0002 §22
 > gate (AFI-5c) are **on hold**. See [`CHANGELOG.md`](CHANGELOG.md) → Unreleased.
 
+> **AFI-5b candidate (unmerged — merge on HOLD).** AFI-5b exists only as a local candidate branch,
+> `feature/afi-5b-identity-transition`: it ships `AUTH_MODE` **SESSION**, removes the "Acting as" selector,
+> its fixtures and its styles from the app, and keeps a development persona outside the app for LOCAL testing.
+> It is **not merged and not deployed**; it may merge only after production login and authenticated
+> end-to-end tests pass on the production host (SDR-0002 §22 items 1 and 8). Until then `main` behaves as
+> described above.
+
 > **Trust model.** "Acting as" is a **local, trust-based application context**, not authentication. It is
 > not a security boundary against anyone with local access to the device, browser profile or portable
 > file. Authorization and read-scope are product behaviour under that trust model.
@@ -677,7 +684,8 @@ Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2)
    Supplemental, Finance posting/execution and Audit domains plus backup/restore are merged; the SESSION
    frontend (AFI-1 … AFI-4g) is merged but dormant; AFI-5a development identity tooling is merged. The
    backend is not deployed and production SESSION mode is not enabled. **AFI-5b** ("Acting as" removal) and
-   **AFI-5c** (SDR-0002 §22 closure) are **ON HOLD**.
+   **AFI-5c** (SDR-0002 §22 closure) are **ON HOLD** for merge; AFI-5b is implemented as an unmerged local
+   candidate only (see the note above).
 4. **PILOT-1** — real operational use with company data. The v2.10.0 controlled pilot was approved but
    **never launched** and is **ON HOLD** until this point; no real company data has been entered.
    Publishing v2.10.0 made the verified artifact obtainable; **it did not launch the pilot**.
