@@ -189,6 +189,7 @@ Engineering justifications for standing security decisions — such as the dispo
 - [`SDR-0003 — Governed Mail Transport`](docs/security/SDR-0003-governed-mail-transport.md) (Accepted)
 - [`SDR-0004 — Employee Account Administration`](docs/security/SDR-0004-employee-account-administration.md) (Accepted; partially supersedes SDR-0002)
 - [`SDR-0006 — Hostinger Account Access-Risk Exception`](docs/security/SDR-0006-hostinger-account-access-risk-exception.md) (Accepted; staging only; partially supersedes SDR-0002)
+- [`SDR-0007 — Recovery Mailbox Two-Factor Exception`](docs/security/SDR-0007-recovery-mailbox-two-factor-exception.md) (Accepted; staging only; partially supersedes SDR-0006)
 
 An SDR documents *why* a finding is accepted or classified as a false positive and what future change
 would require it to be re-examined. An SDR does not, by itself, dismiss any alert.

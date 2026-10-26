@@ -26,6 +26,7 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
 | [SDR-0003](SDR-0003-governed-mail-transport.md) | Governed Mail Transport | Accepted | 2026-10-01 | Before the first real recovery mail |
 | [SDR-0004](SDR-0004-employee-account-administration.md) | Employee Account Administration | Accepted | 2026-10-01 | Before the first real Employee account |
 | [SDR-0006](SDR-0006-hostinger-account-access-risk-exception.md) | Hostinger Account Access-Risk Exception | Accepted | 2026-10-26 | Every 90 days while in force |
+| [SDR-0007](SDR-0007-recovery-mailbox-two-factor-exception.md) | Recovery Mailbox Two-Factor Exception | Accepted | 2026-10-26 | With SDR-0006 (every 90 days while in force) |
 
 ## Timeline
 
@@ -51,5 +52,12 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
   staging, and the §14 access limit. The production two-factor requirement and E10 stay in force and are
   not satisfied; SDR-0002 stays Accepted and unchanged. Authorizes no deployment, no production cutover
   and no real company data.
+- **2026-10-26** — SDR-0007 Accepted (owner decision: two-factor authentication will not be enabled on the Hostinger
+  password-recovery mailbox; reverses SDR-0006 D-4 = A for synthetic staging only). Replaces the mailbox two-factor
+  requirement with mailbox controls M1–M7 (strong rotated password, recovery options and forwarding locked down,
+  reset mail watched, sign-in monitoring where available, hosting location recorded) and accepts the added
+  takeover risks R7–R9 for staging only. **Partially supersedes SDR-0006** — only C5's two-factor sentence, the
+  matching part of X4 and the R7 wording; SDR-0006 stays Accepted and unchanged. Production requirements are
+  unchanged. Authorizes no deployment and no real company data.
 
 *Architecture decisions live in [`../adr/`](../03b-repository-adr/README.md) as ADRs.*
