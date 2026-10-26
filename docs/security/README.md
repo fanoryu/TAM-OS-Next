@@ -25,6 +25,7 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
 | [SDR-0002](SDR-0002-php-mariadb-security-architecture.md) | PHP + MariaDB Multi-User Security Architecture | Accepted | 2026-09-29 | Before first real company data |
 | [SDR-0003](SDR-0003-governed-mail-transport.md) | Governed Mail Transport | Accepted | 2026-10-01 | Before the first real recovery mail |
 | [SDR-0004](SDR-0004-employee-account-administration.md) | Employee Account Administration | Accepted | 2026-10-01 | Before the first real Employee account |
+| [SDR-0006](SDR-0006-hostinger-account-access-risk-exception.md) | Hostinger Account Access-Risk Exception | Accepted | 2026-10-26 | Every 90 days while in force |
 
 ## Timeline
 
@@ -42,5 +43,13 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
   governed outbox as the SDR-0003 §8 revalidation). **Partially supersedes SDR-0002** — only the clauses
   that fix the ACTION count at 20 (§7, the §1 diagram, §9.2); SDR-0002 and SDR-0003 stay Accepted and
   unchanged. Authorizes no implementation.
+- **2026-10-26** — SDR-0006 Accepted (owner decisions D-1 = A, D-2 = B, D-3 = B and D-4 = A: Hostinger
+  account two-factor authentication is disabled and the login is shared, so synthetic-data **staging**
+  may proceed without it under a named access-holder register capped at five, mandatory two-factor on the
+  password-recovery mailbox and compensating controls C1–C9; residual risks R1–R7 accepted for staging
+  only). **Partially supersedes SDR-0002** — only the §14 two-factor requirement as it applies to
+  staging, and the §14 access limit. The production two-factor requirement and E10 stay in force and are
+  not satisfied; SDR-0002 stays Accepted and unchanged. Authorizes no deployment, no production cutover
+  and no real company data.
 
 *Architecture decisions live in [`../adr/`](../03b-repository-adr/README.md) as ADRs.*
