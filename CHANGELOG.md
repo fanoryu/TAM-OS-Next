@@ -267,6 +267,14 @@
   will attach the zip and manifest. The single-file builder is retired; published single-file releases stay unchanged. No data,
   schema, ACTIONS (**20**) or behaviour change.
 
+### Fixed
+- **O-2 Sign-in screen no longer shows the previous person's email (SESSION mode; not shipped).** After someone signed out,
+  or their session ended, the sign-in form (and the "Forgot password?" form) still showed the email address last typed
+  into it, so the next person at the device could see it. The email is now cleared as soon as a session starts, so it
+  never appears after a sign-out, an unconfirmed sign-out, an ended session or a Retry. A failed sign-in still keeps the
+  typed email so it need not be typed again. Whatever the browser or a password manager fills in by itself is outside
+  TAM OS. The shipped `AUTH_MODE` stays **LOCAL**; no sign-in, session, storage or schema change.
+
 ## 2.11.0 — Identity Refresh
 
 **Type:** Presentation / product-identity release carrying the merged **BRAND-1** identity modernization.

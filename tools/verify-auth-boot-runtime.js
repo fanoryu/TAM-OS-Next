@@ -418,6 +418,134 @@ function firewall(rt, label){
     check(calls(rt2, '/api/auth/logout') === 1 && rt2.AuthBoot.snapshot().message === 'signed_out', 'X. logout 403 + /me 401: the session is already gone -> signed out');
   }
 
+  /* ---------- O-2. no typed email outlives a session ---------- */
+  // O-2: the sign-in and forgot-password forms keep a typed email across a failed attempt
+  // only — never into or past a session. These cases drive the REAL submit and click
+  // handlers of auth-view.js: #app answers querySelector with field stubs (value = the
+  // rendered value=, or what the case "typed") and records the listeners. loadRuntime() is
+  // unchanged. Fabricated identities only.
+  const CEO_MAIL = 'ceo.fixture@example.test';
+  const EMP_MAIL = 'employee.fixture@example.test';
+  function formDriver(rt){
+    const app = rt.w.document.getElementById('app');
+    const handlers = {}; let typed = {};
+    const rendered = (id) => { const m = app.innerHTML.match(new RegExp('id="' + id + '"[^>]*? value="([^"]*)"')); return m ? m[1] : null; };
+    const stub = (id) => ({ value: rendered(id) || '', focus: function(){},
+      addEventListener: function(ev, fn){ handlers[id + ':' + ev] = fn; },
+      querySelector: function(sel){ const f = sel.replace(/^#/, ''); return Object.prototype.hasOwnProperty.call(typed, f) ? { value: typed[f] } : app.querySelector(sel); } });
+    app.querySelector = function(sel){ const id = sel.replace(/^#/, ''); return app.innerHTML.indexOf('id="' + id + '"') === -1 ? null : stub(id); };
+    return {
+      value: rendered,
+      // Submits a form with typed fields; returns before the request settles (for the busy view).
+      submit: function(form, fields){ typed = fields; handlers[form + ':submit']({ preventDefault: function(){} }); typed = {}; },
+      click: function(id){ handlers[id + ':click'](); }
+    };
+  }
+  async function o2SignedOut(routes){
+    const rt = loadRuntime({ mode: SESSION, boot: true, routes: Object.assign({ '/api/auth/me': [err(401, 'unauthenticated')] }, routes || {}) });
+    const d = formDriver(rt);
+    await flush(12);
+    return { rt: rt, d: d };
+  }
+  async function o2SignIn(t, mail, me){
+    t.rt.net.routes['/api/auth/me'] = [ok(me)];
+    t.d.submit('authSignInForm', { authEmail: mail, authPassword: PASSWORD });
+    await flush(12);
+  }
+  {
+    const t = await o2SignedOut();
+    check(t.rt.AuthBoot.snapshot().state === 'SIGNED_OUT' && t.d.value('authEmail') === '', 'O-2. fresh signed-out boot: the app supplies an empty email');
+  }
+  for(const [who, mail, me] of [['CEO', CEO_MAIL, ME_CEO], ['Employee', EMP_MAIL, ME_EMP]]){
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})], '/api/auth/logout': [ok({ loggedOut: true })] });
+    await o2SignIn(t, mail, me);
+    check(t.rt.AuthBoot.snapshot().state === 'AUTHENTICATED' && (t.rt.AuthBoot.snapshot().principal || {}).principalType === me.role,
+      'O-2. ' + who + ' signs in through the real sign-in form');
+    await t.rt.AuthBoot.signOut(); await flush();
+    check(t.rt.AuthBoot.snapshot().message === 'signed_out' && t.d.value('authEmail') === '' && t.rt.appHTML().indexOf(mail) === -1,
+      'O-2. ' + who + ' sign-out (confirmed): the sign-in form shows no previous email');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})], '/api/auth/logout': [err(503, 'service_unavailable')] });
+    await o2SignIn(t, EMP_MAIL, ME_EMP);
+    await t.rt.AuthBoot.signOut(); await flush();
+    check(t.rt.AuthBoot.snapshot().message === 'signout_unconfirmed' && t.d.value('authEmail') === '' && t.rt.appHTML().indexOf(EMP_MAIL) === -1,
+      'O-2. Employee sign-out (unconfirmed): the sign-in form shows no previous email');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})], '/api/auth/logout': [ok({ loggedOut: true })] });
+    await o2SignIn(t, EMP_MAIL, ME_EMP);
+    await t.rt.AuthBoot.signOut(); await flush();
+    check(t.d.value('authEmail') === '' && t.rt.appHTML().indexOf(EMP_MAIL) === -1, 'O-2. handover: the next person sees no Employee email');
+    await o2SignIn(t, CEO_MAIL, ME_CEO);
+    check((t.rt.getCurrentUser() || {}).id === 'u_ceo_1' && (t.rt.AuthBoot.snapshot().principal || {}).principalType === 'ceo' && t.rt.appHTML().indexOf(EMP_MAIL) === -1,
+      'O-2. handover: the CEO session is the CEO only, with no Employee email anywhere');
+    await t.rt.AuthBoot.signOut(); await flush();
+    check(t.d.value('authEmail') === '' && t.rt.appHTML().indexOf(CEO_MAIL) === -1, 'O-2. handover: after the CEO signs out the form is empty again');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})], '/api/employees': [err(401, 'unauthenticated')] });
+    await o2SignIn(t, CEO_MAIL, ME_CEO);
+    check(t.rt.AuthBoot.snapshot().message === 'session_ended' && t.d.value('authEmail') === '' && t.rt.appHTML().indexOf(CEO_MAIL) === -1,
+      'O-2. session ended (business read 401): the sign-in form shows no previous email');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})] });
+    await o2SignIn(t, CEO_MAIL, ME_CEO);
+    t.rt.AuthBoot.sessionUncertain(); await flush();
+    t.rt.net.routes['/api/auth/me'] = [err(401, 'unauthenticated')];
+    await t.rt.AuthBoot.retry(); await flush();
+    const s = t.rt.AuthBoot.snapshot();
+    check(s.state === 'SIGNED_OUT' && s.message === null && t.d.value('authEmail') === '' && t.rt.appHTML().indexOf(CEO_MAIL) === -1,
+      'O-2. uncertain session -> Retry -> signed out: the sign-in form shows no previous email');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})], '/api/auth/logout': [ok({ loggedOut: true })], '/api/auth/forgot-password': [err(503, 'service_unavailable')] });
+    t.d.click('authForgotBtn'); await flush();
+    t.d.submit('authForgotForm', { authForgotEmail: EMP_MAIL }); await flush(12);
+    check(t.d.value('authForgotEmail') === EMP_MAIL, 'O-2. a failed recovery request keeps its typed email (unchanged)');
+    t.d.click('authBackBtn'); await flush(12);
+    await o2SignIn(t, CEO_MAIL, ME_CEO);
+    await t.rt.AuthBoot.signOut(); await flush();
+    t.d.click('authForgotBtn'); await flush();
+    check(t.d.value('authForgotEmail') === '' && t.rt.appHTML().indexOf(EMP_MAIL) === -1,
+      'O-2. after a session the forgot-password form shows no earlier email');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [err(401, 'unauthenticated')] });
+    t.d.submit('authSignInForm', { authEmail: CEO_MAIL, authPassword: PASSWORD }); await flush(12);
+    const dump = JSON.stringify(t.rt.memStore) + JSON.stringify(t.rt.State) + t.rt.appHTML() + JSON.stringify(t.rt.AuthBoot.snapshot());
+    check(t.rt.AuthBoot.snapshot().message === 'credentials' && t.d.value('authEmail') === CEO_MAIL && dump.indexOf(PASSWORD) === -1,
+      'O-2. failed sign-in keeps the typed email (unchanged UX); the password is in no storage, State, DOM or view model');
+  }
+  for(const [label, answers, me, msg] of [
+    ['login 429', [err(429, 'rate_limited', { 'retry-after': '120' })], null, 'rate_limited'], ['login 400', [err(400, 'validation_failed')], null, 'validation'],
+    ['login 403', [err(403, 'forbidden')], null, 'rejected'], ['login 503', [err(503, 'service_unavailable')], null, 'unavailable'],
+    ['login 200 + /me 401', [ok({})], err(401, 'unauthenticated'), 'failed']]){
+    const t = await o2SignedOut({ '/api/auth/login': answers });
+    if(me) t.rt.net.routes['/api/auth/me'] = [me];
+    t.d.submit('authSignInForm', { authEmail: CEO_MAIL, authPassword: PASSWORD }); await flush(12);
+    check(t.rt.AuthBoot.snapshot().message === msg && t.d.value('authEmail') === CEO_MAIL && t.rt.getCurrentUser() === null,
+      'O-2. ' + label + ': the typed email is kept, no identity');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [err(401, 'unauthenticated'), ok({})], '/api/auth/logout': [ok({ loggedOut: true })] });
+    t.d.submit('authSignInForm', { authEmail: CEO_MAIL, authPassword: PASSWORD }); await flush(12);
+    check(t.d.value('authEmail') === CEO_MAIL, 'O-2. failed then successful sign-in: kept after the failure');
+    await o2SignIn(t, CEO_MAIL, ME_CEO);
+    await t.rt.AuthBoot.signOut(); await flush();
+    check(t.rt.AuthBoot.snapshot().state === 'SIGNED_OUT' && t.d.value('authEmail') === '', 'O-2. failed then successful sign-in: empty after the sign-out');
+  }
+  {
+    const t = await o2SignedOut({ '/api/auth/login': [ok({})] });
+    t.rt.net.routes['/api/auth/me'] = [ok(ME_CEO)];
+    t.d.submit('authSignInForm', { authEmail: CEO_MAIL, authPassword: PASSWORD });
+    check(t.rt.AuthBoot.snapshot().busy === true && t.d.value('authEmail') === CEO_MAIL && /id="authEmail"[^>]* disabled/.test(t.rt.appHTML()),
+      'O-2. while signing in, the busy form still shows the typed email (disabled)');
+    await flush(12);
+    check(t.rt.AuthBoot.snapshot().state === 'AUTHENTICATED', 'O-2. the busy sign-in completes');
+  }
+
   /* ---------- summary ---------- */
   console.log('');
   if(failures.length){

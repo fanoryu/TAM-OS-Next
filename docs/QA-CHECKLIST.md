@@ -52,6 +52,10 @@ disposable local PHP + MariaDB backend — never a production backend or real da
       history opens from an event; empty, 403, 500 (with the informational 2,000-event note), 503 and malformed answers are
       shown as such; an Employee has no Audit section; a 401 signs out; zero console errors other than the browser's own
       network-status lines for deliberately failed requests, and zero CSP violations
+- [ ] **No retained sign-in email (O-2):** sign in as the CEO, sign out — the email field is empty; the same for the Employee;
+      Employee out → CEO in → out shows neither email; reload and browser Back after sign-out show no email supplied by TAM OS
+      (record any browser or password-manager autofill separately — outside TAM OS); a failed sign-in still keeps the typed
+      email; zero console errors other than the signed-out `GET /api/auth/me` 401 (CLAUDE.md §12.2), and zero CSP violations
 
 ## LOCAL development persona (test-only server, AFI-5a)
 Run against `node tools/serve-local-dev.js --as ceo` and `--as employee` after `node tools/build-package.js`, with
