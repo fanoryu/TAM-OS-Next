@@ -225,7 +225,7 @@ Get-ChildItem tools/verify-*-runtime.js | ForEach-Object { node $_.FullName *> $
 > `verify-identity-foundation-runtime.js`, `verify-session-identity-runtime.js`,
 > `verify-identity-selection-runtime.js`, `verify-workspace-selfscope-runtime.js`,
 > `verify-authz-runtime.js` and, since N1-B, `verify-auth-boot-runtime.js`, `verify-auth-flow-runtime.js` and
-> `verify-session-employee-runtime.js`, since AFI-4b1 (D-AFI4b1-2) `verify-session-overtime-runtime.js`, since AFI-4c1 (D-AFI4c1-2) `verify-session-payroll-runtime.js`, since AFI-4g (D-AFI4g-9) `verify-session-audit-runtime.js`, since AFI-5a (D-1) `verify-dev-local-runtime.js`, and since AFI-5b (D-03; unmerged candidate) `verify-afi5-runtime.js` — a fixed allowlist of deterministic identity/authorization/SESSION
+> `verify-session-employee-runtime.js`, since AFI-4b1 (D-AFI4b1-2) `verify-session-overtime-runtime.js`, since AFI-4c1 (D-AFI4c1-2) `verify-session-payroll-runtime.js`, since AFI-4g (D-AFI4g-9) `verify-session-audit-runtime.js`, since AFI-5a (D-1) `verify-dev-local-runtime.js`, and since AFI-5b (D-03; PR #62) `verify-afi5-runtime.js` — a fixed allowlist of deterministic identity/authorization/SESSION
 > harnesses that `verify-build.js` pins (no glob, no failure bypass). The rest of the suite is **not** wired into CI
 > (the contract-timeline harness is date-sensitive); run it locally before proposing a change that
 > touches behaviour.
