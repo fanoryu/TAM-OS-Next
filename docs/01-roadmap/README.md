@@ -31,7 +31,7 @@ the **v2.11.0 official release** (Identity Refresh; the prior v2.10.0 release re
 | 9 | Post-Pilot Findings & Remediation | **UPCOMING** |
 | 10 | Pilot Exit Review | **UPCOMING** |
 | 11 | Distribution-1 — Modular Distribution Migration | **COMPLETED** (2026-09-29) — strict-CSP deployment package; unreleased until the next version |
-| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **IN PROGRESS — source only; backend not deployed; production SESSION mode not enabled.** Merged: BF-1 … BF-4g, OPS-1, OPS-2, AFI-1 … AFI-4g, AFI-5a (PR #60). **On hold:** AFI-5b (merge — implemented only as an unmerged local candidate), AFI-5c, deployment and cutover. SDR-0002 §22 gate open (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; each milestone separately authorized) |
+| 12 | Multi-User-1…8 — Shared Multi-User Implementation | **IN PROGRESS — source only; backend not deployed; production SESSION mode not enabled.** Merged: BF-1 … BF-4g, OPS-1, OPS-2, AFI-1 … AFI-4g, AFI-5a (PR #60). AFI-5b (PR #62) enters `main` only through Gate M. **On hold:** AFI-5c, deployment (Gate D) and cutover; the production retirement of "Acting as" waits for Gate R (SDR-0002 §22 items 1 and 8). SDR-0002 §22 gate open (target: [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md); `CLAUDE.md` §4.3 permits only that backend; each milestone separately authorized) |
 | 13 | General-Use Readiness / Hardening | **FUTURE** |
 | 14 | UX-006F / v3.0.0 | **FUTURE** |
 

@@ -64,9 +64,9 @@ SDR-0004, as vocabulary only — no frontend feature consumes it).
 **Verification:** `tools/verify-build.js` — **2985** checks; **forty-two** Node runtime harnesses —
 **7,171** checks, 12 of them run in CI (largest: SESSION payroll 1998, SESSION employee 800, SESSION
 overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-backend-boundary.js`
-(selftest 739) and PHP tests (467 without the database, 874 with it). *(These figures describe `main`. The
-unmerged AFI-5b candidate — see "Identity transition — AFI-5b" below — has 2993 verifier checks, forty-three harnesses
-(7,273 checks, 13 in CI), 88 modules and a 102-file package.)*
+(selftest 739) and PHP tests (467 without the database, 874 with it). *(These figures were recorded before AFI-5b.
+With AFI-5b (PR #62) — see "Identity transition — AFI-5b" below — the verifier has 2993 checks, 13 harnesses run in CI,
+and the package holds 88 modules in 102 files.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
