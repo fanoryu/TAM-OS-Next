@@ -2906,12 +2906,11 @@ no name the application declares); the dev server is loopback-only and writes no
 ("Acting as") are deliberately not checked until AFI-5b, where the confinement checks are replaced by absence checks of
 equal or greater strength.
 
-### Identity transition — AFI-5b (UNMERGED LOCAL CANDIDATE; merge on HOLD; not deployed)
+### Identity transition — AFI-5b (PR #62; enters `main` only through Gate M; not deployed)
 
-AFI-5b exists only on the branch `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
-micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b), open as the Draft PR #62 at remote head `4d6f3e2`; its
-integration with `main` `0a1f7e2` exists only locally and is not yet pushed. It may merge only after Gate M (merge readiness) passes; it
-deploys nothing, and the production retirement of "Acting as" waits for Gate R, which needs SDR-0002 §22 items 1 and 8 to
+AFI-5b is implemented on `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
+micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b) as PR #62, integrated with `main` `0a1f7e2`. It enters
+`main` only through Gate M (merge approval); merging deploys nothing, and the production retirement of "Acting as" waits for Gate R, which needs SDR-0002 §22 items 1 and 8 to
 hold on the production host (B-1.5, B-1.12–B-1.15). Stub and loopback evidence never satisfies them.
 
 | Component | AFI-5b behaviour on the candidate |
