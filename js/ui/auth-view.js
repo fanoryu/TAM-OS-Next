@@ -247,6 +247,8 @@ function renderAuthView(){
   if(modal) modal.innerHTML = '';
   if(typeof AuthFlow !== 'undefined' && AuthFlow.active()) return renderAuthFlowView(app);
   const s = AuthBoot.snapshot();
+  // O-2: a typed email is kept across a failed attempt only, never into or past a session.
+  if(s.state === AUTH_STATES.AUTHENTICATED){ authViewLastEmail = ''; authFlowLastEmail = ''; }
   if(s.state === AUTH_STATES.AUTHENTICATED) return renderSessionWorkspace(app, s);   // AFI-4a1
   app.innerHTML = authViewHTML(s);
   bindAuthView(app);

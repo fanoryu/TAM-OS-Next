@@ -7734,11 +7734,13 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
     && /<time datetime="/.test(viewC) && /tabindex="-1"/.test(viewC),
     'AFI-4g: accessible — busy status, alerts, scoped headers, a labelled month field, machine-readable times, focusable headings');
   // Package, module order, invariants.
+  // O-2 authorized revision: ui/auth-view.js no longer keeps a typed email into or past a session,
+  // so the package digest changed (files, modules and ACTIONS unchanged). Was: digest 097f6b50….
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === 89 && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 103 && pkg.actions === 21
-    && pkg.packageDigest === '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4',
-    'AFI-4g: exactly three new production modules (89 modules); the package holds 103 files at digest 097f6b50…, ACTIONS 21');
+    && pkg.packageDigest === 'b2dae6ed01864793c2fe05e9b7fdf355a72b22d3744fd8fa1c8cfa3820c88147',
+    'AFI-4g: exactly three new production modules (89 modules); the package holds 103 files at digest b2dae6ed… (O-2), ACTIONS 21');
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql'
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && !/'audit|audit\./.test((/const ACTIONS = Object\.freeze\(\{[\s\S]*?\}\);/.exec(read(path.join(root, 'js', 'core', 'authz.js'))) || [''])[0]),

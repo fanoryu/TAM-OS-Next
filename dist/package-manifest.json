@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4",
+  "packageDigest": "b2dae6ed01864793c2fe05e9b7fdf355a72b22d3744fd8fa1c8cfa3820c88147",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3105710,
-    "sha256": "2a8e40b6b9eeeccab2fb1aa57b384021124724bd80ca300b1a79565a6500923c"
+    "bytes": 3105897,
+    "sha256": "cee8e794119d66bb7d343fa5aa16d3146e6c29be436f519eda8b94c18c606dcd"
   },
   "files": [
     {
@@ -469,8 +469,8 @@
     },
     {
       "path": "js/ui/auth-view.js",
-      "bytes": 15487,
-      "sha256": "1ac800dc45145e058e3afa8305f5e1715f5beb937cfb527a87a5ac282119e2ed"
+      "bytes": 15674,
+      "sha256": "7e943156c5d29230855c85f4f8a24f62e9a3902d965cd6fa6d15e8f6c022c2be"
     },
     {
       "path": "js/ui/charts.js",
