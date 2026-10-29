@@ -7792,11 +7792,14 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
     && /<time datetime="/.test(viewC) && /tabindex="-1"/.test(viewC),
     'AFI-4g: accessible — busy status, alerts, scoped headers, a labelled month field, machine-readable times, focusable headings');
   // Package, module order, invariants.
+  // O-2 authorized revision: ui/auth-view.js no longer keeps a typed email into or past a session,
+  // so the package digest changed (files, modules and ACTIONS unchanged). Was: digest 097f6b50….
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === 88 && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 && pkg.actions === 21
-    && pkg.packageDigest !== '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4', // AFI-5b: historical (its digest: the AFI-5b section)
-    'AFI-4g: exactly three new production modules (89 modules, 88 since AFI-5b); the package held 103 files at digest 097f6b50… (102 since AFI-5b, its digest pinned in the AFI-5b section), ACTIONS 21');
+    && pkg.packageDigest !== '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4' // AFI-5b: historical (its digest: the AFI-5b section)
+    && pkg.packageDigest !== 'b2dae6ed01864793c2fe05e9b7fdf355a72b22d3744fd8fa1c8cfa3820c88147', // O-2 (PR #67): historical 103-file digest
+    'AFI-4g: exactly three new production modules (89 modules, 88 since AFI-5b); the package held 103 files at digest 097f6b50… (b2dae6ed… with O-2; 102 since AFI-5b, its digest pinned in the AFI-5b section), ACTIONS 21');
   check(fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().pop() === '0035_replace_audit_events_finance_execute.sql'
     && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && !/'audit|audit\./.test((/const ACTIONS = Object\.freeze\(\{[\s\S]*?\}\);/.exec(read(path.join(root, 'js', 'core', 'authz.js'))) || [''])[0]),
@@ -8009,8 +8012,8 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   const pkg5 = JSON.parse(read(pkgManifestPathA5));
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === '1cd8b4e5602e36930593914c19ad171a809251230245ff34d3e055fe1cc3cb09',
-    'AFI-5b: 88 modules; the package holds 102 files (the selector module removed) at digest 1cd8b4e5…');
+    && pkg5.packageDigest === 'f98e48f8b4d871b811a4dd8ea271f2c50f2937e5f8ef4bebd63ade5e51ed76a5',
+    'AFI-5b: 88 modules; the package holds 102 files (the selector module removed) at digest f98e48f8… (with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }

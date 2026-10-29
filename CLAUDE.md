@@ -203,7 +203,11 @@ The living checklist is [`docs/QA-CHECKLIST.md`](docs/QA-CHECKLIST.md).
    package served over HTTP with the production header contract, including its Content-Security-Policy
    (`file://` is not a supported way to run TAM OS).
 2. **Zero console errors (MUST).** The package must boot and operate with no console errors and no
-   Content-Security-Policy violations.
+   Content-Security-Policy violations. **One narrow exception:** the browser's own network-status
+   line for the signed-out session check (`GET /api/auth/me` answered 401) is not a console error,
+   provided the application handles it as signed-out and the same boot produces no JavaScript
+   exception, no application `console` error and no CSP violation. Any other network-status line is
+   reviewed case by case and recorded in the QA checklist.
 3. **Confirm persistence.** Data must survive reload; no duplicate records are produced.
 4. **Confirm interaction invariants.** Search keeps focus, scroll position is preserved, and menus
    open/close correctly.
