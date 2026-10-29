@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **E11 hostile-principal test coverage for every API route (tests only; not shipped).** Four new database suites check
+  that Payroll, Supplemental Payroll, Finance and the two account self-service routes refuse a signed-out caller (401), an
+  Employee where only the CEO may act (403), another company (404), invented scope fields (400) and a request without its
+  CSRF token or from another website (403) — and that a refused request writes and audits nothing. A confirmation suite
+  covers the remaining account, overtime-valuation and audit cases, and a unit test now fails if any route lacks a hostile
+  suite. No application, schema, package or behaviour change.
 - **AFI-5b Sign-in becomes the only way in; "Acting as" is removed (not shipped).**
   The source now starts in SESSION mode: people sign in, and who they are comes only from the server.
   The "Acting as" chooser, its sample people and its styles are removed from the app; the sample people now live only in
