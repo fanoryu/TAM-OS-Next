@@ -145,8 +145,9 @@ Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v
 > **AFI-5b candidate (unmerged — merge on HOLD).** AFI-5b exists only as a local candidate branch,
 > `feature/afi-5b-identity-transition`: it ships `AUTH_MODE` **SESSION**, removes the "Acting as" selector,
 > its fixtures and its styles from the app, and keeps a development persona outside the app for LOCAL testing.
-> It is **not merged and not deployed**; it may merge only after production login and authenticated
-> end-to-end tests pass on the production host (SDR-0002 §22 items 1 and 8). Until then `main` behaves as
+> It is **not merged and not deployed**; it may merge only after its merge-readiness gate (Gate M) passes, and
+> merging deploys nothing. Retiring "Acting as" in production still needs production login and authenticated
+> end-to-end tests to pass on the production host (SDR-0002 §22 items 1 and 8). Until then `main` behaves as
 > described above.
 
 > **Trust model.** "Acting as" is a **local, trust-based application context**, not authentication. It is

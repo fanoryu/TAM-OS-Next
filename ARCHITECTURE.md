@@ -2908,9 +2908,11 @@ equal or greater strength.
 
 ### Identity transition — AFI-5b (UNMERGED LOCAL CANDIDATE; merge on HOLD; not deployed)
 
-AFI-5b exists only on the local branch `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
-micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b). It may merge only after SDR-0002 §22 items 1 and 8 hold on the
-production host (B-1). Stub and loopback evidence never satisfies them.
+AFI-5b exists only on the branch `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
+micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b), open as the Draft PR #62 at remote head `4d6f3e2`; its
+integration with `main` `0a1f7e2` exists only locally and is not yet pushed. It may merge only after Gate M (merge readiness) passes; it
+deploys nothing, and the production retirement of "Acting as" waits for Gate R, which needs SDR-0002 §22 items 1 and 8 to
+hold on the production host (B-1.5, B-1.12–B-1.15). Stub and loopback evidence never satisfies them.
 
 | Component | AFI-5b behaviour on the candidate |
 |---|---|
