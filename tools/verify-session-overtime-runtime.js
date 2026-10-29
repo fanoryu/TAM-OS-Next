@@ -6,7 +6,7 @@
    tools/verify-build.js proves the STRUCTURE of AFI-4b1 and AFI-4b2. This harness proves
    their BEHAVIOUR by executing every production module (module-order.js, the boot included)
    in the dependency-free Node `vm` loader of the SESSION Employee harness, with the ONE
-   source line `const AUTH_MODE = AUTH_MODES.LOCAL;` rewritten to SESSION in the
+   source line `const AUTH_MODE = AUTH_MODES.SESSION;` loaded as SESSION in the
    concatenated text — the committed value is untouched.
 
    DETERMINISTIC: fetch is a stub answering by URL (path + query) from a script; the API
@@ -50,8 +50,11 @@ const ME_EMP = { userId: 'u_emp_1', membershipId: 'm_emp_1', role: 'employee', e
 const ME_EMP2 = { userId: 'u_emp_2', membershipId: 'm_emp_2', role: 'employee', employeeId: 'emp_srv_2', csrfToken: CSRF };
 const FIXED_NOW = Date.UTC(2031, 3, 15, 12, 0, 0);       // 2031-04-15T12:00:00Z
 const MONTH = '2031-04';
+// AFI-5b (H-1): the three deleted selector functions, probed lexically and on window/globalThis.
+const SELECTOR_PROBE = '[typeof renderIdentitySelectorHTML, typeof bindIdentitySelector, typeof syncIdentitySelector, typeof window.renderIdentitySelectorHTML, typeof window.bindIdentitySelector, typeof window.syncIdentitySelector, typeof globalThis.renderIdentitySelectorHTML, typeof globalThis.bindIdentitySelector, typeof globalThis.syncIdentitySelector].join()';
+const SELECTOR_ABSENT = 'undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined';
 const NEVER = ['loadState', 'saveState', 'applyTheme', 'installGlobalUIHandlers', 'maybeShowFirstRunChoice', 'startFresh',
-  'renderShell', 'renderView', 'renderIdentitySelectorHTML', 'restoreCompleteBackup', 'renderSmartImport', 'openGlobalSearch',
+  'renderShell', 'renderView', 'restoreCompleteBackup', 'renderSmartImport', 'openGlobalSearch',
   'openEmployeeModal', 'setEmployeeActive', 'deleteEmployee', 'renderEmployees', 'renderEmployeeDetail', 'persistEmployees',
   'renderOvertime', 'renderOvertimeWorksheet', 'renderPayrollWorkspace', 'renderPayrollDetail', 'renderDashboard',
   'renderExecutiveDashboard', 'renderTransactions', 'renderExecutionCenter'];
@@ -183,12 +186,15 @@ function loadRuntime(routes){
       src = src.replace(assigns[0], 'const AUTH_MODE = AUTH_MODES.SESSION;');
     }
     if(f === 'core/app-bootstrap.js'){
-      src = NEVER.map((n) => 'try { ' + n + ' = (function(){ return function(){ __spy.push("' + n + '"); return ""; }; })(); } catch(_e){ __spyErr.push("' + n + '"); }').join('\n') + '\n' + src;
+      // AFI-5b (H-1): the selector functions no longer exist. Their absence is probed in the
+      // shared lexical scope (and on window / globalThis) BEFORE any spy is installed — a spy
+      // assignment to a missing name would otherwise create it and hide the absence.
+      src = 'var __selectorBeforeSpies = ' + SELECTOR_PROBE + ';\n' + NEVER.map((n) => 'try { ' + n + ' = (function(){ return function(){ __spy.push("' + n + '"); return ""; }; })(); } catch(_e){ __spyErr.push("' + n + '"); }').join('\n') + '\n' + src;
     }
     return src;
   });
   const src = parts.join('\n')
-    + '\n;window.__TAM__ = { State: State, AuthBoot: AuthBoot, AUTH_STATES: AUTH_STATES, CsrfHolder: CsrfHolder,'
+    + '\n;window.__TAM__ = { selectorBeforeSpies: __selectorBeforeSpies, selectorNow: function(){ return ' + SELECTOR_PROBE + '; }, State: State, AuthBoot: AuthBoot, AUTH_STATES: AUTH_STATES, CsrfHolder: CsrfHolder,'
     + ' SessionIdentityProvider: SessionIdentityProvider, API_RESULT_KINDS: API_RESULT_KINDS, PRINCIPAL_TYPES: PRINCIPAL_TYPES,'
     + ' OvertimeApi: OvertimeApi, OvertimeDecoders: OvertimeDecoders, OvertimeRequests: OvertimeRequests, OvertimeCalendar: OvertimeCalendar,'
     + ' SessionOvertimeStore: SessionOvertimeStore, SessionOvertime: SessionOvertime, SessionEmployeeStore: SessionEmployeeStore,'
@@ -363,8 +369,10 @@ function firewall(rt, label){
   {
     const rt = loadRuntime({});
     check(rt.spyErr.length === 0, '0. every forbidden function is a replaceable declaration and is spied' + (rt.spyErr.length ? ' >> ' + rt.spyErr.join(', ') : ''));
-    check(/const AUTH_MODE = AUTH_MODES\.LOCAL;/.test(fs.readFileSync(path.join(root, 'js', 'core', 'constants.js'), 'utf8')),
-      '0. the committed AUTH_MODE is LOCAL (SESSION exists only inside this harness)');
+    check(rt.selectorBeforeSpies === SELECTOR_ABSENT && rt.selectorNow() === SELECTOR_ABSENT,
+      '0. AFI-5b: renderIdentitySelectorHTML, bindIdentitySelector and syncIdentitySelector do not exist — lexically or on window/globalThis, before the spies and after boot');
+    check(/const AUTH_MODE = AUTH_MODES\.SESSION;/.test(fs.readFileSync(path.join(root, 'js', 'core', 'constants.js'), 'utf8')),
+      '0. the committed AUTH_MODE is SESSION (AFI-5b)');
     check(rt.sessionOvertimeCurrentMonth() === MONTH, '0. the injected clock drives the page: "now" is 2031-04, whatever the real date');
   }
 

@@ -65,7 +65,7 @@ If a proof-of-concept requires data, use clearly fabricated placeholder values.
 
 - Unauthorized disclosure, modification, or loss of stored finance/payroll/employee data
 - Bypass of the application's authorization checks or read-scope by a means **other than** the
-  documented local principal selector (see *Security model* below)
+  published release's documented local principal selector (see *Security model* below)
 - Privilege escalation into an action the acting principal is not permitted to perform
 - Exposure of sensitive data through an unintended surface — exports, logs, error text, URLs
 - Cross-site scripting (XSS) or code injection via imported files, field values, or settings
@@ -93,10 +93,14 @@ unsure. Over-reporting privately is preferred to under-reporting publicly.
 
 ## Security model
 
-Scope your report against what the software actually claims. The shipped TAM Intelligence OS
-application is client-only: it uses no server, database, API, or account system (`AUTH_MODE` LOCAL). The
-repository also contains an unreleased same-origin PHP backend under `server/`, which is source only and
-not deployed; reports about that source are welcome through the same private channel.
+Scope your report against what the software actually claims. The published release (v2.11.0) is
+client-only: it uses no server, database, API, or account system (`AUTH_MODE` LOCAL), and the rest of this
+*Security model* section describes it. The repository also holds unreleased source that no release ships: a
+same-origin PHP backend under `server/` (not deployed) and AFI-5b (PR #62), which switches the source to the
+sign-in (SESSION) mode and removes "Acting as". PR #62 enters `main` only through Gate M (merge approval).
+Merging deploys nothing (Gate D), and no production build without "Acting as" is activated before Gate R, which
+needs production login and authenticated end-to-end tests to pass (SDR-0002 §22 items 1 and 8). Reports about
+unreleased source are welcome through the same private channel.
 
 - **There is no authentication.** The "Acting as" principal is a **local, trust-based application
   context**, not a login. It is spoofable by anyone who can open the application, and it is
@@ -164,7 +168,7 @@ If credentials or tokens are ever exposed (in a report, a commit, a log, or a sc
 
 ## Data-handling expectations
 
-TAM Intelligence OS is client-only. Understanding its data posture helps scope reports correctly:
+The published release of TAM Intelligence OS is client-only. Understanding its data posture helps scope reports correctly:
 
 - All finance/payroll/employee/contract data is stored **locally** (browser `localStorage` or the
   Claude Artifact storage environment). There is no server, database, or API.

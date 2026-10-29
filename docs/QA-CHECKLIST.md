@@ -65,6 +65,19 @@ fabricated data only; clear the dev origin's site data afterwards. The shipped p
       the "Acting as" control cannot replace the dev persona; `node tools/serve-package.js` still shows today's
       "Acting as" with no persona selected; zero console errors and zero CSP violations in both
 
+## Identity transition (AFI-5b, PR #62 — SESSION source; not deployed)
+Applies to the AFI-5b source (PR #62: the package ships SESSION, "Acting as" removed). Fabricated
+data only; clear each test origin's site data afterwards. None of this is production evidence: SDR-0002 §22 items 1
+and 8 need the production host.
+- [ ] **SESSION (auth stub):** `node tools/serve-auth-stub.js` boots to the sign-in view; sign-in → the SESSION
+      workspace, sign-out → signed-out view; no selector, `LocalIdentityProvider` or `.sidebar` anywhere; `localStorage`
+      and `sessionStorage` stay empty; no script error or CSP violation (the `/api/auth/me` 401 network log is expected)
+- [ ] **LOCAL (dev server):** `--as ceo` / `--as employee` mount the shell with the development banner and no selector
+      or `identity-*` node; expanded, collapsed rail, hover-peek and the narrow drawer render without the selector and
+      without horizontal scroll; zero console messages
+- [ ] **Runtime and verifier:** `verify-build.js` passes; the 13 CI harnesses pass in UTC−12, UTC, UTC+7 and UTC+14;
+      every one of the 43 harnesses passes; the H-1, H-2, D-02/R-2, T4, R-3 and CI six-case mutants are each killed
+
 ## Data-safety confirmations
 - [ ] `SCHEMA_VERSION` unchanged (6) unless an intentional, documented migration
 - [ ] Storage keys and migration flags unchanged

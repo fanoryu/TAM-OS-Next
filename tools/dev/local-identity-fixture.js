@@ -1,31 +1,32 @@
 /* ============================================================
-   DEVELOPMENT LOCAL IDENTITY FIXTURE (AFI-5a) — tools/dev/local-identity-fixture.js
+   DEVELOPMENT LOCAL IDENTITY FIXTURE (AFI-5a, AFI-5b) — tools/dev/local-identity-fixture.js
    ------------------------------------------------------------
-   TEST-ONLY. A development persona for LOCAL mode that lives OUTSIDE the application:
-   it is never listed in tools/module-order.js, never referenced by index.html, and
-   never part of the deployment package (tools/verify-build.js, AFI-5a checks). It is
-   loaded only by tools/serve-local-dev.js (injected in memory after js/core/identity.js)
-   and by the runtime harness tools/verify-dev-local-runtime.js.
+   TEST-ONLY. The ONLY home of the development persona for LOCAL mode. It lives OUTSIDE
+   the application: it is never listed in tools/module-order.js, never referenced by
+   index.html, and never part of the deployment package (tools/verify-build.js, AFI-5a
+   checks). It is loaded only by tools/serve-local-dev.js (injected in memory after
+   js/core/identity.js) and by the runtime harnesses that run LOCAL mode.
 
    NOT AUTHENTICATION. A persona chosen here proves nothing about who the operator is;
-   it is the same spoofable client-side fixture identity as the shipped "Acting as"
-   adapter, moved out of the product. Real identity is the SESSION mode's GET
-   /api/auth/me, and the server re-derives every principal from the database.
+   it is a spoofable client-side fixture identity. Real identity is the SESSION mode's
+   GET /api/auth/me, and the server re-derives every principal from the database.
 
-   AFI-5a (owner decision D-AFI5-2, design Addendum A1 §2.1):
-   - DEV_FIXTURE_PRINCIPALS is a deep copy of the two shipped fixture principals
-     (js/core/identity.js FIXTURE_PRINCIPALS) — same ids, names and employee binding —
-     so a persona here resolves exactly as "Acting as" does today. The parity is
-     proven by tools/verify-dev-local-runtime.js, not assumed.
-   - Every top-level name is NEW (TAM_DEV_LOCAL, DEV_PERSONA, DEV_FIXTURE_PRINCIPALS,
-     DevLocalIdentity): none collides with an application declaration, so this file
-     loads beside the unchanged application in one classic global scope.
-   - It installs a persona ONLY through the existing internal test seam
-     setIdentityProviderForTesting (js/core/identity.js). It never calls the shipped
-     selection API, and reads or writes no State, storage, network or StorageAdapter.
-   - DEV_PERSONA is null on disk: loaded as is, the file installs NOTHING (fail closed,
-     never a default CEO). Only tools/serve-local-dev.js rewrites that one line, in
-     memory, from its required --as argument.
+   AFI-5b (design Rev 1.2 D-02, Rev 1.2.1 R-1):
+   - The application ships no fixtures and no selection API, so this file owns them.
+     Exactly five top-level names: TAM_DEV_LOCAL, DEV_PERSONA, DEV_FIXTURE_PRINCIPALS,
+     DevLocalIdentity and LocalIdentityProvider (a development-only compatibility alias
+     with the shipped v2.11.0 adapter's semantics, for the LOCAL runtime harnesses).
+   - LocalIdentityProvider owns the selection: null at load; selectPrincipal(valid id)
+     selects and returns a copy; an unknown id returns null and leaves the selection
+     unchanged; getCurrentUser() returns null or a validated copy. It takes effect only
+     once installed through the internal test seam setIdentityProviderForTesting
+     (js/core/identity.js). Selecting never installs it, and clearing the seam never
+     clears its selection.
+   - DEV_PERSONA is null on disk: loaded as is, the file makes NO seam call and selects
+     nobody (fail closed, never a default CEO). Only tools/serve-local-dev.js rewrites
+     that one line, in memory, from its required --as argument.
+   - It reads or writes no State, storage, network or StorageAdapter, and puts nothing
+     on window.
 
    Classic shared global scope; top-level `const` bindings, NOT on window.
    ============================================================ */
@@ -36,15 +37,16 @@ const TAM_DEV_LOCAL = true;
 /* The persona to install at load. null on disk = install nothing. */
 const DEV_PERSONA = null;
 
-/* Deep copy of the shipped fixture principals (fabricated; no real PII). */
+/* The fabricated development principals, in the v2.11.0 order (no real PII). */
 const DEV_FIXTURE_PRINCIPALS = Object.freeze([
   Object.freeze({ id: 'user_ceo_fixture',      displayName: 'Executive (CEO)',  principalType: 'ceo' }),
   Object.freeze({ id: 'user_employee_fixture', displayName: 'Employee (Sample)', principalType: 'employee',
                   employeeId: 'emp_fixture_self' })
 ]);
 
-const DevLocalIdentity = (function(){
-  let installed = null;              // the persona this file installed; null = none
+/* Development-only compatibility alias (D-02). Never shipped. */
+const LocalIdentityProvider = (function(){
+  let selectedId = null;             // alias-private; null = no principal selected
 
   function find(id){
     for(let i = 0; i < DEV_FIXTURE_PRINCIPALS.length; i++){
@@ -54,9 +56,27 @@ const DevLocalIdentity = (function(){
   }
   function copy(u){ return u ? Object.assign({}, u) : null; }
 
-  // The provider handed to the test seam: the canonical getCurrentUser() only.
-  const provider = Object.freeze({ getCurrentUser(){ return copy(installed); } });
+  return Object.freeze({
+    // Canonical method: a validated copy of the selection, or null (fail closed).
+    getCurrentUser(){
+      if(selectedId === null) return null;
+      const u = find(selectedId);
+      return isValidUser(u) ? copy(u) : null;
+    },
+    // The selectable principals as fresh copies, in fixture order.
+    getAvailablePrincipals(){ return DEV_FIXTURE_PRINCIPALS.map(copy); },
+    // Select by id. An unknown id is a no-op miss returning null: it never selects a
+    // CEO, never fabricates a principal and keeps the previous selection.
+    selectPrincipal(id){
+      const u = find(id);
+      if(!u) return null;
+      selectedId = u.id;
+      return copy(u);
+    }
+  });
+})();
 
+const DevLocalIdentity = (function(){
   // A fixed, unmistakable notice on the page (dev server only). Inline style attribute:
   // the production CSP allows attributes (style-src-attr), so no stylesheet changes.
   function banner(u){
@@ -80,18 +100,18 @@ const DevLocalIdentity = (function(){
 
   const api = Object.freeze({
     // The persona list as defensive copies.
-    principals(){ return DEV_FIXTURE_PRINCIPALS.map(copy); },
-    // Install a persona by id through the test seam. An unknown id installs nothing and
+    principals(){ return LocalIdentityProvider.getAvailablePrincipals(); },
+    // Select a persona through the alias and install THAT alias through the test seam.
+    // An unknown id changes neither the selection nor the installed provider and
     // returns null — it never falls back to a CEO and never fabricates a principal.
     install(id){
-      const u = find(id);
+      const u = LocalIdentityProvider.selectPrincipal(id);
       if(!u) return null;
-      installed = u;
-      setIdentityProviderForTesting(provider);
-      return copy(u);
+      setIdentityProviderForTesting(LocalIdentityProvider);
+      return u;
     },
-    // The installed persona (a copy), or null.
-    current(){ return copy(installed); }
+    // The selected persona (a copy), or null.
+    current(){ return LocalIdentityProvider.getCurrentUser(); }
   });
 
   // Load-time install: only when the dev server set DEV_PERSONA; the banner only after a

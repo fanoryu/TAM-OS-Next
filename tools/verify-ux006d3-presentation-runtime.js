@@ -13,6 +13,10 @@
          the 43 UX-006C3 integration surfaces, navigation visible+normal for every
          principal, the seven denied controls visible+disabled, D2 principal/workspace
          semantics, and the absence of any authorization-hidden navigation.
+   AFI-5b: the "Acting as" selector — with its D2 context block and D3 rail chip — is
+   removed (design Rev 1.2, B-3a/B-3b); section 4 now proves that absence and the
+   principal/workspace semantics that remain, in a LOCAL runtime with the development
+   identity (tools/dev/local-identity-fixture.js) installed through the test seam.
 
    Executes the REAL production modules through the same dependency-free Node `vm`
    loader used by the UX-006A/B/C/D1/D2 harnesses. All fixtures are fabricated; no
@@ -25,6 +29,19 @@ const vm = require('vm');
 const MANIFEST = require('./integration-surface-manifest.js');
 
 const ROOT = path.resolve(__dirname, '..');
+// AFI-5b (design Rev 1.2 §3, D-02) — this harness runs LOCAL mode. The shipped AUTH_MODE is
+// SESSION, so the loader rewrites its one assignment to LOCAL in memory, loads the development
+// identity right after core/identity.js and installs its LocalIdentityProvider alias once.
+const AFI5_DEV_IDENTITY = fs.readFileSync(path.join(__dirname, 'dev', 'local-identity-fixture.js'), 'utf8');
+function afi5LocalSource(f, src){
+  if(f === 'core/constants.js'){
+    const assigns = src.match(/const AUTH_MODE = [^;\n]+;/g) || [];
+    if(assigns.length !== 1) throw new Error('expected exactly one AUTH_MODE assignment');
+    return src.replace(assigns[0], 'const AUTH_MODE = AUTH_MODES.LOCAL;');
+  }
+  return f === 'core/identity.js' ? src + '\n' + AFI5_DEV_IDENTITY : src;
+}
+const AFI5_LOCAL_INSTALL = '\n;setIdentityProviderForTesting(LocalIdentityProvider); window.LocalIdentityProvider = LocalIdentityProvider;';
 let passed = 0; const failures = [];
 function check(cond, label){
   if(cond){ passed++; console.log('  [PASS] ' + label); }
@@ -36,12 +53,12 @@ const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:]
 /* ---------- runtime loader ---------- */
 function loadRuntime(){
   const jsFiles = require(path.join(ROOT,'tools','module-order.js')).filter(f => f !== 'core/app-bootstrap.js');
-  const src = jsFiles.map(f => fs.readFileSync(path.join(ROOT,'js',f),'utf8')).join('\n')
+  const src = jsFiles.map(f => afi5LocalSource(f, fs.readFileSync(path.join(ROOT,'js',f),'utf8'))).join('\n') + AFI5_LOCAL_INSTALL
     + '\n;window.__TAM__ = { State: State, LocalIdentityProvider: LocalIdentityProvider,'
     + ' getCurrentUser: getCurrentUser, getCurrentWorkspace: getCurrentWorkspace,'
     + ' can: can, ACTIONS: ACTIONS, authzDisabled: authzDisabled, emptyState: emptyState,'
     + ' PAGE_TITLES: PAGE_TITLES, NAV_GROUPS: NAV_GROUPS, quickActionsFor: quickActionsFor,'
-    + ' renderIdentitySelectorHTML: renderIdentitySelectorHTML };';
+    + ' selectorDeclared: typeof renderIdentitySelectorHTML };';
   const noop = function(){};
   const memStore = {};
   const writes = [];
@@ -182,29 +199,32 @@ function seed(rt, principal){
 
   /* 4. D3-4 — D2 principal/workspace semantics survive D3 */
   console.log('-- 4. D3-4 : D2 principal & workspace semantics survive --');
-  { const expect = { CEO:'Executive workspace', employee:'No workspace', null:'No workspace' };
+  // AFI-5b: the context block and the rail chip were selector presentation and are
+  // removed with it; the workspace semantics they displayed are proved directly.
+  { const expect = { CEO:'executive', employee:null, null:null };
     for(const [label, principal] of PRINCIPALS){
       const rt = loadRuntime(); seed(rt, principal);
-      const html = rt.w.renderIdentitySelectorHTML();
-      check(html.indexOf('>' + expect[label] + '<') !== -1,
-        label + ': workspace context still reads "' + expect[label] + '"');
-      check(html.indexOf('id="identityPrincipalRail"') !== -1, label + ': the collapsed rail chip still renders');
+      const ws = rt.w.getCurrentWorkspace();
+      check(expect[label] === null ? ws === null : (!!ws && ws.type === expect[label]),
+        label + ': the workspace is still ' + (expect[label] || 'none (fail-closed)'));
+      check(rt.selectorDeclared === 'undefined', label + ': no selector (and so no context block or rail chip) is rendered');
     }
-    // the two null-workspace causes stay distinct (D2 invariant)
+    check(!/\.identity-(selector|select|context|rail)\b/.test(read('css/shell.css')),
+      'shell.css carries no context-block or rail-chip rule');
     const rtN = loadRuntime(); seed(rtN, null);
-    check(rtN.w.renderIdentitySelectorHTML().indexOf('Select a principal to begin') !== -1,
-      'no principal: still invited to select');
+    check(rtN.w.getCurrentUser() === null && rtN.w.getCurrentWorkspace() === null,
+      'no principal: no identity and no workspace (no default principal)');
     const rtU = loadRuntime(); seed(rtU, EMP_P);
-    check(rtU.w.renderIdentitySelectorHTML().indexOf('No linked employee record') !== -1,
-      'unlinked employee: still names the real cause, not "select a principal"'); }
+    check(!!rtU.w.getCurrentUser() && rtU.w.getCurrentWorkspace() === null,
+      'unlinked employee: an active principal, still no workspace (the frozen UX-006B fail-closed rule)'); }
   { // principal switching still re-derives, with no writes
     const rt = loadRuntime(); seed(rt, null);
     rt.w.LocalIdentityProvider.selectPrincipal(CEO_P);
-    const a = rt.w.renderIdentitySelectorHTML();
+    const a = rt.w.getCurrentWorkspace();
     rt.w.LocalIdentityProvider.selectPrincipal(EMP_P);
-    const b = rt.w.renderIdentitySelectorHTML();
-    check(a !== b && a.indexOf('Executive workspace') !== -1,
-      'principal switch still re-derives the presentation');
+    const b = rt.w.getCurrentWorkspace();
+    check(!!a && a.type === 'executive' && b === null,
+      'principal switch still re-derives the workspace');
     check(rt.writes.length === 0, 'principal switching still performs ZERO storage writes'); }
 
   /* 5. D3-5 — no authorization-hidden navigation, anywhere */

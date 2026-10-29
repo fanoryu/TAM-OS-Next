@@ -1,21 +1,26 @@
 #!/usr/bin/env node
 'use strict';
 /* ============================================================
-   UX-006D1 — REACHABLE PRINCIPAL SELECTION — RUNTIME VERIFICATION
+   UX-006D1 → AFI-5b — PRINCIPAL SELECTION: PRODUCTION ABSENCE + DEVELOPMENT ISOLATION
    ------------------------------------------------------------
-   tools/verify-build.js proves the STRUCTURE of the D1 selector (module exists,
-   registered, adapter-isolated, no persistence/schema, no auth vocabulary). This
-   harness proves its BEHAVIOUR by executing the REAL production modules through
-   the same dependency-free Node `vm` loader used by the UX-006A/B/C harnesses
-   (concatenating module-order.js MINUS core/app-bootstrap.js) against an in-memory
-   window + a small faithful fake DOM that models exactly the shell nodes the
-   selector touches.
+   The file name is historical (UX-006D1 "Reachable Principal Selection", kept so the CI
+   allowlist stays stable, design Rev 1.2 D-03). Since AFI-5b the application ships NO
+   "Acting as" selector, NO principal fixtures and NO selection API; the persona used for
+   LOCAL development lives only in tools/dev/local-identity-fixture.js.
 
-   Proves: initial fail-closed null (no auto-select / no default CEO); deterministic
-   CEO-first enumeration; the selector change flow reaching identity/workspace/authz
-   through the existing render facade; reload resets to null (ephemeral); no
-   persistence key and no State.identity; and adapter isolation at runtime. No file
-   is modified; no real data is used; all fixtures are fabricated.
+   This harness executes the REAL production modules through the same dependency-free
+   Node `vm` loader as the other harnesses (module-order.js MINUS core/app-bootstrap.js)
+   and proves:
+     A. the shipped SESSION runtime: no selector function, fixture or selection API is
+        declared or on window; no identity before /me; no identity persistence;
+     B. the source and package: no production file (registered or not) defines or calls
+        the selector or the selection API; the selector module is gone from
+        module-order.js, index.html and the built package;
+     C. development isolation: in a LOCAL runtime with the development identity loaded,
+        the alias enumerates CEO-first, a selection reaches identity + workspace + authz
+        only once the alias is installed, nothing persists, a fresh load is null again,
+        and empty/unknown ids are no-op misses — while the alias stays off window.
+   No file is modified; no real data is used; all fixtures are fabricated.
    ============================================================ */
 
 const fs = require('fs');
@@ -28,75 +33,32 @@ function check(cond, label){
   else { failures.push(label); console.log('  [FAIL] ' + label); }
 }
 
-/* ---------- a small, faithful fake DOM (only what the selector code uses) ---------- */
-function El(tag){
-  const el = {
-    tagName: String(tag||'div').toUpperCase(),
-    _classes: new Set(), _attrs: {}, _listeners: {},
-    children: [], parent: null, textContent: '', value: '',
-    style: {}, dataset: {}, hidden: false, disabled: false
-  };
-  el.offsetParent = { real: true };
-  el.classList = {
-    add:(c)=>el._classes.add(c), remove:(c)=>el._classes.delete(c),
-    contains:(c)=>el._classes.has(c),
-    toggle:(c,on)=>{ const w=(on===undefined)?!el._classes.has(c):!!on; if(w) el._classes.add(c); else el._classes.delete(c); return w; }
-  };
-  el.setAttribute = (k,v)=>{ el._attrs[k]=String(v); if(k==='id') el.id=String(v); };
-  el.getAttribute = (k)=> (k in el._attrs)?el._attrs[k]:null;
-  el.hasAttribute = (k)=> k in el._attrs;
-  el.removeAttribute = (k)=>{ delete el._attrs[k]; };
-  el.appendChild = (c)=>{ c.parent=el; el.children.push(c); return c; };
-  el.removeChild = (c)=>{ el.children=el.children.filter(x=>x!==c); return c; };
-  el.replaceChild = (n,o)=>{ const i=el.children.indexOf(o); if(i>=0){ el.children[i]=n; n.parent=el; } return o; };
-  el.insertAdjacentHTML = ()=>{};
-  el.addEventListener = (t,fn)=>{ (el._listeners[t]=el._listeners[t]||[]).push(fn); };
-  el.removeEventListener = (t,fn)=>{ el._listeners[t]=(el._listeners[t]||[]).filter(f=>f!==fn); };
-  el.dispatchEvent = (evt)=>{ evt.target=evt.target||el; (el._listeners[evt.type]||[]).slice().forEach(fn=>fn(evt)); return true; };
-  el.focus = ()=>{}; el.blur = ()=>{};
-  el.contains = (n)=>{ for(let x=n; x; x=x.parent){ if(x===el) return true; } return false; };
-  el.querySelector = (sel)=> qsa(el, sel)[0] || null;
-  el.querySelectorAll = (sel)=> qsa(el, sel);
-  Object.defineProperty(el,'className',{ get:()=>[...el._classes].join(' '), set:(v)=>{ el._classes=new Set(String(v).split(/\s+/).filter(Boolean)); } });
-  Object.defineProperty(el,'parentNode',{ get:()=>el.parent });
-  return el;
-}
-function descendants(root){ const out=[]; (function w(n){ n.children.forEach(c=>{ out.push(c); w(c); }); })(root); return out; }
-function matchSimple(el, s){
-  s=s.trim(); if(!s) return false;
-  let ok=true; let sawSelector=false;
-  const idm=s.match(/#([\w-]+)/); if(idm){ sawSelector=true; ok=ok&&(el.id===idm[1]); }
-  const cls=s.match(/\.[\w-]+/g)||[]; cls.forEach(c=>{ sawSelector=true; ok=ok&&el._classes.has(c.slice(1)); });
-  // attribute selectors: [attr] and [attr="val"] — match only when the attr is present/equal
-  const attrs=s.match(/\[[^\]]+\]/g)||[]; attrs.forEach(a=>{
-    sawSelector=true;
-    const m=a.match(/^\[([\w-]+)(?:="?([^"\]]*)"?)?\]$/); if(!m){ ok=false; return; }
-    if(m[2]===undefined) ok=ok&&el.hasAttribute(m[1]);
-    else ok=ok&&(el.getAttribute(m[1])===m[2]);
-  });
-  const tagm=s.match(/^([a-z]+)(?:[.#\[]|$)/i);
-  if(tagm){ sawSelector=true; ok=ok&&(el.tagName===tagm[1].toUpperCase()); }
-  return sawSelector && ok;
-}
-function qsa(root, selector){
-  const parts=selector.split(',').map(x=>x.trim());
-  const pool=descendants(root); const set=new Set();
-  parts.forEach(p=>{ pool.filter(e=>matchSimple(e,p)).forEach(e=>set.add(e)); });
-  return [...set];
-}
+const root = path.resolve(__dirname, '..');
+const DEV_IDENTITY = fs.readFileSync(path.join(__dirname, 'dev', 'local-identity-fixture.js'), 'utf8');
+const SELECTOR_NAMES = ['renderIdentitySelectorHTML', 'bindIdentitySelector', 'syncIdentitySelector',
+  'identityAvailablePrincipals', 'onIdentityPrincipalChange'];
+const FIXTURE_NAMES = ['LocalIdentityProvider', 'FIXTURE_PRINCIPALS'];
 
-/* ---------- runtime loader (same technique as the UX-006A/B/C harnesses) ---------- */
-function loadRuntime(){
-  const root = path.resolve(__dirname, '..');
+/* ---------- runtime loader ----------
+   local=false: the shipped source unchanged (SESSION). local=true: the one AUTH_MODE
+   assignment rewritten to LOCAL in memory and the development identity loaded right
+   after identity.js (installation is left to each test). */
+function loadRuntime(local){
   const jsFiles = require(path.join(root,'tools','module-order.js')).filter(f => f !== 'core/app-bootstrap.js');
-  const src = jsFiles.map(f => fs.readFileSync(path.join(root,'js',f),'utf8')).join('\n')
-    + '\n;window.__TAM__ = { State: State, PRINCIPAL_TYPES: PRINCIPAL_TYPES,'
-    + ' LocalIdentityProvider: LocalIdentityProvider, getCurrentUser: getCurrentUser,'
-    + ' getCurrentWorkspace: getCurrentWorkspace, getScopedRecords: getScopedRecords,'
-    + ' can: can, ACTIONS: ACTIONS,'
-    + ' renderIdentitySelectorHTML: renderIdentitySelectorHTML, bindIdentitySelector: bindIdentitySelector,'
-    + ' syncIdentitySelector: syncIdentitySelector, identityAvailablePrincipals: identityAvailablePrincipals,'
-    + ' onIdentityPrincipalChange: onIdentityPrincipalChange };';
+  const src = jsFiles.map(f => {
+      let s = fs.readFileSync(path.join(root,'js',f),'utf8');
+      if(local && f === 'core/constants.js'){
+        const assigns = s.match(/const AUTH_MODE = [^;\n]+;/g) || [];
+        if(assigns.length !== 1) throw new Error('expected exactly one AUTH_MODE assignment');
+        s = s.replace(assigns[0], 'const AUTH_MODE = AUTH_MODES.LOCAL;');
+      }
+      return (local && f === 'core/identity.js') ? s + '\n' + DEV_IDENTITY : s;
+    }).join('\n')
+    + '\n;window.__TAM__ = { State: State, getCurrentUser: getCurrentUser,'
+    + ' getCurrentWorkspace: getCurrentWorkspace, can: can, ACTIONS: ACTIONS,'
+    + ' setIdentityProviderForTesting: setIdentityProviderForTesting,'
+    + (local ? ' LocalIdentityProvider: LocalIdentityProvider,' : '')
+    + ' lexical: {' + SELECTOR_NAMES.concat(FIXTURE_NAMES).map(n => ' ' + n + ': typeof ' + n).join(',') + ' } };';
   const noop = function(){};
   const memStore = {};
   const memStorage = {
@@ -104,131 +66,115 @@ function loadRuntime(){
     setItem:(k,v)=>{ memStore[k]=String(v); },
     removeItem:(k)=>{ delete memStore[k]; }
   };
-  // A shell tree containing #app and the mounted selector, so bind/sync operate on
-  // real (fake) nodes. The selector markup is produced by the REAL renderIdentitySelectorHTML,
-  // but we build the equivalent node graph here since the fake DOM does not parse HTML.
-  const app = El('div'); app.setAttribute('id','app');
-  const brand = El('div'); brand.classList.add('brand'); app.appendChild(brand);
-  const sel = El('select'); sel.setAttribute('id','identityPrincipalSelect'); brand.appendChild(sel);
-  const help = El('p'); help.setAttribute('id','identityPrincipalHelp'); brand.appendChild(help);
-  const main = El('main'); main.setAttribute('id','main'); app.appendChild(main);
-  const byId = { app: app, main: main, identityPrincipalSelect: sel, identityPrincipalHelp: help };
+  const el = () => ({ style:{}, dataset:{}, className:'', textContent:'', innerHTML:'',
+    addEventListener:noop, removeEventListener:noop, appendChild:noop, setAttribute:noop,
+    remove:noop, querySelector:()=>null, querySelectorAll:()=>[] });
   const sandbox = {
-    console:{ log:noop, warn:noop, error:noop }, navigator:{ userAgent:'tam-ux006d1' },
+    console:{ log:noop, warn:noop, error:noop }, navigator:{ userAgent:'tam-afi5b-selection' },
     setTimeout:setTimeout, clearTimeout:clearTimeout, requestAnimationFrame:(fn)=>setTimeout(fn,0),
     localStorage:memStorage, storage:undefined,
     addEventListener:noop, removeEventListener:noop, confirm:()=>true,
     matchMedia:()=>({ matches:false, addEventListener:noop, addListener:noop }),
-    document:{
-      addEventListener:noop, removeEventListener:noop,
-      getElementById:(id)=> byId[id] || null,
-      querySelector:(s)=> app.querySelector(s), querySelectorAll:(s)=> app.querySelectorAll(s),
-      createElement:(t)=>El(t), createComment:()=>El('#comment'),
-      body:{ appendChild:noop }, documentElement:{ dataset:{} }
-    }
+    document:{ addEventListener:noop, removeEventListener:noop, getElementById:()=>el(),
+      querySelector:()=>null, querySelectorAll:()=>[], createElement:()=>el(),
+      body:{ appendChild:noop }, documentElement:{ dataset:{} } }
   };
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
-  vm.runInContext(src, vm.createContext(sandbox), { filename:'tam-ux006d1-runtime.js' });
+  vm.runInContext(src, vm.createContext(sandbox), { filename:'tam-afi5b-selection-runtime.js' });
   const rt = sandbox.__TAM__;
-  rt.w = sandbox; rt.memStore = memStore; rt.dom = { app, brand, sel, help };
+  rt.w = sandbox; rt.memStore = memStore;
   return rt;
 }
-function fresh(){ return loadRuntime(); }
+
+/* Executable text of a JS source: block and line comments removed, string contents kept. */
+function code(s){ return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"\\])\/\/.*$/gm, '$1'); }
+function allJs(dir){
+  return fs.readdirSync(dir, { withFileTypes:true }).flatMap((d) => d.isDirectory() ? allJs(path.join(dir, d.name))
+    : (/\.js$/.test(d.name) ? [path.join(dir, d.name)] : []));
+}
 
 (function main(){
-  console.log('== UX-006D1 REACHABLE PRINCIPAL SELECTION — RUNTIME VERIFICATION ==');
-  console.log('   fail-closed null / deterministic enumeration / selection reaches');
-  console.log('   identity+workspace+authz / ephemeral (reload resets) / no persistence.');
+  console.log('== UX-006D1 → AFI-5b PRINCIPAL SELECTION — PRODUCTION ABSENCE + DEV ISOLATION ==');
   console.log('');
 
-  /* ---------- 1. initial state: fail-closed null, no auto-select ---------- */
-  const a = fresh();
-  check(a.getCurrentUser() === null, 'initial: getCurrentUser() === null (no auto-select, no default CEO)');
-  check(a.getCurrentWorkspace() === null, 'initial: no workspace resolves while unselected (fail-closed)');
-  check(Object.keys(a.memStore).every(k => !/principal|identity|acting/i.test(k)),
-    'initial: no principal/identity persistence key written at load');
-  check(!('identity' in a.State), 'initial: no State.identity slice created');
+  /* ---------- A. the shipped SESSION runtime ---------- */
+  const a = loadRuntime(false);
+  SELECTOR_NAMES.forEach((n) => check(a.lexical[n] === 'undefined' && a.w[n] === undefined,
+    'SESSION: no selector function ' + n + ' is declared or on window'));
+  FIXTURE_NAMES.forEach((n) => check(a.lexical[n] === 'undefined' && a.w[n] === undefined,
+    'SESSION: no ' + n + ' is declared or on window'));
+  check(a.getCurrentUser() === null && a.getCurrentWorkspace() === null, 'SESSION: before /me there is no principal and no workspace');
+  check(Object.keys(a.memStore).every(k => !/principal|identity|acting/i.test(k)) && !('identity' in a.State),
+    'SESSION: no principal/identity persistence key and no State.identity slice');
 
-  /* ---------- 2. enumeration: both principals, deterministic CEO-first ---------- */
-  const e = fresh();
-  const list = e.identityAvailablePrincipals();
-  check(Array.isArray(list) && list.length === 2, 'enumeration: exactly two principals available');
-  check(list[0] && list[0].principalType === 'ceo', 'enumeration: CEO is first (deterministic order)');
-  check(list[1] && list[1].principalType === 'employee', 'enumeration: Employee is second');
+  /* ---------- B. source and package ---------- */
+  const modules = require(path.join(root,'tools','module-order.js'));
+  const indexHtml = fs.readFileSync(path.join(root,'index.html'),'utf8');
+  check(!fs.existsSync(path.join(root,'js','ui','identity-selector.js')) && modules.indexOf('ui/identity-selector.js') === -1
+    && !/identity-selector/.test(indexHtml), 'source: the selector module is deleted, unregistered and not loaded by index.html');
+  const API = /\b(selectPrincipal|getAvailablePrincipals|renderIdentitySelectorHTML|bindIdentitySelector|syncIdentitySelector|identityAvailablePrincipals|onIdentityPrincipalChange|LocalIdentityProvider|FIXTURE_PRINCIPALS)\b|user_ceo_fixture|user_employee_fixture|identityPrincipalSelect|>Acting as</;
+  const offenders = allJs(path.join(root,'js')).filter((p) => API.test(code(fs.readFileSync(p,'utf8'))))
+    .map((p) => path.relative(root, p).replace(/\\/g, '/'));
+  check(offenders.length === 0, 'source: no production js/** file (registered or not) defines or uses the selector, the fixtures or the selection API'
+    + (offenders.length ? ' >> ' + offenders.join(', ') : ''));
+  const pkgManifest = path.join(root,'dist','package-manifest.json');
+  const pkgFiles = fs.existsSync(pkgManifest) ? (JSON.parse(fs.readFileSync(pkgManifest,'utf8')).files || []).map(e => e.path) : [];
+  check(pkgFiles.length > 0 && !pkgFiles.some(p => /identity-selector|local-identity-fixture|^dev\/|^tools\//.test(p)),
+    'package: the manifest lists no selector, development fixture, dev/ or tools/ file');
+
+  /* ---------- C. development isolation (LOCAL runtime, development identity) ---------- */
+  const e = loadRuntime(true);
+  const list = e.LocalIdentityProvider.getAvailablePrincipals();
+  check(Array.isArray(list) && list.length === 2 && list[0].principalType === 'ceo' && list[1].principalType === 'employee',
+    'dev: the alias enumerates exactly two principals, CEO first (deterministic order)');
   check(list.some(p=>p.displayName==='Executive (CEO)') && list.some(p=>p.displayName==='Employee (Sample)'),
-    'enumeration: fixture displayName labels used verbatim');
+    'dev: fixture displayName labels unchanged from v2.11.0');
+  check(e.w.LocalIdentityProvider === undefined && e.w.DevLocalIdentity === undefined && e.w.TAM_DEV_LOCAL === undefined,
+    'dev: the development identity puts nothing on window');
+  check(e.getCurrentUser() === null, 'dev: loading the development identity alone selects nobody (no default CEO)');
 
-  /* ---------- 3. rendered markup: placeholder + no-auth wording ---------- */
-  const h = fresh();
-  const html = h.renderIdentitySelectorHTML();
-  check(/Acting as/.test(html), 'markup: "Acting as" label present');
-  check(/— Select principal —/.test(html), 'markup: non-value placeholder option present');
-  check(/No principal selected/.test(html), 'markup: unselected helper present while null');
-  check(/aria-describedby="identityPrincipalHelp"/.test(html), 'markup: select is aria-describedby its helper');
-  check(!/\b(login|log in|sign[- ]?in|password|oauth|session|credential|authenticate|authentication)\b/i.test(html),
-    'markup: no authentication/session/login vocabulary in the rendered surface');
-
-  /* ---------- 4. CEO selection flow reaches identity + workspace + authz ---------- */
-  const c = fresh();
-  c.onIdentityPrincipalChange('user_ceo_fixture');   // the exact call the change listener makes
+  const c = loadRuntime(true);
+  c.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
+  check(c.getCurrentUser() === null, 'dev: a selection has no effect until the alias is installed through the seam');
+  c.setIdentityProviderForTesting(c.LocalIdentityProvider);
   const cu = c.getCurrentUser();
-  check(!!cu && cu.principalType === 'ceo', 'CEO: selection resolves getCurrentUser() to CEO');
+  check(!!cu && cu.principalType === 'ceo', 'dev: installed alias + CEO -> getCurrentUser() is CEO');
   const cw = c.getCurrentWorkspace();
-  check(!!cw && cw.type === 'executive' && cw.scope === 'ALL_COMPANY', 'CEO: workspace Executive / ALL_COMPANY');
-  check(c.can(c.ACTIONS.EMPLOYEE_CREATE) === true, 'CEO: authz current-context allows a company mutation (employee.create)');
-  check(c.dom.help.textContent === 'Acting as Executive (CEO).', 'CEO: acting-as indicator synced after render');
-  check(c.dom.sel.value === 'user_ceo_fixture', 'CEO: select value synced to the chosen principal');
+  check(!!cw && cw.type === 'executive' && cw.scope === 'ALL_COMPANY', 'dev: CEO -> workspace Executive / ALL_COMPANY');
+  check(c.can(c.ACTIONS.EMPLOYEE_CREATE) === true, 'dev: CEO -> authz allows a company mutation (employee.create)');
 
-  /* ---------- 5. Employee selection flow: identity + fail-closed workspace + authz deny ---------- */
-  const em = fresh();
-  em.onIdentityPrincipalChange('user_employee_fixture');
-  const eu = em.getCurrentUser();
-  check(!!eu && eu.principalType === 'employee', 'Employee: selection resolves getCurrentUser() to Employee');
-  // No bound Employee record exists (empty State) -> workspace fail-closed to null,
-  // NEVER ALL_COMPANY. Employee-specific identity path is reachable regardless.
-  check(em.getCurrentWorkspace() === null, 'Employee: unbound linkage -> no workspace (fail-closed, never ALL_COMPANY)');
-  check(em.can(em.ACTIONS.EMPLOYEE_CREATE) === false, 'Employee: authz denies a company mutation (deny-by-default)');
-  check(em.dom.help.textContent === 'Acting as Employee (Sample).', 'Employee: acting-as indicator synced');
-
-  /* ---------- 5b. Employee SELF workspace when linkage resolves ---------- */
-  const es = fresh();
+  const em = loadRuntime(true);
+  em.setIdentityProviderForTesting(em.LocalIdentityProvider);
+  em.LocalIdentityProvider.selectPrincipal('user_employee_fixture');
+  check(!!em.getCurrentUser() && em.getCurrentUser().principalType === 'employee', 'dev: Employee selection resolves to Employee');
+  check(em.getCurrentWorkspace() === null, 'dev: unbound Employee -> no workspace (fail-closed, never ALL_COMPANY)');
+  check(em.can(em.ACTIONS.EMPLOYEE_CREATE) === false, 'dev: Employee -> authz denies a company mutation');
+  const es = loadRuntime(true);
   es.State.employees = [{ id:'emp_fixture_self', fullName:'Sample', employeeId:'E-001' }];
-  es.onIdentityPrincipalChange('user_employee_fixture');
+  es.setIdentityProviderForTesting(es.LocalIdentityProvider);
+  es.LocalIdentityProvider.selectPrincipal('user_employee_fixture');
   const esw = es.getCurrentWorkspace();
-  check(!!esw && esw.type === 'personal' && esw.scope === 'SELF', 'Employee: bound linkage -> Personal / SELF workspace');
+  check(!!esw && esw.type === 'personal' && esw.scope === 'SELF', 'dev: bound Employee -> Personal / SELF workspace');
 
-  /* ---------- 6. ephemerality: a fresh module load is null again ---------- */
-  const r1 = fresh();
-  r1.onIdentityPrincipalChange('user_ceo_fixture');
-  check(!!r1.getCurrentUser(), 'ephemeral: principal selected within a session');
-  check(Object.keys(r1.memStore).every(k => !/principal|identity|acting/i.test(k)),
-    'ephemeral: selection wrote NO persistence key');
-  const r2 = fresh();  // simulates a reload (fresh module scope)
-  check(r2.getCurrentUser() === null, 'ephemeral: a fresh load resets to null (selection not retained)');
+  const r1 = loadRuntime(true);
+  r1.setIdentityProviderForTesting(r1.LocalIdentityProvider);
+  r1.LocalIdentityProvider.selectPrincipal('user_ceo_fixture');
+  check(!!r1.getCurrentUser() && Object.keys(r1.memStore).every(k => !/principal|identity|acting/i.test(k)),
+    'dev: a selection writes NO persistence key');
+  check(loadRuntime(true).getCurrentUser() === null, 'dev: a fresh load resets to null (selection not retained)');
 
-  /* ---------- 7. no-op safety: empty / unknown id never fabricates a principal ---------- */
-  const n = fresh();
-  n.onIdentityPrincipalChange('');            // the placeholder value
-  check(n.getCurrentUser() === null, 'safety: empty (placeholder) id leaves currentUser null');
-  n.onIdentityPrincipalChange('nope_unknown');
-  check(n.getCurrentUser() === null, 'safety: unknown id is a no-op miss (never a privileged fallback)');
-
-  /* ---------- 8. adapter isolation (runtime): selector holds the only live calls ---------- */
-  const root = path.resolve(__dirname, '..');
-  const jsFiles = require(path.join(root,'tools','module-order.js'));
-  const offenders = jsFiles.filter(function(f){
-    if(f === 'core/identity.js' || f === 'ui/identity-selector.js') return false;
-    const s = fs.readFileSync(path.join(root,'js',f),'utf8');
-    return /getAvailablePrincipals|selectPrincipal/.test(s);
-  });
-  check(offenders.length === 0, 'adapter isolation: no module besides identity.js + identity-selector.js references the local-only selection API' + (offenders.length?(' >> '+offenders.join(', ')):''));
+  const n = loadRuntime(true);
+  n.setIdentityProviderForTesting(n.LocalIdentityProvider);
+  check(n.LocalIdentityProvider.selectPrincipal('') === null && n.getCurrentUser() === null, 'dev: empty id leaves the principal null');
+  check(n.LocalIdentityProvider.selectPrincipal('nope_unknown') === null && n.getCurrentUser() === null,
+    'dev: unknown id is a no-op miss (never a privileged fallback)');
 
   /* ---------- summary ---------- */
   console.log('');
   if(failures.length){
-    console.log('UX-006D1 REACHABLE PRINCIPAL SELECTION RUNTIME VERIFICATION FAILED -- ' + failures.length + ' failing:');
+    console.log('UX-006D1/AFI-5b PRINCIPAL SELECTION ABSENCE RUNTIME VERIFICATION FAILED -- ' + failures.length + ' failing:');
     failures.forEach(f=>console.log('  - ' + f));
     process.exit(1);
   }
-  console.log('UX-006D1 REACHABLE PRINCIPAL SELECTION RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.');
+  console.log('UX-006D1/AFI-5b PRINCIPAL SELECTION ABSENCE RUNTIME VERIFICATION PASSED -- ' + passed + ' checks OK.');
 })();

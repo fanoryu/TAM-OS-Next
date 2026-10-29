@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- **AFI-5b Sign-in becomes the only way in; "Acting as" is removed (not shipped).**
+  The source now starts in SESSION mode: people sign in, and who they are comes only from the server.
+  The "Acting as" chooser, its sample people and its styles are removed from the app; the sample people now live only in
+  the development tools, for LOCAL testing, and the LOCAL mode refuses to start without one installed. Local data in the
+  browser is never read, changed or deleted by the signed-in app. It enters `main` only through Gate M (merge approval);
+  merging deploys nothing (Gate D), and retiring "Acting as" in production waits for Gate R (SDR-0002 §22 items 1 and
+  8). It is not deployed.
 - **AFI-5a Development persona for LOCAL testing (tooling only, not shipped).** Developers can now run the local
   version of TAM OS as the sample CEO or the sample Employee from a test-only local server
   (`node tools/serve-local-dev.js --as ceo|employee`), which shows a clear "development — not authenticated" banner. The
@@ -273,7 +280,7 @@
   into it, so the next person at the device could see it. The email is now cleared as soon as a session starts, so it
   never appears after a sign-out, an unconfirmed sign-out, an ended session or a Retry. A failed sign-in still keeps the
   typed email so it need not be typed again. Whatever the browser or a password manager fills in by itself is outside
-  TAM OS. The shipped `AUTH_MODE` stays **LOCAL**; no sign-in, session, storage or schema change.
+  TAM OS. No sign-in, session, storage or schema change; with AFI-5b the shipped `AUTH_MODE` is **SESSION**.
 
 ## 2.11.0 — Identity Refresh
 
