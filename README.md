@@ -93,8 +93,8 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 > tag `v2.11.0` in `fanoryu/TAM-OS-Next` (targeting commit `04c1503d`). The published asset
 > `tam-os-v2.11.0.html` (**1,676,709 bytes**, SHA-256
 > `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is byte-identical to the artifact
-> `dist/tam-os-v2.11.0.html` tracked here, so the canonical repository still builds the exact package that
-> shipped. It is a **presentation / product-identity release** carrying the merged BRAND-1 work: the
+> `dist/tam-os-v2.11.0.html` tracked here as a frozen, digest-pinned release artifact. The single-file builder is
+> retired: `main` now builds the source-based deployment package (Distribution-1), which no release has shipped. It is a **presentation / product-identity release** carrying the merged BRAND-1 work: the
 > refreshed `[monogram] TAM OS` lockup, the Sora wordmark, and self-contained offline typography (no Google
 > Fonts dependency). `APP_VERSION` **2.11.0**, `SCHEMA_VERSION` **6**, `ACTIONS` **20** — no authorization,
 > data-model, financial-logic or backend change. The **controlled internal pilot has not launched** —
@@ -139,13 +139,16 @@ Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v
 > `0035`) — **source only, not deployed**; a SESSION-mode frontend that signs in against that backend
 > (AFI-1 … AFI-4g) — present but **dormant in the published release** (`AUTH_MODE` **LOCAL**, "Acting as"
 > retained); and AFI-5a, test-only development identity tooling outside the app. Frontend hosting state:
-> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8. AFI-5b enters `main` only through Gate M; closing the SDR-0002 §22
-> gate (AFI-5c) is **on hold**. See [`CHANGELOG.md`](CHANGELOG.md) → Unreleased.
+> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8. AFI-5b is merged into source `main` (PR #62) and is not deployed;
+> the E11 hostile-principal tests are merged (PR #68) and verified by post-merge CI, while the E12 external security
+> review is a separate, open requirement; closing the SDR-0002 §22 gate (AFI-5c) is **on hold**. See
+> [`CHANGELOG.md`](CHANGELOG.md) → Unreleased.
 
-> **AFI-5b identity transition (PR #62).** It switches the source to `AUTH_MODE` **SESSION**, removes the
-> "Acting as" selector, its fixtures and its styles from the app, and keeps a development persona outside the app
-> for LOCAL testing. It enters `main` only through Gate M (merge approval). Merging deploys nothing (Gate D), and
-> the production retirement of "Acting as" waits for Gate R (SDR-0002 §22 items 1 and 8).
+> **AFI-5b identity transition (PR #62, merged into source `main`).** It switched the source to `AUTH_MODE`
+> **SESSION**, removed the "Acting as" selector, its fixtures and its styles from the app, and keeps a development
+> persona outside the app for LOCAL testing. It passed Gate M (merge approval) and was merged; merging deployed
+> nothing (Gate D **HOLD**), and the production retirement of "Acting as" waits for Gate R (SDR-0002 §22 items 1
+> and 8; **HOLD**).
 
 > **Trust model (published release).** "Acting as" is a **local, trust-based application context**, not authentication. It is
 > not a security boundary against anyone with local access to the device, browser profile or portable
@@ -682,8 +685,9 @@ Next, in order (maintainer sequencing ruling, 2026-09-29, refined by ARCH-GOV-2)
    Supplemental, Finance posting/execution and Audit domains plus backup/restore are merged; the SESSION
    frontend (AFI-1 … AFI-4g) is merged but dormant in the published release; AFI-5a development identity
    tooling is merged. The backend is not deployed and production SESSION mode is not enabled. **AFI-5b**
-   (PR #62, "Acting as" removal) enters `main` only through Gate M; its production retirement waits for
-   Gate R. **AFI-5c** (SDR-0002 §22 closure) is **ON HOLD**.
+   (PR #62, "Acting as" removal) is merged into source `main` and not deployed; its production retirement waits
+   for Gate R. The E11 hostile-principal tests are merged (PR #68) and CI-verified; the E12 external security
+   review remains separate and open. **AFI-5c** (SDR-0002 §22 closure) is **ON HOLD**.
 4. **PILOT-1** — real operational use with company data. The v2.10.0 controlled pilot was approved but
    **never launched** and is **ON HOLD** until this point; no real company data has been entered.
    Publishing v2.10.0 made the verified artifact obtainable; **it did not launch the pilot**.

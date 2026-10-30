@@ -8,14 +8,15 @@
   Employee where only the CEO may act (403), another company (404), invented scope fields (400) and a request without its
   CSRF token or from another website (403) — and that a refused request writes and audits nothing. A confirmation suite
   covers the remaining account, overtime-valuation and audit cases, and a unit test now fails if any route lacks a hostile
-  suite. No application, schema, package or behaviour change.
+  suite. No application, schema, package or behaviour change. Merged as PR #68; post-merge CI verified (470 PHP tests
+  without the database, 901 with it). The E12 external security review is separate and still open.
 - **AFI-5b Sign-in becomes the only way in; "Acting as" is removed (not shipped).**
   The source now starts in SESSION mode: people sign in, and who they are comes only from the server.
   The "Acting as" chooser, its sample people and its styles are removed from the app; the sample people now live only in
   the development tools, for LOCAL testing, and the LOCAL mode refuses to start without one installed. Local data in the
-  browser is never read, changed or deleted by the signed-in app. It enters `main` only through Gate M (merge approval);
-  merging deploys nothing (Gate D), and retiring "Acting as" in production waits for Gate R (SDR-0002 §22 items 1 and
-  8). It is not deployed.
+  browser is never read, changed or deleted by the signed-in app. Merged into source `main` through Gate M as PR #62;
+  merging deployed nothing (Gate D **HOLD**), and retiring "Acting as" in production waits for Gate R (SDR-0002 §22
+  items 1 and 8). It is not deployed.
 - **AFI-5a Development persona for LOCAL testing (tooling only, not shipped).** Developers can now run the local
   version of TAM OS as the sample CEO or the sample Employee from a test-only local server
   (`node tools/serve-local-dev.js --as ceo|employee`), which shows a clear "development — not authenticated" banner. The
