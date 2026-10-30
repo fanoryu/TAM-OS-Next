@@ -30,12 +30,13 @@ deployment-specific configuration or secrets. A ready-to-use template for this l
 ## 2. Running the app
 
 The published release (v2.11.0) is a single-page, client-only application that uses **no backend, database or API**
-(`AUTH_MODE` LOCAL; the backend under `server/` is source only and not deployed — §8; AFI-5b (PR #62), which switches the
-source to SESSION and removes "Acting as", enters `main` only through Gate M, is not deployed (Gate D), and retires
-"Acting as" in production only through Gate R, SDR-0002 §22 items 1 and 8); its only
-runtime dependency is the vendored, pinned SheetJS parser. It is distributed as the **deployment
-package** (Distribution-1, [ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md)
-Model B) and runs **over HTTP**:
+(`AUTH_MODE` LOCAL; the backend under `server/` is source only and not deployed — §8; AFI-5b (PR #62, merged into
+source `main`), which switched the source to SESSION and removed "Acting as", is not deployed (Gate D **HOLD**) and
+retires "Acting as" in production only through Gate R, SDR-0002 §22 items 1 and 8); its only
+runtime dependency is the vendored, pinned SheetJS parser. The published v2.11.0 asset is the frozen single-file
+release `tam-os-v2.11.0.html`. Source `main` instead builds the **deployment package** (Distribution-1,
+[ADR-0002](03b-repository-adr/ADR-0002-canonical-distribution-architecture.md) Model B), which no release has shipped
+yet and which runs **over HTTP**:
 
 ```bash
 node tools/build-package.js     # dist/package/ + ZIP + dist/package-manifest.json

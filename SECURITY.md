@@ -96,9 +96,9 @@ unsure. Over-reporting privately is preferred to under-reporting publicly.
 Scope your report against what the software actually claims. The published release (v2.11.0) is
 client-only: it uses no server, database, API, or account system (`AUTH_MODE` LOCAL), and the rest of this
 *Security model* section describes it. The repository also holds unreleased source that no release ships: a
-same-origin PHP backend under `server/` (not deployed) and AFI-5b (PR #62), which switches the source to the
-sign-in (SESSION) mode and removes "Acting as". PR #62 enters `main` only through Gate M (merge approval).
-Merging deploys nothing (Gate D), and no production build without "Acting as" is activated before Gate R, which
+same-origin PHP backend under `server/` (not deployed) and AFI-5b (PR #62, merged into source `main` through Gate M),
+which switched the source to the sign-in (SESSION) mode and removed "Acting as". The merge deployed nothing (Gate D
+**HOLD**), and no production build without "Acting as" is activated before Gate R, which
 needs production login and authenticated end-to-end tests to pass (SDR-0002 §22 items 1 and 8). Reports about
 unreleased source are welcome through the same private channel.
 

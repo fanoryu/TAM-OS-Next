@@ -65,9 +65,9 @@ SDR-0004, as vocabulary only — no frontend feature consumes it).
 **7,171** checks, 12 of them run in CI (largest: SESSION payroll 1998, SESSION employee 800, SESSION
 overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-backend-boundary.js`
 (selftest 739) and PHP tests (467 without the database, 874 with it). *(These figures were recorded before AFI-5b.
-With AFI-5b (PR #62) — see "Identity transition — AFI-5b" below — the verifier has 2993 checks, 13 harnesses run in CI,
-and the package holds 88 modules in 102 files. The E11 hostile-principal suites add 3 unit and 24 database tests:
-470 PHP tests without the database, 901 with it.)*
+With AFI-5b (PR #62, merged) — see "Identity transition — AFI-5b" below — the verifier has 2993 checks, 13 harnesses run in
+CI, and the package holds 88 modules in 102 files. The E11 hostile-principal suites (PR #68, merged; post-merge CI
+verified) add 3 unit and 24 database tests: 470 PHP tests without the database, 901 with it.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
@@ -1077,8 +1077,9 @@ status-order tests; MariaDB tests for the anchor schema and binding FK, named bi
 writes; and a hostile-principal suite (`tests/Db/HostilePrincipalTest.php`) that logs in real CEO and
 Employee accounts in two companies and drives test-only routes through the real resolver, kernel, Policy
 and scoped store. Overtime has no table yet, so its own-Draft rules are proven on Policy with principals
-resolved from real sessions. **E11 (SDR-0002 §17):** dedicated hostile-principal suites cover the production routes of
-every later domain — `tests/Db/PayrollHostileTest.php`, `SupplementalHostileTest.php`, `FinanceHostileTest.php`,
+resolved from real sessions. **E11 (SDR-0002 §17; PR #68, merged and post-merge CI verified):** dedicated
+hostile-principal suites cover the Payroll, Supplemental Payroll, Finance and account self-service routes —
+`tests/Db/PayrollHostileTest.php`, `SupplementalHostileTest.php`, `FinanceHostileTest.php`,
 `AuthSelfServiceHostileTest.php` and `HostileConfirmationsTest.php` (no session, revoked session, an Employee on CEO
 routes, another company, forged scope, missing CSRF or a foreign origin; every refusal writes and audits nothing) — and
 `tests/Unit/RouteHostileCoverageTest.php` fails when any production route has no hostile suite.
@@ -2911,14 +2912,15 @@ no name the application declares); the dev server is loopback-only and writes no
 ("Acting as") are deliberately not checked until AFI-5b, where the confinement checks are replaced by absence checks of
 equal or greater strength.
 
-### Identity transition — AFI-5b (PR #62; enters `main` only through Gate M; not deployed)
+### Identity transition — AFI-5b (PR #62; merged into source `main`; not deployed)
 
-AFI-5b is implemented on `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
-micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b) as PR #62, integrated with `main` `0a1f7e2`. It enters
-`main` only through Gate M (merge approval); merging deploys nothing, and the production retirement of "Acting as" waits for Gate R, which needs SDR-0002 §22 items 1 and 8 to
-hold on the production host (B-1.5, B-1.12–B-1.15). Stub and loopback evidence never satisfies them.
+AFI-5b was implemented on `feature/afi-5b-identity-transition` (from `36ec46b`; design AFI-5 Rev 1.2 +
+micro-addendum Rev 1.2.1; Owner approvals B-3a and B-3b) and merged into source `main` as PR #62 (`7610676`,
+2026-10-29) after Gate M (merge approval). Merging deployed nothing (Gate D **HOLD**), and the production retirement of
+"Acting as" waits for Gate R, which needs SDR-0002 §22 items 1 and 8 to hold on the production host (B-1.5,
+B-1.12–B-1.15). Stub and loopback evidence never satisfies them.
 
-| Component | AFI-5b behaviour on the candidate |
+| Component | AFI-5b behaviour in the merged source |
 |---|---|
 | `js/core/constants.js` | `AUTH_MODE = AUTH_MODES.SESSION`. LOCAL remains a development/testing mode reached only by an in-memory rewrite (D-AFI5-2) |
 | `js/core/identity.js` | No fixtures, no `LocalIdentityProvider`, no selection API, no `window` export of either. SESSION dispatch resolves `SessionIdentityProvider` first and never reads the test seam (SA-7). LOCAL resolves only the provider installed through `setIdentityProviderForTesting`, else `NO_IDENTITY_PROVIDER`; a `null` reset clears it and never restores an alias (R-1). `localDevReady()` — a lexical, unexported predicate — is true only in LOCAL with an installed provider whose principal is valid; a throwing provider is not ready (D-01) |
