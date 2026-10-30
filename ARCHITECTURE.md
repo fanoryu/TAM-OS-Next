@@ -66,7 +66,8 @@ SDR-0004, as vocabulary only — no frontend feature consumes it).
 overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-backend-boundary.js`
 (selftest 739) and PHP tests (467 without the database, 874 with it). *(These figures were recorded before AFI-5b.
 With AFI-5b (PR #62) — see "Identity transition — AFI-5b" below — the verifier has 2993 checks, 13 harnesses run in CI,
-and the package holds 88 modules in 102 files.)*
+and the package holds 88 modules in 102 files. The E11 hostile-principal suites add 3 unit and 24 database tests:
+470 PHP tests without the database, 901 with it.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
@@ -1076,7 +1077,11 @@ status-order tests; MariaDB tests for the anchor schema and binding FK, named bi
 writes; and a hostile-principal suite (`tests/Db/HostilePrincipalTest.php`) that logs in real CEO and
 Employee accounts in two companies and drives test-only routes through the real resolver, kernel, Policy
 and scoped store. Overtime has no table yet, so its own-Draft rules are proven on Policy with principals
-resolved from real sessions.
+resolved from real sessions. **E11 (SDR-0002 §17):** dedicated hostile-principal suites cover the production routes of
+every later domain — `tests/Db/PayrollHostileTest.php`, `SupplementalHostileTest.php`, `FinanceHostileTest.php`,
+`AuthSelfServiceHostileTest.php` and `HostileConfirmationsTest.php` (no session, revoked session, an Employee on CEO
+routes, another company, forged scope, missing CSRF or a foreign origin; every refusal writes and audits nothing) — and
+`tests/Unit/RouteHostileCoverageTest.php` fails when any production route has no hostile suite.
 
 **Enforcement added to `tools/verify-backend-boundary.js`.** `server/src/Policy` is un-gated;
 `Authorization` is constructed only in `Policy/Policy.php` and `ScopedRecord` only in
