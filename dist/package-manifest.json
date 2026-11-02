@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "f98e48f8b4d871b811a4dd8ea271f2c50f2937e5f8ef4bebd63ade5e51ed76a5",
+  "packageDigest": "85022e4046f43302f6a43a59c66c51516b4cfa53c3a58d7e15eaa86e32b4db5b",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3088890,
-    "sha256": "86e848c0657a9198cf8f3451859816e443ab8fb6ff03055d83817cdc68821c2b"
+    "bytes": 3102419,
+    "sha256": "71f8487290cd2f0bfe285b4548e0916575fc9f470ca0ef0909154b39b01f4196"
   },
   "files": [
     {
@@ -114,8 +114,8 @@
     },
     {
       "path": "js/core/auth-boot.js",
-      "bytes": 10543,
-      "sha256": "bc31c56a8e102bfcbbf24849a6aba7a41f346d80cfd8de1f2897f4efc4131bdd"
+      "bytes": 10948,
+      "sha256": "bbbb713f76fc9f02a280e60d5d01c957a2c81083d037a30d9ffdd50569766b3a"
     },
     {
       "path": "js/core/auth-flow.js",
@@ -469,8 +469,8 @@
     },
     {
       "path": "js/ui/auth-view.js",
-      "bytes": 15674,
-      "sha256": "7e943156c5d29230855c85f4f8a24f62e9a3902d965cd6fa6d15e8f6c022c2be"
+      "bytes": 15829,
+      "sha256": "575d9aee774e783edfaf4669200f8e96ba28c194f0eb9da3d230101dc2bcce2f"
     },
     {
       "path": "js/ui/charts.js",
@@ -479,28 +479,28 @@
     },
     {
       "path": "js/ui/global-search-ui.js",
-      "bytes": 11904,
-      "sha256": "2ba274257e2b5c7399c97712c507e13bd398b6f3e4da321b72bc9d5eda05a36c"
+      "bytes": 11841,
+      "sha256": "58cfeac0503190eae247aaa5a9c8d302eae06544424d7b918daa08b350fb73b5"
     },
     {
       "path": "js/ui/session-audit-view.js",
-      "bytes": 13631,
-      "sha256": "f2d4c4a803386ca5a4eed7d3b84b81ea8274b752ab6f47568b78df4865b4533e"
+      "bytes": 13635,
+      "sha256": "7e715e10bfd653f90a92fefb91473e0fa9ad4957fff7fefa2363984f84acdd10"
     },
     {
       "path": "js/ui/session-overtime-view.js",
-      "bytes": 34270,
-      "sha256": "9770fd1a68b6fc82b22cef8b88a23b48f3de2a79e4d9a18017c356838871706d"
+      "bytes": 34307,
+      "sha256": "fbb8dc97112facc2f12af28f8e1427863086a0e9560dfa36f67a8e3163449748"
     },
     {
       "path": "js/ui/session-payroll-view.js",
-      "bytes": 83999,
-      "sha256": "c29ef1ff5ddb833346361c957d357d19536df9e58d64fd3866184a801aef7d9c"
+      "bytes": 84036,
+      "sha256": "183f1177d1b4a2ae87c901c859f494115bbdf57b089eae43e7a835393c152f10"
     },
     {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 37258,
-      "sha256": "0ee85706c0fb619f63c7a6e20f1447accb01d0975c7d488b9468c159fd1983aa"
+      "bytes": 50218,
+      "sha256": "d152949a25152d669dca392ae8b75cbe0b9094bd5f80390be2a6fd94300b3a37"
     },
     {
       "path": "js/ui/settings-about.js",
@@ -509,8 +509,8 @@
     },
     {
       "path": "js/ui/shell-render.js",
-      "bytes": 42284,
-      "sha256": "5b79287a91142ba1b197cf764c1369ca235aaddf32273213497231746496fb90"
+      "bytes": 42278,
+      "sha256": "c79b814269f9edf2a74bd42496ff3006c1ec1b3e41a2bd05189de1d35931ebe5"
     },
     {
       "path": "vendor/sheetjs/LICENSE",

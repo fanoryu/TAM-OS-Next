@@ -5,7 +5,7 @@
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js) — its only caller — when the
    section is shown. It is NOT the LOCAL Overtime page (js/people/overtime.js) and never
    reaches it, the business shell, its navigation, Global Search or "Acting as":
-   AuthBoot.allowsWorkspace() stays false.
+   U1: it sits inside the SESSION shell (js/ui/session-workspace-view.js) only.
 
      CEO       Overtime: the month bar (Previous, the month, Next), the company's records of
                that month (date, owner, hours, status), a record's detail, "Add overtime" for a

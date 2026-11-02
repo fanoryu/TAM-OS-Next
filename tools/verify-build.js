@@ -5680,11 +5680,16 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
   // no AuthBoot, no network); ready -> the unchanged boot order.
   check(/if\(AUTH_MODE === AUTH_MODES\.LOCAL\)\{\s*if\(!localDevReady\(\)\)\{\s*const mount = document\.getElementById\('app'\);\s*if\(mount\) mount\.textContent = 'Development identity not installed';\s*return;\s*\}\s*await loadState\(\);\s*applyTheme\(\);\s*installGlobalUIHandlers\(\);\s*render\(\);\s*maybeShowFirstRunChoice\(\);\s*return;\s*\}\s*AuthBoot\.start\(\);\s*\}\)\(\);/.test(bootCode),
     'AFI-2/AFI-5b: app-bootstrap.js guards LOCAL with localDevReady() (static notice + return when not ready), keeps the ready LOCAL boot order verbatim and only starts AuthBoot otherwise');
-  check(/function render\(\)\{\s*closeFloatingMenu\(\);\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\)\{\s*if\(typeof renderAuthView === 'function'\) renderAuthView\(\);\s*return;\s*\}/.test(shellCode),
-    'AFI-2: render() shows only the auth views outside LOCAL mode until a workspace is granted');
-  check(/function openGlobalSearch\(\)\{\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL && !\(typeof AuthBoot !== 'undefined' && AuthBoot\.allowsWorkspace\(\)\)\) return;/.test(gsCode),
-    'AFI-2: Global Search (Ctrl/Cmd+K) is gated the same way');
-  check(/allowsWorkspace\(\)\{ return false; \}/.test(abCode), 'AFI-2: AuthBoot grants no workspace in any state (D-A)');
+  // U1 authorized revision (Owner U-D2 = GR-4; D-GS-1 supersedes D-A): render() sends EVERY SESSION
+  // paint to renderAuthView() — whose AUTHENTICATED branch is the SESSION shell — so the LOCAL shell
+  // never mounts outside LOCAL whatever allowsWorkspace() says; Global Search never opens outside
+  // LOCAL; allowsWorkspace() is true only in AUTHENTICATED with a navigation model. Was: render() and
+  // Global Search gated on allowsWorkspace(), and allowsWorkspace(){ return false; } (D-A).
+  check(/function render\(\)\{\s*closeFloatingMenu\(\);\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL\)\{\s*if\(typeof renderAuthView === 'function'\) renderAuthView\(\);\s*return;\s*\}/.test(shellCode),
+    'AFI-2/U1: render() shows only the auth views (and, AUTHENTICATED, the SESSION shell) outside LOCAL mode; the LOCAL shell never mounts there');
+  check(/function openGlobalSearch\(\)\{\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL\) return;/.test(gsCode),
+    'AFI-2/U1: Global Search (Ctrl/Cmd+K) never opens outside LOCAL mode');
+  check(/allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abCode), 'AFI-2/U1: AuthBoot grants the SESSION shell only in AUTHENTICATED with a navigation model (D-GS-1)');
   // Firewall + authority inside the auth modules.
   [['core/auth-boot.js', abCode], ['ui/auth-view.js', avCode]].forEach(([name, c]) => {
     check(!/\b(loadState|maybeShowFirstRunChoice|meaningfulDataCounts|renderShell|renderIdentitySelectorHTML|LocalIdentityProvider|selectPrincipal|FIXTURE_PRINCIPALS|setIdentityProviderForTesting)\b/.test(c),
@@ -5781,7 +5786,8 @@ console.log('== AFI-3 — CREDENTIAL FLOWS ==');
   check(/snapshot\(\)\{\s*return Object\.freeze\(\{ state: state, purpose: purpose, busy: busy, message: message, retryAfter: retryAfter, requestId: requestId \}\);/.test(afCode),
     'AFI-3: the AuthFlow view model never carries the token');
   check(!/\btoken\b/i.test(avCode), 'AFI-3: auth-view.js never references the link token');
-  check(/allowsWorkspace\(\)\{ return false; \}/.test(abCode), 'AFI-3: AuthBoot still grants no workspace in any state');
+  // U1 authorized revision (GR-4): the SESSION shell only, AUTHENTICATED. Was: allowsWorkspace(){ return false; }.
+  check(/allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abCode), 'AFI-3/U1: AuthBoot grants no workspace outside AUTHENTICATED (the SESSION shell only)');
   // The views.
   check((avCode.match(/type="password" autocomplete="new-password"/g) || []).length === 2
     && !/type="password"[^>]*maxlength/.test(avCode)
@@ -5888,7 +5894,8 @@ console.log('== AFI-4a1 — SESSION EMPLOYEE WORKSPACE ==');
     && /if\(!SessionEmployeeStore\.isCurrent\(token\)\) return;\s*if\(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)/.test(runFn)
     && settleFn.indexOf('if(!SessionEmployeeStore.isLive(token)) return;') !== -1 && settleFn.indexOf('if(!SessionEmployeeStore.isLive(token)) return;') < settleFn.indexOf('AuthBoot.sessionLost()'),
     'AFI-4a1/AFI-4a2: only a current read, or a write of the current identity, answered 401 ends the session; stale answers are dropped first');
-  check(/allowsWorkspace\(\)\{ return false; \}/.test(abC), 'AFI-4a1: AuthBoot still grants no business shell (allowsWorkspace() is false)');
+  // U1 authorized revision (GR-4): the SESSION shell, never the LOCAL business shell. Was: allowsWorkspace() false.
+  check(/allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abC), 'AFI-4a1/U1: AuthBoot grants only the SESSION shell (AUTHENTICATED with a navigation model), never the LOCAL business shell');
   // The view: no controls beyond reading, nothing but escaped values.
   // AFI-4a2 authorized revision: the CEO gains Employee CRUD controls (pinned role-scoped in
   // AFI-4a2 below); the read-only property now holds for the Employee's self view, and no
@@ -6289,8 +6296,9 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // The view: a section of the SESSION workspace only; ids never in the page; escaped; CSS unchanged.
   const otRenderers = jsFiles.filter((f) => f !== 'ui/session-overtime-view.js' && /\b(renderSessionOvertimeHTML|renderSessionOvertimeTitle|bindSessionOvertime)\s*\(/.test(code(rd(f))));
   check(otRenderers.join() === 'ui/session-workspace-view.js' && /if\(overtime\)\{ title = renderSessionOvertimeTitle\(principal, ot\); body = renderSessionOvertimeHTML\(principal, ot\); \}/.test(wsC)
-    && /allowsWorkspace\(\)\{ return false; \}/.test(abC) && !/\bSessionOvertime(Store)?\b/.test(code(rd('ui/shell-render.js')) + code(rd('ui/auth-view.js')) + code(rd('core/app-bootstrap.js'))),
-    'AFI-4b1: Overtime is rendered only as a section of the SESSION workspace (renderAuthView -> renderSessionWorkspace); AuthBoot.allowsWorkspace() stays false; never the shell');
+    // U1 authorized revision (GR-4): allowsWorkspace() is the SESSION shell gate. Was: it stayed false.
+    && /allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abC) && !/\bSessionOvertime(Store)?\b/.test(code(rd('ui/shell-render.js')) + code(rd('ui/auth-view.js')) + code(rd('core/app-bootstrap.js'))),
+    'AFI-4b1/U1: Overtime is rendered only as a section of the SESSION workspace (renderAuthView -> renderSessionWorkspace), inside the SESSION shell; never the LOCAL shell');
   check(!/data-[a-z-]*="' \+ [a-z]+\.(id|employeeId)|value="' \+ (e|r|d|row)\.(id|employeeId)|>' \+ [a-z]+\.(id|employeeId) \+/.test(viewC) && /'<option value="' \+ i \+ '"'/.test(viewC) && /id="swoOpen' \+ i \+ '"/.test(viewC)
     && /escapeHtml\(r\.hours\)/.test(viewC) && /escapeHtml\(value\)/.test(viewC),
     'AFI-4b1: the view never writes an opaque record or Employee id into the page (rows and owners by position); values escaped; hours shown as sent');
@@ -6308,9 +6316,13 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // AFI-4g authorized revision (D-AFI4g-3 = A): the CEO's fourth section is Audit, and Employees stays
   // pressed only while no other section (Audit included) is shown; an Employee has no Audit section.
   // Was: Employees | Overtime | Payroll for the CEO, Employees pressed while neither Overtime nor Payroll.
-  check(/const SECTIONS|<nav aria-label="Workspace sections">/.test(wsC) && (wsC.match(/id="' \+ id \+ '"/g) || []).length >= 1
-    && /tab\('swSectionMain', ceo \? 'Employees' : 'My profile', !overtime && !payroll && !audit\) \+ tab\('swSectionOvertime', ceo \? 'Overtime' : 'My overtime', overtime\)/.test(wsC)
-    && /\+ tab\('swSectionPayroll', ceo \? 'Payroll' : 'My payroll', payroll === true\)\n\s*\+ \(ceo \? tab\('swSectionAudit', 'Audit', audit === true\) : ''\)/.test(wsC) && /const payroll = \(ceo \|\| employee\) && pr\.open;/.test(wsC)
+  // U1 authorized revision (GR-4): the section buttons are the SESSION shell's sidebar items, from the
+  // frozen SESSION_ROUTES (same ids, same labels, same order); the active item is the open section,
+  // else Employees / My profile. Was: a tab row, sessionWorkspaceSectionsHTML() with tab(...) calls.
+  check(!/<nav aria-label="Workspace sections">|function sessionWorkspaceSectionsHTML/.test(wsC)
+    && /const SESSION_ROUTES = Object\.freeze\(\[\s*Object\.freeze\(\{ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',\s*labels: Object\.freeze\(\{ ceo: 'Employees', employee: 'My profile' \}\) \}\),\s*Object\.freeze\(\{ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',\s*labels: Object\.freeze\(\{ ceo: 'Overtime', employee: 'My overtime' \}\) \}\),\s*Object\.freeze\(\{ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\) \}\),\s*Object\.freeze\(\{ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Audit' \}\) \}\)\s*\]\);/.test(wsC)
+    && /return sessionShellHTML\(model, payroll \? 'payroll' : \(overtime \? 'overtime' : \(audit \? 'audit' : SESSION_HOME_ROUTE\)\), busy, card\);/.test(wsC)
+    && /const payroll = \(ceo \|\| employee\) && pr\.open;/.test(wsC)
     && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(wsC),
     'AFI-4b1/AFI-4c1/AFI-4c2/AFI-4g: the workspace sections are Employees | Overtime | Payroll | Audit (CEO) and My profile | My overtime | My payroll (Employee); the existing one stays the default');
   // Invariants held by this slice.
@@ -6638,11 +6650,12 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
   check(/p\.id === id && p\.status === t\[1\] && p\.version === expectedVersion \+ 1/.test(apiC),
     'AFI-4c1: a transition is confirmed only by the same plan in the target status at expectedVersion + 1');
   const abC = code(rd('core/auth-boot.js')), wsC = code(rd('ui/session-workspace-view.js'));
-  check(/SessionOvertimeStore\.clear\(\);\s*SessionPayrollStore\.clear\(\);/.test(abC) && /allowsWorkspace\(\)\{ return false; \}/.test(abC)
+  // U1 authorized revision (GR-4): allowsWorkspace() is the SESSION shell gate. Was: it stayed false.
+  check(/SessionOvertimeStore\.clear\(\);\s*SessionPayrollStore\.clear\(\);/.test(abC) && /allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abC)
     && jsFiles.filter((f) => /\brenderSessionPayrollHTML\(/.test(code(rd(f))) && f !== 'ui/session-payroll-view.js').join() === 'ui/session-workspace-view.js'
     // AFI-4c2 authorized revision: the title also takes the principal (My payroll). Was: (pr).
     && /if\(payroll\)\{ title = renderSessionPayrollTitle\(pr, principal\); body = renderSessionPayrollHTML\(principal, pr\); \}/.test(wsC),
-    'AFI-4c1: AuthBoot clears the Payroll data with the other SESSION stores; Payroll renders only as a section of the SESSION workspace; allowsWorkspace() stays false');
+    'AFI-4c1/U1: AuthBoot clears the Payroll data with the other SESSION stores; Payroll renders only as a section of the SESSION workspace (in the SESSION shell)');
   // AFI-4c2 authorized revision: an Employee opens My payroll and reads their own Committed plans
   // (myMonth / myGet); every write and the drift read stay the CEO's. Was: CEO only, no Employee read.
   check(/if\(value === true && !sessionPayrollIsCeo\(p\) && !sessionPayrollIsEmployee\(p\)\) return;/.test(storeC)
@@ -6787,7 +6800,8 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
     && />Retry commit</.test(viewC) && !/\bPaid\b|Mark paid|Execute payment|Post to Finance/.test(viewC.replace(/submit: 'Post to Finance'|>Post to Finance</g, '')),
     'AFI-4c2: the words are D-AFI4c2-3 = A — "Commit payroll", "Committing…", "Retry commit", "Committed — final, not paid"; never Paid or Post to Finance');
   check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\./.test(all), 'AFI-4c2: still no number conversion, Math, formatter or Intl in the Payroll modules');
-  check(/tab\('swSectionPayroll', ceo \? 'Payroll' : 'My payroll', payroll === true\)/.test(wsC) && /function sessionPayrollMineDetailHTML\(w\)/.test(viewC)
+  // U1 authorized revision (GR-4): the My payroll label lives in SESSION_ROUTES. Was: tab('swSectionPayroll', …).
+  check(/id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\)/.test(wsC) && /function sessionPayrollMineDetailHTML\(w\)/.test(viewC)
     // AFI-4f authorized revision: the one label of the BF-4f code bankTransfer (pinned in the AFI-4f
     // section) is not a bank concept of My payroll. Was: no bank word at all.
     && !/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|net salary|bank|payment date)\b/i.test(viewC.replace(/It is not a payment/g, '').replace(/bankTransfer: 'Bank transfer'/g, '')),
@@ -7762,8 +7776,9 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   const ws = code(read(path.join(root, 'js', 'ui', 'session-workspace-view.js')));
   check(/if\(value === true && !sessionAuditIsCeo\(principalNow\(\)\)\) return;/.test(storeC) && /if\(!s\.open \|\| !sessionAuditIsCeo\(principal\)\) return;/.test(storeC)
     && /function canRead\(\)\{ return sessionAuditIsCeo\(principalNow\(\)\) && SessionAuditStore\.snapshot\(\)\.open; \}/.test(storeC)
-    && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(ws) && /\(ceo \? tab\('swSectionAudit', 'Audit', audit === true\) : ''\)/.test(ws),
-    'AFI-4g: CEO only — the tab is rendered for the CEO alone and every SessionAudit entry point checks the CEO again (the server decides)');
+    // U1 authorized revision (GR-4): the Audit item is the route with a CEO label only. Was: (ceo ? tab('swSectionAudit', …) : '').
+    && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(ws) && /id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Audit' \}\) \}\)/.test(ws),
+    'AFI-4g/U1: CEO only — the Audit item has a CEO label alone and every SessionAudit entry point checks the CEO again (the server decides)');
   check(/SessionAuditStore\.clear\(\);\s+\/\/ AFI-4g/.test(read(path.join(root, 'js', 'core', 'auth-boot.js'))) && /if\(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)\{\s*AuthBoot\.sessionLost\(\);/.test(storeC)
     && /bindPrincipal\(p\)\{\s*const key = keyOf\(p\);\s*if\(key === principalKey\) return false;\s*clear\(\);/.test(storeC)
     && !/localStorage|sessionStorage|indexedDB|document\.cookie|history\.(pushState|replaceState)|location\.|State\./.test(all),
@@ -7842,18 +7857,21 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
 // AFI-5b D-03 authorized revision: the identity transition harness (verify-afi5-runtime.js) is the thirteenth,
 // appended after the baseline order, after its repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14)
 // determinism proof and the six-case negative acceptance suite. Was: twelve.
+// U1 authorized revision (GR-4): the SESSION shell harness (verify-session-shell-runtime.js) is the
+// fourteenth, appended after its repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof
+// and its R-11 mutation self-test. Was: thirteen.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
     'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js',
     'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js',
     'verify-session-overtime-runtime.js', 'verify-session-payroll-runtime.js', 'verify-session-audit-runtime.js',
-    'verify-dev-local-runtime.js', 'verify-afi5-runtime.js'];
+    'verify-dev-local-runtime.js', 'verify-afi5-runtime.js', 'verify-session-shell-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the thirteen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the fourteen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');
@@ -8010,12 +8028,81 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
 
   /* The AFI-5b package: the selector module left it. */
   const pkg5 = JSON.parse(read(pkgManifestPathA5));
+  // U1 authorized revision (GR-4): U1 added no module and no file; the digest is the U1 package's.
+  // Was: f98e48f8b4d871b811a4dd8ea271f2c50f2937e5f8ef4bebd63ade5e51ed76a5 (AFI-5b with O-2).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === 'f98e48f8b4d871b811a4dd8ea271f2c50f2937e5f8ef4bebd63ade5e51ed76a5',
-    'AFI-5b: 88 modules; the package holds 102 files (the selector module removed) at digest f98e48f8… (with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === '85022e4046f43302f6a43a59c66c51516b4cfa53c3a58d7e15eaa86e32b4db5b',
+    'AFI-5b/U1: 88 modules; the package holds 102 files (the selector module removed) at the U1 r4 digest 85022e40… (3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
+}
+
+// ===== U1 — SESSION GRADUATED SHELL (Option B; Owner U-D1..U-D5, GR-4; D-GS-1) =====
+// The v2.11.0 shell chrome for the AUTHENTICATED SESSION state only, in ui/session-workspace-view.js (no
+// new module, no CSS change, no API, no storage). The LOCAL shell (renderShell / renderView / data-nav)
+// stays unreachable in SESSION. Behaviour: tools/verify-session-shell-runtime.js.
+console.log('== U1 — SESSION GRADUATED SHELL ==');
+{
+  const code = (t) => stripComments(t).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => { const q = path.join(root, 'js', f); return fs.existsSync(q) ? read(q) : ''; };
+  const wsU = code(rd('ui/session-workspace-view.js'));
+  const shellFns = ['sessionNavModel', 'sessionRouteAllowed', 'sessionNavItemHTML', 'sessionShellHTML', 'bindSessionShell', 'sessionShellApplyDrawer',
+    'sessionShellOpenDrawer', 'sessionShellCloseDrawer', 'sessionShellReset'];
+  const owners = shellFns.map((n) => jsFiles.filter((f) => new RegExp('function ' + n + '\\(').test(code(rd(f)))).join());
+  check(owners.every((o) => o === 'ui/session-workspace-view.js') && jsFiles.filter((f) => /\bconst SESSION_ROUTES\b/.test(code(rd(f)))).join() === 'ui/session-workspace-view.js',
+    'U1: SESSION_ROUTES and every SESSION shell function live in ui/session-workspace-view.js only (no new module)');
+  check(jsFiles.filter((f) => /\bsessionShellHTML\(/.test(code(rd(f)))).join() === 'ui/session-workspace-view.js' && (wsU.match(/\bsessionShellHTML\(/g) || []).length === 2
+    && jsFiles.filter((f) => /\bsessionShellReset\(/.test(code(rd(f)))).sort().join() === 'ui/auth-view.js,ui/session-workspace-view.js',
+    'U1: the shell is rendered only by sessionWorkspaceHTML(), and reset only by renderAuthView() outside AUTHENTICATED');
+  check(/const model = AuthBoot\.allowsWorkspace\(\) \? sessionNavModel\(principal\) : null;\s*if\(!model\) return '<main class="auth-screen" id="main">' \+ card \+ '<\/main>';/.test(wsU),
+    'U1: no model (allowsWorkspace() false, unknown role) -> the card alone, no shell (fail closed)');
+  check(/if\(role !== PRINCIPAL_TYPES\.CEO && role !== PRINCIPAL_TYPES\.EMPLOYEE\) return null;/.test(wsU) && /if\(!Object\.prototype\.hasOwnProperty\.call\(r\.labels, role\)\) return;/.test(wsU),
+    'U1: sessionNavModel admits only the CEO and Employee roles, and a route only for a role it labels');
+  const shellFn = (wsU.match(/function sessionShellHTML\([\s\S]*?\n\}/) || [''])[0];
+  check(!!shellFn && !/data-nav|identity|Acting as|State\b|localStorage|sessionStorage|fetch|ApiClient/.test(shellFn) && /escapeHtml\(SESSION_SHELL_FOOT\)/.test(shellFn)
+    && /const SESSION_SHELL_FOOT = 'Data stored on the TAM OS server\.';/.test(wsU) && !/Data stored privately in your browser/.test(wsU),
+    'U1: the SESSION shell has no data-nav routing, selector, State, storage or network; its footer says the data is on the server (P1-D3)');
+  check(!/\bState\b|localStorage|sessionStorage/.test((wsU.match(/const SessionShellDrawer[\s\S]*$/) || [''])[0].replace(/\/\/[^\n]*/g, '')),
+    'U1: the mobile drawer state is SessionShellDrawer, memory only (never State, never storage)');
+  // U1 correction 1 (Owner-approved): a closed off-canvas drawer is inert as well as aria-hidden.
+  const applyFn = (wsU.match(/function sessionShellApplyDrawer\([\s\S]*?\n\}/) || [''])[0];
+  check(/const hide = drawer && !open && sessionShellRescueFocus\(app, sidebar\);[\s\S]*?if\(hide\)\{ sidebar\.setAttribute\('aria-hidden', 'true'\); sidebar\.setAttribute\('inert', ''\); \}\s*else \{ sidebar\.removeAttribute\('aria-hidden'\); sidebar\.removeAttribute\('inert'\); \}/.test(applyFn)
+    && /SessionShellDrawer\.open = true;\s*sessionShellApplyDrawer\(app\);[\s\S]*?f\[0\]\.focus\(\)/.test(wsU),
+    'U1: a closed mobile drawer is inert and aria-hidden; opening removes both before focus moves to its first item');
+  // U1 r3/r4 (Atlas a11y blockers): before the sidebar turns inert, focus inside it moves to the
+  // menu button, else #main (tabindex -1), each attempt verified against document.activeElement
+  // (no blur()); if none succeeds the sidebar stays focusable (held) and turns inert on focusout.
+  const rescueFn = (wsU.match(/function sessionShellRescueFocus\([\s\S]*?\n\}/) || [''])[0];
+  check(/if\(!inside\(\)\) return true;/.test(rescueFn)
+    && /const targets = \[app\.querySelector\('#navHamburger'\), app\.querySelector\('#main'\)\];/.test(rescueFn)
+    && /t\.focus\(\);\s*if\(document\.activeElement === t && !inside\(\)\) return true;/.test(rescueFn) && /\n  return false;\n\}$/.test(rescueFn)
+    && /<main class="main" id="main" tabindex="-1">/.test(wsU)
+    && !/\bState\b|localStorage|sessionStorage|fetch|blur\(/.test(rescueFn) && (wsU.match(/sessionShellRescueFocus\(/g) || []).length === 2,
+    'U1 r4: focus inside the sidebar moves to the menu button, else #main (no new tab stop); every attempt is verified; false when focus cannot leave; one caller');
+  check(/SessionShellDrawer\.held = drawer && !open && !hide;/.test(applyFn)
+    && /addEventListener\('focusout', function\(e\)\{\s*if\(!SessionShellDrawer\.held\) return;[\s\S]*?sessionShellApplyDrawer\(app\);\s*\}\);/.test(wsU)
+    && /function sessionShellReset\(app\)\{\s*SessionShellDrawer\.open = false; SessionShellDrawer\.ret = null; SessionShellDrawer\.held = false;/.test(wsU),
+    'U1 r4: a failed rescue holds the closed drawer focusable (never inert around focus), recovers on focusout, and is cleared when the shell is left');
+  // U1 correction 2 (Owner-approved): the Employee's Finance group reads "My work" (display only).
+  check(/const SESSION_GROUP_LABELS = Object\.freeze\(\{ employee: Object\.freeze\(\{ finance: 'My work' \}\) \}\);/.test(wsU),
+    'U1: the per-role group labels are exactly { employee: { finance: "My work" } }; route and button ids unchanged');
+  // U1 correction 3 (Owner-approved): About and Release notes are deferred to U2 — no SESSION route and no
+  // SESSION code path reaches the LOCAL variants (which read State / StorageAdapter and claim browser storage).
+  check(!/\b(renderAbout|renderReleaseNotes|renderSettings)\b|'about'|'releasenotes'/.test(wsU) && !/\b(renderAbout|renderReleaseNotes)\b/.test(code(rd('ui/auth-view.js')) + code(rd('core/auth-boot.js'))),
+    'U1: About and Release notes are not SESSION destinations (deferred to U2); the LOCAL variants are unreachable from the SESSION views');
+  check(jsFiles.filter((f) => /\brenderShell\(\)/.test(code(rd(f)))).join() === 'ui/shell-render.js',
+    'U1: renderShell() (the LOCAL shell) is still called only inside shell-render.js');
+  check(!/allowsWorkspace/.test(code(rd('ui/global-search-ui.js'))) && !/allowsWorkspace/.test(code(rd('ui/shell-render.js'))),
+    'U1: neither render() nor Global Search consults allowsWorkspace() (both are closed outside LOCAL)');
+  const chromeTool = path.join(root, 'tools', 'session-shell-chrome.js');
+  check(fs.existsSync(chromeTool) && fs.existsSync(path.join(root, 'tools', 'verify-session-shell-runtime.js'))
+    && !jsFiles.some((f) => /session-shell/.test(f)) && !/session-shell/.test(indexHtml) && !(JSON.parse(read(pkgManifestPathA5)).files || []).some((e) => /session-shell/.test(e.path)),
+    'U1: the chrome oracle (tools/session-shell-chrome.js) and the runtime harness exist and are in no module list, index.html or package');
+  check(/R-11/.test(read(path.join(root, 'tools', 'verify-session-shell-runtime.js'))) && /parseSessionShell/.test(read(path.join(root, 'tools', 'verify-session-employee-runtime.js')))
+    && ['overtime', 'payroll', 'audit'].every((d) => /parseSessionShell/.test(read(path.join(root, 'tools', 'verify-session-' + d + '-runtime.js'))))
+    && ['auth-boot', 'auth-flow'].every((d) => /parseSessionShell/.test(read(path.join(root, 'tools', 'verify-' + d + '-runtime.js')))),
+    'U1: the six revised SESSION / auth harnesses check the card against the exact chrome oracle; the shell harness carries its mutation self-test');
 }
 
 console.log('');

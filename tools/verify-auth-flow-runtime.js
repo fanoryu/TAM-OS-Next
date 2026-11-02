@@ -22,6 +22,8 @@
 
 const fs = require('fs');
 const path = require('path');
+// U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification.
+const { parseSessionShell } = require('./session-shell-chrome.js');
 const vm = require('vm');
 
 let passed = 0; const failures = [];
@@ -193,11 +195,18 @@ function firewall(rt, label){
   check(rt.spy.indexOf('loadState') === -1 && rt.spy.indexOf('maybeShowFirstRunChoice') === -1 && rt.tamReads().length === 0,
     label + ': no loadState, no first-run choice, no tam_* read');
   check(rt.State.txns.length === 0 && rt.State.employees.length === 0 && rt.State.storageReady === false, label + ': no business state in memory');
-  check(!/identityPrincipalSelect|Acting as|class="sidebar"|id="sidebar"|data-nav=/.test(html) && rt.selectorDeclared === 'undefinedundefinedundefined',
-    label + ': no shell and no "Acting as" mounted (the selector functions do not exist)');
+  // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION
+  // shell; no other state has a sidebar, and the card itself still has no LOCAL navigation (data-nav),
+  // no LOCAL sidebar and no "Acting as". Was: no sidebar at all.
+  const shell = parseSessionShell(html);
+  const body = shell ? shell.content : html;
+  check(!/identityPrincipalSelect|Acting as|class="sidebar"|id="sidebar"|data-nav=/.test(body) && rt.selectorDeclared === 'undefinedundefinedundefined'
+    && (shell ? rt.AuthBoot.snapshot().state === 'AUTHENTICATED' && rt.AuthBoot.allowsWorkspace() === true : rt.AuthBoot.allowsWorkspace() === false),
+    label + ': no LOCAL shell and no "Acting as" mounted (the selector functions do not exist); only the exact SESSION shell, and only while AUTHENTICATED');
   const created = rt.net.created;
   try { rt.openGlobalSearch(); } catch(_e){ rt.net.created++; }
-  check(rt.net.created === created && rt.AuthBoot.allowsWorkspace() === false, label + ': Ctrl/Cmd+K opens nothing; no workspace');
+  // U1 authorized revision (GR-4): no workspace outside AUTHENTICATED; Ctrl/Cmd+K opens nothing in any state. Was: never a workspace.
+  check(rt.net.created === created && rt.AuthBoot.allowsWorkspace() === (rt.AuthBoot.snapshot().state === 'AUTHENTICATED'), label + ': Ctrl/Cmd+K opens nothing; no workspace outside AUTHENTICATED');
   check(rt.writes.length === 0 && rt.logs.length === 0, label + ': nothing written to storage, nothing logged');
 }
 // Neither the token nor a password anywhere observable.
@@ -523,8 +532,9 @@ async function signedOut(routes){
     rt.net.routes['/api/auth/me'] = [ok(ME_CEO)];
     await rt.AuthFlow.leave();
     const s = rt.AuthBoot.snapshot();
-    check(s.state === 'AUTHENTICATED' && (s.principal || {}).id === 'u_ceo_1' && rt.AuthBoot.allowsWorkspace() === false,
-      'R. Continue -> /me 200 -> AUTHENTICATED holding view: /me, not the reset, decides');
+    // U1 authorized revision (GR-4): /me's CEO gets the SESSION shell. Was: allowsWorkspace() === false.
+    check(s.state === 'AUTHENTICATED' && (s.principal || {}).id === 'u_ceo_1' && rt.AuthBoot.allowsWorkspace() === true && (parseSessionShell(rt.appHTML()) || {}).role === 'ceo',
+      'R. Continue -> /me 200 -> AUTHENTICATED CEO SESSION shell: /me, not the reset, decides');
   }
   {
     const rt = await linkFlow('#recovery=' + T_REC, { '/api/auth/reset-password': [v400(['token'])] });

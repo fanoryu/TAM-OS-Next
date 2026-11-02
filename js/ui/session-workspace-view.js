@@ -3,9 +3,10 @@
    ------------------------------------------------------------
    The SESSION workspace, rendered into #app by renderAuthView()
    (js/ui/auth-view.js) — its only caller — while AuthBoot is AUTHENTICATED. It is
-   NOT the business shell: AuthBoot.allowsWorkspace() stays false, so render()
-   never mounts the shell, its navigation, Global Search or "Acting as", and no
-   other domain (Payroll, Finance) has an entry here.
+   NOT the LOCAL business shell: render() never mounts renderShell() in SESSION,
+   its data-nav navigation, Global Search or "Acting as", and no LOCAL
+   domain page has an entry here. U1: the card sits inside the SESSION shell (end of
+   this file) while AuthBoot.allowsWorkspace() — AUTHENTICATED with a navigation model.
 
    AFI-4b1: two SESSION sections, switched by buttons under the heading — CEO
    "Employees | Overtime", Employee "My profile | My overtime". The existing section
@@ -342,21 +343,9 @@ function sessionWorkspaceSelfHTML(w){
   ]);
 }
 
-// AFI-4b1: the two SESSION sections. A section button shows its section; neither switches while
-// a write of either section is in flight. AFI-4c1: the CEO's third section, Payroll. AFI-4c2: the
-// Employee's third section, My payroll. AFI-4g: the CEO's fourth section, Audit.
-function sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll, audit){
-  const dis = busy ? ' disabled' : '';
-  const tab = function(id, label, current){
-    return '<button class="tab' + (current ? ' active' : '') + '" type="button" id="' + id + '" aria-pressed="' + current + '"' + dis + '>' + label + '</button>';
-  };
-  return '<nav aria-label="Workspace sections"><div class="tabs">'
-    + tab('swSectionMain', ceo ? 'Employees' : 'My profile', !overtime && !payroll && !audit) + tab('swSectionOvertime', ceo ? 'Overtime' : 'My overtime', overtime)
-    + tab('swSectionPayroll', ceo ? 'Payroll' : 'My payroll', payroll === true)
-    + (ceo ? tab('swSectionAudit', 'Audit', audit === true) : '')
-    + '</div></nav>';
-}
-
+// U1: the section buttons are the SESSION shell's sidebar items (js/ui/session-shell.js,
+// sessionNavModel); none is enabled while a write of any section is in flight. Without a
+// navigation model (no principal, unknown role) the card renders alone — no shell.
 function sessionWorkspaceHTML(auth, w){
   const principal = auth.principal;
   const who = (principal && principal.displayName) ? principal.displayName : '';
@@ -377,12 +366,14 @@ function sessionWorkspaceHTML(auth, w){
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
   else body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_WORKSPACE_ERRORS.UNAVAILABLE) + '</p>';
-  return '<main class="auth-screen" id="main"><section class="card" aria-labelledby="authTitle">'
+  const card = '<section class="card" aria-labelledby="authTitle">'
     + '<div class="page-head"><div><h1 class="auth-title" id="authTitle" tabindex="-1">' + escapeHtml(title) + '</h1>'
     + '<p class="auth-lead">Signed in as <strong>' + escapeHtml(who) + '</strong>.</p></div>'
     + '<div class="auth-actions"><button class="btn" id="authSignOutBtn" type="button"' + (auth.busy ? ' disabled aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>'
-    + (ceo || employee ? sessionWorkspaceSectionsHTML(ceo, overtime, busy, payroll, audit) : '')
-    + body + '</section></main>';
+    + body + '</section>';
+  const model = AuthBoot.allowsWorkspace() ? sessionNavModel(principal) : null;
+  if(!model) return '<main class="auth-screen" id="main">' + card + '</main>';
+  return sessionShellHTML(model, payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : SESSION_HOME_ROUTE)), busy, card);
 }
 
 function bindSessionWorkspace(app){
@@ -493,6 +484,8 @@ function renderSessionWorkspace(app, auth){
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
   app.innerHTML = sessionWorkspaceHTML(auth, SessionEmployeeStore.snapshot());
+  const model = AuthBoot.allowsWorkspace() ? sessionNavModel(auth.principal) : null;
+  if(model) bindSessionShell(app, model);                      // U1: before the section buttons' own listeners
   bindSessionWorkspace(app);
   const hint = SessionEmployeeStore.takeFocus();
   const otHint = SessionOvertimeStore.takeFocus();
@@ -514,4 +507,226 @@ function renderSessionWorkspace(app, auth){
     return sessionWorkspaceFocus(app, auHint ? 'heading' : null, kept);
   }
   sessionWorkspaceFocus(app, hint, kept);
+}
+
+/* ------------------------------------------------------------
+   U1 — SESSION GRADUATED SHELL (Option B)
+   ------------------------------------------------------------
+   The v2.11.0 shell chrome (sidebar, brand lockup, grouped navigation, mobile
+   drawer, skip link, #main landmark) for the AUTHENTICATED SESSION state only. It
+   reuses the existing shell CSS classes and NAV_GROUPS group labels and icons; it is
+   NOT renderShell(): the LOCAL shell, its data-nav routing over State.view, Global
+   Search, Quick Actions and every LOCAL view stay unreachable in SESSION.
+
+     SESSION_ROUTES        the only SESSION destinations — the four existing SESSION
+                           sections. Each names its section button id (the same ids the
+                           section tabs carried), its NAV_GROUPS group and item, and a
+                           fixed label per role. A role absent from `labels` cannot see
+                           the route.
+     sessionNavModel(p)    pure: the principal's visible groups and items, or null for a
+                           missing principal or an unknown role (fail closed: no shell).
+     sessionShellHTML()    the chrome around the existing workspace card.
+     bindSessionShell()    drawer open/close, Escape, focus trap, skip link.
+
+   AUTHORITY: the model decides visibility only. Every read and write is still decided
+   by the server Policy and scope; a route shown in error ends in the server's 403 and
+   the section's denied message. Section switching stays in bindSessionWorkspace() above
+   through the section button ids, so the existing
+   "no switch while a write is in flight" rule and every store are unchanged.
+
+   Called only by sessionWorkspaceHTML() / renderSessionWorkspace(), which run only
+   from renderAuthView() while AuthBoot is AUTHENTICATED. Every label is a fixed
+   string; nothing from the server is rendered here. The mobile drawer state is
+   SessionShellDrawer (memory only; never State, never storage).
+
+   Classic shared global scope; existing CSS classes only.
+   ------------------------------------------------------------ */
+
+const SESSION_ROUTES = Object.freeze([
+  Object.freeze({ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',
+    labels: Object.freeze({ ceo: 'Employees', employee: 'My profile' }) }),
+  Object.freeze({ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',
+    labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }) }),
+  Object.freeze({ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',
+    labels: Object.freeze({ ceo: 'Payroll', employee: 'My payroll' }) }),
+  Object.freeze({ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',
+    labels: Object.freeze({ ceo: 'Audit' }) })
+]);
+// Per-role group labels over NAV_GROUPS (display only): an Employee has no Finance access, so
+// their own overtime and payroll sit under "My work".
+const SESSION_GROUP_LABELS = Object.freeze({ employee: Object.freeze({ finance: 'My work' }) });
+const SESSION_HOME_ROUTE = 'main';
+const SESSION_SHELL_FOOT = 'Data stored on the TAM OS server.';
+
+// The principal's navigation, or null (no shell). Reads only principal.principalType,
+// SESSION_ROUTES and NAV_GROUPS; returns a new frozen value each call.
+function sessionNavModel(principal){
+  if(!principal || typeof principal !== 'object') return null;
+  const role = principal.principalType;
+  if(role !== PRINCIPAL_TYPES.CEO && role !== PRINCIPAL_TYPES.EMPLOYEE) return null;
+  const groups = [];
+  SESSION_ROUTES.forEach(function(r){
+    if(!Object.prototype.hasOwnProperty.call(r.labels, role)) return;
+    const g = NAV_GROUPS.find(function(x){ return x.id === r.group; });
+    const n = g ? g.items.find(function(i){ return i.id === r.navItem; }) : null;
+    if(!g || !n) return;
+    let out = groups.find(function(x){ return x.id === g.id; });
+    if(!out){
+      const own = Object.prototype.hasOwnProperty.call(SESSION_GROUP_LABELS, role) && Object.prototype.hasOwnProperty.call(SESSION_GROUP_LABELS[role], g.id);
+      out = { id: g.id, label: own ? SESSION_GROUP_LABELS[role][g.id] : g.label, items: [] }; groups.push(out);
+    }
+    out.items.push(Object.freeze({ id: r.id, button: r.button, label: r.labels[role], ic: n.ic }));
+  });
+  if(!groups.some(function(g){ return g.items.some(function(i){ return i.id === SESSION_HOME_ROUTE; }); })) return null;
+  return Object.freeze({ role: role, home: SESSION_HOME_ROUTE,
+    groups: Object.freeze(groups.map(function(g){ return Object.freeze({ id: g.id, label: g.label, items: Object.freeze(g.items) }); })) });
+}
+
+// True when the model offers the route; anything else is the home route.
+function sessionRouteAllowed(model, id){
+  return !!model && model.groups.some(function(g){ return g.items.some(function(i){ return i.id === id; }); });
+}
+
+function sessionNavItemHTML(item, active, busy){
+  const on = item.id === active;
+  return '<button class="nav-item' + (on ? ' active' : '') + '" type="button" id="' + item.button + '"' + (on ? ' aria-current="page"' : '') + (busy ? ' disabled' : '') + '>'
+    + '<span class="ic" aria-hidden="true">' + item.ic + '</span><span class="nav-label">' + escapeHtml(item.label) + '</span></button>';
+}
+
+// The shell around `content` (the workspace card). `active` is a route id of the model.
+function sessionShellHTML(model, active, busy, content){
+  const current = sessionRouteAllowed(model, active) ? active : model.home;
+  const nav = model.groups.map(function(g){
+    return '<div class="nav-group"><div class="nav-group-head"><span>' + escapeHtml(g.label) + '</span></div>'
+      + '<div class="nav-group-items">' + g.items.map(function(i){ return sessionNavItemHTML(i, current, busy); }).join('') + '</div></div>';
+  }).join('');
+  return '<a class="skip-link" href="#main" id="skipLink">Skip to main content</a>'
+    + '<button class="nav-hamburger" id="navHamburger" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span aria-hidden="true">☰</span></button>'
+    + '<div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>'
+    + '<div class="sidebar" id="sidebar"><div class="brand"><div class="brand-lockup">'
+    + '<img class="brand-monogram" src="' + BRAND_MONOGRAM + '" alt="" aria-hidden="true" width="34" height="34" draggable="false">'
+    + '<div class="mark">TAM&nbsp;<span class="os">OS</span></div></div></div>'
+    + '<nav class="nav" aria-label="Primary navigation">' + nav + '</nav>'
+    + '<div class="sidebar-foot">' + escapeHtml(APP_NAME) + ' v' + APP_VERSION + '<br>' + escapeHtml(SESSION_SHELL_FOOT) + '</div></div>'
+    + '<main class="main" id="main" tabindex="-1">' + content + '</main>';
+}
+
+// The mobile drawer: memory only, owned here (never State, never storage). The shell is
+// re-rendered on every paint, so its open state is baked into the markup and re-applied.
+// `held`: the closed drawer was left focusable because focus could not leave it (see
+// sessionShellRescueFocus); the sidebar's focusout re-applies the state once focus is out.
+const SessionShellDrawer = { open: false, ret: null, mq: null, held: false };
+
+function sessionShellApplyDrawer(app){
+  const drawer = sidebarIsDrawerMode();
+  const open = drawer && SessionShellDrawer.open;
+  if(app.classList) app.classList.toggle('drawer-open', open);
+  const sidebar = app.querySelector('#sidebar');
+  if(sidebar && typeof sidebar.setAttribute === 'function' && typeof sidebar.removeAttribute === 'function'){
+    // A closed off-canvas drawer is inert: no keyboard focus, no screen-reader access.
+    // Focus still inside it (e.g. a desktop -> mobile resize) must leave first; if it cannot,
+    // the sidebar is never made inert or aria-hidden around the focused element.
+    const hide = drawer && !open && sessionShellRescueFocus(app, sidebar);
+    SessionShellDrawer.held = drawer && !open && !hide;
+    if(hide){ sidebar.setAttribute('aria-hidden', 'true'); sidebar.setAttribute('inert', ''); }
+    else { sidebar.removeAttribute('aria-hidden'); sidebar.removeAttribute('inert'); }
+  }
+  const back = app.querySelector('#sidebarBackdrop');
+  if(back) back.hidden = !open;
+  const ham = app.querySelector('#navHamburger');
+  if(ham && typeof ham.setAttribute === 'function') ham.setAttribute('aria-expanded', String(open));
+}
+
+// Before the sidebar turns inert: true when focus is (now) outside it. Focus inside moves to
+// the menu button, else to #main (tabindex -1: no new tab stop); each attempt is checked
+// against document.activeElement, never assumed. False: focus could not leave the sidebar.
+function sessionShellRescueFocus(app, sidebar){
+  const inside = function(){
+    const a = document.activeElement;
+    return !!a && (typeof sidebar.contains !== 'function' || sidebar.contains(a));
+  };
+  if(!inside()) return true;
+  const targets = [app.querySelector('#navHamburger'), app.querySelector('#main')];
+  for(let i = 0; i < targets.length; i++){
+    const t = targets[i];
+    if(!t || typeof t.focus !== 'function' || t.isConnected === false) continue;
+    t.focus();
+    if(document.activeElement === t && !inside()) return true;
+  }
+  return false;
+}
+
+function sessionShellOpenDrawer(app){
+  if(!sidebarIsDrawerMode()) return;
+  SessionShellDrawer.ret = document.activeElement;
+  SessionShellDrawer.open = true;
+  sessionShellApplyDrawer(app);
+  const sidebar = app.querySelector('#sidebar');
+  const f = sidebar ? sidebarFocusables(sidebar) : [];
+  if(f.length) f[0].focus();
+}
+
+// `restore` false: a navigation is about to move focus to the new heading itself.
+function sessionShellCloseDrawer(app, restore){
+  const wasOpen = SessionShellDrawer.open;
+  const ret = SessionShellDrawer.ret;
+  SessionShellDrawer.open = false; SessionShellDrawer.ret = null;
+  sessionShellApplyDrawer(app);
+  if(!wasOpen || !restore) return;
+  const target = (ret && ret !== document.body && typeof ret.focus === 'function' && document.contains(ret)) ? ret : app.querySelector('#navHamburger');
+  if(target && typeof target.focus === 'function') target.focus();
+}
+
+// Binds the chrome of a freshly rendered shell (the whole #app is re-rendered on every
+// paint, so nothing is bound twice). Section buttons are bound by bindSessionWorkspace().
+function bindSessionShell(app, model){
+  const skip = app.querySelector('#skipLink');
+  if(skip) skip.addEventListener('click', function(e){
+    e.preventDefault();
+    const main = app.querySelector('#main');
+    if(main && typeof main.focus === 'function') main.focus();
+  });
+  const ham = app.querySelector('#navHamburger');
+  if(ham) ham.addEventListener('click', function(e){ e.preventDefault(); if(SessionShellDrawer.open) sessionShellCloseDrawer(app, true); else sessionShellOpenDrawer(app); });
+  const back = app.querySelector('#sidebarBackdrop');
+  if(back) back.addEventListener('click', function(){ sessionShellCloseDrawer(app, true); });
+  const sidebar = app.querySelector('#sidebar');
+  if(sidebar) sidebar.addEventListener('keydown', function(e){
+    if(!SessionShellDrawer.open) return;
+    if(e.key === 'Escape'){ e.preventDefault(); sessionShellCloseDrawer(app, true); return; }
+    if(e.key === 'Tab'){
+      const f = sidebarFocusables(sidebar); if(!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+      else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+    }
+  });
+  // A held (focusable) closed drawer is made inert as soon as focus leaves it.
+  if(sidebar) sidebar.addEventListener('focusout', function(e){
+    if(!SessionShellDrawer.held) return;
+    if(e && e.relatedTarget && typeof sidebar.contains === 'function' && sidebar.contains(e.relatedTarget)) return;
+    sessionShellApplyDrawer(app);
+  });
+  // A tap in the mobile drawer navigates, then dismisses it (as in the LOCAL shell).
+  model.groups.forEach(function(g){ g.items.forEach(function(i){
+    const b = app.querySelector('#' + i.button);
+    if(b) b.addEventListener('click', function(){ if(SessionShellDrawer.open) sessionShellCloseDrawer(app, false); });
+  }); });
+  // A viewport change (e.g. desktop -> mobile) re-applies the drawer state; bound once, for the page.
+  if(!SessionShellDrawer.mq && typeof matchMedia === 'function'){
+    SessionShellDrawer.mq = matchMedia('(max-width:768px)');
+    const onMq = function(){
+      const root = document.getElementById('app');
+      if(!root || !root.querySelector('#sidebar')) return;
+      if(!sidebarIsDrawerMode() && SessionShellDrawer.open) sessionShellCloseDrawer(root, false); else sessionShellApplyDrawer(root);
+    };
+    if(SessionShellDrawer.mq.addEventListener) SessionShellDrawer.mq.addEventListener('change', onMq); else if(SessionShellDrawer.mq.addListener) SessionShellDrawer.mq.addListener(onMq);
+  }
+  sessionShellApplyDrawer(app);
+}
+
+// Leaving the shell (any non-AUTHENTICATED view): no drawer stays open behind the auth views.
+function sessionShellReset(app){
+  SessionShellDrawer.open = false; SessionShellDrawer.ret = null; SessionShellDrawer.held = false;
+  if(app.classList) app.classList.remove('drawer-open');
 }

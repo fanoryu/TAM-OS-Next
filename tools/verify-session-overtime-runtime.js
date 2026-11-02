@@ -34,6 +34,9 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+// U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification.
+const { parseSessionShell, stripSessionShell } = require('./session-shell-chrome.js');
+const activeRoute = (html) => (parseSessionShell(html) || {}).active;
 
 let passed = 0; const failures = [];
 function check(cond, label){
@@ -312,7 +315,15 @@ function firewall(rt, label){
   check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0,
     label + ': zero localStorage / sessionStorage / cookie access' + (rt.access.local.length + rt.access.session.length + rt.access.cookie.length ? ' >> ' + rt.access.local.concat(rt.access.session, rt.access.cookie).join(', ') : ''));
   check(rt.spy.length === 0, label + ': no LOCAL boot, shell, "Acting as", local data tool, Global Search, LOCAL Overtime page or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
-  const html = rt.appHTML();
+  // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION shell
+  // (tools/session-shell-chrome.js), the Employees / My profile or Overtime item active — never Payroll
+  // or Audit here; every content check below runs on the card alone, which carries no section button.
+  // No other state has a shell. Was: an exact tab row inside the card, no sidebar.
+  const shell = parseSessionShell(rt.appHTML());
+  const authed = rt.AuthBoot.snapshot().state === 'AUTHENTICATED';
+  const html = shell ? shell.content : rt.appHTML();
+  check(shell ? authed && (shell.active === 'main' || shell.active === 'overtime') && rt.AuthBoot.allowsWorkspace() === true : !authed && rt.AuthBoot.allowsWorkspace() === false,
+    label + ': the exact SESSION shell (Employees / My profile or Overtime active) only while AUTHENTICATED; never otherwise');
   // AFI-4b2 authorized revision. Was: no "Approv" and no money word anywhere in the DOM (BF-4b2 had
   // not reached the frontend). Now: Payroll / Finance and their vocabulary stay forbidden
   // everywhere; approval and money are allowed ONLY where BF-4b2 discloses them — the valuation
@@ -327,14 +338,9 @@ function firewall(rt, label){
   // AFI-4g authorized revision (D-AFI4g-3 = A): the CEO's Payroll button is followed by a fourth,
   // Audit (not pressed — never open here), removed together with it; no Audit control (swau*) is
   // ever rendered here. Was: the CEO's switch ended at Payroll.
-  const PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><button class="tab" type="button" id="swSectionAudit" aria-pressed="false"( disabled)?>Audit<\/button><\/div><\/nav>/;
-  const MY_PAYROLL_TAB = /<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>My payroll<\/button><\/div><\/nav>/;
-  const pNow = rt.AuthBoot.snapshot().principal;
-  const ceoNow = !!pNow && pNow.principalType === 'ceo';
-  const TAB = ceoNow ? PAYROLL_TAB : MY_PAYROLL_TAB;
-  check((html.match(/id="swSectionPayroll"/g) || []).length === (TAB.test(html) ? 1 : 0) && !/id="swp|id="swau/.test(html),
-    label + ': the Payroll section button (CEO "Payroll", Employee "My payroll") exists unpressed only; no Payroll section control is ever rendered here');
-  const denyHtml = html.replace(TAB, '</div></nav>');
+  check(!/id="swSection/.test(html) && !/id="swp|id="swau/.test(html),
+    label + ': the Payroll item (CEO "Payroll", Employee "My payroll") is shell chrome only, never active here; no Payroll section control is ever rendered here');
+  const denyHtml = html;
   check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Payroll|Payslip|Finance|ledger|journal|payment|\btax\b|Smart Import|Backup|Restore|Start fresh|Commit|Post to/i.test(denyHtml) && !/id="swp/.test(html),
     label + ': the DOM carries no "Acting as", navigation, Payroll / Finance entry or vocabulary (beyond the CEO\'s exact Payroll section button), commit / post control or local data tool');
   const w = rt.ot();
@@ -351,8 +357,8 @@ function firewall(rt, label){
   check((html.indexOf('id="swoApproveBtn"') === -1 || ceoReviewed) && (!/Approve this overtime\?/.test(html) || ceoReviewed),
     label + ': an Approve control or approval panel exists only for the CEO on a Reviewed record');
   check(!/[0-9a-f]{32}|"e_[0-9a-z]+"|emp_srv_/.test(html.replace(RID, '')), label + ': no opaque record or Employee id in the page');
-  check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
-    label + ': legacy State stays empty and the business shell is never granted');
+  check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.spy.indexOf('renderShell') === -1,
+    label + ': legacy State stays empty and the LOCAL business shell is never mounted');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
   const bad = posts(rt).filter((c) => /"(role|companyId|company_id|employee_id|actor|status|version|amount|rate|salary|payroll|contract|reason)"\s*:/.test(c.init.body)
     || (c.url !== W.create && /"employeeId"/.test(c.init.body)) || c.init.headers['X-CSRF-Token'] === undefined);
@@ -461,11 +467,13 @@ function firewall(rt, label){
   {
     const rt = await boot(ME_CEO, { [OT(MONTH)]: [ok(CEO_MONTH)], [EMPS]: [() => labelsGate.promise] });
     var labelsGate = deferred();
-    check(/id="swSectionMain" aria-pressed="true"[^>]*>Employees</.test(rt.appHTML()) && /id="swSectionOvertime" aria-pressed="false"[^>]*>Overtime</.test(rt.appHTML())
+    // U1 authorized revision (GR-4): the sections are the CEO SESSION shell's items; the active one carries
+    // aria-current. Was: aria-pressed tab buttons.
+    check((parseSessionShell(rt.appHTML()) || {}).role === 'ceo' && activeRoute(rt.appHTML()) === 'main'
       && rt.ot().open === false && countOf(rt, OT(MONTH)) === 0, 'D. CEO: sections Employees | Overtime; Employees stays the default; nothing of Overtime is read before it is opened');
     rt.app.fire('swSectionOvertime', 'click'); await flush();
     check(rt.ot().open && rt.ot().month === MONTH && countOf(rt, OT(MONTH)) === 1 && countOf(rt, EMPS) === 1, 'D. opening Overtime reads the injected-clock month and the canonical Employee list (archived included)');
-    check(/<h1 class="auth-title" id="authTitle" tabindex="-1">Overtime<\/h1>/.test(rt.appHTML()) && /aria-pressed="true"[^>]*>Overtime</.test(rt.appHTML()) && lastFocus(rt) === 'authTitle',
+    check(/<h1 class="auth-title" id="authTitle" tabindex="-1">Overtime<\/h1>/.test(rt.appHTML()) && activeRoute(rt.appHTML()) === 'overtime' && lastFocus(rt) === 'authTitle',
       'D. the section heading is "Overtime", its button pressed, focus on the heading');
     check((rt.appHTML().match(/<td>Loading…<\/td>/g) || []).length === 4, 'D. while the Employee list loads every owner reads "Loading…"');
     labelsGate.resolve(ok(PEOPLE)); await flush();
@@ -497,7 +505,8 @@ function firewall(rt, label){
   {
     const rt = await open(ME_EMP);
     const html = rt.appHTML();
-    check(/aria-pressed="false"[^>]*>My profile</.test(html) && /aria-pressed="true"[^>]*>My overtime</.test(html) && /<h1[^>]*>My overtime<\/h1>/.test(html),
+    // U1 authorized revision (GR-4): the Employee SESSION shell, My overtime active. Was: aria-pressed tabs.
+    check((parseSessionShell(html) || {}).role === 'employee' && activeRoute(html) === 'overtime' && /<h1[^>]*>My overtime<\/h1>/.test(html),
       'E. Employee: sections My profile | My overtime; "My overtime" heading');
     check((html.match(/<td>You<\/td>/g) || []).length === 4 && countOf(rt, EMPS) === 0 && countOf(rt, '/api/employees') === 0, 'E. own rows labelled "You"; the Employee list is never read');
     check(rt.sessionOvertimeOwnerLabel(rt.AuthBoot.snapshot().principal, 'ready', null, 'emp_srv_2') === 'Unknown employee', 'E. a record of another Employee would never be labelled "You"');
@@ -910,7 +919,9 @@ function firewall(rt, label){
     rt.app.fire('swoForm', 'submit'); await flush();
     check(posts(rt).length === 1 && lastFocus(rt) === 'swoMutationMessage' && /role="status" tabindex="-1">Overtime record created/.test(rt.appHTML()),
       'Q. keyboard submission runs the same guarded handler; the confirmation is a focused status message');
-    check(/<nav aria-label="Workspace sections">/.test(rt.appHTML()) && /aria-pressed="true"/.test(rt.appHTML()), 'Q. the section switch is a labelled nav of pressed / unpressed buttons');
+    // U1 authorized revision (GR-4): the section switch is the labelled primary nav with one aria-current item. Was: "Workspace sections" pressed buttons.
+    check(/<nav class="nav" aria-label="Primary navigation">/.test(rt.appHTML()) && (rt.appHTML().match(/aria-current="page"/g) || []).length === 1 && !!activeRoute(rt.appHTML()),
+      'Q. the section switch is a labelled nav with exactly one current item');
   }
 
   /* ---------- R. pending guards, storage and containment ---------- */
@@ -1247,7 +1258,7 @@ function firewall(rt, label){
     // A colleague's record: the server answers 404 to the record read; nothing about money is asked or shown.
     const rt = await open(ME_EMP, { [OT(MONTH)]: [ok(EMP_MONTH5)], [REC(IDX)]: [err(404, 'not_found')] });
     rt.SessionOvertime.openDetail(IDX); await flush();
-    check(valuationCalls(rt) === 0 && /This overtime record was not found\./.test(rt.appHTML()) && !/Rp|salary|amount/i.test(rt.appHTML()),
+    check(valuationCalls(rt) === 0 && /This overtime record was not found\./.test(rt.appHTML()) && !/Rp|salary|amount/i.test(stripSessionShell(rt.appHTML())),   // U1: on the card (the shell's base64 logo is not text)
       'Y. a colleague\'s record (server 404): no valuation request, no money disclosed');
     const p = rt.AuthBoot.snapshot().principal;
     check(rt.sessionOvertimeValuationWanted(p, Object.assign({}, S5, { employeeId: 'emp_srv_2' })) === false, 'Y. the page would never ask for a colleague\'s valuation either');

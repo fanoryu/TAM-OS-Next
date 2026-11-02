@@ -593,6 +593,17 @@ Payroll, Supplemental Payroll, Finance and account self-service, a confirmation 
 of the 54 production routes lacks a hostile suite. Post-merge CI verified: 470 PHP tests without the database, 901 with it
 (431 database tests). This is SDR-0002 §17 E11 evidence only; the E12 external security review is a separate, open
 requirement, and Gate D and Gate R stay on **HOLD** (no deployment authorized).
+
+**U1 — SESSION graduated shell (Option B; 2026-11-01; local candidate on `feature/session-graduated-shell`, NOT
+committed, NOT pushed, NOT deployed).** Owner approved U-D1…U-D5 and GR-4 for local development. Signed-in CEO /
+Employee see the v2.11.0 sidebar shell around the unchanged SESSION sections (`SESSION_ROUTES`, `sessionNavModel` in
+`js/ui/session-workspace-view.js`); `allowsWorkspace()` is AUTHENTICATED ∧ navigation model (D-GS-1 becomes effective
+only when a U1 PR merges). Package 102 files, digest `85022e40…` (r4: fail-safe focus rescue); verifier 3008; 44 runtime harnesses green
+(new: `verify-session-shell-runtime.js`). A disposable PHP/MariaDB E2E (U1-D3, 2026-11-01) reported 14/14 PASS: CEO and
+Employee sign-in, activation and the server's authorization boundary (Employee 403 on Employees, Audit and Finance
+postings), with the disposable stack deleted afterwards. It ran on the earlier U1 candidate (r1, package `75d579bc…`), not
+on the r2–r4 digests, and it did not re-run the Payroll financial writes (generate, commit, post, record payment). No new
+real-backend E2E has been run for r4.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

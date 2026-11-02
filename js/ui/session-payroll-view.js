@@ -5,7 +5,7 @@
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js), its only caller, when the section
    is shown. It is NOT the LOCAL Payroll Workspace (js/people/payroll-workspace.js) and never
    reaches it, the business shell, its navigation, Global Search or "Acting as":
-   AuthBoot.allowsWorkspace() stays false.
+   U1: it sits inside the SESSION shell (js/ui/session-workspace-view.js) only.
 
      the month bar (Previous, the month, Next); "Prepare payroll for <month>" (generate, after an
      inline confirmation); the employees the last preparation left out, named from the CEO

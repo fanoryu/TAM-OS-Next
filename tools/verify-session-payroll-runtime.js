@@ -53,6 +53,11 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+// U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification. The current
+// section is the shell's aria-current item (was: an aria-pressed tab button).
+const { parseSessionShell, stripSessionShell } = require('./session-shell-chrome.js');
+const activeRoute = (html) => (parseSessionShell(html) || {}).active;
+const shellRole = (html) => (parseSessionShell(html) || {}).role;
 
 let passed = 0; const failures = [];
 function check(cond, label){
@@ -437,7 +442,14 @@ function firewall(rt, label, overtimeOpened){
   check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0,
     label + ': zero localStorage / sessionStorage / cookie access');
   check(rt.spy.length === 0, label + ': no LOCAL boot, shell, "Acting as", Global Search, LOCAL payroll engine or page, or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
-  const html = rt.appHTML();
+  // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION shell
+  // (whose "Finance" group label and Payroll item are chrome); every content check below runs on the
+  // card alone. No other state has a shell. Was: the whole page, no sidebar.
+  const shell = parseSessionShell(rt.appHTML());
+  const authed = rt.AuthBoot.snapshot().state === 'AUTHENTICATED';
+  const html = shell ? shell.content : rt.appHTML();
+  check(shell ? authed && rt.AuthBoot.allowsWorkspace() === true : !authed && rt.AuthBoot.allowsWorkspace() === false,
+    label + ': the exact SESSION shell only while AUTHENTICATED; never otherwise');
   check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Smart Import|Backup|Restore|Start fresh/i.test(html),
     label + ': no "Acting as", navigation or local data tool in the DOM');
   check(!/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|statutory|gross|net pay|payslip)\b/i.test(html),
@@ -476,7 +488,7 @@ function firewall(rt, label, overtimeOpened){
   check(!finShown || (!!who && who.principalType === 'ceo' && committedShown), label + ': Finance appears only on a Committed plan or Supplemental document shown to the CEO');
   // AFI-4d authorized revision: a Supplemental document's captured overtime record ids too. Was: IDO only.
   check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO + '|' + IDO2 + '|' + IDO3, 'g'), '')), label + ': no opaque plan or document id in the page (only an overtime record id, by design)');
-  check(rt.State.employees.length === 0 && rt.State.payrollPlans.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
+  check(rt.State.employees.length === 0 && rt.State.payrollPlans.length === 0 && rt.State.storageReady === false && rt.spy.indexOf("renderShell") === -1,
     label + ': legacy State (employees, payroll plans) stays empty and the business shell is never granted');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
   const bad = posts(rt).filter((c) => {
@@ -601,12 +613,12 @@ function firewall(rt, label, overtimeOpened){
   {
     const rt = await boot(ME_CEO, { [LIST(MONTH)]: [ok(MONTH_ALL)] });
     const before = rt.appHTML();
-    check(/<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false">Payroll<\/button>/.test(before) && /id="swSectionMain" aria-pressed="true"[^>]*>Employees</.test(before),
+    check(shellRole(before) === 'ceo' && activeRoute(before) === 'main',
       'C. the CEO workspace offers a third section, Payroll; Employees stays the default');
     check(payrollCalls(rt).length === 0, 'C. nothing of Payroll is read before the section is opened');
     rt.app.fire('swSectionPayroll', 'click'); await flush();
     const html = rt.appHTML();
-    check(rt.pr().open === true && rt.pr().month === MONTH && countOf(rt, LIST(MONTH)) === 1 && /id="swSectionPayroll" aria-pressed="true"/.test(html) && /<h1[^>]*>Payroll<\/h1>/.test(html),
+    check(rt.pr().open === true && rt.pr().month === MONTH && countOf(rt, LIST(MONTH)) === 1 && activeRoute(html) === 'payroll' && /<h1[^>]*>Payroll<\/h1>/.test(html),
       'C. opening the section reads the month list once (the local calendar month) and shows the Payroll heading');
     const get = rt.net.calls.find((c) => c.url === LIST(MONTH));
     check(get.init.method === 'GET' && get.init.body === undefined && get.init.credentials === 'same-origin', 'C. the list read is a credentialed same-origin GET with no body');
@@ -614,7 +626,9 @@ function firewall(rt, label, overtimeOpened){
     check(rows === 5 && html.indexOf('EMP-001') < html.indexOf('EMP-002') && html.indexOf('EMP-002') < html.indexOf('EMP-004') && html.indexOf('EMP-005') < html.indexOf('EMP-006'),
       'C. five rows, in the server order (no client sorting)');
     check(html.indexOf('<td>8000000.50</td><td>12345.00</td><td>999.00</td>') !== -1, 'C. money is shown exactly as sent — the deliberately inconsistent total 999.00 verbatim (no client arithmetic, rounding or reformatting)');
-    check(/Base salary \(Rp\)/.test(html) && /Total \(Rp\)/.test(html) && !/Rp ?[0-9]|[0-9]\.[0-9]{3},|8\.000\.000/.test(html), 'C. amounts are labelled (Rp) and never reformatted (no locale grouping)');
+    // U1 authorized revision (GR-4): checked on the card; the shell chrome (brand <img>, base64 logo,
+    // "Finance" group label) is pinned exactly by tools/session-shell-chrome.js. Was: the whole page.
+    check(/Base salary \(Rp\)/.test(html) && /Total \(Rp\)/.test(html) && !/Rp ?[0-9]|[0-9]\.[0-9]{3},|8\.000\.000/.test(stripSessionShell(html)), 'C. amounts are labelled (Rp) and never reformatted (no locale grouping)');
     // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Committed reads "Committed — final, not paid". Was: "Committed".
     check(/<td>Ready — approved, not paid<\/td>/.test(html) && /<td>Committed — final, not paid<\/td>/.test(html) && /<td>Cancelled<\/td>/.test(html) && /<td>Reviewed<\/td>/.test(html) && /<td>Draft<\/td>/.test(html)
       && !/<td>Approved<\/td>/.test(html), 'C. the server status words are shown (D-AFI4c1-3 = A): Ready reads "Ready — approved, not paid"; never the LOCAL "Approved"');
@@ -645,7 +659,7 @@ function firewall(rt, label, overtimeOpened){
   {
     const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [] })] });
     const html = rt.appHTML();
-    check(/id="swSectionMain" aria-pressed="true"[^>]*>My profile</.test(html) && /id="swSectionOvertime"[^>]*>My overtime</.test(html) && /id="swSectionPayroll"[^>]*>My payroll</.test(html)
+    check(shellRole(html) === 'employee' && activeRoute(html) === 'main'
       && !/>Payroll</.test(html), 'D. an Employee sees exactly My profile | My overtime | My payroll — never the CEO Payroll section');
     check(payrollCalls(rt).length === 0, 'D. an Employee makes zero /api/payroll* requests until My payroll is opened');
     rt.SessionPayroll.openPanel('generate'); rt.SessionPayroll.openPanel('commit'); await rt.SessionPayroll.confirmPanel(); await rt.SessionPayroll.retryCommit(); rt.SessionPayroll.reloadPlan(); await flush();
@@ -886,7 +900,7 @@ function firewall(rt, label, overtimeOpened){
     rt.app.fire('swSectionPayroll', 'click'); await flush();
     check(rt.pr().open === true && rt.SessionOvertimeStore.snapshot().open === false && rt.pr().month === MONTH, 'J. switching back to Payroll keeps its month in memory');
     rt.app.fire('swSectionMain', 'click'); await flush();
-    check(rt.pr().open === false && /id="swSectionMain" aria-pressed="true"/.test(rt.appHTML()), 'J. Employees closes Payroll');
+    check(rt.pr().open === false && activeRoute(rt.appHTML()) === 'main', 'J. Employees closes Payroll');
     firewall(rt, 'J. sections', true);
   }
 
@@ -1106,7 +1120,7 @@ function firewall(rt, label, overtimeOpened){
     const rt = await boot(ME_EMP, { [LIST(MONTH)]: [ok({ payrollPlans: [MINE] })], [DET(ID7)]: [ok(det(MINE, [OT1]))], [LIST(MAY)]: [ok({ payrollPlans: [] })] });
     rt.app.fire('swSectionPayroll', 'click'); await flush();
     let html = rt.appHTML();
-    check(rt.pr().open === true && /<h1[^>]*>My payroll<\/h1>/.test(html) && /id="swSectionPayroll" aria-pressed="true"[^>]*>My payroll</.test(html) && countOf(rt, LIST(MONTH)) === 1,
+    check(rt.pr().open === true && /<h1[^>]*>My payroll<\/h1>/.test(html) && shellRole(html) === 'employee' && activeRoute(html) === 'payroll' && countOf(rt, LIST(MONTH)) === 1,
       'O. My payroll opens on the current month with one read of the month');
     check(html.indexOf('<td>April 2031</td><td>Committed — final, not paid</td><td>1000000.00</td><td>54688.00</td><td>777.00</td>') !== -1,
       'O. the own Committed plan, money verbatim (the inconsistent total 777.00 as sent), Committed — final, not paid');
@@ -1996,7 +2010,9 @@ function firewall(rt, label, overtimeOpened){
     const suppHTML = rt.appHTML();
     rt.SessionPayroll.openPanel('finPostPlan'); rt.SessionPayroll.openPanel('finPostSupp'); await rt.SessionPayroll.confirmPanel();
     await rt.SessionPayroll.retryPosting(); await rt.SessionPayroll.retryFinance(); await flush();
-    check(!/Finance|Posted|swpFin|swpSuppFin/.test(planHTML + suppHTML + rt.appHTML()) && rt.net.calls.every((c) => !/^\/api\/finance/.test(c.url)) && rt.pr().fin === null && rt.pr().postIntent === null && rt.crypto.calls === 0,
+    // U1 authorized revision (GR-4): checked on the card; the shell chrome (brand <img>, base64 logo,
+    // "Finance" group label) is pinned exactly by tools/session-shell-chrome.js. Was: the whole page.
+    check(!/Finance|Posted|swpFin|swpSuppFin/.test(stripSessionShell(planHTML) + stripSessionShell(suppHTML) + stripSessionShell(rt.appHTML())) && rt.net.calls.every((c) => !/^\/api\/finance/.test(c.url)) && rt.pr().fin === null && rt.pr().postIntent === null && rt.crypto.calls === 0,
       'F8. an Employee\'s own Committed payroll and Supplemental cards show no Finance; no Finance read or write is ever made, even called directly');
     firewall(rt, 'F8. Employee');
   }
@@ -2555,7 +2571,9 @@ function firewall(rt, label, overtimeOpened){
     const rt = await openFin({ [DET(IDPC)]: [ok(det(HX, [OT1]))], [FIN(MONTH)]: [finOk([FPCX])] });
     rt.app.fire('swpPayRecordBtn', 'click'); await flush();
     const html = rt.appHTML();
-    check(!/<img|<b>/.test(html) && html.indexOf('&lt;img src=x onerror=alert(1)&gt; (EMP-&lt;b&gt;) — April 2031.') !== -1, 'X9. the source\'s server strings are escaped in the Record payment form');
+    // U1 authorized revision (GR-4): checked on the card; the shell chrome (brand <img>, base64 logo,
+    // "Finance" group label) is pinned exactly by tools/session-shell-chrome.js. Was: the whole page.
+    check(!/<img|<b>/.test(stripSessionShell(html)) && html.indexOf('&lt;img src=x onerror=alert(1)&gt; (EMP-&lt;b&gt;) — April 2031.') !== -1, 'X9. the source\'s server strings are escaped in the Record payment form');
     fill(rt, '2031-04-10"><script>x</script>', 'cash" onclick="x');
     rt.render(); await flush();
     const h2 = rt.appHTML();
@@ -2585,7 +2603,9 @@ function firewall(rt, label, overtimeOpened){
     const ht = hx.SessionPayrollStore.begin('exec', MONTH);
     hx.SessionPayrollStore.applyExec(ht, [Object.freeze(Object.assign(execution(XID1, FPCX, '2031-04-10', 'cash'), { executedOn: '<img src=x onerror=alert(1)>' }))]);
     hx.render(); await flush();
-    check(/Date paid<\/th><td>&lt;img src=x onerror=alert\(1\)&gt;</.test(hx.appHTML()) && !/<img/.test(hx.appHTML()),
+    // U1 authorized revision (GR-4): checked on the card; the shell chrome (brand <img>, base64 logo,
+    // "Finance" group label) is pinned exactly by tools/session-shell-chrome.js. Was: the whole page.
+    check(/Date paid<\/th><td>&lt;img src=x onerror=alert\(1\)&gt;</.test(hx.appHTML()) && !/<img/.test(stripSessionShell(hx.appHTML())),
       'X9. defence in depth: even a value the strict decoder would refuse is escaped in the recorded rows');
     const rec = await openPay({ [EXE(MONTH)]: [exeOk([execution(XID1, FPCX, '2031-04-10', 'qris')])] });
     const card = (/<section class="card" id="swpFinance"[\s\S]*?<\/section>/.exec(rec.appHTML()) || [''])[0];
