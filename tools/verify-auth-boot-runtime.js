@@ -22,6 +22,8 @@
 
 const fs = require('fs');
 const path = require('path');
+// U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification.
+const { parseSessionShell } = require('./session-shell-chrome.js');
 const vm = require('vm');
 
 let passed = 0; const failures = [];
@@ -153,8 +155,14 @@ function firewall(rt, label){
     label + ': no loadState, no first-run choice, no local business key read');
   check(rt.State.txns.length === 0 && rt.State.employees.length === 0 && rt.State.storageReady === false,
     label + ': no business state in memory');
-  check(!/identityPrincipalSelect|Acting as|class="sidebar"|id="sidebar"|data-nav=/.test(html) && rt.selectorDeclared === 'undefinedundefinedundefined',
-    label + ': no shell and no "Acting as" mounted (the selector functions do not exist)');
+  // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION
+  // shell; no other state has a sidebar, and the card itself still has no LOCAL navigation (data-nav),
+  // no LOCAL sidebar and no "Acting as". Was: no sidebar at all.
+  const shell = parseSessionShell(html);
+  const body = shell ? shell.content : html;
+  check(!/identityPrincipalSelect|Acting as|class="sidebar"|id="sidebar"|data-nav=/.test(body) && rt.selectorDeclared === 'undefinedundefinedundefined'
+    && (shell ? rt.AuthBoot.snapshot().state === 'AUTHENTICATED' && rt.AuthBoot.allowsWorkspace() === true : rt.AuthBoot.allowsWorkspace() === false),
+    label + ': no LOCAL shell and no "Acting as" mounted (the selector functions do not exist); only the exact SESSION shell, and only while AUTHENTICATED');
 }
 
 (async function main(){
@@ -220,16 +228,21 @@ function firewall(rt, label){
     // the auth-view path (not the business shell — the firewall below still holds). Was: the
     // "not available in this sign-in mode" holding view.
     check(!/authSignInForm/.test(rt.appHTML()) && /<h1 class="auth-title" id="authTitle" tabindex="-1">Employees<\/h1>/.test(rt.appHTML())
-      && rt.AuthBoot.allowsWorkspace() === false, 'D. AUTHENTICATED renders the SESSION Employee workspace, never the business shell');
+      // U1 authorized revision (GR-4): inside the exact CEO SESSION shell, Employees active. Was: allowsWorkspace() === false.
+      && rt.AuthBoot.allowsWorkspace() === true && ((parseSessionShell(rt.appHTML()) || {}).role === 'ceo') && parseSessionShell(rt.appHTML()).active === 'main',
+      'D. AUTHENTICATED renders the SESSION Employee workspace inside the CEO SESSION shell, never the LOCAL business shell');
     firewall(rt, 'D. AUTHENTICATED CEO');
-    check(rt.AuthBoot.allowsWorkspace() === false, 'D. AuthBoot grants no workspace (D-A)');
+    // U1 authorized revision (GR-4, D-GS-1 supersedes D-A): the SESSION shell is granted here. Was: false.
+    check(rt.AuthBoot.allowsWorkspace() === true && rt.spy.indexOf('renderShell') === -1, 'D. AuthBoot grants the SESSION shell (not the LOCAL renderShell) in AUTHENTICATED');
     check((rt.getCurrentUser() || {}).id === 'u_ceo_1' && rt.CsrfHolder.get() === CSRF_A, 'D. identity from /me; CSRF in memory');
     rt.setIdentityProviderForTesting(HOSTILE);
     check((rt.getCurrentUser() || {}).id === 'u_ceo_1' && rt.localDevReady() === false,
       'K. a provider installed through the test seam cannot change the SESSION identity (AFI-5b: the seam is inert)');
     rt.setIdentityProviderForTesting(null);
     rt.render();
-    check(!/sidebar|identityPrincipalSelect/.test(rt.appHTML()), 'K. render() in SESSION mode never mounts the shell');
+    // U1 authorized revision (GR-4): render() keeps the exact SESSION shell; never the LOCAL one. Was: no sidebar at all.
+    check(!!parseSessionShell(rt.appHTML()) && !/sidebar|identityPrincipalSelect|data-nav=/.test(parseSessionShell(rt.appHTML()).content) && rt.spy.indexOf('renderShell') === -1,
+      'K. render() in SESSION mode never mounts the LOCAL shell (only the SESSION shell)');
     const createdBefore = rt.net.created;
     // An attempt to build the overlay (even one that throws on the fake DOM) counts as opening it.
     try { rt.openGlobalSearch(); } catch(_e){ rt.net.created++; }

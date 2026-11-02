@@ -491,10 +491,11 @@ function closeSidebarDrawer(){
    Mounts the shell on first use, then only syncs it and replaces the view. */
 function render(){
   closeFloatingMenu();    // v2.6.3b — never leave a portaled Actions menu orphaned across a re-render
-  // AFI-2 — outside LOCAL mode only the auth views render (js/ui/auth-view.js) until
-  // AuthBoot grants a workspace, which it never does in AFI-2. The shell and the views
-  // are therefore never mounted in SESSION mode. LOCAL (development only) is unchanged.
-  if(AUTH_MODE !== AUTH_MODES.LOCAL && !(typeof AuthBoot !== 'undefined' && AuthBoot.allowsWorkspace())){
+  // AFI-2 — outside LOCAL mode only the auth views render (js/ui/auth-view.js). U1: an
+  // AUTHENTICATED principal gets the SESSION shell from there (js/ui/session-shell.js); this
+  // LOCAL shell and its views are never mounted in SESSION mode, whatever allowsWorkspace()
+  // says. LOCAL (development only) is unchanged.
+  if(AUTH_MODE !== AUTH_MODES.LOCAL){
     if(typeof renderAuthView === 'function') renderAuthView();
     return;
   }

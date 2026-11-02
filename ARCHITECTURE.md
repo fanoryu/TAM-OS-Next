@@ -1568,6 +1568,22 @@ guards and revises two AFI-1/AFI-2 allowlists (one more `ApiClient` caller with 
 credential views' fixed password vocabulary). `tools/serve-auth-stub.js` answers the three endpoints from
 fabricated one-time tokens and scenarios. No CSS, backend, schema, storage-key or ACTIONS change.
 
+### SESSION graduated shell — U1 (Option B; local development candidate, not committed)
+
+U1 supersedes the "not the business shell" clause of the AFI-4a1 text below (D-GS-1 supersedes D-A). While AuthBoot is
+AUTHENTICATED, `renderSessionWorkspace()` (js/ui/session-workspace-view.js) renders the existing workspace card inside
+the SESSION shell, `sessionShellHTML()` in the same file: the v2.11.0 sidebar chrome (existing CSS classes only), grouped
+by the NAV_GROUPS labels People / Finance / System, its items the four SESSION section buttons (same ids:
+`swSectionMain`, `swSectionOvertime`, `swSectionPayroll`, `swSectionAudit`) from the frozen `SESSION_ROUTES`, filtered
+by the pure `sessionNavModel(principal)` (CEO or Employee only; null → the card alone); `SESSION_GROUP_LABELS` relabels the
+Employee's Finance group "My work" (display only). The mobile drawer state is
+`SessionShellDrawer` (memory only); closed at drawer width, `#sidebar` is `inert` and `aria-hidden`; focus inside it at that moment (a desktop → mobile resize) moves to the menu button, else to `#main`, each attempt checked against `document.activeElement`
+(`sessionShellRescueFocus`); if focus cannot leave, the sidebar stays focusable (`SessionShellDrawer.held`) and becomes inert on
+its `focusout`. `AuthBoot.allowsWorkspace()` = AUTHENTICATED ∧ a navigation model; `render()` sends
+every SESSION paint to `renderAuthView()` and Global Search returns outside LOCAL, so `renderShell()`, `renderView()`,
+data-nav routing and every LOCAL view stay unreachable in SESSION. Visibility only: the server Policy and scope still
+decide every request. No module, CSS, API or storage change.
+
 ### Read-only SESSION Employee workspace — AFI-4a1 (frontend; SESSION mode only, LOCAL still shipped)
 
 AFI-4a1 is the first slice of the authenticated Employee workspace (AFI-4a). In SESSION mode, AUTHENTICATED no

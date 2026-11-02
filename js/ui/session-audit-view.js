@@ -5,7 +5,7 @@
    sessionWorkspaceHTML() (js/ui/session-workspace-view.js) — its only caller — when the section
    is shown, for the CEO only (D-AFI4g-3 = A). It is NOT the LOCAL activity log
    (js/ui/activity-log.js) and never reaches it, the business shell, its navigation, Global Search
-   or "Acting as": AuthBoot.allowsWorkspace() stays false. An Employee has no Audit section.
+   or "Acting as" (U1: it sits inside the SESSION shell only). An Employee has no Audit section.
 
      Month          the month bar (Previous, the month, Next) and the month's audit events, oldest
                     first: time (WIB), action, record, actor and the field names — "View" opens one

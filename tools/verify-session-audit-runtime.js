@@ -29,6 +29,8 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+// U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification.
+const { parseSessionShell } = require('./session-shell-chrome.js');
 
 let passed = 0; const failures = [];
 function check(cond, label){
@@ -236,7 +238,10 @@ const auditCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/audit-events/.tes
 const countOf = (rt, url) => rt.net.calls.filter((c) => c.url === url).length;
 const lastFocus = (rt) => rt.dom.focused[rt.dom.focused.length - 1];
 const queryKeys = (url) => (url.split('?')[1] || '').split('&').map((p) => p.split('=')[0]).join();
-const pressed = (html) => (html.match(/id="(swSection[A-Za-z]+)" aria-pressed="true"/g) || []).map((m) => m.slice(4, -21));
+// U1 authorized revision (GR-4): the current section is the SESSION shell's aria-current item. Was: the
+// aria-pressed tab buttons.
+const SECTION_BUTTONS = { main: 'swSectionMain', overtime: 'swSectionOvertime', payroll: 'swSectionPayroll', audit: 'swSectionAudit' };
+const pressed = (html) => { const sh = parseSessionShell(html); return sh ? [SECTION_BUTTONS[sh.active]] : []; };
 
 async function boot(me, routes){
   const base = me.role === 'ceo' ? { [EMPS]: [ok({ employees: [] })] } : { '/api/employee?id=emp_srv_1': [ok({ employee: SELF })] };
@@ -261,10 +266,16 @@ function firewall(rt, label){
   check(rt.selectorBeforeSpies === SELECTOR_ABSENT && rt.selectorNow() === SELECTOR_ABSENT,
     label + ': AFI-5b — the selector functions do not exist (lexically or on window/globalThis), before the spies and now');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');
-  const html = rt.appHTML();
-  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Smart Import|Backup|Restore|Start fresh|<script|\son[a-z]+=|style="/i.test(html),
-    label + ': the DOM carries no "Acting as", navigation, local data tool, script, inline handler or inline style');
-  check(rt.AuthBoot.allowsWorkspace() === false && rt.State.employees.length === 0, label + ': the business shell is never granted and legacy State stays empty');
+  // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION shell;
+  // the content checks run on the card alone, and no other state has a shell. Was: no sidebar at all and
+  // allowsWorkspace() false.
+  const shell = parseSessionShell(rt.appHTML());
+  const authed = rt.AuthBoot.snapshot().state === 'AUTHENTICATED';
+  const html = shell ? shell.content : rt.appHTML();
+  check(!/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Smart Import|Backup|Restore|Start fresh|<script|\son[a-z]+=|style="/i.test(html) && !/style="|\son[a-z]+=|<script/i.test(rt.appHTML()),
+    label + ': the DOM carries no "Acting as", LOCAL navigation, local data tool, script, inline handler or inline style');
+  check((shell ? authed && rt.AuthBoot.allowsWorkspace() === true : !authed && rt.AuthBoot.allowsWorkspace() === false) && rt.spy.indexOf('renderShell') === -1 && rt.State.employees.length === 0,
+    label + ': only the exact SESSION shell, only while AUTHENTICATED; the LOCAL business shell is never mounted and legacy State stays empty');
   check(rt.net.calls.every((c) => !/^\/api\/audit-events/.test(c.url) || (c.init.method === 'GET' && c.init.body === undefined && !c.init.headers['X-CSRF-Token']
     && c.init.credentials === 'same-origin' && c.init.cache === 'no-store' && ['month', 'entity,id'].indexOf(queryKeys(c.url)) !== -1)),
     label + ': every audit request is a bodiless same-origin GET without a CSRF token whose query is exactly ?month= or ?entity=&id= (never a company, role or scope)');
@@ -277,7 +288,8 @@ function firewall(rt, label){
   {
     const rt = await boot(ME_CEO);
     const html = rt.appHTML();
-    check(/<button class="tab" type="button" id="swSectionPayroll" aria-pressed="false">Payroll<\/button><button class="tab" type="button" id="swSectionAudit" aria-pressed="false">Audit<\/button><\/div><\/nav>/.test(html)
+    // U1 authorized revision (GR-4): the CEO shell (its last item Audit, after Payroll, by the oracle). Was: the tab row.
+    check((parseSessionShell(html) || {}).role === 'ceo' && /id="swSectionPayroll"[\s\S]*id="swSectionAudit"/.test(html)
       && pressed(html).join() === 'swSectionMain' && auditCalls(rt).length === 0,
       'A. the CEO has a fourth section button, Audit, after Payroll — unpressed by default; nothing is read before it is opened');
     firewall(rt, 'A. CEO');
@@ -285,7 +297,8 @@ function firewall(rt, label){
   {
     const rt = await boot(ME_EMP);
     const html = rt.appHTML();
-    check(!/swSectionAudit|>Audit</.test(html) && /id="swSectionPayroll"[^>]*>My payroll<\/button><\/div><\/nav>/.test(html), 'A. an Employee has no Audit section button (My profile | My overtime | My payroll)');
+    // U1 authorized revision (GR-4): the Employee shell has no Audit item. Was: the tab row ended at My payroll.
+    check(!/swSectionAudit|>Audit</.test(html) && (parseSessionShell(html) || {}).role === 'employee', 'A. an Employee has no Audit section button (My profile | My overtime | My payroll)');
     rt.SessionAudit.show(true); await flush();
     rt.SessionAudit.setMonth('2031-03'); rt.SessionAudit.shiftMonth(-1); rt.SessionAudit.openEvent(0, 'month'); rt.SessionAudit.openRecord(); rt.SessionAudit.retry(); await flush();
     rt.SessionAudit.ensureLoaded(rt.AuthBoot.snapshot().principal); await flush();

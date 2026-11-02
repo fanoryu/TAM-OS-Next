@@ -30,6 +30,8 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+// U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification.
+const { parseSessionShell, stripSessionShell } = require('./session-shell-chrome.js');
 
 let passed = 0; const failures = [];
 function check(cond, label){
@@ -240,7 +242,14 @@ function firewall(rt, label){
   check(rt.access.local.length === 0 && rt.access.session.length === 0,
     label + ': zero localStorage / sessionStorage access' + (rt.access.local.length + rt.access.session.length ? ' >> ' + rt.access.local.concat(rt.access.session).join(', ') : ''));
   check(rt.spy.length === 0, label + ': no LOCAL boot, shell, "Acting as", local data tool, Global Search, legacy Employee handler or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
-  const html = rt.appHTML();
+  // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION shell
+  // (tools/session-shell-chrome.js) with Employees / My profile the active item; every content check
+  // below runs on the card alone. No other state has a shell. Was: the exact tab row below, no sidebar.
+  const shell = parseSessionShell(rt.appHTML());
+  const authed = rt.AuthBoot.snapshot().state === 'AUTHENTICATED';
+  const html = shell ? shell.content : rt.appHTML();
+  check(shell ? authed && shell.active === 'main' && rt.AuthBoot.allowsWorkspace() === true : !authed && rt.AuthBoot.allowsWorkspace() === false,
+    label + ': the exact SESSION shell (Employees / My profile active) only while AUTHENTICATED; never otherwise');
   // AFI-4b1 authorized revision: the authenticated workspace carries the SESSION section switch —
   // exactly this nav of two buttons (Employees | Overtime, My profile | My overtime) — and the
   // Overtime section is never open in this harness (its button is not pressed, no swo* control).
@@ -254,13 +263,11 @@ function firewall(rt, label){
   // AFI-4g authorized revision (D-AFI4g-3 = A): the CEO's switch has a fourth button, Audit (not
   // pressed — the Audit section is never open in this harness); an Employee's switch has none.
   // Was: the CEO's switch ended at Payroll.
-  const SECTIONS = /<nav aria-label="Workspace sections"><div class="tabs">(<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>Employees<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>Overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>Payroll<\/button><button class="tab" type="button" id="swSectionAudit" aria-pressed="false"( disabled)?>Audit<\/button>|<button class="tab active" type="button" id="swSectionMain" aria-pressed="true"( disabled)?>My profile<\/button><button class="tab" type="button" id="swSectionOvertime" aria-pressed="false"( disabled)?>My overtime<\/button><button class="tab" type="button" id="swSectionPayroll" aria-pressed="false"( disabled)?>My payroll<\/button>)<\/div><\/nav>/g;
-  const sections = html.match(SECTIONS) || [];
-  check(sections.length <= 1 && !/id="swo|id="swp|id="swau|id="swSection/.test(html.replace(SECTIONS, ''))
-    && !/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Overtime|Payroll|Finance|Smart Import|Backup|Restore|Start fresh/i.test(html.replace(SECTIONS, '')),
-    label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool (beyond the exact SESSION section switch, Overtime not open)');
-  check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.AuthBoot.allowsWorkspace() === false,
-    label + ': legacy State stays empty and the business shell is never granted');
+  check(!/id="swo|id="swp|id="swau|id="swSection/.test(html)
+    && !/identity-selector|identityPrincipalSelect|Acting as|class="sidebar"|data-nav=|Overtime|Payroll|Finance|Smart Import|Backup|Restore|Start fresh/i.test(html),
+    label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool (the card; the exact SESSION shell is checked above)');
+  check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.spy.indexOf('renderShell') === -1,
+    label + ': legacy State stays empty and the LOCAL business shell is never mounted');
   check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');
   // AFI-4a3 authorized revision: account administration exists only for the CEO, only on the
   // record detail, and only as the exact BF-4a2 requests. Was: no account route or control at all.
@@ -795,7 +802,8 @@ async function archiveWith(archiveRoutes, extra){
     check(/id="swf-employeeCode" name="employeeCode" required aria-required="true" aria-invalid="true" aria-describedby="swf-employeeCode-error"/.test(html)
       && /<p class="hint auth-message-warn" id="swf-employeeCode-error">Enter an employee code/.test(html), 'M. the invalid field has aria-invalid and an associated error');
     check(lastFocus(rt) === 'swf-employeeCode', 'M. focus moves to the first invalid field');
-    check(/value="&lt;img src=x onerror=alert\(1\)&gt;&quot;q&#39;"/.test(html) && !/<img/.test(html), 'M. the draft is kept and escaped inside the value attribute');
+    // U1 authorized revision (GR-4): the shell's own brand <img> is chrome; the card has none. Was: !/<img/ on the whole page.
+    check(/value="&lt;img src=x onerror=alert\(1\)&gt;&quot;q&#39;"/.test(html) && !/<img/.test(stripSessionShell(html)), 'M. the draft is kept and escaped inside the value attribute');
     firewall(rt, 'M. client validation');
   }
   {

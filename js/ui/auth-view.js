@@ -2,9 +2,9 @@
    AUTH VIEWS (AFI-2) — js/ui/auth-view.js
    ------------------------------------------------------------
    The SESSION-mode screens, rendered into #app by the existing render() facade
-   (js/ui/shell-render.js) whenever AuthBoot grants no workspace — which, in AFI-2,
-   is always. Replacing #app unmounts any shell, so the business shell, the
-   navigation, Global Search and "Acting as" never appear in SESSION mode.
+   (js/ui/shell-render.js) for every SESSION paint (U1: AUTHENTICATED renders the SESSION
+   shell of js/ui/session-workspace-view.js). Replacing #app unmounts it, and the LOCAL
+   business shell, its navigation, Global Search and "Acting as" never appear in SESSION mode.
 
      CHECKING_SESSION  "Checking your session…"
      SIGNED_OUT        sign-in form (email + password), with a fixed message
@@ -249,7 +249,8 @@ function renderAuthView(){
   const s = AuthBoot.snapshot();
   // O-2: a typed email is kept across a failed attempt only, never into or past a session.
   if(s.state === AUTH_STATES.AUTHENTICATED){ authViewLastEmail = ''; authFlowLastEmail = ''; }
-  if(s.state === AUTH_STATES.AUTHENTICATED) return renderSessionWorkspace(app, s);   // AFI-4a1
+  if(s.state === AUTH_STATES.AUTHENTICATED) return renderSessionWorkspace(app, s);   // AFI-4a1; U1: the SESSION shell
+  sessionShellReset(app);                                       // U1: no drawer past the shell
   app.innerHTML = authViewHTML(s);
   bindAuthView(app);
   // Focus: the first empty sign-in field when the form is usable, else the heading.

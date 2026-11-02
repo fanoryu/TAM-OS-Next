@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Added
+- **U1 — SESSION graduated shell (Option B; local development candidate, not committed, not deployed).** After sign-in,
+  the CEO and Employees now see the v2.11.0 sidebar shell (brand, grouped navigation, mobile drawer, skip link) around
+  the existing SESSION sections instead of a single card with tabs: CEO — People: Employees; Finance: Overtime, Payroll;
+  System: Audit. Employee — People: My profile; My work: My overtime, My payroll (the Employee has no Finance access, so the group
+  is labelled "My work"). The navigation comes from a frozen
+  `SESSION_ROUTES` table and the pure, fail-closed `sessionNavModel(principal)` (only the CEO and Employee roles; no
+  shell for anything else). `AuthBoot.allowsWorkspace()` is true only while AUTHENTICATED with a navigation model
+  (D-GS-1 supersedes D-A); `render()` and Global Search no longer consult it, so the LOCAL shell, its views and Global
+  Search stay unreachable in SESSION. Every section, store, API call, money value and confirmation is unchanged; no CSS,
+  API, `/api/auth/me`, schema, storage key or module was added or changed. The sidebar footer reads "Data stored on
+  the TAM OS server." Placeholders, About and Release notes are not shown in SESSION (SESSION variants deferred to U2;
+  the LOCAL ones read browser storage). On a phone the closed drawer is `inert` and `aria-hidden`, so keyboard focus
+  cannot enter it; opening moves focus to its first item, Escape returns it to the menu button. A desktop → mobile resize
+  that would leave focus inside the now-inert sidebar first moves it to the menu button, else to `#main`, checking the
+  actual focused element each time; if focus cannot leave, the sidebar is not made inert or `aria-hidden` until it does
+  (focus elsewhere is kept). Verifier D-A pins revised under GR-4
+  (3008 checks); six SESSION/auth harnesses revised to check the card against a written-out chrome oracle
+  (`tools/session-shell-chrome.js`); new CI harness `tools/verify-session-shell-runtime.js` with a twelve-defect mutation
+  self-test. Package 102 files, digest `85022e40…`. Known U2 CSS work (not changed under U1): at ≤768 px the fixed menu
+  button overlaps the page heading (the later `.main` padding rules in `css/shell.css` override the hamburger clearance),
+  and the Payroll month bar overflows at 375 px.
 - **E11 hostile-principal test coverage for every API route (tests only; not shipped).** Four new database suites check
   that Payroll, Supplemental Payroll, Finance and the two account self-service routes refuse a signed-out caller (401), an
   Employee where only the CEO may act (403), another company (404), invented scope fields (400) and a request without its

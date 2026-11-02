@@ -10,14 +10,14 @@
      SIGNED_OUT        /me said 401 (or the user signed out). Sign-in form.
      AUTHENTICATED     /me returned a valid projection. AFI-4a1: the read-only
                        SESSION Employee workspace (js/ui/session-workspace-view.js),
-                       rendered by auth-view — never the business shell (D-A holds:
-                       allowsWorkspace() stays false).
+                       rendered by auth-view inside the SESSION shell (U1, D-GS-1:
+                       allowsWorkspace()) — never the LOCAL business shell.
      UNAVAILABLE       /me could not be determined (403, 429, 5xx, network,
                        timeout, malformed answer) or the mode is invalid. Retry only.
 
    FIREWALL: no state ever loads local business state, runs a migration, opens the
    first-run choice, mounts the shell or "Acting as", or falls back to the local
-   identity. allowsWorkspace() is false in every state. AFI-4a1: leaving
+   identity. allowsWorkspace() is false outside AUTHENTICATED. AFI-4a1: leaving
    AUTHENTICATED also destroys the in-memory SESSION Employee data
    (SessionEmployeeStore) — AFI-4b1: and the SESSION Overtime data
    (SessionOvertimeStore) — and sessionLost() is how a business read's 401 ends the
@@ -191,8 +191,13 @@ const AuthBoot = (function(){
       go(AUTH_STATES.UNAVAILABLE, 'unavailable');
     },
 
-    // AFI-2 grants no business workspace in any state (D-A).
-    allowsWorkspace(){ return false; },
+    // U1 (D-GS-1, GR-4): the SESSION shell only — AUTHENTICATED with a principal that has a
+    // navigation model (js/ui/session-shell.js). Never the LOCAL shell: render() sends every
+    // SESSION paint to renderAuthView(). Every other state, and an unknown role, is false.
+    allowsWorkspace(){
+      return state === AUTH_STATES.AUTHENTICATED && typeof sessionNavModel === 'function'
+        && sessionNavModel(SessionIdentityProvider.getCurrentUser()) !== null;
+    },
 
     // A read-only view model for js/ui/auth-view.js.
     snapshot(){

@@ -78,6 +78,9 @@ jobs:
       - name: Runtime harness - identity transition (AFI-5b)
         run: node tools/verify-afi5-runtime.js
 
+      - name: Runtime harness - SESSION graduated shell (U1)
+        run: node tools/verify-session-shell-runtime.js
+
       - name: Build deployment package
         run: node tools/build-package.js
 
