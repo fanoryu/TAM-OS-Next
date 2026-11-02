@@ -604,6 +604,14 @@ Employee sign-in, activation and the server's authorization boundary (Employee 4
 postings), with the disposable stack deleted afterwards. It ran on the earlier U1 candidate (r1, package `75d579bc…`), not
 on the r2–r4 digests, and it did not re-run the Payroll financial writes (generate, commit, post, record payment). No new
 real-backend E2E has been run for r4.
+
+**U2-WP1 — mobile layout corrections (feature/u2-wp1-mobile-layout; draft PR; NOT merged, NOT deployed).** Owner
+D-1a/D-1b/D-2/D-3/D-11, F-1b. `css/shell.css`: the `.main` menu-button clearance now follows the gutter shorthands that
+reset it, and the ineffective earlier declaration is removed (golden pin `1501d7ec…`, GR-5; tokens pin unchanged; no
+scroll-padding). `js/ui/session-payroll-view.js`: the Payroll month bar uses `.head-controls` (wraps; left-aligned).
+Package digest `be06880d…`; verifier 3011; 44 runtime harnesses green. Browser evidence is Chrome only (RR-3); partial,
+never total, focus occlusion under the menu button is recorded as RR-2. Deferred under Owner D-12 (RR-4): the
+pre-existing CEO payroll plan-detail action row overflows at 320px, on the baseline as well. Gate D and Gate R stay on HOLD.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

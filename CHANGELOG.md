@@ -303,6 +303,13 @@
   schema, ACTIONS (**20**) or behaviour change.
 
 ### Fixed
+- **U2-WP1 — mobile layout corrections (SESSION and LOCAL; not released, not deployed).** At widths up to 768px the
+  page heading no longer sits under the fixed menu button: the clearance was declared inside the drawer media query
+  and then reset by the later gutter rules, so it now follows them (`css/shell.css` only; golden revision GR-5, tokens
+  unchanged). The SESSION Payroll month bar (Previous month, month, Next month) now wraps instead of pushing Previous
+  month off the left edge at 375px and 320px; it is left-aligned at every width (Owner D-2). No focus, event, API,
+  storage, schema or financial change; `APP_VERSION` and `SCHEMA_VERSION` unchanged. Known and deferred (Owner D-12,
+  RR-4): the pre-existing CEO payroll plan-detail action row still overflows at 320px; it fits at 375px.
 - **O-2 Sign-in screen no longer shows the previous person's email (SESSION mode; not shipped).** After someone signed out,
   or their session ended, the sign-in form (and the "Forgot password?" form) still showed the email address last typed
   into it, so the next person at the device could see it. The email is now cleared as soon as a session starts, so it
