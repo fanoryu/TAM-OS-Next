@@ -8038,10 +8038,13 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // Was: f98e48f8b4d871b811a4dd8ea271f2c50f2937e5f8ef4bebd63ade5e51ed76a5 (AFI-5b with O-2).
   // U2-WP1 authorized revision (Owner D-3): no module and no file added; css/shell.css and
   // js/ui/session-payroll-view.js changed. Was: 85022e4046f43302f6a43a59c66c51516b4cfa53c3a58d7e15eaa86e32b4db5b (U1 r4).
+  // U2-WP1b authorized revision (Owner WP1b-D3): no module and no file added; comment-only edits to
+  // js/core/auth-boot.js, js/ui/session-workspace-view.js and js/ui/shell-render.js. Was:
+  // be06880d10c033b7b60146e9206ee3b1425c9ab454f88cc0df9e08b0c73f97dd (U2-WP1).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === 'be06880d10c033b7b60146e9206ee3b1425c9ab454f88cc0df9e08b0c73f97dd',
-    'AFI-5b/U1/U2-WP1: 88 modules; the package holds 102 files (the selector module removed) at the U2-WP1 digest be06880d… (85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === '3738fce6cf2d1b260904d5754d5ea60accd3a5649f794a351f01551dfb703f25',
+    'AFI-5b/U1/U2-WP1/U2-WP1b: 88 modules; the package holds 102 files (the selector module removed) at the U2-WP1b digest 3738fce6… (be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
@@ -8133,6 +8136,39 @@ console.log('== U2-WP1 — MOBILE LAYOUT CORRECTIONS ==');
   check(/'<div class="head-controls" role="group" aria-label="Month">'/.test(bar) && !/auth-actions/.test(bar)
     && ['swpPrevMonth', 'swpMonth', 'swpNextMonth'].every((id) => bar.split('id="' + id + '"').length === 2) && /<label for="swpMonth">Month<\/label>/.test(bar),
     'U2-WP1 (iv): the Payroll month bar is a wrapping .head-controls group (role=group, aria-label=Month) with Previous, the labelled month input and Next');
+}
+
+// ===== U2-WP1b — U1 / U2-WP1 MERGE-STATUS RECONCILIATION (Owner WP1b-D1, WP1b-D2 with limits) =====
+// U1 merged as PR #70 (d6ff8bd9…) and U2-WP1 as PR #71 (9f7795cf…); neither is deployed. These four
+// checks are scoped to exactly those four documentation entries: each entry is extracted by its
+// anchor (exactly once, with its terminator, else the check fails closed) and only the extracted text
+// is tested. No phrase is prohibited anywhere else, so legitimate history elsewhere is untouched.
+console.log('== U2-WP1b — U1 / U2-WP1 MERGE-STATUS RECONCILIATION ==');
+{
+  const entry = (src, anchor, terminator, inclusive) => {
+    const i = src.indexOf(anchor);
+    if (i < 0 || src.indexOf(anchor, i + 1) >= 0) return null;
+    const j = src.indexOf(terminator, i + anchor.length);
+    if (j < 0) return null;
+    return src.slice(i, inclusive ? j + terminator.length : j);
+  };
+  const ctxW = read(path.join(root, 'AI_CONTEXT.md'));
+  const archW = read(path.join(root, 'ARCHITECTURE.md'));
+  const logW = read(path.join(root, 'CHANGELOG.md'));
+  const w1 = entry(ctxW, '**U1 — SESSION graduated shell', '\n\n', false);
+  check(w1 !== null && w1.includes('PR #70') && w1.includes('d6ff8bd921e0f36a998a33b5e10a3a3825fa2553') && w1.includes('NOT deployed')
+    && !/local candidate|NOT committed|NOT pushed|U1 PR merges/i.test(w1),
+    'U2-WP1b (W1): the AI_CONTEXT U1 entry records PR #70 at merge d6ff8bd9… and NOT deployed — never a local, uncommitted or unmerged candidate');
+  const w2 = entry(ctxW, '**U2-WP1 — mobile layout corrections', 'Gate D and Gate R stay on HOLD.', true);
+  check(w2 !== null && w2.includes('PR #71') && w2.includes('9f7795cfb5208055507d225db5d5d7faf944ad36') && w2.includes('NOT deployed')
+    && !/draft PR|NOT merged/i.test(w2),
+    'U2-WP1b (W2): the AI_CONTEXT U2-WP1 entry records PR #71 at merge 9f7795cf… and NOT deployed — never a draft or unmerged PR');
+  const w3 = entry(archW, '### SESSION graduated shell — U1', '\n', false);
+  check(w3 !== null && w3.includes('PR #70') && /not deployed/i.test(w3) && !/local development candidate|not committed/i.test(w3),
+    'U2-WP1b (W3): the ARCHITECTURE U1 heading records PR #70 and not deployed — never a local, uncommitted candidate');
+  const w4 = entry(logW, '- **U1 — SESSION graduated shell', '\n- **', false);
+  check(w4 !== null && w4.includes('PR #70') && /not deployed/i.test(w4) && !/local development candidate|not committed/i.test(w4),
+    'U2-WP1b (W4): the CHANGELOG U1 entry records PR #70 and not deployed — never a local, uncommitted candidate');
 }
 
 console.log('');

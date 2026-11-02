@@ -343,7 +343,7 @@ function sessionWorkspaceSelfHTML(w){
   ]);
 }
 
-// U1: the section buttons are the SESSION shell's sidebar items (js/ui/session-shell.js,
+// U1: the section buttons are the SESSION shell's sidebar items (sessionShellHTML,
 // sessionNavModel); none is enabled while a write of any section is in flight. Without a
 // navigation model (no principal, unknown role) the card renders alone — no shell.
 function sessionWorkspaceHTML(auth, w){

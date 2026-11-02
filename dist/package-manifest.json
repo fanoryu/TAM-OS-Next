@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "be06880d10c033b7b60146e9206ee3b1425c9ab454f88cc0df9e08b0c73f97dd",
+  "packageDigest": "3738fce6cf2d1b260904d5754d5ea60accd3a5649f794a351f01551dfb703f25",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3102590,
-    "sha256": "385e7a15dfe329900eeb5c88a0eafe7210b0b396c5fe29ceacbb04a79b3247a8"
+    "bytes": 3102619,
+    "sha256": "6636358bc2942b362938cf8a78ef2bc90d75b6728a93803e1531be78eb33a044"
   },
   "files": [
     {
@@ -114,8 +114,8 @@
     },
     {
       "path": "js/core/auth-boot.js",
-      "bytes": 10948,
-      "sha256": "bbbb713f76fc9f02a280e60d5d01c957a2c81083d037a30d9ffdd50569766b3a"
+      "bytes": 10974,
+      "sha256": "e103520822328eee250df4cac6df91ba0392520479905c48f43b14442aaa6dc9"
     },
     {
       "path": "js/core/auth-flow.js",
@@ -499,8 +499,8 @@
     },
     {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 50218,
-      "sha256": "d152949a25152d669dca392ae8b75cbe0b9094bd5f80390be2a6fd94300b3a37"
+      "bytes": 50212,
+      "sha256": "aba4e7ccddf433e9d4043282fbd6a258947e0cdcc6d4e84a13ee507c7ae40d04"
     },
     {
       "path": "js/ui/settings-about.js",
@@ -509,8 +509,8 @@
     },
     {
       "path": "js/ui/shell-render.js",
-      "bytes": 42278,
-      "sha256": "c79b814269f9edf2a74bd42496ff3006c1ec1b3e41a2bd05189de1d35931ebe5"
+      "bytes": 42287,
+      "sha256": "8b75ea6519d4f66c8fbb1b7e88b8bc68a03b7c05a023660fd8315ae11941262d"
     },
     {
       "path": "vendor/sheetjs/LICENSE",

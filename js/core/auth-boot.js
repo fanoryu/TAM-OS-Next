@@ -192,7 +192,7 @@ const AuthBoot = (function(){
     },
 
     // U1 (D-GS-1, GR-4): the SESSION shell only — AUTHENTICATED with a principal that has a
-    // navigation model (js/ui/session-shell.js). Never the LOCAL shell: render() sends every
+    // navigation model (sessionNavModel, js/ui/session-workspace-view.js). Never the LOCAL shell: render() sends every
     // SESSION paint to renderAuthView(). Every other state, and an unknown role, is false.
     allowsWorkspace(){
       return state === AUTH_STATES.AUTHENTICATED && typeof sessionNavModel === 'function'
