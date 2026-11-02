@@ -172,7 +172,13 @@ const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
 //     balanced, and the brand --identity-* custom properties live in tokens.css, which is
 //     byte-unchanged (pinned below). No token, colour, spacing or type-scale change.
 //     Prior CSS golden pin was be5eea17…5e230067.
-const CSS_GOLDEN_SHA256 = '5321928bcbfda491ccb7c128b78e0dea5f655471d29f9c4ae316d83bcfa6a42a';
+//   U2-WP1 / GR-5 (current) — AUTHORIZED golden revision (Owner D-1a/D-1b, U2-C1), css/shell.css
+//     only: the mobile menu-button clearance (.main padding-top) moves after the two gutter
+//     shorthands that silently reset it, and the ineffective earlier declaration inside the
+//     drawer media query is removed (the @media (max-width:768px){ block itself stays). Same
+//     token value, no new token, no scroll-padding/scroll-margin (Owner F-1b); tokens.css and
+//     every other CSS file byte-unchanged. Prior CSS golden pin was 5321928b…6a42a.
+const CSS_GOLDEN_SHA256 = '1501d7ec3d887fb1d8ca2e4c87e67042f05e2ceb90faeeff056b38a48b9c8d06';
 // UX-005C — tokens.css anti-drift pin. The design tokens are the single source of truth
 // for spacing/type/radius/color; this pin fails loudly if any token VALUE is changed,
 // so a "consistency" edit can never silently move the scale it normalizes onto.
@@ -8030,10 +8036,12 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   const pkg5 = JSON.parse(read(pkgManifestPathA5));
   // U1 authorized revision (GR-4): U1 added no module and no file; the digest is the U1 package's.
   // Was: f98e48f8b4d871b811a4dd8ea271f2c50f2937e5f8ef4bebd63ade5e51ed76a5 (AFI-5b with O-2).
+  // U2-WP1 authorized revision (Owner D-3): no module and no file added; css/shell.css and
+  // js/ui/session-payroll-view.js changed. Was: 85022e4046f43302f6a43a59c66c51516b4cfa53c3a58d7e15eaa86e32b4db5b (U1 r4).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === '85022e4046f43302f6a43a59c66c51516b4cfa53c3a58d7e15eaa86e32b4db5b',
-    'AFI-5b/U1: 88 modules; the package holds 102 files (the selector module removed) at the U1 r4 digest 85022e40… (3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === 'be06880d10c033b7b60146e9206ee3b1425c9ab454f88cc0df9e08b0c73f97dd',
+    'AFI-5b/U1/U2-WP1: 88 modules; the package holds 102 files (the selector module removed) at the U2-WP1 digest be06880d… (85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
@@ -8103,6 +8111,28 @@ console.log('== U1 — SESSION GRADUATED SHELL ==');
     && ['overtime', 'payroll', 'audit'].every((d) => /parseSessionShell/.test(read(path.join(root, 'tools', 'verify-session-' + d + '-runtime.js'))))
     && ['auth-boot', 'auth-flow'].every((d) => /parseSessionShell/.test(read(path.join(root, 'tools', 'verify-' + d + '-runtime.js')))),
     'U1: the six revised SESSION / auth harnesses check the card against the exact chrome oracle; the shell harness carries its mutation self-test');
+}
+
+// ===== U2-WP1 — MOBILE LAYOUT CORRECTIONS (Owner D-1a, D-1b, D-2, D-3; F-1b) =====
+// U2-C1: the .main clearance for the fixed mobile menu button was declared inside the drawer media
+// query, then reset by the later gutter shorthands. It now follows them. U2-C2: the SESSION Payroll
+// month bar uses the existing wrapping .head-controls row. No scroll-padding / scroll-margin (F-1b).
+console.log('== U2-WP1 — MOBILE LAYOUT CORRECTIONS ==');
+{
+  const css = (f) => read(path.join(root, 'css', f)).replace(/\/\*[\s\S]*?\*\//g, '');
+  const sh = css('shell.css');
+  const CLEAR = '@media(max-width:768px){ .main{padding-top:calc(var(--space-5) + var(--space-6));} }';
+  const i480 = sh.indexOf('@media(max-width:480px){ .main{padding:');
+  const iClr = sh.indexOf(CLEAR);
+  check(i480 >= 0 && iClr > i480 && sh.split(CLEAR).length === 2 && !/\.main\{[^}]*padding/.test(sh.slice(iClr + CLEAR.length)),
+    'U2-WP1 (i): the last .main padding-top at <=768px is calc(var(--space-5) + var(--space-6)), after the 768px and 480px gutter shorthands');
+  check(sh.split('padding-top:calc(var(--space-5) + var(--space-6))').length === 2 && /@media \(max-width:768px\)\{/.test(sh)
+    && !cssFiles.some((f) => /scroll-padding|scroll-margin/.test(css(f))),
+    'U2-WP1 (ii): the ineffective drawer-block padding-top is removed, the @media (max-width:768px){ drawer block stays, and no scroll-padding / scroll-margin exists (F-1b)');
+  const bar = (stripComments(read(path.join(root, 'js', 'ui', 'session-payroll-view.js'))).match(/function sessionPayrollMonthBarHTML\(w, dis\)\{[\s\S]*?\n\}/) || [''])[0];
+  check(/'<div class="head-controls" role="group" aria-label="Month">'/.test(bar) && !/auth-actions/.test(bar)
+    && ['swpPrevMonth', 'swpMonth', 'swpNextMonth'].every((id) => bar.split('id="' + id + '"').length === 2) && /<label for="swpMonth">Month<\/label>/.test(bar),
+    'U2-WP1 (iv): the Payroll month bar is a wrapping .head-controls group (role=group, aria-label=Month) with Previous, the labelled month input and Next');
 }
 
 console.log('');

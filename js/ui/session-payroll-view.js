@@ -370,7 +370,7 @@ function sessionPayrollPanelHTML(w){
 }
 
 function sessionPayrollMonthBarHTML(w, dis){
-  return '<div class="auth-actions" role="group" aria-label="Month">'
+  return '<div class="head-controls" role="group" aria-label="Month">'
     + '<button class="btn" type="button" id="swpPrevMonth"' + dis + '>Previous month</button>'
     + '<label for="swpMonth">Month</label><input class="input" type="month" id="swpMonth" name="month" autocomplete="off"' + dis + ' value="' + escapeHtml(w.month || '') + '">'
     + '<button class="btn" type="button" id="swpNextMonth"' + dis + '>Next month</button></div>';
