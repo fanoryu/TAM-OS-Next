@@ -594,18 +594,19 @@ of the 54 production routes lacks a hostile suite. Post-merge CI verified: 470 P
 (431 database tests). This is SDR-0002 §17 E11 evidence only; the E12 external security review is a separate, open
 requirement, and Gate D and Gate R stay on **HOLD** (no deployment authorized).
 
-**U1 — SESSION graduated shell (Option B; 2026-11-01; local candidate on `feature/session-graduated-shell`, NOT
-committed, NOT pushed, NOT deployed).** Owner approved U-D1…U-D5 and GR-4 for local development. Signed-in CEO /
+**U1 — SESSION graduated shell (Option B; 2026-11-01; merged 2026-11-02 as PR #70, merge commit
+`d6ff8bd921e0f36a998a33b5e10a3a3825fa2553`; NOT deployed).** Owner approved U-D1…U-D5 and GR-4 for local development. Signed-in CEO /
 Employee see the v2.11.0 sidebar shell around the unchanged SESSION sections (`SESSION_ROUTES`, `sessionNavModel` in
-`js/ui/session-workspace-view.js`); `allowsWorkspace()` is AUTHENTICATED ∧ navigation model (D-GS-1 becomes effective
-only when a U1 PR merges). Package 102 files, digest `85022e40…` (r4: fail-safe focus rescue); verifier 3008; 44 runtime harnesses green
+`js/ui/session-workspace-view.js`); `allowsWorkspace()` is AUTHENTICATED ∧ navigation model (D-GS-1 in effect in source
+`main` since the PR #70 merge). Package 102 files, digest `85022e40…` (r4: fail-safe focus rescue); verifier 3008; 44 runtime harnesses green
 (new: `verify-session-shell-runtime.js`). A disposable PHP/MariaDB E2E (U1-D3, 2026-11-01) reported 14/14 PASS: CEO and
 Employee sign-in, activation and the server's authorization boundary (Employee 403 on Employees, Audit and Finance
 postings), with the disposable stack deleted afterwards. It ran on the earlier U1 candidate (r1, package `75d579bc…`), not
 on the r2–r4 digests, and it did not re-run the Payroll financial writes (generate, commit, post, record payment). No new
 real-backend E2E has been run for r4.
 
-**U2-WP1 — mobile layout corrections (feature/u2-wp1-mobile-layout; draft PR; NOT merged, NOT deployed).** Owner
+**U2-WP1 — mobile layout corrections (feature/u2-wp1-mobile-layout; merged 2026-11-03 as PR #71, merge commit
+`9f7795cfb5208055507d225db5d5d7faf944ad36`; NOT deployed).** Owner
 D-1a/D-1b/D-2/D-3/D-11, F-1b. `css/shell.css`: the `.main` menu-button clearance now follows the gutter shorthands that
 reset it, and the ineffective earlier declaration is removed (golden pin `1501d7ec…`, GR-5; tokens pin unchanged; no
 scroll-padding). `js/ui/session-payroll-view.js`: the Payroll month bar uses `.head-controls` (wraps; left-aligned).

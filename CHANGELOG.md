@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- **U1 — SESSION graduated shell (Option B; local development candidate, not committed, not deployed).** After sign-in,
+- **U1 — SESSION graduated shell (Option B; merged as PR #70, `d6ff8bd`; not deployed).** After sign-in,
   the CEO and Employees now see the v2.11.0 sidebar shell (brand, grouped navigation, mobile drawer, skip link) around
   the existing SESSION sections instead of a single card with tabs: CEO — People: Employees; Finance: Overtime, Payroll;
   System: Audit. Employee — People: My profile; My work: My overtime, My payroll (the Employee has no Finance access, so the group

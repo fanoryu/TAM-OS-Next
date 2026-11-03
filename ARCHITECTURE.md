@@ -1568,7 +1568,7 @@ guards and revises two AFI-1/AFI-2 allowlists (one more `ApiClient` caller with 
 credential views' fixed password vocabulary). `tools/serve-auth-stub.js` answers the three endpoints from
 fabricated one-time tokens and scenarios. No CSS, backend, schema, storage-key or ACTIONS change.
 
-### SESSION graduated shell — U1 (Option B; local development candidate, not committed)
+### SESSION graduated shell — U1 (Option B; merged as PR #70, not deployed)
 
 U1 supersedes the "not the business shell" clause of the AFI-4a1 text below (D-GS-1 supersedes D-A). While AuthBoot is
 AUTHENTICATED, `renderSessionWorkspace()` (js/ui/session-workspace-view.js) renders the existing workspace card inside
