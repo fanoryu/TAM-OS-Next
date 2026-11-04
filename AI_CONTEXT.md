@@ -636,6 +636,12 @@ attempt is checked against `document.activeElement`; no `blur()`, retry, State o
 `shell-render.js` (LOCAL) unchanged. Package digest `b640785b…`; verifier 3022 (six additive UI-DEV-03 checks); the shell
 harness models orders A / B / S (simulated) with R1-R12 and M13-M16. Browser checks are Chrome only (RR-3) and are UI
 acceptance checks, not P0 evidence. Gate D and Gate R stay on HOLD.
+*Status update (supersedes "PR, NOT merged" and "R4-4 stays open" above; entry kept as written):* merged into `main` via
+PR #74 on 2026-11-04, merge commit `5b1870b07662a113dc055c2a50e6d88577236970`; post-merge CI green (verifier 3022). **R4-4
+is CLOSED for the SESSION shell** on the accepted Chrome evidence, including real-window DPR 1.25 cells W1 (768 -> 770) and
+W2 (520 -> 1280), and no focus moved in any negative case. Remaining, not closed by this: LOCAL shell focus recovery
+(`shell-render.js`) is out of scope; RR-3 (Firefox / Safari) stays open; the pointer-press-then-body path has harness-only
+coverage (R7). Not released, not deployed.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
