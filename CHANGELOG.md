@@ -303,6 +303,15 @@
   schema, ACTIONS (**20**) or behaviour change.
 
 ### Fixed
+- **UI-DEV-02 — Payroll detail buttons no longer run off the left edge on narrow screens (RR-4; SESSION; not released,
+  not deployed).** On a CEO payroll plan, the row with Back to list and the plan's actions (Commit payroll, Return to draft,
+  Cancel plan …) was right-aligned and could not wrap, so at 320px Back to list was pushed off the left edge where it could
+  not be reached; the same happened on a Supplemental payroll (at 320px and, with four buttons, at 375px). Both rows now
+  use the existing wrapping, left-aligned `.head-controls` row, as the Payroll month bar does, so the buttons wrap onto a
+  second line and all stay visible (`js/ui/session-payroll-view.js` only; no CSS change). Button ids, labels, order and
+  behaviour are unchanged. No focus, event, API, storage, schema or financial change; `APP_VERSION` and `SCHEMA_VERSION`
+  unchanged. Closes the deferral recorded as RR-4 under Owner D-12.
+### Fixed
 - **U2-WP1 — mobile layout corrections (SESSION and LOCAL; not released, not deployed).** At widths up to 768px the
   page heading no longer sits under the fixed menu button: the clearance was declared inside the drawer media query
   and then reset by the later gutter rules, so it now follows them (`css/shell.css` only; golden revision GR-5, tokens

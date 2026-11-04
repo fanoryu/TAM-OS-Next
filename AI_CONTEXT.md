@@ -613,6 +613,13 @@ scroll-padding). `js/ui/session-payroll-view.js`: the Payroll month bar uses `.h
 Package digest `be06880d…`; verifier 3011; 44 runtime harnesses green. Browser evidence is Chrome only (RR-3); partial,
 never total, focus occlusion under the menu button is recorded as RR-2. Deferred under Owner D-12 (RR-4): the
 pre-existing CEO payroll plan-detail action row overflows at 320px, on the baseline as well. Gate D and Gate R stay on HOLD.
+
+**UI-DEV-02 — RR-4 payroll detail action rows (fix/u2-rr4-payroll-detail-actions; draft PR, NOT merged, NOT deployed).**
+Owner-approved UI-DEV-02. `js/ui/session-payroll-view.js`: the CEO plan-detail and Supplemental-detail action rows (Back
+to list, Reload, the matrix actions) use the wrapping `.head-controls` row instead of the right-aligned, non-wrapping
+`.auth-actions` row that pushed Back to list off the left edge at 320px (Supplemental also at 375px with four buttons).
+No CSS change; ids, labels and order unchanged. Package digest `5ce6716e…`; verifier 3016 (one additive RR-4 check);
+44 runtime harnesses green. Browser evidence is Chrome only (RR-3). Gate D and Gate R stay on HOLD.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
