@@ -620,6 +620,9 @@ to list, Reload, the matrix actions) use the wrapping `.head-controls` row inste
 `.auth-actions` row that pushed Back to list off the left edge at 320px (Supplemental also at 375px with four buttons).
 No CSS change; ids, labels and order unchanged. Package digest `5ce6716e…`; verifier 3016 (one additive RR-4 check);
 44 runtime harnesses green. Browser evidence is Chrome only (RR-3). Gate D and Gate R stay on HOLD.
+*Status update (supersedes "draft PR, NOT merged" above; entry kept as written):* merged into `main` via PR #73 on
+2026-11-04, merge commit `c32cf7417af025dd3dfa7d52a990a213c8171535`; the branch was deleted afterwards. Not released,
+not deployed.
 
 **UI-DEV-03 — R4-4 desktop focus recovery (fix/u2-rr4-4-desktop-focus-recovery; PR, NOT merged, NOT deployed).**
 Decision status (2026-11-04, Owner, with Atlas disposition): RD-1 changed from R-A (external tooling, INV-ORD and counted
