@@ -23,6 +23,12 @@
      A11y the mobile drawer: closed = inert + aria-hidden; open, Escape, backdrop, item tap, repaint;
           r3: a live desktop <-> mobile resize (matchMedia change) never leaves focus in the inert sidebar;
           r4: fail-safe rescue under fault injection (menu button missing / focus() ineffective / all fail)
+     WR   UI-DEV-03 (R4-4, Owner D4-u): mobile -> desktop with the (now hidden) menu button focused
+          moves focus to the current nav item, else #main, in all three simulated orders (A: still
+          focused when 'change' runs; B: blur to body first; S: silent drop, no event), and never
+          moves focus that is elsewhere, after a pointer press, in an unfocused window, with the
+          drawer open, or after the session ended. M13-M16 (and M13b/M13c) seed defects in it.
+          The orders are SIMULATED here; which one a browser produces is not asserted.
 
    The mobile drawer, focus trap and layout need a real browser (fake DOM has no layout); they
    are covered by the U1 browser validation, not here.
@@ -69,6 +75,12 @@ function mkApp(mkEl, dom){
   const inSidebar = (o) => { const a = html.indexOf(' id="sidebar"'), b = html.indexOf('<main', a);
     return a >= 0 && !!o && !!o.id && o === elements[o.id] && html.slice(a, b < 0 ? html.length : b).indexOf(' id="' + o.id + '"') >= 0; };
   function find(sel){
+    // UI-DEV-03: the current nav item (the one marked aria-current="page" inside #sidebar).
+    if(sel === '#sidebar [aria-current="page"]'){
+      const a = html.indexOf(' id="sidebar"'), b = html.indexOf('<main', a);
+      const c = a < 0 ? null : /<[a-z]+[^>]*\sid="([A-Za-z0-9_-]+)"[^>]*\saria-current="page"/.exec(html.slice(a, b < 0 ? html.length : b));
+      return c ? find('#' + c[1]) : null;
+    }
     const m = /^#([A-Za-z0-9_-]+)$/.exec(sel);
     if(!m) return null;
     const tag = tagOf(m[1]);
@@ -81,7 +93,21 @@ function mkApp(mkEl, dom){
         setAttribute: (n, v) => { dom.log.push('set:' + id + ':' + n); attrs[n] = String(v); }, removeAttribute: (n) => { dom.log.push('unset:' + id + ':' + n); delete attrs[n]; }, querySelectorAll: () => [],
         contains: (o) => o === elements[id] || (id === 'sidebar' && inSidebar(o)),
         addEventListener: (t, fn) => { (listeners[t] = listeners[t] || []).push(fn); },
-        focus: () => { if(dom.noFocus.has(id)){ dom.log.push('focus-refused:' + id); return; } dom.focused.push(id); dom.log.push('focus:' + id); dom.doc.activeElement = elements[id]; }, setSelectionRange: () => {}, querySelector: find, getAttribute: () => null };
+        focus: () => { if(dom.noFocus.has(id)){ dom.log.push('focus-refused:' + id); return; }
+          // UI-DEV-03: an element inside an inert #sidebar cannot take focus (as in a browser).
+          if(id !== 'sidebar' && elements.sidebar && 'inert' in elements.sidebar.attrs && inSidebar(elements[id])){ dom.log.push('focus-refused-inert:' + id); return; }
+          dom.focused.push(id); dom.log.push('focus:' + id);
+          // UI-DEV-03: focusout on the element losing focus (relatedTarget = the new one), then a
+          // document focusin (capture listeners). Element listeners only; no bubbling is modelled.
+          const prev = dom.doc.activeElement, next = elements[id];
+          if(prev && prev !== next && prev.listeners) (prev.listeners.focusout || []).forEach((fn) => fn.call(prev, { relatedTarget: next }));
+          dom.doc.activeElement = next;
+          (dom.docListeners.focusin || []).forEach((fn) => fn({ target: next })); },
+        // UI-DEV-03: the menu button is display:none at desktop width (shell.css), so it has no boxes.
+        getClientRects: () => (id === 'navHamburger' && !dom.media.matches ? [] : [{}]),
+        setSelectionRange: () => {}, querySelector: find, getAttribute: () => null };
+      const self = elements[id];
+      Object.defineProperty(self, 'isConnected', { get: () => elements[id] === self });
     }
     return elements[id];
   }
@@ -132,8 +158,9 @@ function loadRuntime(routes, mutate, drawerMode){
     addEventListener:noop, removeEventListener:noop, appendChild:noop, removeChild:noop, setAttribute:noop, removeAttribute:noop,
     getAttribute:()=>null, remove:noop, focus:noop, contains:()=>false, querySelector:()=>null, querySelectorAll:()=>[],
     classList:{ add:noop, remove:noop, toggle:noop, contains:()=>false } });
-  const els = {}; const dom = { focused: [], log: [], noFocus: new Set() }; // noFocus: ids whose focus() is ineffective (fault injection)
+  const els = {}; const dom = { focused: [], log: [], noFocus: new Set(), docListeners: {}, hasFocus: true }; // noFocus: ids whose focus() is ineffective (fault injection)
   const media = { matches: !!drawerMode, listeners: [] };
+  dom.media = media;
   const mql = () => ({ get matches(){ return media.matches; }, addEventListener: (t, fn) => { if(t === 'change') media.listeners.push(fn); }, addListener: (fn) => { media.listeners.push(fn); } });
   els.app = mkApp(mkEl, dom);
   const net = { calls: [], routes: routes || {} };
@@ -157,7 +184,8 @@ function loadRuntime(routes, mutate, drawerMode){
     history: { replaceState: noop, pushState: noop },
     matchMedia: mql,
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
-    document: { addEventListener:noop, removeEventListener:noop, getElementById: (id) => (els[id] = els[id] || mkEl()),
+    document: { addEventListener: (t, fn) => { (dom.docListeners[t] = dom.docListeners[t] || []).push(fn); }, removeEventListener:noop,
+      hasFocus: () => dom.hasFocus, getElementById: (id) => (els[id] = els[id] || mkEl()),
       querySelector:()=>null, querySelectorAll:()=>[], createElement:()=>mkEl(), contains:()=>false,
       body: mkEl(), documentElement: { dataset:{}, style:{} }, activeElement: null }
   };
@@ -169,6 +197,22 @@ function loadRuntime(routes, mutate, drawerMode){
   rt.app = els.app; rt.appHTML = () => els.app.innerHTML; rt.dom = dom;
   rt.state = () => rt.AuthBoot.snapshot().state;
   rt.resize = (mobile) => { if(media.matches === !!mobile) return; media.matches = !!mobile; media.listeners.slice().forEach((fn) => fn({ matches: media.matches })); };
+  // UI-DEV-03 — a simulated mobile -> desktop change, in one of three orders (none is asserted to be
+  // what a browser does): 'A' the hidden menu button keeps focus when 'change' runs; 'B' focus drops
+  // to body with a focusout (relatedTarget null) first; 'S' it drops silently (no event). noChange:
+  // the 'change' listeners do not run (only the deferred focusout re-check can act).
+  rt.toDesktop = (mode, noChange) => {
+    if(!media.matches) return;
+    media.matches = false;
+    const a = dom.doc.activeElement;
+    if((mode === 'B' || mode === 'S') && a && a.id === 'navHamburger'){
+      dom.doc.activeElement = dom.doc.body; dom.log.push('drop:navHamburger');
+      if(mode === 'B') ((a.listeners || {}).focusout || []).forEach((fn) => fn.call(a, { relatedTarget: null }));
+    }
+    if(!noChange) media.listeners.slice().forEach((fn) => fn({ matches: false }));
+  };
+  rt.change = () => media.listeners.slice().forEach((fn) => fn({ matches: media.matches }));
+  rt.pointer = () => (dom.docListeners.pointerdown || []).forEach((fn) => fn({}));
   return rt;
 }
 const flush = async (n) => { for(let i = 0; i < (n || 8); i++) await new Promise((r) => setImmediate(r)); };
@@ -396,6 +440,151 @@ async function suite(mutate){
       'A11y resize 5b: session lost before the resize: the resize touches nothing and restores no focus to a detached element');
   }
 
+  // UI-DEV-03 (R4-4, Owner D4-u) — mobile -> desktop with the menu button focused. The menu button is
+  // hidden at desktop width; focus must end on the current nav item (else #main), never on a hidden
+  // or detached element, and focus anywhere else must never move. Orders A / B / S are simulated.
+  const frame = () => new Promise((r) => setTimeout(r, 5)); // one requestAnimationFrame (setTimeout 0 here)
+  const atMobile = async (me) => {
+    const rt = await boot(me, mutate, null, true);
+    const el = (id) => rt.app.querySelector('#' + id) || { attrs: {}, focus: () => {} };
+    return { rt: rt, el: el };
+  };
+  const focusLog = (rt, from) => rt.dom.log.slice(from).filter((x) => /^focus/.test(x));
+  for(const me of [ME_CEO, ME_EMP]){
+    const role = me.role;
+    for(const [mode, noChange, label] of [['A', false, 'R1 (A: still focused when change runs)'], ['B', false, 'R2 (B: blur to body before change)'],
+      ['S', false, 'R3 (S: silent drop, no event)']]){
+      const { rt, el } = await atMobile(me);
+      el('navHamburger').focus();
+      const set = rt.SessionShellDrawer.hamLast === true;
+      const from = rt.dom.log.length;
+      rt.toDesktop(mode, noChange); await frame();
+      const item = el('swSectionMain');
+      t(set && rt.dom.doc.activeElement === item && rt.app.querySelector('#sidebar [aria-current="page"]') === item
+        && JSON.stringify(focusLog(rt, from)) === '["focus:swSectionMain"]' && rt.SessionShellDrawer.hamLast === false && !('inert' in el('sidebar').attrs),
+        'WR ' + label + ' ' + role + ': the hidden menu button\'s focus moves once to the current nav item; the sidebar is not inert' + ' >> ' + focusLog(rt, from).join(','));
+    }
+  }
+  for(const me of [ME_CEO, ME_EMP]){
+    // R2b — B with the deferred focusout re-check running before 'change' (the closed drawer is still
+    // inert, so the nav item refuses focus): #main takes it; the later 'change' moves nothing.
+    const { rt, el } = await atMobile(me);
+    el('navHamburger').focus();
+    const from = rt.dom.log.length;
+    rt.toDesktop('B', true); await frame();
+    const early = rt.dom.doc.activeElement === el('main');
+    rt.change(); await frame();
+    t(early && rt.dom.doc.activeElement === el('main') && JSON.stringify(focusLog(rt, from)) === '["focus-refused-inert:swSectionMain","focus:main"]' && !('inert' in el('sidebar').attrs),
+      'WR R2b ' + me.role + ' (B, the focusout re-check before change): #main takes focus (the nav item is still inert); the later change moves nothing >> ' + focusLog(rt, from).join(','));
+  }
+  {
+    // R4 — the current item refuses focus: #main (tabindex -1) takes it.
+    const { rt, el } = await atMobile(ME_CEO);
+    el('navHamburger').focus(); rt.dom.noFocus.add('swSectionMain');
+    const from = rt.dom.log.length;
+    rt.toDesktop('S'); await frame();
+    t(rt.dom.doc.activeElement === el('main') && JSON.stringify(focusLog(rt, from)) === '["focus-refused:swSectionMain","focus:main"]',
+      'WR R4: the current nav item refuses focus -> the actual activeElement is checked and #main takes focus >> ' + focusLog(rt, from).join(','));
+  }
+  {
+    // R5 — both refuse: focus untouched, two attempts only, no throw, no loop.
+    const { rt, el } = await atMobile(ME_CEO);
+    const ham = el('navHamburger'); ham.focus(); rt.dom.noFocus.add('swSectionMain'); rt.dom.noFocus.add('main');
+    const from = rt.dom.log.length;
+    let threw = null; try { rt.toDesktop('A'); await frame(); } catch(e){ threw = e; }
+    t(!threw && rt.dom.doc.activeElement === ham && JSON.stringify(focusLog(rt, from)) === '["focus-refused:swSectionMain","focus-refused:main"]',
+      'WR R5: both targets refuse -> focus left as it is, exactly two attempts, no throw, no loop >> ' + focusLog(rt, from).join(','));
+  }
+  for(const me of [ME_CEO, ME_EMP]){
+    // R6 — focus elsewhere (Sign out, #main) never moves, in every order; nor body reached from elsewhere.
+    for(const mode of ['A', 'B', 'S']){
+      const { rt, el } = await atMobile(me);
+      const out = el('authSignOutBtn'); out.focus();
+      const from = rt.dom.log.length;
+      rt.toDesktop(mode); await frame();
+      const { rt: rt2, el: el2 } = await atMobile(me);
+      const main = el2('main'); main.focus();
+      const from2 = rt2.dom.log.length;
+      rt2.toDesktop(mode); await frame();
+      t(rt.dom.doc.activeElement === out && focusLog(rt, from).length === 0 && rt2.dom.doc.activeElement === main && focusLog(rt2, from2).length === 0,
+        'WR R6 ' + me.role + ' ' + mode + ': focus on Sign out or #main is never moved by the desktop change');
+    }
+    const { rt, el } = await atMobile(me);
+    el('navHamburger').focus(); el('authSignOutBtn').focus();       // Tab away: focusin elsewhere clears hamLast
+    rt.dom.doc.activeElement = rt.dom.doc.body;                       // later lost for another reason
+    const from = rt.dom.log.length;
+    rt.toDesktop('S'); await frame();
+    t(rt.SessionShellDrawer.hamLast === false && rt.dom.doc.activeElement === rt.dom.doc.body && focusLog(rt, from).length === 0,
+      'WR R6 ' + me.role + ': body reached after focus left the menu button for another element -> untouched');
+  }
+  {
+    // R7 — a pointer press after the menu button clears hamLast: a later body focus is the user's.
+    const { rt, el } = await atMobile(ME_CEO);
+    const ham = el('navHamburger'); ham.focus();
+    rt.pointer(); rt.dom.doc.activeElement = rt.dom.doc.body;
+    ((ham.listeners || {}).focusout || []).forEach((fn) => fn.call(ham, { relatedTarget: null })); await frame(); // click on the page: blur at mobile width
+    const from = rt.dom.log.length;
+    rt.toDesktop('S'); await frame();
+    t(rt.SessionShellDrawer.hamLast === false && rt.dom.doc.activeElement === rt.dom.doc.body && focusLog(rt, from).length === 0,
+      'WR R7: menu button focused, then a pointer press on the page -> the desktop change moves nothing');
+  }
+  {
+    // R8 — an unfocused window (document.hasFocus() false) is never acted on.
+    for(const mode of ['A', 'S']){
+      const { rt, el } = await atMobile(ME_EMP);
+      const ham = el('navHamburger'); ham.focus(); rt.dom.hasFocus = false;
+      const from = rt.dom.log.length;
+      rt.toDesktop(mode); await frame();
+      t(focusLog(rt, from).length === 0 && rt.dom.doc.activeElement === (mode === 'A' ? ham : rt.dom.doc.body),
+        'WR R8 ' + mode + ': document.hasFocus() false -> no focus moved');
+    }
+  }
+  {
+    // R9 — drawer open, focus on an item in it: the existing close path only, focus unchanged.
+    const { rt, el } = await atMobile(ME_CEO);
+    el('navHamburger').focus(); rt.app.fire('navHamburger', 'click');
+    const item = el('swSectionOvertime'); item.focus();
+    const from = rt.dom.log.length;
+    rt.toDesktop('A'); await frame();
+    t(rt.SessionShellDrawer.open === false && !('inert' in el('sidebar').attrs) && rt.dom.doc.activeElement === item && focusLog(rt, from).length === 0,
+      'WR R9: drawer open with focus on an item -> the drawer closes as before; focus stays on the item');
+  }
+  {
+    // R10 — session ended before the change: no shell, nothing focused, hamLast cleared.
+    for(const mode of ['B', 'S']){
+      const { rt, el } = await atMobile(ME_CEO);
+      const ham = el('navHamburger'); ham.focus();
+      rt.AuthBoot.sessionLost(); await flush();
+      const cleared = rt.SessionShellDrawer.hamLast === false;
+      const from = rt.dom.log.length;
+      rt.toDesktop(mode); await frame();
+      const a = rt.dom.doc.activeElement;
+      t(cleared && noShellAfter(rt) && focusLog(rt, from).length === 0 && !(a && /^(navHamburger|sidebar|swSection)/.test(a.id || '')),
+        'WR R10 ' + mode + ': session lost before the change -> hamLast cleared, nothing focused, no detached element holds focus');
+    }
+  }
+  {
+    // R11 — desktop -> mobile unchanged: a focused sidebar item moves to the menu button, nothing else.
+    const rt = await boot(ME_EMP, mutate);
+    const el = (id) => rt.app.querySelector('#' + id) || { attrs: {}, focus: () => {} };
+    el('swSectionOvertime').focus();
+    const from = rt.dom.log.length;
+    rt.resize(true); await frame();
+    t(JSON.stringify(focusLog(rt, from)) === '["focus:navHamburger"]' && rt.dom.doc.activeElement === el('navHamburger') && el('sidebar').attrs.inert === '',
+      'WR R11: desktop -> mobile behaves as before (focus to the menu button only, sidebar inert) >> ' + focusLog(rt, from).join(','));
+  }
+  {
+    // R12 — both triggers fire (focusout re-check and the change handler): exactly one focus move.
+    const { rt, el } = await atMobile(ME_CEO);
+    el('navHamburger').focus();
+    const from = rt.dom.log.length;
+    rt.toDesktop('B'); await frame(); await frame();
+    rt.change(); await frame();                                       // a duplicate 'change' with focus now visible
+    const items = focusLog(rt, from);
+    t(JSON.stringify(items) === '["focus:swSectionMain"]' && rt.dom.doc.activeElement === el('swSectionMain'),
+      'WR R12: both triggers and a duplicate change -> exactly one focus move >> ' + items.join(','));
+  }
+
   // Fail closed — the pure model.
   {
     const rt = loadRuntime({ '/api/auth/me': [err(401, 'unauthenticated')] }, mutate); await flush();
@@ -430,6 +619,13 @@ const MUTATIONS = [
   ['M10 focus() is assumed to succeed (activeElement not verified)', swap('ui/session-workspace-view.js', 'if(document.activeElement === t && !inside()) return true;', 'return true;')],
   ['M11 a failed rescue still makes the focused sidebar inert', swap('ui/session-workspace-view.js', 'const hide = drawer && !open && sessionShellRescueFocus(app, sidebar);', 'const hide = drawer && !open && (sessionShellRescueFocus(app, sidebar) || true);')],
   ['M12 a held sidebar never recovers on focusout', swap('ui/session-workspace-view.js', 'if(!SessionShellDrawer.held) return;', 'return;')],
+  ['M13 the desktop focus recovery is removed', swap('ui/session-workspace-view.js', 'function sessionShellDesktopFocus(root){', 'function sessionShellDesktopFocus(root){ return false;')],
+  ['M13b the change-handler trigger is removed', swap('ui/session-workspace-view.js', 'if(!sidebarIsDrawerMode()) sessionShellDesktopFocus(root);', '')],
+  ['M13c the deferred focusout trigger is removed', swap('ui/session-workspace-view.js', "requestAnimationFrame(function(){ sessionShellDesktopFocus(document.getElementById('app')); });", '')],
+  ['M14 the recovery assumes focus() succeeded', swap('ui/session-workspace-view.js', 'if(document.activeElement === t){ SessionShellDrawer.hamLast = false; return true; }', 'SessionShellDrawer.hamLast = false; return true;')],
+  ['M15 the recovery runs at mobile width or for focus elsewhere', (f, src) => swap('ui/session-workspace-view.js', "if(!root || typeof root.querySelector !== 'function' || sidebarIsDrawerMode()) return false;", "if(!root || typeof root.querySelector !== 'function') return false;")(f,
+    swap('ui/session-workspace-view.js', 'if(!(a === ham || ((!a || a === document.body) && SessionShellDrawer.hamLast))) return false;', '')(f, src))],
+  ['M16 a pointer press never clears hamLast', swap('ui/session-workspace-view.js', "document.addEventListener('pointerdown', function(){ SessionShellDrawer.hamLast = false; }, true);", '')],
   ['M7 the Employee group label reverts to "Finance"', swap('ui/session-workspace-view.js', "finance: 'My work'", "finance: 'Finance'")],
   ['M5 the workspace renders in UNAVAILABLE', swap('ui/auth-view.js', 'if(s.state === AUTH_STATES.AUTHENTICATED) return renderSessionWorkspace(app, s);', 'if(s.state === AUTH_STATES.AUTHENTICATED || s.state === AUTH_STATES.UNAVAILABLE) return renderSessionWorkspace(app, s);')]
 ];

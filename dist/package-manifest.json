@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "5ce6716e9525109f193e70fa200296f245c71c993e9888727d0eec6acb705895",
+  "packageDigest": "b640785b35054d19f863b31a4a11babfae9d59e89b417cb382c18fcecdb38aec",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3102621,
-    "sha256": "a0222d18adf984f72b46d528ff0deccc3b55d3cf8308b1c6f4fc1efdb2281969"
+    "bytes": 3105436,
+    "sha256": "cc9adf6e148983b98cdc3ff24105e7e788e8342c50b1786ab9d9111792450c89"
   },
   "files": [
     {
@@ -499,8 +499,8 @@
     },
     {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 50212,
-      "sha256": "aba4e7ccddf433e9d4043282fbd6a258947e0cdcc6d4e84a13ee507c7ae40d04"
+      "bytes": 53027,
+      "sha256": "e040c5ad078a34f33a2f152ad36e81eabf1800e6219c80ec50b48d3eb66058e7"
     },
     {
       "path": "js/ui/settings-about.js",

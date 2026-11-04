@@ -620,6 +620,22 @@ to list, Reload, the matrix actions) use the wrapping `.head-controls` row inste
 `.auth-actions` row that pushed Back to list off the left edge at 320px (Supplemental also at 375px with four buttons).
 No CSS change; ids, labels and order unchanged. Package digest `5ce6716e…`; verifier 3016 (one additive RR-4 check);
 44 runtime harnesses green. Browser evidence is Chrome only (RR-3). Gate D and Gate R stay on HOLD.
+*Status update (supersedes "draft PR, NOT merged" above; entry kept as written):* merged into `main` via PR #73 on
+2026-11-04, merge commit `c32cf7417af025dd3dfa7d52a990a213c8171535`; the branch was deleted afterwards. Not released,
+not deployed.
+
+**UI-DEV-03 — R4-4 desktop focus recovery (fix/u2-rr4-4-desktop-focus-recovery; PR, NOT merged, NOT deployed).**
+Decision status (2026-11-04, Owner, with Atlas disposition): RD-1 changed from R-A (external tooling, INV-ORD and counted
+P0 before any P1 code; Owner-declared earlier on 2026-11-04, kept here as history) to **R-C**; the U2-WP2 P0 investigation
+is closed administratively as **P0-X** (no counted P0 result is claimed); WP2-D4 = **D4-u** (unified recovery);
+WP2-D9 = the limited `bindSessionShell` additions below. R4-4 stays open until UI-DEV-03 passes acceptance.
+`js/ui/session-workspace-view.js`: on a mobile -> desktop change the hidden menu button's focus (still on it, or just lost
+to body with `SessionShellDrawer.hamLast` set and no pointer press since) moves to the current nav item, else `#main`;
+triggers are the end of the desktop `change` handler and one frame after the button's focusout with no new target; each
+attempt is checked against `document.activeElement`; no `blur()`, retry, State or storage. No CSS change;
+`shell-render.js` (LOCAL) unchanged. Package digest `b640785b…`; verifier 3022 (six additive UI-DEV-03 checks); the shell
+harness models orders A / B / S (simulated) with R1-R12 and M13-M16. Browser checks are Chrome only (RR-3) and are UI
+acceptance checks, not P0 evidence. Gate D and Gate R stay on HOLD.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
