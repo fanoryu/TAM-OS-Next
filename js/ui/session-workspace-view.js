@@ -615,7 +615,9 @@ function sessionShellHTML(model, active, busy, content){
 // re-rendered on every paint, so its open state is baked into the markup and re-applied.
 // `held`: the closed drawer was left focusable because focus could not leave it (see
 // sessionShellRescueFocus); the sidebar's focusout re-applies the state once focus is out.
-const SessionShellDrawer = { open: false, ret: null, mq: null, held: false };
+// `hamLast` (UI-DEV-03, R4-4): the menu button was the last element to receive focus, with no
+// pointer press since (document capture listeners, bound once in bindSessionShell).
+const SessionShellDrawer = { open: false, ret: null, mq: null, held: false, hamLast: false };
 
 function sessionShellApplyDrawer(app){
   const drawer = sidebarIsDrawerMode();
@@ -656,6 +658,28 @@ function sessionShellRescueFocus(app, sidebar){
   return false;
 }
 
+// UI-DEV-03 (R4-4, Owner D4-u): a mobile -> desktop change hides the menu button. If it holds
+// focus (still, or just lost to body with hamLast set), focus moves to the current nav item, else
+// #main (tabindex -1: no new tab stop). Only at desktop width, in a focused document, for the
+// current, connected, hidden menu button; each attempt is checked against document.activeElement
+// (no blur(), no retry). Idempotent: once focus is visible nothing matches. True: focus moved.
+function sessionShellDesktopFocus(root){
+  if(!root || typeof root.querySelector !== 'function' || sidebarIsDrawerMode()) return false;
+  if(typeof document.hasFocus !== 'function' || !document.hasFocus()) return false;
+  const ham = root.querySelector('#navHamburger');
+  if(!ham || ham.isConnected === false || typeof ham.getClientRects !== 'function' || ham.getClientRects().length !== 0) return false;
+  const a = document.activeElement;
+  if(!(a === ham || ((!a || a === document.body) && SessionShellDrawer.hamLast))) return false;
+  const targets = [root.querySelector('#sidebar [aria-current="page"]'), root.querySelector('#main')];
+  for(let i = 0; i < targets.length; i++){
+    const t = targets[i];
+    if(!t || typeof t.focus !== 'function' || t.isConnected === false) continue;
+    t.focus();
+    if(document.activeElement === t){ SessionShellDrawer.hamLast = false; return true; }
+  }
+  return false;
+}
+
 function sessionShellOpenDrawer(app){
   if(!sidebarIsDrawerMode()) return;
   SessionShellDrawer.ret = document.activeElement;
@@ -688,6 +712,12 @@ function bindSessionShell(app, model){
   });
   const ham = app.querySelector('#navHamburger');
   if(ham) ham.addEventListener('click', function(e){ e.preventDefault(); if(SessionShellDrawer.open) sessionShellCloseDrawer(app, true); else sessionShellOpenDrawer(app); });
+  // UI-DEV-03 (R4-4): focus dropped from the menu button with no new target (it may have been
+  // hidden by the breakpoint before the 'change' handler runs) is re-checked one frame later.
+  if(ham) ham.addEventListener('focusout', function(e){
+    if((e && e.relatedTarget) || typeof requestAnimationFrame !== 'function') return;
+    requestAnimationFrame(function(){ sessionShellDesktopFocus(document.getElementById('app')); });
+  });
   const back = app.querySelector('#sidebarBackdrop');
   if(back) back.addEventListener('click', function(){ sessionShellCloseDrawer(app, true); });
   const sidebar = app.querySelector('#sidebar');
@@ -719,14 +749,25 @@ function bindSessionShell(app, model){
       const root = document.getElementById('app');
       if(!root || !root.querySelector('#sidebar')) return;
       if(!sidebarIsDrawerMode() && SessionShellDrawer.open) sessionShellCloseDrawer(root, false); else sessionShellApplyDrawer(root);
+      if(!sidebarIsDrawerMode()) sessionShellDesktopFocus(root);   // UI-DEV-03 (R4-4): mobile -> desktop
     };
     if(SessionShellDrawer.mq.addEventListener) SessionShellDrawer.mq.addEventListener('change', onMq); else if(SessionShellDrawer.mq.addListener) SessionShellDrawer.mq.addListener(onMq);
+    // UI-DEV-03 (R4-4): hamLast is true only while the menu button was the last to take focus;
+    // any other focus or any pointer press clears it (focusout alone does not).
+    if(typeof document.addEventListener === 'function'){
+      document.addEventListener('focusin', function(e){
+        const r = document.getElementById('app');
+        const h = r && typeof r.querySelector === 'function' ? r.querySelector('#navHamburger') : null;
+        SessionShellDrawer.hamLast = !!h && !!e && e.target === h;
+      }, true);
+      document.addEventListener('pointerdown', function(){ SessionShellDrawer.hamLast = false; }, true);
+    }
   }
   sessionShellApplyDrawer(app);
 }
 
 // Leaving the shell (any non-AUTHENTICATED view): no drawer stays open behind the auth views.
 function sessionShellReset(app){
-  SessionShellDrawer.open = false; SessionShellDrawer.ret = null; SessionShellDrawer.held = false;
+  SessionShellDrawer.open = false; SessionShellDrawer.ret = null; SessionShellDrawer.held = false; SessionShellDrawer.hamLast = false;
   if(app.classList) app.classList.remove('drawer-open');
 }

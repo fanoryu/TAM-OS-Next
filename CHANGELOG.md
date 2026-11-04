@@ -303,6 +303,13 @@
   schema, ACTIONS (**20**) or behaviour change.
 
 ### Fixed
+- **UI-DEV-03 — Keyboard focus is no longer lost when the window widens past the mobile layout (R4-4; SESSION; not
+  released, not deployed).** On a narrow screen a keyboard user can be on the menu button; when the window widens past
+  768px that button is hidden, and focus could be left on the hidden button or dropped to the page. Focus now moves to the
+  current navigation item (or, if that cannot take it, the main content), whichever order the browser hides the button
+  in. Focus that is anywhere else, follows a mouse or touch press, or belongs to an inactive window is never moved
+  (`js/ui/session-workspace-view.js` only; no CSS change; the LOCAL shell is unchanged). No event, API, storage, schema or
+  financial change; `APP_VERSION` and `SCHEMA_VERSION` unchanged.
 - **UI-DEV-02 — Payroll detail buttons no longer run off the left edge on narrow screens (RR-4; SESSION; not released,
   not deployed).** On a CEO payroll plan, the row with Back to list and the plan's actions (Commit payroll, Return to draft,
   Cancel plan …) was right-aligned and could not wrap, so at 320px Back to list was pushed off the left edge where it could

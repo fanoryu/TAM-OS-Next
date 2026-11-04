@@ -8044,10 +8044,13 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // UI-DEV-02 / RR-4 authorized revision (Owner-approved UI-DEV-02): no module and no file added;
   // js/ui/session-payroll-view.js changed (the CEO plan-detail and Supplemental-detail action rows use
   // the wrapping .head-controls row). Was: 3738fce6cf2d1b260904d5754d5ea60accd3a5649f794a351f01551dfb703f25 (U2-WP1b).
+  // UI-DEV-03 / R4-4 authorized revision (Owner RD-1 = R-C, WP2-D4 = D4-u, WP2-D9): no module and no
+  // file added; js/ui/session-workspace-view.js changed (mobile -> desktop focus recovery). Was:
+  // 5ce6716e9525109f193e70fa200296f245c71c993e9888727d0eec6acb705895 (RR-4).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === '5ce6716e9525109f193e70fa200296f245c71c993e9888727d0eec6acb705895',
-    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4: 88 modules; the package holds 102 files (the selector module removed) at the RR-4 digest 5ce6716e… (3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === 'b640785b35054d19f863b31a4a11babfae9d59e89b417cb382c18fcecdb38aec',
+    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4: 88 modules; the package holds 102 files (the selector module removed) at the R4-4 digest b640785b… (5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
@@ -8188,6 +8191,43 @@ console.log('== UI-DEV-02 — RR-4 PAYROLL DETAIL ACTION ROWS ==');
     const f = fn(n); return f.split(ROW).length === 2 && !/auth-actions/.test(f.split('const intentState')[0]) && /back \+ reload \+ actions \+ '<\/div>'/.test(f);
   });
   check(ok, 'UI-DEV-02 (RR-4): the CEO plan-detail and Supplemental-detail action rows open a wrapping .head-controls row (Back to list, then Reload and the matrix actions), not the right-aligned .auth-actions row');
+}
+
+// ===== UI-DEV-03 — R4-4 DESKTOP FOCUS RECOVERY (Owner RD-1 = R-C, P0-X; WP2-D4 = D4-u; WP2-D9) =====
+// A mobile -> desktop change hides the SESSION menu button. sessionShellDesktopFocus() moves focus
+// that is (or was just) on it to the current nav item, else #main; triggers: the 'change' handler
+// and a one-frame re-check after the button's focusout with no new target. hamLast is memory only.
+// Behaviour (orders A / B / S, R1-R12, M13-M16): tools/verify-session-shell-runtime.js.
+console.log('== UI-DEV-03 — R4-4 DESKTOP FOCUS RECOVERY ==');
+{
+  const code = (t) => stripComments(t).replace(/\s\/\/\s.*$/gm, '');
+  const ws = code(read(path.join(root, 'js', 'ui', 'session-workspace-view.js')));
+  const fn = (ws.match(/function sessionShellDesktopFocus\(root\)\{[\s\S]*?\n\}/) || [''])[0];
+  check(/const SessionShellDrawer = \{ open: false, ret: null, mq: null, held: false, hamLast: false \};/.test(ws)
+    && /function sessionShellReset\(app\)\{\s*SessionShellDrawer\.open = false; SessionShellDrawer\.ret = null; SessionShellDrawer\.held = false; SessionShellDrawer\.hamLast = false;/.test(ws),
+    'UI-DEV-03: SessionShellDrawer carries hamLast (memory only) and sessionShellReset clears it after the U1 fields');
+  check(!!fn && /if\(!root \|\| typeof root\.querySelector !== 'function' \|\| sidebarIsDrawerMode\(\)\) return false;/.test(fn)
+    && /if\(typeof document\.hasFocus !== 'function' \|\| !document\.hasFocus\(\)\) return false;/.test(fn)
+    && /if\(!ham \|\| ham\.isConnected === false \|\| typeof ham\.getClientRects !== 'function' \|\| ham\.getClientRects\(\)\.length !== 0\) return false;/.test(fn)
+    && /if\(!\(a === ham \|\| \(\(!a \|\| a === document\.body\) && SessionShellDrawer\.hamLast\)\)\) return false;/.test(fn),
+    'UI-DEV-03: the recovery acts only at desktop width, in a focused document, for the current connected hidden menu button, with focus on it or on body after it (hamLast)');
+  check(/const targets = \[root\.querySelector\('#sidebar \[aria-current="page"\]'\), root\.querySelector\('#main'\)\];/.test(fn)
+    && /t\.focus\(\);\s*if\(document\.activeElement === t\)\{ SessionShellDrawer\.hamLast = false; return true; \}/.test(fn) && /\n  return false;\n\}$/.test(fn)
+    && !/\bState\b|localStorage|sessionStorage|fetch|blur\(|while\s*\(|setTimeout|setInterval/.test(fn),
+    'UI-DEV-03: targets are the current nav item, then #main; every attempt verified against activeElement; no blur(), loop, timer, State or storage');
+  check((ws.match(/sessionShellDesktopFocus\(/g) || []).length === 3
+    && /if\(!sidebarIsDrawerMode\(\)\) sessionShellDesktopFocus\(root\);\s*\};/.test(ws)
+    && /ham\.addEventListener\('focusout', function\(e\)\{\s*if\(\(e && e\.relatedTarget\) \|\| typeof requestAnimationFrame !== 'function'\) return;\s*requestAnimationFrame\(function\(\)\{ sessionShellDesktopFocus\(document\.getElementById\('app'\)\); \}\);\s*\}\);/.test(ws),
+    'UI-DEV-03: exactly two triggers: the end of the desktop change handler, and one frame after the menu button loses focus with no new target');
+  const once = (ws.match(/if\(!SessionShellDrawer\.mq && typeof matchMedia === 'function'\)\{[\s\S]*?\n  \}\n/) || [''])[0];
+  check(/document\.addEventListener\('focusin', function\(e\)\{[\s\S]*?SessionShellDrawer\.hamLast = !!h && !!e && e\.target === h;\s*\}, true\);/.test(once)
+    && /document\.addEventListener\('pointerdown', function\(\)\{ SessionShellDrawer\.hamLast = false; \}, true\);/.test(once)
+    && (ws.match(/document\.addEventListener\(/g) || []).length === 2 && !/focusout[^\n]*hamLast = false/.test(ws),
+    'UI-DEV-03: hamLast is set by focusin on the menu button and cleared by any other focusin or a pointer press (capture, bound once per page); focusout alone never clears it');
+  const h = read(path.join(root, 'tools', 'verify-session-shell-runtime.js'));
+  check(['R1', 'R2', 'R2b', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12'].every((r) => h.indexOf("'WR " + r + ' ') >= 0 || h.indexOf("'WR " + r + ":") >= 0 || h.indexOf("'R" + r.slice(1) + ' (') >= 0)
+    && ['M13 ', 'M13b ', 'M13c ', 'M14 ', 'M15 ', 'M16 '].every((m) => h.indexOf("['" + m) >= 0) && /rt\.toDesktop = \(mode, noChange\)/.test(h),
+    'UI-DEV-03: the shell harness carries the A / B / S desktop orders, cases R1-R12 and seeded defects M13-M16');
 }
 
 console.log('');
