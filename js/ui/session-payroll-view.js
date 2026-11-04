@@ -485,7 +485,7 @@ function sessionPayrollPlansHTML(w, dis){
 function sessionPayrollDetailHTML(principal, w){
   const busy = sessionPayrollBusy(w);
   const dis = busy ? ' disabled' : '';
-  const back = '<div class="auth-actions"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';
+  const back = '<div class="head-controls"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';
   if(w.detailStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'detail'){
     const retry = (w.error.kind === 'DENIED' || w.error.kind === 'NOT_FOUND') ? '' : '<button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button>';
     return sessionPayrollMutationHTML(w) + sessionPayrollErrorHTML(w.error) + back + retry + '</div>';
@@ -689,7 +689,7 @@ function sessionSupplementalLinesHTML(d, rows){
 function sessionSupplementalDetailHTML(principal, w){
   const busy = sessionPayrollBusy(w);
   const dis = busy ? ' disabled' : '';
-  const back = '<div class="auth-actions"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';
+  const back = '<div class="head-controls"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';
   if(w.suppDetailStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'suppDetail'){
     const retry = (w.error.kind === 'DENIED' || w.error.kind === 'NOT_FOUND') ? '' : '<button class="btn btn-accent" type="button" id="swpRetryBtn"' + dis + '>Retry</button>';
     return sessionSupplementalDetailMessageHTML(w) + sessionPayrollErrorHTML(w.error) + back + retry + '</div>';

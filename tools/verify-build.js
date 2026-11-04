@@ -8041,10 +8041,13 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // U2-WP1b authorized revision (Owner WP1b-D3): no module and no file added; comment-only edits to
   // js/core/auth-boot.js, js/ui/session-workspace-view.js and js/ui/shell-render.js. Was:
   // be06880d10c033b7b60146e9206ee3b1425c9ab454f88cc0df9e08b0c73f97dd (U2-WP1).
+  // UI-DEV-02 / RR-4 authorized revision (Owner-approved UI-DEV-02): no module and no file added;
+  // js/ui/session-payroll-view.js changed (the CEO plan-detail and Supplemental-detail action rows use
+  // the wrapping .head-controls row). Was: 3738fce6cf2d1b260904d5754d5ea60accd3a5649f794a351f01551dfb703f25 (U2-WP1b).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === '3738fce6cf2d1b260904d5754d5ea60accd3a5649f794a351f01551dfb703f25',
-    'AFI-5b/U1/U2-WP1/U2-WP1b: 88 modules; the package holds 102 files (the selector module removed) at the U2-WP1b digest 3738fce6… (be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === '5ce6716e9525109f193e70fa200296f245c71c993e9888727d0eec6acb705895',
+    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4: 88 modules; the package holds 102 files (the selector module removed) at the RR-4 digest 5ce6716e… (3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
@@ -8169,6 +8172,22 @@ console.log('== U2-WP1b — U1 / U2-WP1 MERGE-STATUS RECONCILIATION ==');
   const w4 = entry(logW, '- **U1 — SESSION graduated shell', '\n- **', false);
   check(w4 !== null && w4.includes('PR #70') && /not deployed/i.test(w4) && !/local development candidate|not committed/i.test(w4),
     'U2-WP1b (W4): the CHANGELOG U1 entry records PR #70 and not deployed — never a local, uncommitted candidate');
+}
+
+// ===== UI-DEV-02 — RR-4 PAYROLL DETAIL ACTION ROWS (Owner-approved UI-DEV-02) =====
+// The CEO payroll plan-detail and Supplemental-detail action rows (Back to list + the matrix actions)
+// were right-aligned, non-wrapping .auth-actions rows that pushed Back to list off the left edge at
+// 320px. Both now use the existing wrapping .head-controls row (left-aligned), as the month bar does.
+// No CSS change; ids, labels and order unchanged.
+console.log('== UI-DEV-02 — RR-4 PAYROLL DETAIL ACTION ROWS ==');
+{
+  const v = stripComments(read(path.join(root, 'js', 'ui', 'session-payroll-view.js')));
+  const fn = (name) => (v.match(new RegExp('function ' + name + '\\(principal, w\\)\\{[\\s\\S]*?\\n\\}')) || [''])[0];
+  const ROW = `const back = '<div class="head-controls"><button class="btn" type="button" id="swpBackBtn"' + dis + '>Back to list</button>';`;
+  const ok = ['sessionPayrollDetailHTML', 'sessionSupplementalDetailHTML'].every((n) => {
+    const f = fn(n); return f.split(ROW).length === 2 && !/auth-actions/.test(f.split('const intentState')[0]) && /back \+ reload \+ actions \+ '<\/div>'/.test(f);
+  });
+  check(ok, 'UI-DEV-02 (RR-4): the CEO plan-detail and Supplemental-detail action rows open a wrapping .head-controls row (Back to list, then Reload and the matrix actions), not the right-aligned .auth-actions row');
 }
 
 console.log('');
