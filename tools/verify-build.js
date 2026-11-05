@@ -5635,9 +5635,11 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
     // unchanged — every /api/ path is an exact, allowlisted literal; no account route.
     // AFI-4a3 authorized revision: plus the four BF-4a2 account routes. Was: reads + three Employee writes.
     && ((prodCode['core/employee-api.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/employee','/api/employee','/api/employees','/api/employees/archive','/api/employees/create','/api/employees/disable-account','/api/employees/enable-account','/api/employees/provision-account','/api/employees/reissue-activation','/api/employees/update'"
-    && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/login','/api/auth/logout'"
+    // WP-1 authorized revision (Owner WP-1 authorization): auth-boot.js also names the two BF-3B
+    // self-service routes, change-password and logout-all. Was: login and logout only.
+    && ((prodCode['core/auth-boot.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/change-password','/api/auth/login','/api/auth/logout','/api/auth/logout-all'"
     && ((prodCode['core/auth-flow.js'] || '').match(/'\/api\/[^']*'/g) || []).sort().join() === "'/api/auth/activate','/api/auth/forgot-password','/api/auth/reset-password'",
-    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1/AFI-4c1/AFI-4g: /api/ paths are named only by the session modules; audit-api.js names only the two BF-4g audit reads; auth-boot.js names only login/logout, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve), payroll-api.js only the nine BF-4c1/BF-4c2 Payroll routes and (AFI-4d) the nine BF-4d Supplemental routes');
+    'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4a2/AFI-4b1/AFI-4c1/AFI-4g: /api/ paths are named only by the session modules; audit-api.js names only the two BF-4g audit reads; auth-boot.js names only login/logout and (WP-1) change-password/logout-all, auth-flow.js only activate/forgot-password/reset-password, employee-api.js only the two Employee reads, the three Employee writes and the four account routes, overtime-api.js only the ten Overtime routes (BF-4b1 eight + BF-4b2 valuation, approve), payroll-api.js only the nine BF-4c1/BF-4c2 Payroll routes and (AFI-4d) the nine BF-4d Supplemental routes');
   // AFI-5b authorized revision (owner decisions D-AFI5-1..3, design Rev 1.2): the shipped mode
   // is SESSION and the identity has no LOCAL fixture provider; SESSION dispatch comes first and
   // never reads the test seam. Was: LocalIdentityProvider the default (AUTH_MODE LOCAL, D1).
@@ -5703,15 +5705,22 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
     check(!/\bconsole\s*\.|\bfetch\s*\(|XMLHttpRequest|\bState\b|setInterval/.test(c), 'AFI-2: ' + name + ' does not log, fetch directly, touch State or poll');
   });
   check(!/setTimeout|while\s*\(/.test(abCode), 'AFI-2: AuthBoot schedules nothing and has no loop (no automatic retry)');
-  check((abCode.match(/ApiClient\.request\(/g) || []).length === 3
+  // WP-1 authorized revision: plus exactly two direct, CSRF-bearing sends — change-password and
+  // logout-all — that are never replayed (pinned in WP-1 below). Was: three ApiClient calls.
+  check((abCode.match(/ApiClient\.request\(/g) || []).length === 5
+    && abCode.split("ApiClient.request('/api/auth/change-password', { method: 'POST', body: { currentPassword: currentPassword, newPassword: newPassword }, csrf: true })").length === 2
+    && abCode.split("ApiClient.request('/api/auth/logout-all', { method: 'POST', body: {}, csrf: true })").length === 2
     && /ApiClient\.request\('\/api\/auth\/login', \{ method: 'POST', body: \{ email: email, password: password \} \}\)/.test(abCode)
     && (abCode.match(/ApiClient\.request\(path, \{ method: 'POST', body: body, csrf: true \}\)/g) || []).length === 2
     && /authSessionMutation\('\/api\/auth\/logout', \{\}\)/.test(abCode),
-    'AFI-2: login is a CSRF-free POST; logout goes through the bounded recovery (one send, at most one replay), with CSRF');
+    'AFI-2/WP-1: login is a CSRF-free POST; logout goes through the bounded recovery (one send, at most one replay), with CSRF; change-password and logout-all are single CSRF sends');
   check(/if\(!samePrincipal\(principal, SessionIdentityProvider\.getCurrentUser\(\)\)\) return/.test(abCode)
     && /if\(CsrfHolder\.get\(\) === token\) return/.test(abCode) && /first\.kind !== API_RESULT_KINDS\.DENIED/.test(abCode),
     'AFI-2: a 403 is replayed only for the same principal with a changed CSRF token');
-  check(/const me = await SessionIdentityProvider\.refresh\(\);/.test(abCode) && !/res\.data/.test(abCode),
+  // WP-1 authorized revision: the property is scoped to signIn(), because the change-password and
+  // logout-all answers ARE read (strictly; WP-1 below). Was: no `res.data` anywhere in auth-boot.js.
+  const signInFn = (abCode.match(/async signIn\(email, password\)\{[\s\S]*?\n    \},/) || [''])[0];
+  check(/const me = await SessionIdentityProvider\.refresh\(\);/.test(signInFn) && !/\.data\b/.test(signInFn),
     'AFI-2: identity after login comes from /me; the login response body is never read');
   // The views.
   check(/type="email" autocomplete="username"/.test(avCode) && /type="password" autocomplete="current-password"/.test(avCode)
@@ -5722,7 +5731,9 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
   // sign-in literals only. The property is unchanged — no other `password` remains, so
   // the only password values are the submit-time locals.
   check(/escapeHtml\(/.test(avCode) && !/password/.test(avCode.replace(/authPassword|type="password"|current-password|name="password"|const password = passEl \? passEl\.value : '';|AuthBoot\.signIn\(email, password\)|'Enter your email address and password\.'|Email or password|passEl/g, '')
-    .replace(/name="(confirm-)?new-password"|autocomplete="new-password"|Forgot password\?|missing_password|Enter the new password in both fields|The two passwords do not match|That password cannot be used|Very long passwords|a common password|Choose a new password|Set a new password|Set the password|Set password|Reset your password|Your password (was changed|is set)|with the new password|If you just set a new password|(Confirm new|New) password<\/label>/g, '')),
+    .replace(/name="(confirm-)?new-password"|autocomplete="new-password"|Forgot password\?|missing_password|Enter the new password in both fields|The two passwords do not match|That password cannot be used|Very long passwords|a common password|Choose a new password|Set a new password|Set the password|Set password|Reset your password|Your password (was changed|is set)|with the new password|If you just set a new password|(Confirm new|New) password<\/label>/g, '')
+    // WP-1 authorized revision: plus the fixed "password_unconfirmed" sign-in message. Was: the AFI-3 list.
+    .replace(/password_unconfirmed|whether your password was changed/g, '')),
     'AFI-2/AFI-3: auth-view.js escapes dynamic values and keeps passwords only as submit-time locals');
   // The test-only stub.
   const stubPath = path.join(root, 'tools', 'serve-auth-stub.js');
@@ -8051,10 +8062,14 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // js/ui/session-audit-view.js and js/ui/session-overtime-view.js changed (the Audit and Overtime month
   // bars use the wrapping .head-controls row). Prior pin was
   // b640785b35054d19f863b31a4a11babfae9d59e89b417cb382c18fcecdb38aec (R4-4).
+  // WP-1 authorized revision (Owner WP-1 authorization: SESSION Account security): no module and no file
+  // added; js/core/auth-boot.js, js/ui/auth-view.js and js/ui/session-workspace-view.js changed (Change
+  // password and Sign out all devices). Prior pin was
+  // 568e654d406b75ec3197ee0deacaf72253d3056e1dcb455357226d951c4d92d7 (D-1).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === '568e654d406b75ec3197ee0deacaf72253d3056e1dcb455357226d951c4d92d7',
-    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1: 88 modules; the package holds 102 files (the selector module removed) at the D-1 digest 568e654d… (b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === 'f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430',
+    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1: 88 modules; the package holds 102 files (the selector module removed) at the WP-1 digest f6fa99b1… (568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
@@ -8253,6 +8268,65 @@ console.log('== UI-DEV-03 — R4-4 DESKTOP FOCUS RECOVERY ==');
   check(['R1', 'R2', 'R2b', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10', 'R11', 'R12'].every((r) => h.indexOf("'WR " + r + ' ') >= 0 || h.indexOf("'WR " + r + ":") >= 0 || h.indexOf("'R" + r.slice(1) + ' (') >= 0)
     && ['M13 ', 'M13b ', 'M13c ', 'M14 ', 'M15 ', 'M16 '].every((m) => h.indexOf("['" + m) >= 0) && /rt\.toDesktop = \(mode, noChange\)/.test(h),
     'UI-DEV-03: the shell harness carries the A / B / S desktop orders, cases R1-R12 and seeded defects M13-M16');
+}
+
+// ===== WP-1 — SESSION ACCOUNT SECURITY (Owner WP-1 authorization: Change password, Sign out all devices) =====
+// STRUCTURE only; behaviour (both roles, every refusal and uncertain outcome, the M1-M6 mutation
+// register) is proven by tools/verify-auth-boot-runtime.js. Pins: each request is sent once through
+// ApiClient with CSRF and never replayed; the confirmation never leaves AuthBoot; a change is accepted
+// only when the rotated session is confirmed by /me with the answer's CSRF token; an uncertain change
+// locks Change password for the session; logout-all is "done" only on the exact { loggedOut: true }; the
+// panel is reset by every state change; the three password fields are cleared on submit.
+console.log('== WP-1 — SESSION ACCOUNT SECURITY ==');
+{
+  const code = (t) => stripComments(t).replace(/\s\/\/\s.*$/gm, '');
+  const ab = code(read(path.join(root, 'js', 'core', 'auth-boot.js')));
+  const ws = code(read(path.join(root, 'js', 'ui', 'session-workspace-view.js')));
+  const av = code(read(path.join(root, 'js', 'ui', 'auth-view.js')));
+  const changeFn = (ab.match(/async changePassword\(currentPassword, newPassword, confirmPassword\)\{[\s\S]*?\n    \},/) || [''])[0];
+  const allFn = (ab.match(/async signOutAll\(\)\{[\s\S]*?\n    \},/) || [''])[0];
+  const changedFn = (ab.match(/async function passwordChanged\(principal, res\)\{[\s\S]*?\n  \}/) || [''])[0];
+  const uncertainFn = (ab.match(/async function passwordUncertain\(principal, res\)\{[\s\S]*?\n  \}/) || [''])[0];
+  check(!!changeFn && changeFn.split('ApiClient.request(').length === 2 && !/authSessionMutation/.test(ab.replace(/const authSessionMutation = async function\(path, body\)\{[\s\S]*?\n\};/, '').replace(/authSessionMutation\('\/api\/auth\/logout', \{\}\)/, ''))
+    && changeFn.indexOf('if(newPassword !== confirmPassword) return accountFailed(\'pw_mismatch\');') !== -1
+    && changeFn.indexOf('if(newPassword !== confirmPassword)') < changeFn.indexOf('ApiClient.request(') && !/confirmPassword[^\n]*ApiClient|body: \{[^}]*confirm/.test(changeFn),
+    'WP-1: change-password is one direct ApiClient send (no authSessionMutation, no replay); the confirmation is compared before it and never sent');
+  check(/if\(res\.kind === API_RESULT_KINDS\.UNAVAILABLE \|\| res\.kind === API_RESULT_KINDS\.SERVER_ERROR\) return passwordUncertain\(principal, res\);/.test(changeFn)
+    && /if\(res\.ok\) return passwordChanged\(principal, res\);/.test(changeFn)
+    && !!uncertainFn && /account\.locked = true;/.test(uncertainFn) && uncertainFn.split('ApiClient.request(').length === 1
+    && /if\(panel === 'password' && account\.locked\) return;/.test(ab) && /account\.panel !== 'password' \|\| account\.locked\) return;/.test(changeFn),
+    'WP-1: an uncertain change (503, network, timeout, 500, malformed 200) is never resent and locks Change password for the session');
+  check(!!changedFn && /const rotated = mapSessionProjection\(res\.data\);/.test(changedFn)
+    && /if\(!rotated \|\| !samePrincipal\(principal, rotated\.principal\)\) return passwordUncertain\(principal, res\);/.test(changedFn)
+    && changedFn.indexOf('CsrfHolder.replace(rotated.csrfToken);') !== -1 && changedFn.indexOf('CsrfHolder.replace(rotated.csrfToken);') < changedFn.indexOf('await SessionIdentityProvider.refresh();')
+    && /\|\| CsrfHolder\.get\(\) !== rotated\.csrfToken\)\{\s*return go\(AUTH_STATES\.UNAVAILABLE, 'unavailable'/.test(changedFn),
+    'WP-1: a 200 is accepted only as the exact projection of the same principal; its CSRF token is installed and /me must confirm the principal and that token, else fail closed');
+  check(!!allFn && allFn.split('ApiClient.request(').length === 2
+    && /Object\.keys\(data\)\.length === 1 && data\.loggedOut === true\)\{\s*return go\(AUTH_STATES\.SIGNED_OUT, 'signed_out_all'\);/.test(allFn)
+    && ab.split("'signed_out_all'").length === 2,
+    'WP-1: logout-all is one direct send, reported done ("signed_out_all") only on a 200 that is exactly { loggedOut: true }');
+  check(/function go\(next, msg, extra\)\{\s*account = freshAccount\(\);/.test(ab) && /if\(state !== AUTH_STATES\.AUTHENTICATED \|\| busy \|\| account\.busy\) return;\s*busy = true; paint\(\);\s*const out = await authSessionMutation\('\/api\/auth\/logout', \{\}\);/.test(ab)
+    && !/password/i.test((ab.match(/account: Object\.freeze\(\{[^}]*\}\)/) || ['x password'])[0]),
+    'WP-1: every state change resets the panel; Sign out waits for an Account security request; the view model carries no password');
+  const formFn = (ws.match(/function sessionAccountSecurityHTML\(a\)\{[\s\S]*?\n\}/) || [''])[0];
+  const bindFn = (ws.match(/function bindSessionAccountSecurity\(app\)\{[\s\S]*?\n\}/) || [''])[0];
+  check((formFn.match(/type="password"/g) || []).length === 1 && /field\('authAcctCurrent', 'Current password', 'current-password'\)/.test(formFn)
+    && /field\('authAcctNew', 'New password', 'new-password'/.test(formFn) && /field\('authAcctConfirm', 'Confirm new password', 'new-password'\)/.test(formFn)
+    && !/value="/.test(formFn) && /method="post" novalidate/.test(formFn)
+    && bindFn.split("const v = el ? el.value : ''; if(el) el.value = ''; return v;").length === 2 && /e\.preventDefault\(\);/.test(bindFn)
+    && /AuthBoot\.changePassword\(current, next, again\);/.test(bindFn),
+    'WP-1: three password inputs (current-password, new-password twice) rendered without a value, read once on submit and cleared at once; submit intercepted');
+  check(/'<div class="head-controls">' \+ sessionAccountOpenerHTML\(auth\)/.test(ws) && /id="authAccountBtn" type="button" aria-controls="authAcctPanel" aria-expanded="/.test(ws)
+    && /bindSessionAccountSecurity\(app\);/.test(ws) && !/\b(State|localStorage|sessionStorage)\b/.test(formFn + bindFn)
+    && ['signed_out_all', 'signout_all_unconfirmed', 'password_unconfirmed'].every((k) => av.split(k + ': ').length === 2),
+    'WP-1: "Account security" sits beside Sign out in a wrapping .head-controls row, in every section; no storage; the three sign-in outcome messages are fixed keys');
+  const h = read(path.join(root, 'tools', 'verify-auth-boot-runtime.js'));
+  check(['M1 ', 'M2 ', 'M3 ', 'M4 ', 'M5 ', 'M6 '].every((m) => h.split("['" + m).length === 2) && h.split('/* ---------- WP-1. Account security').length === 2,
+    'WP-1: the auth-boot harness carries the WP-1 section and seeded defects M1-M6');
+  const stub = read(path.join(root, 'tools', 'serve-auth-stub.js'));
+  check(stub.split("if((p === '/api/auth/change-password' || p === '/api/auth/logout-all') && req.method === 'POST'){").length === 2
+    && stub.split("if(req.headers['x-csrf-token'] !== session.csrf) return api(res, 403, 'forbidden');").length >= 2,
+    'WP-1: the test-only auth stub models change-password and logout-all (session, CSRF, exact keys)');
 }
 
 console.log('');

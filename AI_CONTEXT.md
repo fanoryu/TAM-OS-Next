@@ -656,6 +656,26 @@ measured on the baseline in its worst case (four buttons on a Draft, CEO and Emp
 (was `b640785b…`); verifier 3024 (two additive D-1 checks, which fail on the baseline sources); the 44 runtime harnesses
 are unchanged. Browser checks are Chrome 157 only on the loopback auth stub (RR-3). Gate D and Gate R stay on HOLD; not
 released, not deployed.
+
+**WP-1 — SESSION Account security (feature/session-account-security; draft PR, NOT merged, NOT deployed).** Owner
+direction 2026-11-05 (Core SESSION first; first deployment staging-only with fabricated data) and Owner WP-1
+authorization (inline panel near Sign out, no new route; reproducible digest and manifest update). The CEO and the
+Employee get **Account security** beside Sign out in every SESSION section: Change password (`POST
+/api/auth/change-password`) and Sign out all devices (`POST /api/auth/logout-all`), the BF-3B routes that had no UI.
+`js/core/auth-boot.js` owns the memory-only panel state; each request is sent once with CSRF and never replayed (not
+even after a 403); a change is accepted only when the 200 is the exact projection of the same principal and `/me` under
+the rotated cookie confirms that principal and the answer's CSRF token; an uncertain change is never resent and locks
+Change password for the session; logout-all is "done" only on the exact `{ loggedOut: true }`; the three password fields
+are cleared on submit. `js/ui/session-workspace-view.js` renders it (existing classes, wrapping `.head-controls`);
+`js/ui/auth-view.js` adds three sign-in messages; the test-only `tools/serve-auth-stub.js` models both routes. No CSS,
+backend, migration, module, Action (21) or storage change; golden master unchanged. Package digest `f6fa99b1…` (was
+`568e654d…`); verifier 3033 (nine additive WP-1 checks; four existing checks revised as WP-1 authorized revisions: the
+auth-boot `/api/` path allowlist, its `ApiClient` call count, the login-body rule scoped to `signIn()`, and one
+auth-view password literal); `tools/verify-auth-boot-runtime.js` 151 → 220 checks with a six-defect mutation register;
+the other 43 runtime harnesses unchanged. A disposable real-backend loopback check (PHP 8.3.36 + MariaDB 10.11.19,
+fabricated data; Chrome 157 headless) passed 68/68: the rotated session and CSRF contract, revocation of the other
+device, Employee isolation, logout-all's exact answer, refusals, and uncertain outcomes injected with CDP. It does not
+satisfy SDR-0002 §22 item 8. Gate D and Gate R stay on HOLD.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
