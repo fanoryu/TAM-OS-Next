@@ -657,6 +657,11 @@ measured on the baseline in its worst case (four buttons on a Draft, CEO and Emp
 are unchanged. Browser checks are Chrome 157 only on the loopback auth stub (RR-3). Gate D and Gate R stay on HOLD; not
 released, not deployed.
 
+*Status update (supersedes "PR, NOT merged" above; entry kept as written):* merged into `main` via PR #76 on
+2026-11-05, merge commit `5aa091237b385802f8eea2200d3ce5c08957aaa9`; post-merge CI green (verifier 3024). WP-E2E-2
+(below) re-ran the UI-15 Audit and Overtime cells at 320px and 375px against the real backend: all pass. Not released,
+not deployed.
+
 **WP-1 — SESSION Account security (feature/session-account-security; draft PR, NOT merged, NOT deployed).** Owner
 direction 2026-11-05 (Core SESSION first; first deployment staging-only with fabricated data) and Owner WP-1
 authorization (inline panel near Sign out, no new route; reproducible digest and manifest update). The CEO and the
@@ -676,6 +681,46 @@ the other 43 runtime harnesses unchanged. A disposable real-backend loopback che
 fabricated data; Chrome 157 headless) passed 68/68: the rotated session and CSRF contract, revocation of the other
 device, Employee isolation, logout-all's exact answer, refusals, and uncertain outcomes injected with CDP. It does not
 satisfy SDR-0002 §22 item 8. Gate D and Gate R stay on HOLD.
+
+*Status update (supersedes "draft PR, NOT merged" above; entry kept as written):* merged into `main` via PR #77 on
+2026-11-05 (authorized head `f2cbd2f9`), merge commit `2a602348110645b7f3c1ce1c4726b68ea9dde46b`; post-merge CI green.
+The four revised verifier assertions (R1–R4) were accepted by the Owner on recorded negative-control evidence (each
+still fails on a seeded defect). Not released, not deployed.
+
+**WP-2 — Backend deployment readiness (merged via PR #78; documentation and tooling only; NOT deployed).** Owner WP-2
+authorization 2026-11-05 (runbook, configuration design, static-header implementation and tests; no host change).
+[`docs/BACKEND-DEPLOYMENT-RUNBOOK.md`](docs/BACKEND-DEPLOYMENT-RUNBOOK.md) is the governed staging-first procedure
+(file placement, configuration and secrets, PHP/MariaDB evidence, migrations and first-CEO provisioning without assuming
+SSH, header probe HP-1…HP-7, staging rollback, the requirements that stay mandatory before production);
+`tools/hostinger-htaccess.js` renders the document-root `.htaccess` from `tools/package-headers.js` (`/api/*` excluded,
+no `<IfModule>`, HSTS only with `--production`), pinned by six additive verifier checks. Pre-merge finding F-1 was fixed
+in the PR (runbook §7.1, docs only): with `env = production` staging backups are labelled production, so separate
+staging and production key pairs, recorded fingerprints, a source/target check before every restore, and never
+restoring a staging backup into production are mandatory; the backup and restore code is unchanged. `main` was merged
+into the branch with a merge commit (no rebase; CHANGELOG kept both entries). Merged into `main` on 2026-11-05 (head
+`17756f77`), merge commit `8ef3d6be02cd6d1bb17c8efd055770408a75c49e`; post-merge CI green; verifier 3039; package digest
+`f6fa99b1…` unchanged. **F-2 is pending host verification:** that LiteSpeed applies the `/api/*` exclusion is proven
+only by HP-3 on the staging host. Owner decisions OD-W2-1…3 stay open. No host was accessed. Not deployed.
+
+**WP-E2E-2 — Core SESSION real-backend regression (accepted by the Owner as completed local engineering validation;
+not a release or deployment authorization).** Run on `main` @ `8ef3d6be` on 2026-11-05: a disposable loopback
+PHP 8.3.36 + MariaDB 10.11.19 stack, fabricated data only, the package built from `git archive` (manifest
+byte-identical, verifier 3039), headless Chrome 157. **282/282 checks PASS**: the WP-E2E-1 domain suite re-run (214:
+authentication, Employees, Overtime, Payroll, Supplemental, Finance posting, Record payment and Audit with real database
+writes, authorization and cross-company refusals, lost-network outcomes, responsive 320–1280px) and the WP-1
+account-security suite (68: session rotation, CSRF replacement, revocation, logout-all, uncertain outcomes). PHP backend
+suite **901 passed, 0 failed** (database suite ran, 431). Financial totals identical to WP-E2E-1; no duplicate posting,
+execution or event. No product defect; three superseded records (P2–P4) were a test-environment defect, recorded with
+cause. WP-E2E-1 (`35d2d2eb`, 208/214, the six failures being D-1) stands unchanged as history. Limitations: Chrome
+headless only (RR-3 / F-4 open); loopback with the PHP built-in server and `env = development`, not Hostinger (F-2 and
+HP-1…HP-7 need the host); a SQL-seeded second company (the product bootstraps one); account security on a second fresh
+database; payment date and method set by value setter. It does **not** satisfy SDR-0002 §22 item 8. Evidence is
+archived outside the repository (`WP-E2E-2_Evidence.zip`, sha256 `aa2b3146…`).
+
+**Owner direction (2026-11-05).** Core SESSION first; the first deployment is **staging only, with fabricated data**,
+conditional on a staging-specific Gate D ruling and the SDR-0006 X1–X8 evidence; phased Full Parity afterwards. The
+sequence is recorded in [`docs/01-roadmap/Milestone_Roadmap.md`](docs/01-roadmap/Milestone_Roadmap.md); it authorizes no
+work, release or deployment by itself. `APP_VERSION` stays 2.11.0. Gate D and Gate R stay on HOLD.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 
