@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+Nothing yet beyond the 3.0.0 candidate below.
+
+## 3.0.0 — Core SESSION Foundation (release candidate)
+
+**MAJOR** (Owner decision 2026-11-05). Candidate only: it becomes a release through a separately authorized merge, tag
+and GitHub Release; v2.11.0 remains the latest published release. See [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
+### Breaking
+- Delivery: the single offline HTML file is replaced by the Distribution-1 deployment package
+  (`tam-os-v3.0.0-package.zip`), served over HTTPS under a strict Content-Security-Policy.
+- The application requires the same-origin PHP 8.3 + MariaDB backend (`server/`, migrations 0001–0035) and signed-in
+  accounts (`AUTH_MODE` SESSION); "Acting as" is removed.
+- Data stored in the browser by v2.x is not read or migrated. The LOCAL areas not yet migrated (dashboards, Contracts,
+  Finance Overview and Transactions, Import, Recurring, Cash Flow, Budget Center, Execution, Bank Accounts, Projects,
+  Vendors, Financial Calendar, Reports, Activity Log, Global Search, Settings and Data Portability) are not part of
+  v3.0.0; they follow in Phased Full Parity.
+
+### Notes
+- `APP_VERSION` 3.0.0, `APP_RELEASE_NAME` "Core SESSION Foundation"; `SCHEMA_VERSION` remains 6; `ACTIONS` 21.
+- The entries below were written while each change was in progress. Status words in them such as "draft PR", "not
+  merged" or "unreleased" are kept as recorded; every entry below is merged into `main`, and none is deployed.
+
 ### Added
 - **WP-2 — Backend deployment readiness (staging first; documentation and tooling only; nothing deployed).**
   [`docs/BACKEND-DEPLOYMENT-RUNBOOK.md`](docs/BACKEND-DEPLOYMENT-RUNBOOK.md) is the governed procedure for the first

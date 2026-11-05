@@ -1,15 +1,15 @@
 {
   "format": "tam-os-package/1",
-  "appVersion": "2.11.0",
-  "appReleaseName": "Identity Refresh",
+  "appVersion": "3.0.0",
+  "appReleaseName": "Core SESSION Foundation",
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430",
+  "packageDigest": "819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5",
   "zip": {
-    "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3123865,
-    "sha256": "324806c02bf24b3402afe60c9fab1637a579567c22e0371f1a265aafa439b416"
+    "name": "tam-os-v3.0.0-package.zip",
+    "bytes": 3124997,
+    "sha256": "3b6dcecb796fa74f88aca9b509f70b0a91ae74b8daf7cf6d24093afe00247d58"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 10018,
-      "sha256": "25cbd94dc8c174c13ca484ddd601edbd1c1e3ff80dd358fbaf1d60182390cbff"
+      "bytes": 10017,
+      "sha256": "f23ec7c3dae77da50ce637bcbe9480ad9c2b7ab8c6ea2837047c6ed9186c4e7e"
     },
     {
       "path": "js/analytics/compare.js",
@@ -129,8 +129,8 @@
     },
     {
       "path": "js/core/constants.js",
-      "bytes": 19207,
-      "sha256": "5fe57bc6244c7cd30585863e9fc33fe294ad134cb31f1f212533a1d24c36e784"
+      "bytes": 19213,
+      "sha256": "3372fa7c33bf6b8c297506fbfa72f4ad5df42784b39bf26918e6afce1a74300e"
     },
     {
       "path": "js/core/data-grid.js",
@@ -504,8 +504,8 @@
     },
     {
       "path": "js/ui/settings-about.js",
-      "bytes": 104733,
-      "sha256": "9ba02661d25b4fab4641c472c13b0526f9bc7b2b6a5288bf559450194a3f006f"
+      "bytes": 105860,
+      "sha256": "d3f956a4e3b048b2be12e71d48a883e3e00f52da879fa0843822632bbbe079b5"
     },
     {
       "path": "js/ui/shell-render.js",

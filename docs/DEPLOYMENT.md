@@ -29,6 +29,12 @@ deployment-specific configuration or secrets. A ready-to-use template for this l
 
 ## 2. Running the app
 
+> **v3.0.0 candidate (Core SESSION Foundation).** The release-preparation branch sets `APP_VERSION` 3.0.0: its artifact
+> is this deployment package as `tam-os-v3.0.0-package.zip` plus `dist/package-manifest.json`, SESSION-only, which
+> needs the backend under `server/` and HTTPS. Its deployment — staging first, fabricated data, separately gated — and
+> its rollback follow [`BACKEND-DEPLOYMENT-RUNBOOK.md`](BACKEND-DEPLOYMENT-RUNBOOK.md). The text below describes the
+> published v2.11.0 and is kept as written.
+
 The published release (v2.11.0) is a single-page, client-only application that uses **no backend, database or API**
 (`AUTH_MODE` LOCAL; the backend under `server/` is source only and not deployed — §8; AFI-5b (PR #62, merged into
 source `main`), which switched the source to SESSION and removed "Acting as", is not deployed (Gate D **HOLD**) and

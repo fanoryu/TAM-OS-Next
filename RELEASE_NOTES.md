@@ -1,3 +1,81 @@
+# TAM OS v3.0.0 — Core SESSION Foundation (release candidate)
+
+**Release Name:** Core SESSION Foundation
+**Type:** **MAJOR** release candidate (Owner decision 2026-11-05) — breaking architectural and delivery changes.
+`APP_VERSION` is **3.0.0** on the release-preparation branch; `SCHEMA_VERSION` **remains 6** (no client data
+migration); `ACTIONS` **21** (20 at v2.11.0; BF-4a2 added `account.manage`).
+
+> **Candidate status.** v3.0.0 is a **release candidate**. It becomes a release only through separate Owner
+> authorizations: merge of this preparation, then the annotated tag and the GitHub Release (`docs/RELEASE-PROCESS.md`
+> §7 and §11). Until then **v2.11.0 — Identity Refresh remains the latest published release** (recorded below). Nothing
+> here approves a deployment: Gate D and Gate R stay on **HOLD**.
+
+**Why this is a major version.** Since v2.11.0 the product changed how it is delivered, what it needs to run and what
+it offers. A v2.11.0 user cannot simply replace the file:
+
+| | v2.11.0 (published) | v3.0.0 (candidate) |
+|---|---|---|
+| Delivery | one self-contained HTML file, opens offline from disk | a deployment package (`tam-os-v3.0.0-package.zip`, 102 files) served over **HTTPS** under a strict Content-Security-Policy |
+| Runs against | nothing — browser-only (LOCAL) | the same-origin **PHP 8.3 + MariaDB** backend (`server/`, migrations 0001–0035) |
+| Identity | "Acting as" selector, no sign-in | **signed-in accounts** (CEO, Employee); "Acting as" removed |
+| Data | this browser's local storage | the server database; **data stored in the browser by v2.x is not read and not migrated** |
+| Scope | every LOCAL area | the **Core SESSION** areas below only |
+
+**Core SESSION scope (what v3.0.0 contains).**
+
+- **CEO:** Employees (create, edit, archive, exact salary strings), employee logins (provision, reissue, disable,
+  enable); Overtime (record, submit, review, approve with the TAM-OT-1 valuation, reject, delete); Payroll (prepare,
+  review, approve, commit with salary-drift protection, return and regenerate); Supplemental payroll; Post to Finance;
+  Record payment (paid outside TAM OS); Audit history by Asia/Jakarta month with record history.
+- **Employee:** My profile, My overtime (own Drafts), My payroll.
+- **Everyone signed in:** Account security — **Change password** (the other sessions end, this device stays signed in;
+  an unconfirmed change is reported and never resent) and **Sign out all devices**.
+- Every write is authorized by the server; money is exact decimal strings; payroll, posting and payment writes are
+  idempotent, and an unknown network outcome is never resent automatically.
+
+**Not included — LOCAL areas not yet migrated.** Executive Dashboard, Executive Insights, Contracts, Finance Overview, Transactions, Import, Recurring, Cash Flow, Budget Center, Execution, Bank Accounts, Projects, Vendors, Financial Calendar, Reports, Activity Log, Global Search and Settings with Data Portability (Complete Backup and restore) are **not part of the v3.0.0 application**. They migrate
+domain by domain in later releases (Phased Full Parity, `docs/01-roadmap/Milestone_Roadmap.md`); **v3.0.0 does not
+claim Full Parity**. For them, the published v2.11.0 single file remains available and unchanged.
+
+**Accounts.** The first CEO exists only through the operator command `php bin/account.php create-ceo` on the host,
+which prints a one-time 72-hour activation link to hand over out of band; there is no sign-up and no HTTP bootstrap.
+The CEO then provisions Employee logins. Employee activation and password recovery send mail, which needs the governed
+mail transport (SDR-0003 §7); until it is configured, a deployment is **CEO-only**. One company per deployment.
+
+**Requirements to run.** HTTPS on a dedicated hostname whose document-root parent is not web-served; PHP 8.3 with
+`pdo_mysql`, `openssl`, `mbstring`, `sodium`, `zlib`; MariaDB/MySQL with InnoDB; the configuration, logs and
+encrypted backups outside the document root; cron for the nightly backup. The procedure — placement, configuration and
+secrets, migrations, first CEO, header probe, rollback — is
+[`docs/BACKEND-DEPLOYMENT-RUNBOOK.md`](docs/BACKEND-DEPLOYMENT-RUNBOOK.md).
+
+**Deployment constraints.** v3.0.0 is not deployed anywhere. The first deployment is **staging only, with fabricated
+data**, after a staging-specific Gate D ruling and the SDR-0006 X1–X8 (and SDR-0007 M1–M3) evidence, with Owner
+decisions OD-W2-1…3. Production is separately gated (E7 restore rehearsal, E8 data residency, E10 Hostinger two-factor,
+E12 external security review, governed mail, Gate R / SDR-0002 §22). v3.0.0 is **not** production-ready by itself.
+
+**Rollback and recovery.** Before any deployment, users stay on v2.11.0. For a deployed v3.0.0, rollback and recovery
+follow the runbook §8 (close the API, re-upload the previous verified package and backend, staging database recreate,
+off-host restore of an encrypted backup with the §7.1 safeguards) — not the v2.x Complete Backup.
+
+**Known limitations.**
+
+- Browser evidence is **Chrome only** (RR-3: Firefox and Safari untested).
+- F-2: that Hostinger's LiteSpeed applies the document-root `/api/*` header exclusion is proven only by the host probe
+  HP-3.
+- SDR-0002 §22 items 1 and 8 (authenticated end-to-end on the production host) are not satisfied.
+- No import of v2.x data; the LOCAL areas listed above are absent.
+
+**Verified (local engineering evidence).** `tools/verify-build.js` and all 44 runtime harnesses pass on this candidate;
+the backend suite passed 901/0 with the database suite (431) and the real-backend regression WP-E2E-2 passed 282/282 on
+`main` @ `8ef3d6be` (disposable loopback PHP 8.3.36 + MariaDB 10.11.19, fabricated data). Local evidence is not host
+evidence.
+
+**Artifacts (candidate build).** `tam-os-v3.0.0-package.zip` (3,124,997 bytes, SHA-256 `3b6dcecb796fa74f88aca9b509f70b0a91ae74b8daf7cf6d24093afe00247d58`) and
+`dist/package-manifest.json` (SHA-256 `1451ab44997828b39758ad4b0c780566497c9ca40ed8144e2c32287649a7ab27`); package digest `819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5`. The backend is deployed from the
+same commit by `git archive` (runbook §2.1); it is not a release asset.
+
+---
+
 # TAM OS v2.11.0 — Identity Refresh
 
 **Release Name:** Identity Refresh

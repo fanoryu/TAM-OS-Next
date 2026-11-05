@@ -6,6 +6,11 @@ AI assistants get productive quickly. It is descriptive (what *is*), whereas
 authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file summarizes and points
 there rather than duplicating it.
 
+**Release candidate (release-preparation branch):** `APP_VERSION` **3.0.0 — "Core SESSION Foundation"** (MAJOR, Owner
+decision 2026-11-05): the Distribution-1 package `tam-os-v3.0.0-package.zip`, SESSION-only, Core SESSION scope, LOCAL
+areas not migrated. It is a candidate until a separately authorized merge, tag and GitHub Release; **v2.11.0 remains
+the latest published release**. The paragraph below is kept as written at v2.11.0.
+
 **As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the merged BRAND-1
 identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 21 (20 until BF-4a2 added `account.manage`). The published v2.11.0 portable artifact is
 `dist/tam-os-v2.11.0.html` (1,676,709 bytes, SHA-256
@@ -721,6 +726,11 @@ archived outside the repository (`WP-E2E-2_Evidence.zip`, sha256 `aa2b3146…`).
 conditional on a staging-specific Gate D ruling and the SDR-0006 X1–X8 evidence; phased Full Parity afterwards. The
 sequence is recorded in [`docs/01-roadmap/Milestone_Roadmap.md`](docs/01-roadmap/Milestone_Roadmap.md); it authorizes no
 work, release or deployment by itself. `APP_VERSION` stays 2.11.0. Gate D and Gate R stay on HOLD.
+
+*Status update (v3.0.0 candidate; entry kept as written):* the Owner set the target version to **3.0.0 — "Core SESSION
+Foundation"** (MAJOR: breaking delivery and architecture changes) and authorized one draft release-preparation PR. On
+that branch `APP_VERSION` is 3.0.0; `main` keeps 2.11.0 until a separately authorized merge, and v2.11.0 stays the
+latest published release until a separately authorized tag and GitHub Release. No deployment is authorized.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

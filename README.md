@@ -85,6 +85,22 @@ The operational payroll worksheet — period KPIs and the Draft → Review → A
 
 ---
 
+## Release candidate — v3.0.0 Core SESSION Foundation
+
+**v3.0.0 — Core SESSION Foundation** is the **release candidate** on the release-preparation branch (MAJOR; Owner
+decision 2026-11-05). It is a release only after a separately authorized merge, annotated tag and GitHub Release; until
+then **v2.11.0 — Identity Refresh**, below, remains the latest published release and the version badge tracks it.
+
+v3.0.0 is a breaking change: TAM OS becomes a signed-in application served over HTTPS as the Distribution-1 package
+(`tam-os-v3.0.0-package.zip`) against the same-origin PHP 8.3 + MariaDB backend. It contains the **Core SESSION** areas
+— Employees and logins, Overtime, Payroll, Supplemental payroll, Post to Finance, Record payment, Audit, My profile /
+overtime / payroll and Account security — and **not** the LOCAL areas that have not migrated yet (dashboards, Contracts,
+Finance and Transactions, Import, Recurring, Cash Flow, Budget, Execution, Bank Accounts, Projects, Vendors, Calendar,
+Reports, Activity Log, Settings and Data Portability); browser-stored v2.x data is not migrated. It is not deployed:
+the first deployment is staging-only with fabricated data, separately gated
+([`docs/BACKEND-DEPLOYMENT-RUNBOOK.md`](docs/BACKEND-DEPLOYMENT-RUNBOOK.md)); browser evidence is Chrome-only (RR-3).
+`SCHEMA_VERSION` remains 6; `ACTIONS` 21. Details: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
 ## Current release
 
 **v2.11.0 — Identity Refresh** · `SCHEMA_VERSION` 6 · **published and marked Latest** — the BRAND-1 TAM OS product-identity and offline-typography modernization
@@ -143,6 +159,10 @@ Readiness-1 / Readiness-2) is unchanged. The portable artifact is `dist/tam-os-v
 > the E11 hostile-principal tests are merged (PR #68) and verified by post-merge CI, while the E12 external security
 > review is a separate, open requirement; closing the SDR-0002 §22 gate (AFI-5c) is **on hold**. See
 > [`CHANGELOG.md`](CHANGELOG.md) → Unreleased.
+>
+> *Status update (v3.0.0 candidate; block kept as written):* this work is the content of the v3.0.0 Core SESSION
+> Foundation candidate, recorded in [`CHANGELOG.md`](CHANGELOG.md) → 3.0.0; the shipped source runs `AUTH_MODE`
+> SESSION since AFI-5b.
 
 > **AFI-5b identity transition (PR #62, merged into source `main`).** It switched the source to `AUTH_MODE`
 > **SESSION**, removed the "Acting as" selector, its fixtures and its styles from the app, and keeps a development

@@ -435,8 +435,10 @@ function mkTxn(over){
     // capability, no migration), so the pin moves with it. The invariants either side of it —
     // ACTIONS 20 and SCHEMA_VERSION 6 — are unchanged, which is the point: the version moved
     // BECAUSE the platform contract did not.
-    check(/const APP_VERSION = '2\.11\.0';/.test(fs.readFileSync(path.join(ROOT,'js','core','constants.js'),'utf8')),
-      'APP_VERSION is 2.11.0 (RELEASE-1 version; no schema migration)'); }
+    // v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision (Owner, 2026-11-05). Was: APP_VERSION '2.11.0' (RELEASE-1).
+    // SCHEMA_VERSION 6 is still asserted above: the major version moved without a client data migration.
+    check(/const APP_VERSION = '3\.0\.0';/.test(fs.readFileSync(path.join(ROOT,'js','core','constants.js'),'utf8')),
+      'APP_VERSION is 3.0.0 (v3.0.0 candidate; no schema migration)'); }
 
   console.log('');
   if(failures.length){

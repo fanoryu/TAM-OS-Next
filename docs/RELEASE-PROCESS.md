@@ -44,6 +44,10 @@ errors, zero CSP violations.
 Re-test previously-working features (payroll, overtime, execution, import, dedup, backup/restore,
 activity log, settings). Any regression is a **release blocker**.
 
+For a SESSION release (v3.0.0 onward) the regression also covers the real-backend suites (a disposable loopback PHP +
+MariaDB stack with fabricated data, as in WP-E2E-2) and the backend suite `server/tests/run.php --require-db`; local
+evidence is never presented as host evidence.
+
 ## 6. Release candidate
 Prepare an RC summary that distinguishes **browser-tested / automated-test verified /
 source-inspected / unable to verify**, reports any secret-scan findings (paths + categories only,
@@ -130,3 +134,10 @@ tag, release URL, asset names, CI status, branch, and working-tree status.
   new patch version. Never force-push or rewrite `main`; the ruleset rejects both.
 - **Restoring user data:** users restore from their most recent Complete Backup (Settings → Data
   Portability). A pre-restore safety backup is always created automatically.
+- **SESSION releases (v3.0.0 onward):** a deployment is rolled back and recovered by
+  [`BACKEND-DEPLOYMENT-RUNBOOK.md`](BACKEND-DEPLOYMENT-RUNBOOK.md) §8 (close the API, re-upload the previous verified
+  package and backend, recreate a staging database, or restore an encrypted backup off-host under the §7.1
+  safeguards). Complete Backup belongs to the LOCAL application and does not apply to SESSION data.
+- **Publication flags (v3.0.0):** `release.yml` creates the Release with `gh release create` and no
+  `--latest`/`--prerelease` flag, so GitHub marks it **Latest** by default; whether v3.0.0 may become Latest is an
+  Owner decision taken before the tag is pushed.
