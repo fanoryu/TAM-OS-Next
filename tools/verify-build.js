@@ -315,6 +315,40 @@ check(/localStorage\.getItem\('tam_settings_v1'\)/.test(read(path.join(root, 'js
     'static header contract carries nosniff, Referrer-Policy and Permissions-Policy');
   check(!/includeSubDomains|preload/i.test(hdr.HSTS_PRODUCTION), 'production HSTS has no includeSubDomains/preload (SDR-0002 §13.1)');
 }
+
+// ===== WP-2 — HOSTINGER DOCUMENT-ROOT HEADERS (Owner WP-2 authorization: static-header implementation) =====
+// tools/hostinger-htaccess.js renders the document-root .htaccess from tools/package-headers.js. Pins: every
+// static header exactly once, verbatim, replacing (not appending); /api/* excluded so the PHP API keeps its own
+// no-store headers; no <IfModule> (a missing mod_headers fails closed); HSTS only in the production rendering;
+// no secret, path or hostname; deterministic. modelHeaders() is a self-consistency model of the rendered
+// directives — NOT host evidence (SDR-0002 E6 stays a host probe, docs/BACKEND-DEPLOYMENT-RUNBOOK.md).
+console.log('== WP-2 — HOSTINGER DOCUMENT-ROOT HEADERS ==');
+{
+  const hdr = require('./package-headers.js');
+  const ht = require('./hostinger-htaccess.js');
+  const staging = ht.renderDocumentRootHtaccess();
+  const prod = ht.renderDocumentRootHtaccess({ production: true });
+  const lines = staging.split('\n');
+  const headerLines = lines.filter((l) => l.startsWith('Header '));
+  const names = Object.keys(hdr.STATIC_HEADERS);
+  check(names.every((n) => headerLines.filter((l) => l.startsWith('Header always set ' + n + ' ')).length === 1)
+    && headerLines.length === names.length && headerLines.every((l) => l.startsWith('Header always set ') && l.endsWith(' env=!TAMOS_API')),
+    'WP-2: the staging .htaccess sets each static header of package-headers.js exactly once (Header always set), every line excluded from /api/*');
+  const paths = ['/', '/index.html', '/js/core/auth-boot.js', '/css/shell.css', '/vendor/sheetjs/LICENSE', '/apis.txt'];
+  check(paths.every((p) => JSON.stringify(ht.modelHeaders(staging, p)) === JSON.stringify(hdr.STATIC_HEADERS)),
+    'WP-2: modelled on the rendered directives, every static path gets exactly the STATIC_HEADERS values (byte-identical)');
+  check(['/api', '/api/', '/api/health', '/api/auth/me', '/api/index.php'].every((p) => Object.keys(ht.modelHeaders(staging, p)).length === 0)
+    && lines.filter((l) => l.startsWith('SetEnvIf ')).join() === 'SetEnvIf Request_URI "^/api(/|$)" TAMOS_API',
+    'WP-2: modelled, no /api/* path gets any header from the document root (the API keeps Cache-Control: no-store, private and its own CSP)');
+  check(!/IfModule|Header (append|add|merge|edit|unset)|Header set /.test(staging) && /^Options -Indexes$/m.test(staging) && /^DirectoryIndex index\.html$/m.test(staging)
+    && /^AddType "text\/javascript; charset=utf-8" \.js$/m.test(staging) && /^AddType "text\/css; charset=utf-8" \.css$/m.test(staging),
+    'WP-2: no <IfModule> wrapper (fails closed without mod_headers), only "Header always set"; no directory listing; explicit UTF-8 types for .js and .css');
+  check(!/Strict-Transport-Security/.test(staging) && prod.split('\n').filter((l) => /Strict-Transport-Security/.test(l)).join() === 'Header always set Strict-Transport-Security "' + hdr.HSTS_PRODUCTION + '" env=!TAMOS_API'
+    && prod.replace(/^# TAM OS document root \([^)]*\)\.\n/, '').replace(/^Header always set Strict-Transport-Security .*\n/m, '') === staging.replace(/^# TAM OS document root \([^)]*\)\.\n/, ''),
+    'WP-2: HSTS appears only in the --production rendering (the package-headers value, no includeSubDomains/preload); otherwise both renderings are identical');
+  check(!/password|secret|api_key|token|\/home\/|public_html|reliabilityindonesia|@/i.test(staging + prod) && staging === ht.renderDocumentRootHtaccess() && !/\r/.test(staging),
+    'WP-2: the rendering is deterministic, LF-only and names no secret, path, hostname or account');
+}
 {
   const ciYml = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const relYml = read(path.join(root, '.github', 'workflows', 'release.yml'));

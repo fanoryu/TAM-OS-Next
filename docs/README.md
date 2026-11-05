@@ -35,6 +35,7 @@ The AI-facing entry point that requires this reading before implementation is
 | [`RELEASE-PROCESS.md`](RELEASE-PROCESS.md) | The step-by-step release procedure |
 | [`DATA-SAFETY.md`](DATA-SAFETY.md) | Data-safety guidance for storage, migrations, and backups |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | How the deployment package is built and deployed, the header contract, and the public/private layering |
+| [`BACKEND-DEPLOYMENT-RUNBOOK.md`](BACKEND-DEPLOYMENT-RUNBOOK.md) | The governed staging-first backend deployment procedure: file placement, configuration and secrets, prerequisites, migrations and first CEO without assuming SSH, header probe, rollback, production-only requirements (authorizes nothing) |
 
 ## Decision records
 

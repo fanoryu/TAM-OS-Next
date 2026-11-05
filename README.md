@@ -396,6 +396,7 @@ tools/
   app-version.js                   Single source of truth for the version (reads constants.js)
   build-package.js                 Modular source -> deployment package + ZIP + manifest (Distribution-1)
   package-headers.js               Production response-header contract (CSP, security, cache)
+  hostinger-htaccess.js            Renders the Hostinger document-root .htaccess from that contract (WP-2)
   serve-package.js                 Local loopback server applying that contract (validation only)
   serve-auth-stub.js               Test-only loopback server: SESSION-mode QA against fabricated answers
   serve-e2e-proxy.js               Test-only loopback front for authenticated E2E against a local backend
