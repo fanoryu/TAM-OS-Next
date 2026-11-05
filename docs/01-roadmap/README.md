@@ -9,6 +9,13 @@ truth; the [Governance](../00-governance/README.md) layer above it is timeless a
 Current as of `main` @ `113f0184` (2026-10-19) in the canonical repository **`fanoryu/TAM-OS-Next`**, after
 the **v2.11.0 official release** (Identity Refresh; the prior v2.10.0 release remains published and intact).
 
+> **Current-status note (2026-11-05; the baseline above and the table below are kept as written).** `main` @
+> `8ef3d6be` carries Core SESSION, engineering complete and not released (PR #76, #77, #78; WP-E2E-2 282/282 local
+> validation). The Owner-approved sequence — staging deployment next (staging-specific Gate D ruling and SDR-0006 X1–X8
+> first), staging stabilization, repository cleanup, documentation simplification, README badge audit, phased Full
+> Parity, then production readiness and cutover — is recorded in [Milestone_Roadmap.md](Milestone_Roadmap.md). It
+> authorizes nothing by itself; v2.11.0 is still the current Latest release; Gate D and Gate R stay on HOLD.
+
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in
 > [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) before the clean migration. They do **not** resolve

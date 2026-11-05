@@ -1586,6 +1586,14 @@ decide every request. No module, CSS, API or storage change.
 
 ### SESSION Account security — WP-1 (Change password, Sign out all devices; not merged, not deployed)
 
+*Status update (supersedes "not merged" in the heading; heading kept as written):* merged into `main` via PR #77 on
+2026-11-05, merge commit `2a602348110645b7f3c1ce1c4726b68ea9dde46b`; re-verified against the real backend on `main`
+@ `8ef3d6be` by WP-E2E-2 (68/68 account-security checks). The sibling SESSION changes merged the same day: PR #76 (D-1,
+merge commit `5aa09123`) moved the Audit and Overtime month bars to the wrapping `.head-controls` row (no CSS change);
+PR #78 (WP-2, merge commit `8ef3d6be`) added the backend deployment runbook and the Hostinger `.htaccess` renderer
+(`tools/hostinger-htaccess.js`), documentation and tooling only, with no architecture change. Not released, not
+deployed.
+
 The SESSION frontend of the two BF-3B self-service routes. **"Account security"** sits beside Sign out in the page
 heading of every SESSION section (one wrapping `.head-controls` row) for the CEO and the Employee alike, and opens an
 inline panel (`sessionAccountSecurityHTML()` in js/ui/session-workspace-view.js; no route, no CSS change): Change
