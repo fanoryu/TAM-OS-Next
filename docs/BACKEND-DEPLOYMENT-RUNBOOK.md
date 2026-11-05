@@ -89,7 +89,7 @@ over SFTP with mode `0600`. The loader rejects unknown keys and any value still 
 
 | Key | Staging value | Rule |
 |---|---|---|
-| `env` | `production` (recommended — Owner decision OD-W2-1) | `production` demands an `https://` origin, sends HSTS on `/api/*` over HTTPS (`Kernel.php`), omits stack traces from the log, and makes `backup.php keygen/verify/restore` refuse to run on the host. `development` would log redacted traces and send no HSTS |
+| `env` | `production` (recommended — Owner decision OD-W2-1) | `production` demands an `https://` origin, sends HSTS on `/api/*` over HTTPS (`Kernel.php`), omits stack traces from the log, and makes `backup.php keygen/verify/restore` refuse to run on the host. It also labels every staging backup `source.env = production` — see §7.1. `development` would log redacted traces and send no HSTS |
 | `origin` | `https://<staging hostname>` exactly | State-changing requests must come from exactly this origin (SDR-0002 §3.4) |
 | `log_path` | `<app>/logs/api.log` | Absolute; outside the document root |
 | `db` | the dedicated staging database and user | The password is a staging secret (SDR-0006 C6) |
@@ -222,6 +222,30 @@ Each step has a recorded result in the private layer; any unexpected result stop
     `.sha256` over SFTP and `verify` off-host (`DEPLOYMENT.md` §8, OPS-1).
 12. Record the deployment: commit, digests, probe results, smoke-test results, time, operator.
 
+### 7.1 Staging backups under `env = production` (F-1)
+
+With `env = production` the staging API records **`source.env = production`** in every backup manifest it
+creates. The restore tool's environment check (`BackupRestorer::requireConfirmation`) refuses a *non*-production
+backup for a production target, so it **cannot tell a staging backup from a production one**. Nothing in the
+backup or restore implementation changes for this; the following operating rules close the gap and are mandatory:
+
+1. **Separate key pairs.** Staging and production each have their own off-host backup key pair, generated
+   separately, stored separately and labelled with their environment; a key pair is never shared or copied between
+   them (SDR-0006 C6). A staging backup is sealed to the staging public key, so the production secret key refuses it
+   (`WRONG_KEY`) — this is the cryptographic guard, and it holds only while the keys stay separate.
+2. **Record the fingerprints.** At key generation and at each environment's first backup, record the staging and
+   production key fingerprints and database fingerprints in the deployment record.
+3. **Verify before every restore.** The operator compares the confirmation screen against that record before typing
+   the phrase: the backup's **key fingerprint** and **source database fingerprint** must be those of the intended
+   source environment, and the **target** shown must be the intended restore environment. Any mismatch stops the
+   restore; it is not overridden.
+4. **Never staging into production.** Restoring a staging backup into production is not an operational procedure
+   under any circumstance (staging holds fabricated data only). Production restores use production backups only.
+
+The existing safeguards stay in force unchanged: restore and verify-restore refuse to run where the configuration
+is the production one, take their target only from `--target-config`, and require the typed confirmation phrase
+for a production target.
+
 ## 8. Staging rollback
 
 | Situation | Action |
@@ -244,7 +268,8 @@ Staging evidence is host-capability evidence. None of the following is met by a 
 - [ ] **E8:** hosting data location recorded and accepted by the Owner (company compliance gate, SDR-0002 §19).
 - [ ] **E7:** an off-host restore rehearsal of an actual **production** encrypted backup, reconciled (`DEPLOYMENT.md` §8).
 - [ ] E1–E6 and E9 re-recorded on the production hostname and database (they are per host and per database user).
-- [ ] Production-only secrets, database and backup key pair, never shared with staging (SDR-0006 C6).
+- [ ] Production-only secrets, database and backup key pair, never shared with staging (SDR-0006 C6); the staging and
+      production key and database fingerprints recorded, and the §7.1 restore rules in force.
 - [ ] Governed mail (SDR-0003 §7: provider account, SPF/DKIM/DMARC, delivery test) before password recovery or Employee onboarding is relied on — the cutover gate requires password recovery/reset to be operational.
 - [ ] O4 backup retention set; nightly backup running and pulled off-host.
 - [ ] Production HSTS rendering (`--production`) applied only after HTTPS is stable.
@@ -255,6 +280,6 @@ Staging evidence is host-capability evidence. None of the following is met by a 
 
 | # | Decision | Recommended |
 |---|---|---|
-| OD-W2-1 | `env` on staging: `production` or `development` | `production` (production posture; HSTS on `/api/*` for the staging hostname only) |
+| OD-W2-1 | `env` on staging: `production` or `development` | `production` (production posture; HSTS on `/api/*` for the staging hostname only; staging backups labelled production, so the §7.1 rules are mandatory) |
 | OD-W2-2 | CEO provisioning without SSH: allow the controlled cron-to-private-file path (§5.2) for synthetic staging | Prefer SSH (Path A); allow OD-W2-2 only if SSH cannot be enabled in time |
 | OD-W2-3 | The staging hostname and its document root (must satisfy S-3) | A dedicated sub-domain whose document root's parent is private |
