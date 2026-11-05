@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- **WP-1 — Account security: Change password and Sign out all devices (SESSION; not merged, not deployed).** Signed-in
+  CEO and Employee users now find **Account security** beside Sign out on every page. **Change password** asks for the
+  current password and the new one twice; on success every other session of the account ends and this device stays
+  signed in. **Sign out all devices** ends every session of the account, this one included. Both use the existing
+  server routes (`/api/auth/change-password`, `/api/auth/logout-all`); each request is sent once and never repeated, a
+  change counts as done only when the server's rotated session is confirmed, an unconfirmed change is reported as such
+  and not offered again in that session, and "signed out on all devices" is shown only on the server's exact
+  confirmation. Password fields are cleared after every attempt; nothing is stored. No CSS, backend, schema or storage
+  change. Package digest `f6fa99b1…`; verifier 3033 checks; `tools/verify-auth-boot-runtime.js` 220 checks (mutation
+  register M1–M6); a disposable real-backend loopback check passed 68/68. Gate D and Gate R stay on HOLD.
 - **U1 — SESSION graduated shell (Option B; merged as PR #70, `d6ff8bd`; not deployed).** After sign-in,
   the CEO and Employees now see the v2.11.0 sidebar shell (brand, grouped navigation, mobile drawer, skip link) around
   the existing SESSION sections instead of a single card with tabs: CEO — People: Employees; Finance: Overtime, Payroll;

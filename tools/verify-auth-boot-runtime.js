@@ -18,6 +18,12 @@
    answers by path from a script; the API timeout timer is recorded, never awaited.
    No network, no clock, no credentials: every identity, token and password here is
    fabricated.
+
+   WP-1 (Account security): section WP-1 drives Change password and Sign out all devices for the
+   CEO and the Employee — exact bodies, CSRF, the rotated-session contract, every refusal and
+   uncertain outcome (never resent), the exact logout-all confirmation, field clearing — and a
+   mutation register (M1-M6): each seeded source defect, applied through loadRuntime's `mutate`
+   option (an exact-once text replacement), must make its case fail.
    ============================================================ */
 
 const fs = require('fs');
@@ -62,8 +68,14 @@ function loadRuntime(opts){
   const mode = opts.mode;
   const jsFiles = require(path.join(root, 'tools', 'module-order.js'))
     .filter((f) => opts.boot || f !== 'core/app-bootstrap.js');
+  // WP-1: an optional seeded defect [file, exact text, replacement], applied exactly once.
+  const mut = opts.mutate || loadRuntime.mutate || null;
   const parts = jsFiles.map((f) => {
     let src = fs.readFileSync(path.join(root, 'js', f), 'utf8');
+    if(mut && mut[0] === f){
+      if(src.split(mut[1]).length !== 2) throw new Error('mutation anchor not found exactly once in ' + f);
+      src = src.split(mut[1]).join(mut[2]);
+    }
     if(f === 'core/constants.js'){
       // Rewrite whichever single AUTH_MODE assignment is there, so a wrong committed value is
       // reported by the counted check in section 0 rather than crashing the run.
@@ -587,6 +599,258 @@ function firewall(rt, label){
       'O-2. while signing in, the busy form still shows the typed email (disabled)');
     await flush(12);
     check(t.rt.AuthBoot.snapshot().state === 'AUTHENTICATED', 'O-2. the busy sign-in completes');
+  }
+
+  /* ---------- WP-1. Account security: Change password and Sign out all devices ---------- */
+  // The signed-in user's own account (CEO and Employee). Every request is sent once; no answer is
+  // ever replayed; the rotated session of a password change must be confirmed by /me; logout-all is
+  // done only on the exact { loggedOut: true }. Seeded defects (WP-1 M1-M6) must be caught below.
+  const NEW_PW = 'fabricated-New-Passw0rd-wp1';
+  const CONFIRM_LEAK = 'fabricated-Confirm-only-wp1';
+  const asMe = (me, csrf) => Object.assign({}, me, { csrfToken: csrf });
+  async function acct(me, routes, mutate){
+    const rt = loadRuntime({ mode: SESSION, boot: true, mutate: mutate, routes: Object.assign({ '/api/auth/me': [ok(me)] }, routes || {}) });
+    await flush(12);
+    return rt;
+  }
+  const cpCalls = (rt) => rt.net.calls.filter((c) => c.url === '/api/auth/change-password');
+  const laCalls = (rt) => rt.net.calls.filter((c) => c.url === '/api/auth/logout-all');
+  const acc = (rt) => rt.AuthBoot.snapshot().account;
+  const noSecret = (rt) => { const dump = JSON.stringify(rt.memStore) + JSON.stringify(rt.State) + rt.appHTML() + JSON.stringify(rt.AuthBoot.snapshot());
+    return dump.indexOf(PASSWORD) === -1 && dump.indexOf(NEW_PW) === -1 && dump.indexOf(CONFIRM_LEAK) === -1; };
+  async function changeOnce(rt, me, answer, meAfter){
+    rt.net.routes['/api/auth/change-password'] = [answer];
+    if(meAfter) rt.net.routes['/api/auth/me'] = [meAfter];
+    rt.AuthBoot.openAccount('password');
+    await rt.AuthBoot.changePassword(PASSWORD, NEW_PW, NEW_PW);
+    await flush(12);
+  }
+  // Each case returns true when its contract holds; the mutation register re-runs them on seeded defects.
+  const WP1 = {};
+  WP1.success = async function(m, label, mutate){
+    const rt = await acct(m, {}, mutate);
+    await changeOnce(rt, m, ok(asMe(m, CSRF_B)), ok(asMe(m, CSRF_B)));
+    const c = cpCalls(rt);
+    const s = rt.AuthBoot.snapshot();
+    const r = [
+      [c.length === 1 && c[0].init.method === 'POST' && c[0].init.body === JSON.stringify({ currentPassword: PASSWORD, newPassword: NEW_PW })
+        && c[0].init.headers['X-CSRF-Token'] === CSRF_A, label + ': one POST /api/auth/change-password with exactly { currentPassword, newPassword } and the session CSRF token (the confirmation is never sent)'],
+      [rt.net.calls[rt.net.calls.indexOf(c[0]) + 1] && rt.net.calls[rt.net.calls.indexOf(c[0]) + 1].url === '/api/auth/me', label + ': the 200 is followed by GET /api/auth/me under the rotated session'],
+      [s.state === 'AUTHENTICATED' && rt.CsrfHolder.get() === CSRF_B && (rt.getCurrentUser() || {}).id === m.userId, label + ': stays signed in; the rotated CSRF token replaces the old one; same principal'],
+      [s.account.panel === null && s.account.notice === 'pw_changed' && /Your password was changed\. Every other session of your account has ended; this device stays signed in\./.test(rt.appHTML()), label + ': the panel closes with the fixed "password changed" notice'],
+      [noSecret(rt), label + ': no password is in storage, State, the DOM or the view model']
+    ];
+    return r;
+  };
+  WP1.tokenMismatch = async function(mutate){
+    const rt = await acct(ME_CEO, {}, mutate);
+    await changeOnce(rt, ME_CEO, ok(asMe(ME_CEO, CSRF_B)), ok(asMe(ME_CEO, CSRF_A)));
+    return [[rt.AuthBoot.snapshot().state === 'UNAVAILABLE' && rt.getCurrentUser() === null && rt.CsrfHolder.get() === null && cpCalls(rt).length === 1,
+      'WP-1 change: /me under the new cookie names a different CSRF token than the change answer -> fail closed (UNAVAILABLE, identity cleared), never resent']];
+  };
+  WP1.uncertain = async function(label, answer, mutate){
+    const rt = await acct(ME_CEO, {}, mutate);
+    await changeOnce(rt, ME_CEO, answer, ok(ME_CEO));
+    const after = rt.net.calls.length;
+    rt.AuthBoot.openAccount('password');
+    await rt.AuthBoot.changePassword(PASSWORD, NEW_PW, NEW_PW);
+    await flush(12);
+    const s = rt.AuthBoot.snapshot();
+    return [
+      [cpCalls(rt).length === 1, label + ': the change is sent exactly once and never resent'],
+      [s.state === 'AUTHENTICATED' && s.account.notice === 'pw_unconfirmed' && s.account.locked === true && s.account.panel === null
+        && /could not confirm whether your password was changed/.test(rt.appHTML()), label + ': /me still valid -> stays signed in with the "could not confirm" notice'],
+      [rt.net.calls.length === after && !/id="authAcctPwBtn"/.test((rt.AuthBoot.openAccount('menu'), rt.appHTML())), label + ': Change password is not offered again in this session (opening it and submitting do nothing)'],
+      [noSecret(rt), label + ': no password is kept anywhere']
+    ];
+  };
+  WP1.uncertainSignedOut = async function(mutate){
+    const rt = await acct(ME_EMP, {}, mutate);
+    await changeOnce(rt, ME_EMP, err(503, 'service_unavailable'), err(401, 'unauthenticated'));
+    const s = rt.AuthBoot.snapshot();
+    return [[s.state === 'SIGNED_OUT' && s.message === 'password_unconfirmed' && cpCalls(rt).length === 1 && rt.getCurrentUser() === null
+      && /could not confirm whether your password was changed\. Sign in with the new password first/.test(rt.appHTML()),
+      'WP-1 change 503 + /me 401 (Employee): the old session is gone -> SIGNED_OUT with the "could not confirm" sign-in message; sent once']];
+  };
+  WP1.logoutAll = async function(m, label, mutate){
+    const rt = await acct(m, { '/api/auth/logout-all': [ok({ loggedOut: true })] }, mutate);
+    rt.AuthBoot.openAccount('logout_all');
+    await rt.AuthBoot.signOutAll();
+    const c = laCalls(rt);
+    const s = rt.AuthBoot.snapshot();
+    return [[c.length === 1 && c[0].init.body === '{}' && c[0].init.headers['X-CSRF-Token'] === CSRF_A && s.state === 'SIGNED_OUT' && s.message === 'signed_out_all'
+      && rt.getCurrentUser() === null && rt.CsrfHolder.get() === null && /You have signed out on all devices\./.test(rt.appHTML()),
+      label + ': POST /api/auth/logout-all {} with CSRF, once; the exact { loggedOut: true } -> SIGNED_OUT "signed out on all devices", identity and CSRF cleared']];
+  };
+  WP1.logoutAllInexact = async function(label, answer, mutate){
+    const rt = await acct(ME_CEO, { '/api/auth/logout-all': [answer] }, mutate);
+    rt.net.routes['/api/auth/me'] = [ok(ME_CEO)];
+    rt.AuthBoot.openAccount('logout_all');
+    await rt.AuthBoot.signOutAll();
+    const s = rt.AuthBoot.snapshot();
+    return [[s.state === 'AUTHENTICATED' && s.message !== 'signed_out_all' && s.account.message === 'all_unconfirmed' && laCalls(rt).length === 1
+      && /could not confirm that your sessions were ended/.test(rt.appHTML()), label + ': never reported as done; /me still valid -> stays signed in with "could not confirm"; sent once']];
+  };
+  WP1.fieldsCleared = async function(mutate){
+    const rt = await acct(ME_CEO, { '/api/auth/change-password': [err(400, 'validation_failed', null)] }, mutate);
+    const app = rt.w.document.getElementById('app');
+    const handlers = {}; const fields = {};
+    const field = (id, v) => (fields[id] = { id: id, value: v, focus: function(){} });
+    const stub = (id) => ({ id: id, focus: function(){}, addEventListener: function(ev, fn){ handlers[id + ':' + ev] = fn; },
+      querySelector: function(sel){ return fields[sel.replace(/^#/, '')] || null; } });
+    app.querySelector = function(sel){ const id = sel.replace(/^#/, ''); return app.innerHTML.indexOf('id="' + id + '"') === -1 ? null : stub(id); };
+    rt.AuthBoot.openAccount('password');
+    field('authAcctCurrent', PASSWORD); field('authAcctNew', NEW_PW); field('authAcctConfirm', CONFIRM_LEAK);
+    const submit = handlers['authAcctPwForm:submit'];
+    if(submit) submit({ preventDefault: function(){} });
+    await flush(12);
+    return [[!!submit && fields.authAcctCurrent.value === '' && fields.authAcctNew.value === '' && fields.authAcctConfirm.value === ''
+      && cpCalls(rt).length === 0 && acc(rt).message === 'pw_mismatch' && noSecret(rt),
+      'WP-1 view: the real submit handler reads the three password fields once and clears them at once; a mismatch is refused locally (no request); nothing is kept']];
+  };
+  for(const [m, who] of [[ME_CEO, 'CEO'], [ME_EMP, 'Employee']]){
+    const rt = await acct(m);
+    check(/id="authAccountBtn"[^>]*aria-expanded="false"[^>]*>Account security<\/button><button class="btn" id="authSignOutBtn"/.test(rt.appHTML()) && /<div class="head-controls"><button class="btn" id="authAccountBtn"/.test(rt.appHTML()),
+      'WP-1 ' + who + ': "Account security" sits beside Sign out in a wrapping .head-controls row; the panel is closed');
+    rt.AuthBoot.openAccount('menu');
+    check(acc(rt).panel === 'menu' && /id="authAcctPanel"/.test(rt.appHTML()) && /id="authAcctPwBtn"/.test(rt.appHTML()) && /id="authAcctAllBtn"/.test(rt.appHTML())
+      && /aria-expanded="true"/.test(rt.appHTML()) && rt.net.calls.length === 2, 'WP-1 ' + who + ': the panel offers Change password and Sign out all devices; opening it sends nothing');
+    rt.AuthBoot.closeAccount();
+    check(acc(rt).panel === null && !/id="authAcctPanel"/.test(rt.appHTML()), 'WP-1 ' + who + ': Close removes the panel');
+    for(const [c, l] of await WP1.success(m, 'WP-1 change ' + who)) check(c, l);
+    for(const [c, l] of await WP1.logoutAll(m, 'WP-1 logout-all ' + who)) check(c, l);
+  }
+  for(const [c, l] of await WP1.tokenMismatch()) check(c, l);
+  {
+    // A refused attempt, then a success: the notice carries no stale reference from the refusal.
+    const rt = await acct(ME_CEO);
+    await changeOnce(rt, ME_CEO, err(409, 'conflict'));
+    check(acc(rt).message === 'pw_conflict' && acc(rt).requestId === RID, 'WP-1 change: precondition — a refusal shows its reference');
+    rt.net.routes['/api/auth/change-password'] = [resp(200, { ok: true, data: asMe(ME_CEO, CSRF_B) })];
+    rt.net.routes['/api/auth/me'] = [resp(200, { ok: true, data: asMe(ME_CEO, CSRF_B) })];
+    await rt.AuthBoot.changePassword(PASSWORD, NEW_PW, NEW_PW); await flush(12);
+    check(acc(rt).notice === 'pw_changed' && acc(rt).requestId === undefined && !/Reference:/.test((rt.appHTML().match(/id="authAcctNotice"[^>]*>[^<]*/) || [''])[0]),
+      'WP-1 change: a later success shows the notice without the earlier refusal\'s reference');
+  }
+  {
+    const rt = await acct(ME_CEO);
+    await changeOnce(rt, ME_CEO, ok(asMe(ME_CEO, CSRF_B)), err(401, 'unauthenticated'));
+    check(rt.AuthBoot.snapshot().state === 'SIGNED_OUT' && rt.AuthBoot.snapshot().message === 'session_ended' && cpCalls(rt).length === 1,
+      'WP-1 change 200 + /me 401: the rotated session is not confirmed -> SIGNED_OUT, never resent');
+    const rt2 = await acct(ME_CEO);
+    await changeOnce(rt2, ME_CEO, ok(asMe(ME_EMP, CSRF_B)), ok(ME_CEO));
+    check(rt2.AuthBoot.snapshot().state === 'AUTHENTICATED' && acc(rt2).notice === 'pw_unconfirmed' && acc(rt2).locked === true && cpCalls(rt2).length === 1,
+      'WP-1 change 200 naming another principal: not accepted as the rotation -> uncertain (locked, not resent)');
+  }
+  for(const [label, answer, key] of [
+    ['WP-1 change 400 [currentPassword]', err(400, 'validation_failed'), null],
+    ['WP-1 change 429', err(429, 'rate_limited', { 'retry-after': '90' }), 'pw_rate_limited'],
+    ['WP-1 change 409', err(409, 'conflict'), 'pw_conflict'],
+    ['WP-1 change 403 (no replay)', err(403, 'forbidden'), 'pw_rejected']]){
+    const fieldsAnswer = key === null ? resp(400, { ok: false, error: { code: 'validation_failed', message: 'x', fields: ['currentPassword'] }, requestId: RID }) : answer;
+    const rt = await acct(ME_CEO);
+    const before = rt.net.calls.length;
+    await changeOnce(rt, ME_CEO, fieldsAnswer, ok(asMe(ME_CEO, CSRF_B)));
+    const s = rt.AuthBoot.snapshot();
+    check(s.state === 'AUTHENTICATED' && s.account.panel === 'password' && s.account.message === (key || 'pw_current') && cpCalls(rt).length === 1
+      && rt.net.calls.length === before + 1 && rt.CsrfHolder.get() === CSRF_A && s.account.locked === false,
+      label + ': refused before any change -> stays signed in, panel open with "' + (key || 'pw_current') + '"; one request, no /me, no replay');
+    if(key === 'pw_rate_limited') check(/Too many attempts\. Nothing was changed\. Try again in about 2 minutes\./.test(rt.appHTML()), label + ': shows the Retry-After wait');
+  }
+  {
+    const rt = await acct(ME_CEO);
+    await changeOnce(rt, ME_CEO, resp(400, { ok: false, error: { code: 'validation_failed', message: 'x', fields: ['newPassword'] }, requestId: RID }));
+    check(acc(rt).message === 'pw_policy' && /That new password cannot be used/.test(rt.appHTML()), 'WP-1 change 400 [newPassword] -> the policy message');
+    const rt2 = await acct(ME_CEO);
+    await changeOnce(rt2, ME_CEO, err(401, 'unauthenticated'));
+    check(rt2.AuthBoot.snapshot().state === 'SIGNED_OUT' && rt2.AuthBoot.snapshot().message === 'session_ended' && cpCalls(rt2).length === 1, 'WP-1 change 401 -> SIGNED_OUT (session ended), not resent');
+  }
+  for(const [label, answer] of [['WP-1 change 503', err(503, 'service_unavailable')], ['WP-1 change network failure', NETFAIL],
+    ['WP-1 change 500', err(500, 'internal_error')], ['WP-1 change malformed 200', ok({ changed: true })]]){
+    for(const [c, l] of await WP1.uncertain(label, answer)) check(c, l);
+  }
+  for(const [c, l] of await WP1.uncertainSignedOut()) check(c, l);
+  {
+    const rt = await acct(ME_CEO);
+    rt.AuthBoot.openAccount('password');
+    await rt.AuthBoot.changePassword('', NEW_PW, NEW_PW);
+    check(acc(rt).message === 'pw_missing' && cpCalls(rt).length === 0, 'WP-1 change: an empty field is refused locally (no request)');
+    await rt.AuthBoot.changePassword(PASSWORD, NEW_PW, CONFIRM_LEAK);
+    check(acc(rt).message === 'pw_mismatch' && cpCalls(rt).length === 0 && noSecret(rt), 'WP-1 change: a mismatched confirmation is refused locally (no request, nothing kept)');
+    rt.net.routes['/api/auth/change-password'] = [ok(asMe(ME_CEO, CSRF_B))];
+    rt.net.routes['/api/auth/me'] = [ok(asMe(ME_CEO, CSRF_B))];
+    const p1 = rt.AuthBoot.changePassword(PASSWORD, NEW_PW, NEW_PW);
+    const p2 = rt.AuthBoot.changePassword(PASSWORD, NEW_PW, NEW_PW);
+    check(acc(rt).busy === true && /id="authSignOutBtn" type="button" disabled/.test(rt.appHTML()) && /id="authAcctPwSubmit" type="submit" disabled/.test(rt.appHTML()),
+      'WP-1 change: while in flight, Sign out and the form are disabled');
+    await rt.AuthBoot.signOut();
+    await Promise.all([p1, p2]); await flush(12);
+    check(cpCalls(rt).length === 1 && calls(rt, '/api/auth/logout') === 0 && acc(rt).notice === 'pw_changed', 'WP-1 change: a double submit sends one request, and Sign out waits for it');
+  }
+  {
+    const rt = await acct(ME_CEO, { '/api/auth/logout-all': [err(503, 'service_unavailable')] });
+    rt.net.routes['/api/auth/me'] = [err(401, 'unauthenticated')];
+    rt.AuthBoot.openAccount('logout_all');
+    await rt.AuthBoot.signOutAll();
+    check(rt.AuthBoot.snapshot().state === 'SIGNED_OUT' && rt.AuthBoot.snapshot().message === 'signout_all_unconfirmed' && laCalls(rt).length === 1
+      && /could not confirm that your sessions on other devices were ended/.test(rt.appHTML()), 'WP-1 logout-all 503 + /me 401 -> signed out here, other devices reported unconfirmed');
+    const rt2 = await acct(ME_CEO, { '/api/auth/logout-all': [err(401, 'unauthenticated')] });
+    rt2.AuthBoot.openAccount('logout_all');
+    await rt2.AuthBoot.signOutAll();
+    check(rt2.AuthBoot.snapshot().message === 'signout_all_unconfirmed' && laCalls(rt2).length === 1, 'WP-1 logout-all 401 -> SIGNED_OUT, not reported as done');
+  }
+  for(const [label, answer] of [['WP-1 logout-all 503', err(503, 'service_unavailable')], ['WP-1 logout-all network failure', NETFAIL],
+    ['WP-1 logout-all 200 { loggedOut: true, extra }', ok({ loggedOut: true, extra: 1 })], ['WP-1 logout-all 200 { loggedOut: "yes" }', ok({ loggedOut: 'yes' })],
+    ['WP-1 logout-all 200 {}', ok({})]]){
+    for(const [c, l] of await WP1.logoutAllInexact(label, answer)) check(c, l);
+  }
+  for(const [label, answer, key] of [['WP-1 logout-all 403 (no replay)', err(403, 'forbidden'), 'all_rejected'],
+    ['WP-1 logout-all 429', err(429, 'rate_limited', { 'retry-after': '30' }), 'all_rate_limited']]){
+    const rt = await acct(ME_CEO, { '/api/auth/logout-all': [answer, ok({ loggedOut: true })] });
+    rt.AuthBoot.openAccount('logout_all');
+    const before = rt.net.calls.length;
+    await rt.AuthBoot.signOutAll();
+    check(rt.AuthBoot.snapshot().state === 'AUTHENTICATED' && acc(rt).message === key && laCalls(rt).length === 1 && rt.net.calls.length === before + 1,
+      label + ': refused -> stays signed in with "' + key + '"; one request, no replay');
+  }
+  for(const [c, l] of await WP1.fieldsCleared()) check(c, l);
+  {
+    // State reset: a sign-out ends the panel and the uncertain-change lock.
+    const rt = await acct(ME_CEO, { '/api/auth/logout': [ok({ loggedOut: true })], '/api/auth/login': [ok({})] });
+    await changeOnce(rt, ME_CEO, err(503, 'service_unavailable'), ok(ME_CEO));
+    check(acc(rt).locked === true, 'WP-1 reset: precondition — an uncertain change locked Change password');
+    await rt.AuthBoot.signOut();
+    rt.net.routes['/api/auth/me'] = [ok(ME_CEO)];
+    await rt.AuthBoot.signIn('ceo@example.invalid', PASSWORD); await flush(12);
+    check(rt.AuthBoot.snapshot().state === 'AUTHENTICATED' && acc(rt).locked === false && acc(rt).panel === null && acc(rt).notice === null,
+      'WP-1 reset: after sign-out and a new sign-in the panel is closed and Change password is offered again');
+  }
+
+  /* WP-1 mutation register: each seeded defect must make its case fail. */
+  const AB = 'core/auth-boot.js', WS = 'ui/session-workspace-view.js';
+  const WP1_MUTANTS = [
+    ['M1 the change is resent after an uncertain outcome', [AB, 'if(res.kind === API_RESULT_KINDS.UNAVAILABLE || res.kind === API_RESULT_KINDS.SERVER_ERROR) return passwordUncertain(principal, res);',
+      "if(res.kind === API_RESULT_KINDS.UNAVAILABLE || res.kind === API_RESULT_KINDS.SERVER_ERROR){ await ApiClient.request('/api/auth/change-password', { method: 'POST', body: { currentPassword: currentPassword, newPassword: newPassword }, csrf: true }); return passwordUncertain(principal, res); }"],
+      () => WP1.uncertain('M1', err(503, 'service_unavailable'))],
+    ['M2 the rotated CSRF token is not confirmed by /me', [AB, ' || CsrfHolder.get() !== rotated.csrfToken){', '){'], () => WP1.tokenMismatch()],
+    ['M3 logout-all accepts any loggedOut', [AB, 'Object.keys(data).length === 1 && data.loggedOut === true', '!!data.loggedOut'],
+      () => WP1.logoutAllInexact('M3', ok({ loggedOut: 'yes' }))],
+    ['M4 an uncertain change does not lock Change password', [AB, '    account.locked = true;\n', ''], () => WP1.uncertain('M4', NETFAIL)],
+    ['M5 the password fields are not cleared on submit', [WS, "const v = el ? el.value : ''; if(el) el.value = ''; return v;", "const v = el ? el.value : ''; return v;"], () => WP1.fieldsCleared()],
+    ['M6 the confirmation is sent', [AB, 'body: { currentPassword: currentPassword, newPassword: newPassword }, csrf: true });',
+      'body: { currentPassword: currentPassword, newPassword: newPassword, confirmPassword: confirmPassword }, csrf: true });'], () => WP1.success(ME_CEO, 'M6')]
+  ];
+  for(const [name, mutate, run] of WP1_MUTANTS){
+    let caught = false;
+    try {
+      const saved = loadRuntime.mutate; loadRuntime.mutate = mutate;
+      try {
+        const r = await run(); const hit = r.filter((x) => !x[0]);
+        caught = hit.length > 0;
+        if(caught) console.log('    ' + name.split(' ')[0] + ' caught by: ' + hit[0][1]);
+      } finally { loadRuntime.mutate = saved; }
+    } catch(e){ caught = /mutation anchor/.test(String(e && e.message)) ? false : true; if(!caught) console.log('    ' + e.message); }
+    check(caught, 'WP-1 ' + name + ': caught');
   }
 
   /* ---------- summary ---------- */

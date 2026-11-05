@@ -189,6 +189,18 @@
  *   /__stub/scenario/audit-unavailable    signed in as CEO; every audit read answers 503
  *   /__stub/scenario/audit-malformed      signed in as CEO; a non-empty answer carries a company key
  *   /__stub/scenario/audit-session-lost   signed in as CEO; the first audit read ends the session (401)
+ *
+ * WP-1 Account security (a test-only model of BF-3B): POST /api/auth/change-password
+ * { currentPassword, newPassword } and POST /api/auth/logout-all {} — session required (401), same
+ * origin, X-CSRF-Token equal to the session token (403), exact body keys (400). A wrong current
+ * password is 400 fields:[currentPassword]; a new password under 12 characters is 400
+ * fields:[newPassword]. A change replaces the stub password (until the next scenario switch) and
+ * rotates the one in-memory session: a new CSRF token, answered with the /me projection. logout-all
+ * ends the session and answers { loggedOut: true }. The stub has ONE session, so "other devices"
+ * cannot be shown here: session revocation is proven against the real backend, never by this stub.
+ *   /__stub/scenario/account-password-unavailable  signed in as CEO; change-password 503, nothing applied
+ *   /__stub/scenario/account-password-lost         signed in as CEO; the change is APPLIED, then 503
+ *   /__stub/scenario/account-logout-all-unavailable signed in as CEO; logout-all is APPLIED, then 503
  */
 'use strict';
 const http = require('http');
@@ -211,6 +223,7 @@ if((pkgModeSrc.match(/const AUTH_MODE = [^;\n]+;/g) || []).length !== 1 || pkgMo
   process.exit(1);
 }
 const STUB_PASSWORD = 'stub-only-password';
+let stubPassword = STUB_PASSWORD;   // WP-1: a change replaces it until the next scenario switch
 const USERS = {
   'ceo@example.invalid': { userId: 'u_stub_ceo', membershipId: 'm_stub_ceo', role: 'ceo', employeeId: null },
   'employee@example.invalid': { userId: 'u_stub_emp', membershipId: 'm_stub_emp', role: 'employee', employeeId: 'emp_stub_1' }
@@ -219,7 +232,8 @@ const SCENARIOS = ['signed-out', 'ceo', 'employee', 'me-unavailable', 'me-malfor
   'link-invalid', 'password-policy', 'forgot-rate-limited', 'reset-rate-limited', 'recovery-unavailable', 'recovery-malformed',
   'employees-unavailable', 'employee-self-missing', 'employees-session-lost',
   'write-validation', 'write-session-lost', 'write-denied', 'write-stale-csrf', 'write-conflict', 'write-rate-limited', 'write-error', 'write-unavailable',
-  'write-malformed', 'write-slow', 'audit-empty', 'audit-cap', 'audit-unavailable', 'audit-malformed', 'audit-session-lost'];
+  'write-malformed', 'write-slow', 'audit-empty', 'audit-cap', 'audit-unavailable', 'audit-malformed', 'audit-session-lost',
+  'account-password-unavailable', 'account-password-lost', 'account-logout-all-unavailable'];
 // AFI-4a1 fabricated company records (the CEO detail DTO; the list and self views are projections).
 const STUB_EMPLOYEES = [
   { id: 'emp_stub_1', employeeCode: 'EMP-001', fullName: 'Fabricated Employee One', jobTitle: 'Engineer', department: 'Operations', employmentStatus: 'Active',
@@ -422,6 +436,7 @@ const rid = () => crypto.randomBytes(16).toString('hex');
 function reset(name){
   scenario = name;
   usedTokens = [];
+  stubPassword = STUB_PASSWORD;                  // WP-1
   employees = STUB_EMPLOYEES.map((e) => ({ ...e }));
   overtime = stubOvertime();
   payroll = stubPayroll();
@@ -431,7 +446,7 @@ function reset(name){
   finance = []; failNextPosting = false;   // AFI-4e
   executions = []; failNextExecution = false;   // AFI-4f
   audit = stubAudit();                           // AFI-4g
-  session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-') || name.startsWith('audit-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
+  session = (name === 'ceo' || name === 'me-malformed' || name === 'employees-session-lost' || name === 'employees-unavailable' || name.startsWith('write-') || name.startsWith('audit-') || name.startsWith('account-')) ? { user: USERS['ceo@example.invalid'], csrf: token() }
     : (name === 'employee' || name === 'employee-self-missing') ? { user: USERS['employee@example.invalid'], csrf: token() } : null;
 }
 function api(res, status, payload, extra, fields){
@@ -466,7 +481,7 @@ async function handleApi(req, res, p, query){
     if(!b || Object.keys(b).sort().join() !== 'email,password' || typeof b.email !== 'string' || typeof b.password !== 'string') return api(res, 400, 'validation_failed');
     if(scenario === 'login-rate-limited') return api(res, 429, 'rate_limited', { 'Retry-After': '120' });
     const user = USERS[b.email.trim().toLowerCase()];
-    if(!user || b.password !== STUB_PASSWORD) return api(res, 401, 'unauthenticated');
+    if(!user || b.password !== stubPassword) return api(res, 401, 'unauthenticated');
     session = { user: user, csrf: token(), staleOnce: scenario === 'logout-stale-csrf' };
     return api(res, 200, { ...user, csrfToken: session.csrf });
   }
@@ -480,6 +495,28 @@ async function handleApi(req, res, p, query){
     }
     session = null;
     return api(res, 200, { loggedOut: true });
+  }
+  // WP-1 Account security (test-only model of BF-3B; see the header).
+  if((p === '/api/auth/change-password' || p === '/api/auth/logout-all') && req.method === 'POST'){
+    if(!session) return api(res, 401, 'unauthenticated');
+    if(req.headers['x-csrf-token'] !== session.csrf) return api(res, 403, 'forbidden');
+    const b = await readJson(req);
+    if(p === '/api/auth/logout-all'){
+      if(!b || Object.keys(b).length !== 0) return api(res, 400, 'validation_failed');
+      session = null;                                   // every session of the user ends
+      if(scenario === 'account-logout-all-unavailable') return api(res, 503, 'service_unavailable');
+      return api(res, 200, { loggedOut: true });
+    }
+    if(!b || Object.keys(b).sort().join() !== 'currentPassword,newPassword' || typeof b.currentPassword !== 'string' || typeof b.newPassword !== 'string'){
+      return api(res, 400, 'validation_failed', null, ['currentPassword', 'newPassword']);
+    }
+    if(Array.from(b.newPassword).length < 12) return api(res, 400, 'validation_failed', null, ['newPassword']);
+    if(scenario === 'account-password-unavailable') return api(res, 503, 'service_unavailable');
+    if(b.currentPassword !== stubPassword) return api(res, 400, 'validation_failed', null, ['currentPassword']);
+    stubPassword = b.newPassword;
+    session = { user: session.user, csrf: token() };  // revoked and replaced: a new session, a new CSRF token
+    if(scenario === 'account-password-lost') return api(res, 503, 'service_unavailable');
+    return api(res, 200, { ...session.user, csrfToken: session.csrf });
   }
   // AFI-4a1 Employee reads: RouteAuth::Required, scoped by the session principal, exact query keys.
   if((p === '/api/employees' || p === '/api/employee') && req.method === 'GET'){

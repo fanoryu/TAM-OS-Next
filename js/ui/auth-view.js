@@ -40,7 +40,11 @@ const AUTH_VIEW_MESSAGES = Object.freeze({
   failed: 'Sign-in did not complete. Try again.',
   signed_out: 'You have signed out.',
   signout_unconfirmed: 'Signed out on this device. TAM OS could not confirm the sign-out with the server; that session ends on its own after a period of inactivity.',
-  session_ended: 'Your session has ended. Sign in again to continue.'
+  session_ended: 'Your session has ended. Sign in again to continue.',
+  // WP-1 (Account security): the outcomes that end this device's session.
+  signed_out_all: 'You have signed out on all devices. Every session of your account has ended.',
+  signout_all_unconfirmed: 'Signed out on this device. TAM OS could not confirm that your sessions on other devices were ended. Sign in again and repeat "Sign out all devices".',
+  password_unconfirmed: 'Your session has ended. TAM OS could not confirm whether your password was changed. Sign in with the new password first; if it is refused, use the previous one.'
 });
 
 // The email of the last attempt, so a failed sign-in keeps it. Memory only; never the password.
