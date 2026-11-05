@@ -15,6 +15,9 @@ the **v2.11.0 official release** (Identity Refresh; the prior v2.10.0 release re
 > first), staging stabilization, repository cleanup, documentation simplification, README badge audit, phased Full
 > Parity, then production readiness and cutover — is recorded in [Milestone_Roadmap.md](Milestone_Roadmap.md). It
 > authorizes nothing by itself; v2.11.0 is still the current Latest release; Gate D and Gate R stay on HOLD.
+>
+> *Status update (v3.0.0 candidate):* Core SESSION is prepared as the **v3.0.0 — Core SESSION Foundation** release
+> candidate (MAJOR); v2.11.0 remains the latest published release until a separately authorized tag and Release.
 
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in

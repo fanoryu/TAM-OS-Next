@@ -38,6 +38,11 @@ Production Readiness & Cutover. The order records direction only: **no row autho
 tag, a release or a deployment**; each needs its own Owner authorization, and Gate D and Gate R stay on HOLD until
 separately ruled. `APP_VERSION` remains 2.11.0. Existing gates, decisions and records above are unchanged.
 
+*Status update (v3.0.0 candidate; rows kept as written):* Core SESSION is prepared as the **v3.0.0 — Core SESSION
+Foundation** release candidate (MAJOR, Owner decision 2026-11-05) in a draft release-preparation PR. The candidate is
+not a release until its separately authorized merge, tag and GitHub Release, and it does not change any gate in the
+sequence above.
+
 **README Badge & Link Audit — recorded findings (future cleanup; not fixed here).**
 
 1. The five Shields.io badges (Version, License, JavaScript, HTML, Core) are not wrapped in links, so selecting one

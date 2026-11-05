@@ -78,6 +78,17 @@ and 8 need the production host.
 - [ ] **Runtime and verifier:** `verify-build.js` passes; the 13 CI harnesses pass in UTC−12, UTC, UTC+7 and UTC+14;
       every one of the 43 harnesses passes; the H-1, H-2, D-02/R-2, T4, R-3 and CI six-case mutants are each killed
 
+## Release candidate v3.0.0 (Core SESSION Foundation)
+Run against `node tools/serve-auth-stub.js` after `node tools/build-package.js` (fabricated stub data only).
+- [ ] **Identity:** the page title is "TAM OS v3.0.0"; `dist/package-manifest.json` records `appVersion` 3.0.0, the release
+      name and `tam-os-v3.0.0-package.zip`, whose SHA-256 equals the manifest's `zip.sha256`
+- [ ] **CEO and Employee shells:** signed-in CEO sees Employees, Overtime, Payroll and Audit; the Employee sees My profile,
+      My overtime and My payroll and no Audit; Account security opens beside Sign out for both
+- [ ] **Scope honesty:** no LOCAL area (dashboards, Contracts, Transactions, Import, Settings, …) is reachable in the SESSION shell
+- [ ] **Console:** zero script errors and zero CSP violations (the signed-out `GET /api/auth/me` 401 network line is expected)
+- [ ] **Regression:** `verify-build.js`, all 44 runtime harnesses, and the real-backend suites (WP-E2E-2) on the candidate or
+      on a commit whose package differs only by version identity
+
 ## Data-safety confirmations
 - [ ] `SCHEMA_VERSION` unchanged (6) unless an intentional, documented migration
 - [ ] Storage keys and migration flags unchanged

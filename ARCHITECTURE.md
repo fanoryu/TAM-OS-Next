@@ -8,6 +8,13 @@ Its published asset `tam-os-v2.11.0.html` (**1,676,709 bytes**, SHA-256
 `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is byte-identical to the tracked
 `dist/tam-os-v2.11.0.html`.
 
+**Release candidate — v3.0.0 (Core SESSION Foundation):** on the release-preparation branch `APP_VERSION` is
+**3.0.0** (MAJOR, Owner decision 2026-11-05); it is a release only after a separately authorized merge, tag and GitHub
+Release, so v2.11.0 above remains the latest published release. Its artifact is the Distribution-1 package
+`tam-os-v3.0.0-package.zip` (no single-file artifact), running in `AUTH_MODE` SESSION against the same-origin backend
+under `server/`; it holds the Core SESSION areas only (the LOCAL modules stay in source for Phased Full Parity and are
+not reachable in the shipped SESSION shell). `SCHEMA_VERSION` 6, `ACTIONS` 21. Not deployed (Gate D, Gate R HOLD).
+
 **Prior release — v2.10.0 (Governed Workspace):** published and intact, now the prior release (no longer
 Latest). It was **originally published** (2026-08-11) from the predecessor repository `fanoryu/TAM-OS` —
 annotated tag `v2.10.0` there, release commit `335d53ed` — and **canonically re-published unchanged**

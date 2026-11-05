@@ -548,16 +548,22 @@ if (fs.existsSync(prevDist)) {
 // v2.8.6 adopts the TAM OS artifact naming: dist/tam-os-v<version>.html. Every *.html in dist/
 // is inspected so a leftover legacy-named artifact (tam-intelligence-os-v*) would fail here.
 const distHtml = fs.readdirSync(path.join(root, 'dist')).filter((f)=>/\.html$/.test(f));
-check(distHtml.length === 1 && distHtml[0] === 'tam-os-v' + meta.version + '.html', 'dist/ holds exactly one release artifact — the current v' + meta.version + ' under the TAM OS naming (dist/tam-os-v' + meta.version + '.html)');
+// v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: distHtml === ['tam-os-v' + meta.version + '.html'] (the current
+// version's single file). v3.0.0 ships only the Distribution-1 package, so dist/ keeps exactly the one frozen
+// single-file release (v2.11.0) and no single-file artifact may exist for the current version.
+check(distHtml.length === 1 && distHtml[0] === 'tam-os-v2.11.0.html' && !distHtml.includes('tam-os-v' + meta.version + '.html'),
+  'dist/ holds exactly one single-file artifact — the frozen v2.11.0 release (dist/tam-os-v2.11.0.html); v' + meta.version + ' ships as the Distribution-1 package, with no single-file artifact');
 check(!distHtml.some((f)=>/^tam-intelligence-os-v/.test(f)), 'no legacy tam-intelligence-os-v* artifact remains tracked in dist/ (historical filenames live only in Git history + published Releases)');
-check(meta.version === '2.11.0', 'APP_VERSION is 2.11.0 (this development release — RELEASE-1)');
+// v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: meta.version === '2.11.0' (RELEASE-1).
+check(meta.version === '3.0.0', 'APP_VERSION is 3.0.0 (the v3.0.0 Core SESSION Foundation release candidate)');
 
 // == RELEASE IDENTITY GUARDRAILS (v2.10.0) ==
 // The version and release name live ONCE in js/core/constants.js; these checks prove every
 // authoritative surface agrees with that single source and that the release paperwork exists.
 // They are derived from meta wherever possible so they do not need editing next release.
 const distArtifacts = distHtml; // alias retained for downstream references
-check(meta.releaseName === 'Identity Refresh', 'APP_RELEASE_NAME is the approved v2.11.0 release name');
+// v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: meta.releaseName === 'Identity Refresh' (v2.11.0).
+check(meta.releaseName === 'Core SESSION Foundation', 'APP_RELEASE_NAME is the approved v3.0.0 release name');
 check(!/tam-intelligence-os-v2\.8\.[456]\.html/.test(distArtifacts.join('|')), 'no tracked current artifact remains under a superseded tam-intelligence-os filename');
 check(read(path.join(root, 'index.html')).includes('<title>TAM OS v' + meta.version + '</title>'), 'index.html <title> agrees with APP_VERSION');
 const relNotes = read(path.join(root, 'RELEASE_NOTES.md'));
@@ -572,6 +578,25 @@ check(changelog.includes('## 2.9.0 — Workspace Experience'), 'CHANGELOG.md ret
 check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))), 'SCHEMA_VERSION remains 6 — v2.10.0 carries no data migration');
 check(dist.includes('const SCHEMA_VERSION = 6;'), 'the application carries SCHEMA_VERSION 6');
 check(relNotes.includes('SCHEMA_VERSION') && /remains \*{0,2}6\*{0,2}|unchanged \(6\)/.test(relNotes), 'RELEASE_NOTES.md states SCHEMA_VERSION remains 6');
+// ===== v3.0.0 RELEASE CANDIDATE PAPERWORK (Owner decision 2026-11-05; additive) =====
+{
+  const v3 = relNotes.slice(0, relNotes.indexOf('# TAM OS v2.11.0 — Identity Refresh'));
+  check(relNotes.startsWith('# TAM OS v3.0.0 — Core SESSION Foundation (release candidate)\n') && v3.length > 0,
+    'v3.0.0: RELEASE_NOTES.md opens with the v3.0.0 Core SESSION Foundation candidate; the v2.11.0 notes follow unchanged');
+  check(/\*\*MAJOR\*\*/.test(v3) && /v2\.11\.0 — Identity Refresh remains the latest published release/.test(v3)
+    && /Gate D and Gate R stay on \*\*HOLD\*\*/.test(v3),
+    'v3.0.0: the candidate notes state MAJOR, that v2.11.0 remains the latest published release, and that Gate D and Gate R stay on HOLD');
+  check(/not read and not migrated/.test(v3) && /not part of the v3\.0\.0 application/.test(v3) && /does not\s+claim Full Parity/.test(v3)
+    && /not\*\* production-ready/.test(v3),
+    'v3.0.0: the candidate notes disclose the LOCAL areas not migrated, no v2.x data migration, and claim neither Full Parity nor production readiness');
+  check(/BACKEND-DEPLOYMENT-RUNBOOK\.md/.test(v3) && /create-ceo/.test(v3) && /RR-3/.test(v3) && /HP-3/.test(v3) && /runbook §8/.test(v3),
+    'v3.0.0: the candidate notes document accounts (create-ceo), backend requirements, the runbook rollback (§8), RR-3 and F-2/HP-3');
+  check(!/__(ZIPBYTES|ZIPSHA|MANSHA|DIGEST)__/.test(v3), 'v3.0.0: the candidate notes carry the recorded artifact digests (no placeholder)');
+  const iUnrel = changelog.indexOf('## Unreleased'), i3 = changelog.indexOf('## 3.0.0 — Core SESSION Foundation'), i211 = changelog.indexOf('## 2.11.0 — Identity Refresh');
+  check(iUnrel >= 0 && iUnrel < i3 && i3 < i211, 'v3.0.0: CHANGELOG.md keeps Unreleased on top, then 3.0.0, then the unchanged 2.11.0 entry');
+  check(dist.indexOf("{v:'3.0.0 — Core SESSION Foundation'") > 0 && dist.indexOf("{v:'3.0.0 — Core SESSION Foundation'") < dist.indexOf("{v:'2.11.0 — Identity Refresh'"),
+    'v3.0.0: the in-app Release Notes list the 3.0.0 entry first; the 2.11.0 entry is kept');
+}
 // == v2.10.0 PUBLICATION GUARDRAILS (final release state) ==
 // Current-state product/repository identity and honest release status for the PUBLISHED
 // v2.10.0 release. Text guards over the release paperwork and current-state docs (never over
@@ -589,8 +614,14 @@ const readmeSrc = read(path.join(root, 'README.md'));
 const securitySrc = read(path.join(root, 'SECURITY.md'));
 const issueCfg = read(path.join(root, '.github', 'ISSUE_TEMPLATE', 'config.yml'));
 check(dist.includes("const APP_NAME = 'TAM OS';"), 'APP_NAME is TAM OS (current product identity)');
+// v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: one check, "README.md current-state identity is v2.11.0 / Identity Refresh".
+// The latest PUBLISHED identity is unchanged (the version badge tracks the released version — Owner decision); the
+// candidate is added as a separate, positively worded statement.
 check(/version-2\.11\.0/.test(readmeSrc) && /v2\.11\.0 — Identity Refresh/.test(readmeSrc),
-  'README.md current-state identity is v2.11.0 / Identity Refresh');
+  'README.md latest published identity is v2.11.0 / Identity Refresh (the version badge tracks the released version)');
+check(/## Release candidate — v3\.0\.0 Core SESSION Foundation/.test(readmeSrc) && /\*\*release candidate\*\*/.test(readmeSrc)
+  && /remains the latest published release/.test(readmeSrc) && !/version-3\.0\.0/.test(readmeSrc),
+  'README.md names v3.0.0 Core SESSION Foundation as the release candidate and keeps v2.11.0 as the latest published release');
 // REPO-1 — CANONICAL REPOSITORY SLUG.
 // The canonical repository is fanoryu/TAM-OS-Next. The predecessor fanoryu/TAM-OS is retained as a
 // read-only archive and is still referenced legitimately as provenance (PROVENANCE.md, release history,
@@ -3175,8 +3206,9 @@ check(/\.nav-preview-tag\{[^}]*background:transparent/.test(ux4fCss) && /\.nav-p
 // ---- invariants unchanged ----
 check(/const SCHEMA_VERSION = 6;/.test(ux4fConstants), 'UX-004F: SCHEMA_VERSION remains 6');
 // v2.9.0 release: constants carry the single-source release identity forward.
-check(/const APP_VERSION = '2\.11\.0';/.test(ux4fConstants) && /const APP_RELEASE_NAME = 'Identity Refresh';/.test(ux4fConstants),
-  'release: APP_VERSION 2.11.0 and APP_RELEASE_NAME match the v2.11.0 release identity');
+// v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: APP_VERSION '2.11.0' and APP_RELEASE_NAME 'Identity Refresh'.
+check(/const APP_VERSION = '3\.0\.0';/.test(ux4fConstants) && /const APP_RELEASE_NAME = 'Core SESSION Foundation';/.test(ux4fConstants),
+  'release: APP_VERSION 3.0.0 and APP_RELEASE_NAME match the v3.0.0 release identity');
 check(fs.existsSync(path.join(root,'tools','verify-nav-simplification-runtime.js')),
   'UX-004F runtime harness present: tools/verify-nav-simplification-runtime.js');
 
@@ -4235,8 +4267,9 @@ check(/<link rel="icon"[^>]*href="data:image\/png;base64,/.test(dist),
 check(!/<link rel="icon"[^>]*href="https?:\/\//.test(dist),
   'MAINT-001: the application has no external favicon URL');
 // 4. APP_VERSION / SCHEMA_VERSION unchanged by branding work
-check(indexHtml.includes('<title>TAM OS v' + meta.version + '</title>') && meta.version === '2.11.0',
-  'MAINT-001: APP_VERSION/title consistent (v2.11.0)');
+// v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: meta.version === '2.11.0'.
+check(indexHtml.includes('<title>TAM OS v' + meta.version + '</title>') && meta.version === '3.0.0',
+  'MAINT-001: APP_VERSION/title consistent (v3.0.0)');
 // 5. repository asset paths referenced by README actually resolve
 ['assets/branding/tam-os-logo-full-color.png',
  'assets/screenshots/dashboard-dark.png',
@@ -5267,8 +5300,9 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
     'UX-006D2: ACTIONS remains exactly 21 (D2 adds no capability; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D2: SCHEMA_VERSION remains 6 (no D2 migration/storage change)');
-  check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'UX-006D2: APP_VERSION is 2.11.0 (RELEASE-1 version; D2 remained presentation-only)');
+  // v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: APP_VERSION '2.11.0' (RELEASE-1).
+  check(/const APP_VERSION = '3\.0\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'UX-006D2: APP_VERSION is 3.0.0 (v3.0.0 candidate; D2 remained presentation-only)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-ux006d2-presentation-runtime.js')),
     'UX-006D2: presentation runtime harness present — tools/verify-ux006d2-presentation-runtime.js');
   // Global Search scope wiring is OUTSIDE UX-006D and must stay deferred.
@@ -5312,8 +5346,9 @@ console.log('== UX-006D3 — CROSS-SURFACE PRESENTATION CONSISTENCY ==');
     'UX-006D3: ACTIONS remains exactly 21 (D3 adds no capability; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D3: SCHEMA_VERSION remains 6 (no D3 migration/storage change)');
-  check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'UX-006D3: APP_VERSION is 2.11.0 (RELEASE-1 version; D3 remained presentation-only)');
+  // v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: APP_VERSION '2.11.0' (RELEASE-1).
+  check(/const APP_VERSION = '3\.0\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'UX-006D3: APP_VERSION is 3.0.0 (v3.0.0 candidate; D3 remained presentation-only)');
   check(!/getScopedRecords|getCurrentWorkspace|getCurrentUser/.test(read(path.join(root, 'js', 'core', 'global-search.js'))),
     'UX-006D3: Global Search scope wiring remains deferred (outside UX-006D)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-ux006d3-presentation-runtime.js')),
@@ -5413,8 +5448,9 @@ console.log('== READINESS-1 — EMPLOYEE READ SCOPE ==');
     'Readiness-1: ACTIONS remains exactly 21 (read scope needed no new action; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'Readiness-1: SCHEMA_VERSION remains 6 (no migration)');
-  check(/const APP_VERSION = '2\.11\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
-    'Readiness-1: APP_VERSION is 2.11.0 (RELEASE-1 version; Readiness-1 scope unchanged)');
+  // v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: APP_VERSION '2.11.0' (RELEASE-1).
+  check(/const APP_VERSION = '3\.0\.0';/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    'Readiness-1: APP_VERSION is 3.0.0 (v3.0.0 candidate; Readiness-1 scope unchanged)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-employee-read-scope-runtime.js')),
     'Readiness-1: read-scope runtime harness present — tools/verify-employee-read-scope-runtime.js');
 }
@@ -8100,10 +8136,13 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // added; js/core/auth-boot.js, js/ui/auth-view.js and js/ui/session-workspace-view.js changed (Change
   // password and Sign out all devices). Prior pin was
   // 568e654d406b75ec3197ee0deacaf72253d3056e1dcb455357226d951c4d92d7 (D-1).
+  // v3.0.0 (Owner decision 2026-11-05): re-pinned for the release identity only — APP_VERSION 3.0.0, APP_RELEASE_NAME
+  // "Core SESSION Foundation", the <title> and the 3.0.0 in-app Release Notes entry. Prior pin was
+  // f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430 (WP-1).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === 'f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430',
-    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1: 88 modules; the package holds 102 files (the selector module removed) at the WP-1 digest f6fa99b1… (568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === '819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5',
+    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
