@@ -303,6 +303,17 @@
   schema, ACTIONS (**20**) or behaviour change.
 
 ### Fixed
+- **D-1 — Audit and Overtime month bars no longer push Previous month off the left edge on narrow screens (SESSION; not
+  released, not deployed).** Found by the WP-E2E-1 real-backend E2E regression on `35d2d2eb` (checks UI-15 at 320px and
+  375px; WP-E2E-1's recorded result of 208/214 stands unchanged). On the CEO Audit page and on Overtime (CEO and
+  Employee), the Previous month, month and Next month row was right-aligned and could not wrap, so at 320px Previous month
+  was off-screen and could not be tapped, and a keyboard user tabbing to it had focus on a control they could not see (it
+  was partly visible at 375px). Both rows now use the existing wrapping, left-aligned `.head-controls` row, as the Payroll
+  month bar does, so the controls wrap and stay visible; at wider screens the month bar is left-aligned, as on Payroll
+  (`js/ui/session-audit-view.js` and `js/ui/session-overtime-view.js` only; no CSS change). Control ids, labels, order,
+  `role="group"`, `aria-label="Month"` and behaviour are unchanged. The Overtime detail action row (R-1) was measured in its
+  worst case (four buttons on a Draft) and fits at every width, so it is unchanged. No focus, event, API, storage, schema or
+  financial change; `APP_VERSION` and `SCHEMA_VERSION` unchanged.
 - **UI-DEV-03 — Keyboard focus is no longer lost when the window widens past the mobile layout (R4-4; SESSION; not
   released, not deployed).** On a narrow screen a keyboard user can be on the menu button; when the window widens past
   768px that button is hidden, and focus could be left on the hidden button or dropped to the page. Focus now moves to the

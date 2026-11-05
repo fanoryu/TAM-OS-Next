@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "b640785b35054d19f863b31a4a11babfae9d59e89b417cb382c18fcecdb38aec",
+  "packageDigest": "568e654d406b75ec3197ee0deacaf72253d3056e1dcb455357226d951c4d92d7",
   "zip": {
     "name": "tam-os-v2.11.0-package.zip",
-    "bytes": 3105436,
-    "sha256": "cc9adf6e148983b98cdc3ff24105e7e788e8342c50b1786ab9d9111792450c89"
+    "bytes": 3105438,
+    "sha256": "dc5eac62528562ead066ab5f128c67149f9c0da30eb3cae41e99935814a293c1"
   },
   "files": [
     {
@@ -484,13 +484,13 @@
     },
     {
       "path": "js/ui/session-audit-view.js",
-      "bytes": 13635,
-      "sha256": "7e715e10bfd653f90a92fefb91473e0fa9ad4957fff7fefa2363984f84acdd10"
+      "bytes": 13636,
+      "sha256": "2e789ca97d577953543934195e41f37a62f53b82ab2e289296beecadfc665f61"
     },
     {
       "path": "js/ui/session-overtime-view.js",
-      "bytes": 34307,
-      "sha256": "fbb8dc97112facc2f12af28f8e1427863086a0e9560dfa36f67a8e3163449748"
+      "bytes": 34308,
+      "sha256": "dfed93923b81912bb9dcc658a9756665e4888595d9cc8f0e73982db8601c2390"
     },
     {
       "path": "js/ui/session-payroll-view.js",

@@ -8047,10 +8047,14 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // UI-DEV-03 / R4-4 authorized revision (Owner RD-1 = R-C, WP2-D4 = D4-u, WP2-D9): no module and no
   // file added; js/ui/session-workspace-view.js changed (mobile -> desktop focus recovery). Was:
   // 5ce6716e9525109f193e70fa200296f245c71c993e9888727d0eec6acb705895 (RR-4).
+  // D-1 authorized revision (Owner-approved D-1 targeted fix SPR, WP-E2E-1): no module and no file added;
+  // js/ui/session-audit-view.js and js/ui/session-overtime-view.js changed (the Audit and Overtime month
+  // bars use the wrapping .head-controls row). Prior pin was
+  // b640785b35054d19f863b31a4a11babfae9d59e89b417cb382c18fcecdb38aec (R4-4).
   check(jsFiles.length === 88 && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
-    && pkg5.packageDigest === 'b640785b35054d19f863b31a4a11babfae9d59e89b417cb382c18fcecdb38aec',
-    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4: 88 modules; the package holds 102 files (the selector module removed) at the R4-4 digest b640785b… (5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
+    && pkg5.packageDigest === '568e654d406b75ec3197ee0deacaf72253d3056e1dcb455357226d951c4d92d7',
+    'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1: 88 modules; the package holds 102 files (the selector module removed) at the D-1 digest 568e654d… (b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
 }
@@ -8191,6 +8195,28 @@ console.log('== UI-DEV-02 — RR-4 PAYROLL DETAIL ACTION ROWS ==');
     const f = fn(n); return f.split(ROW).length === 2 && !/auth-actions/.test(f.split('const intentState')[0]) && /back \+ reload \+ actions \+ '<\/div>'/.test(f);
   });
   check(ok, 'UI-DEV-02 (RR-4): the CEO plan-detail and Supplemental-detail action rows open a wrapping .head-controls row (Back to list, then Reload and the matrix actions), not the right-aligned .auth-actions row');
+}
+
+// ===== D-1 — AUDIT AND OVERTIME MONTH BARS (WP-E2E-1 finding; Owner-approved D-1 targeted fix SPR) =====
+// The SESSION Audit and Overtime month bars were right-aligned, non-wrapping .auth-actions rows that
+// pushed Previous month off the left edge at 320px and 375px (WP-E2E-1 checks UI-15.*.320/375.{audit,
+// overtime}). Both now use the existing wrapping .head-controls row, as the Payroll month bar has since
+// U2-WP1. No CSS change; ids, labels, role=group and aria-label=Month unchanged.
+console.log('== D-1 — AUDIT AND OVERTIME MONTH BARS ==');
+{
+  const monthBar = (file, sig) => (stripComments(read(path.join(root, 'js', 'ui', file))).match(new RegExp('function ' + sig.replace(/[()]/g, '\\$&') + '\\{[\\s\\S]*?\\n\\}')) || [''])[0];
+  const bars = [
+    ['session-audit-view.js', 'sessionAuditMonthBarHTML(w)', 'swau', 'D-1 (i): the Audit month bar'],
+    ['session-overtime-view.js', 'sessionOvertimeMonthBarHTML(w, dis)', 'swo', 'D-1 (ii): the Overtime month bar'],
+  ];
+  for (const [file, sig, p, label] of bars) {
+    const bar = monthBar(file, sig);
+    check(/'<div class="head-controls" role="group" aria-label="Month">'/.test(bar) && !/auth-actions/.test(bar)
+      && [p + 'PrevMonth', p + 'Month', p + 'NextMonth'].every((id) => bar.split('id="' + id + '"').length === 2)
+      && bar.indexOf('id="' + p + 'PrevMonth"') < bar.indexOf('id="' + p + 'Month"') && bar.indexOf('id="' + p + 'Month"') < bar.indexOf('id="' + p + 'NextMonth"')
+      && new RegExp('<label for="' + p + 'Month">Month<\\/label>').test(bar),
+      label + ' is a wrapping .head-controls group (role=group, aria-label=Month) with Previous, the labelled month input and Next, in that order — not the right-aligned .auth-actions row');
+  }
 }
 
 // ===== UI-DEV-03 — R4-4 DESKTOP FOCUS RECOVERY (Owner RD-1 = R-C, P0-X; WP2-D4 = D4-u; WP2-D9) =====

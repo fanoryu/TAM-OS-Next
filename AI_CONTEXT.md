@@ -642,6 +642,20 @@ is CLOSED for the SESSION shell** on the accepted Chrome evidence, including rea
 W2 (520 -> 1280), and no focus moved in any negative case. Remaining, not closed by this: LOCAL shell focus recovery
 (`shell-render.js`) is out of scope; RR-3 (Firefox / Safari) stays open; the pointer-press-then-body path has harness-only
 coverage (R7). Not released, not deployed.
+
+**D-1 — Audit and Overtime month bars (fix/u2-d1-month-bar-reflow; PR, NOT merged, NOT deployed).** Owner-approved D-1
+targeted fix SPR after WP-E2E-1. WP-E2E-1 (real-backend SESSION E2E on `35d2d2eb`, disposable loopback PHP 8.3.36 + MariaDB
+10.11.19, synthetic data; 2026-11-05) recorded **208/214** checks and 901/0 PHP tests (database suite ran). That result
+stands unchanged: its six failures (UI-15 at 320px and 375px: CEO Audit, CEO Overtime, Employee Overtime) were one defect,
+D-1. The Audit and Overtime month bars were right-aligned, non-wrapping `.auth-actions` rows that pushed Previous month
+off the left edge (320px: −102…−22; keyboard focus off-screen). `js/ui/session-audit-view.js` and
+`js/ui/session-overtime-view.js` now use the wrapping `.head-controls` row, as the Payroll month bar has since U2-WP1; ids,
+labels, order and ARIA are unchanged; no CSS change (golden master unchanged). R-1 (the Overtime detail action row) was
+measured on the baseline in its worst case (four buttons on a Draft, CEO and Employee; Submitted and Reviewed too) at 320,
+375, 768, 769 and 1280px. It is contained, so it is NOT reproduced and is left unchanged. Package digest `568e654d…`
+(was `b640785b…`); verifier 3024 (two additive D-1 checks, which fail on the baseline sources); the 44 runtime harnesses
+are unchanged. Browser checks are Chrome 157 only on the loopback auth stub (RR-3). Gate D and Gate R stay on HOLD; not
+released, not deployed.
 v2.10.0 remains
 published and intact as the **prior release** (no longer Latest), described next.
 

@@ -111,7 +111,7 @@ function sessionAuditTableHTML(rows, from){
 }
 
 function sessionAuditMonthBarHTML(w){
-  return '<div class="auth-actions" role="group" aria-label="Month">'
+  return '<div class="head-controls" role="group" aria-label="Month">'
     + '<button class="btn" type="button" id="swauPrevMonth">Previous month</button>'
     + '<label for="swauMonth">Month</label><input class="input" type="month" id="swauMonth" name="month" autocomplete="off" value="' + escapeHtml(w.month || '') + '">'
     + '<button class="btn" type="button" id="swauNextMonth">Next month</button></div>';

@@ -286,7 +286,7 @@ function sessionOvertimePanelHTML(principal, w){
 }
 
 function sessionOvertimeMonthBarHTML(w, dis){
-  return '<div class="auth-actions" role="group" aria-label="Month">'
+  return '<div class="head-controls" role="group" aria-label="Month">'
     + '<button class="btn" type="button" id="swoPrevMonth"' + dis + '>Previous month</button>'
     + '<label for="swoMonth">Month</label><input class="input" type="month" id="swoMonth" name="month" autocomplete="off"' + dis + ' value="' + escapeHtml(w.month || '') + '">'
     + '<button class="btn" type="button" id="swoNextMonth"' + dis + '>Next month</button></div>';
