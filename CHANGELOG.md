@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **WP-2 — Backend deployment readiness (staging first; documentation and tooling only; nothing deployed).**
+  [`docs/BACKEND-DEPLOYMENT-RUNBOOK.md`](docs/BACKEND-DEPLOYMENT-RUNBOOK.md) is the governed procedure for the first
+  Hostinger deployment as **staging with fabricated data**: which `server/` files go to the private application
+  directory and which to `<document root>/api/`, configuration and secret isolation, PHP/MariaDB host evidence,
+  migrations and first-CEO provisioning without assuming SSH (SSH preferred; a controlled no-SSH path for the CEO
+  token is an explicit Owner decision, never a default), the host header probe (SDR-0002 E1/E5/E6), staging rollback,
+  and the requirements that stay mandatory before production (E7, E8, E10, E12, governed mail, the cutover gate). New
+  `tools/hostinger-htaccess.js` renders the document-root `.htaccess` from `tools/package-headers.js` — every static
+  header once with `Header always set`, `/api/*` excluded so the PHP API keeps `Cache-Control: no-store, private`, no
+  `<IfModule>` (fails closed without `mod_headers`), HSTS only in its `--production` rendering — and six additive
+  `verify-build.js` checks pin it (3030 checks). No application, backend, package (digest unchanged), schema or CI
+  change; no host was accessed. Gate D and Gate R stay on HOLD.
 - **U1 — SESSION graduated shell (Option B; merged as PR #70, `d6ff8bd`; not deployed).** After sign-in,
   the CEO and Employees now see the v2.11.0 sidebar shell (brand, grouped navigation, mobile drawer, skip link) around
   the existing SESSION sections instead of a single card with tabs: CEO — People: Employees; Finance: Overtime, Payroll;

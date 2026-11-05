@@ -217,6 +217,13 @@ belong in the private layer (§1), never in this repository.
 5. Spot-check deployed files against the manifest's per-file SHA-256, then run a production smoke
    test.
 
+The backend half of a deployment — which `server/` files go to the private application directory and
+which to `<document root>/api/`, the configuration and its secrets, PHP/MariaDB prerequisites, migrations
+and first-CEO provisioning without assuming SSH, the host header probe, staging rollback, and the
+requirements that remain mandatory before production — is the governed procedure in
+[`BACKEND-DEPLOYMENT-RUNBOOK.md`](BACKEND-DEPLOYMENT-RUNBOOK.md) (WP-2, staging first). It authorizes no
+deployment.
+
 **The package (Distribution-1).** Every file is a byte-identical copy of its source file at the same
 relative path: `index.html`, the six stylesheets, the pre-paint `js/boot/theme-boot.js`, every
 module-order script, vendored SheetJS, and the licence texts. It has no inline executable script and
@@ -240,7 +247,10 @@ locally and the verifier checks. In summary:
   `<style>` elements and style URLs stay restricted to `'self'`, and scripts are unaffected.
 
 Applying these headers on Hostinger (for example via `.htaccess`) is a deployment step for the backend
-readiness milestones; nothing here configures the host.
+readiness milestones; nothing here configures the host. WP-2: the document-root `.htaccess` is rendered
+from this contract by [`tools/hostinger-htaccess.js`](../tools/hostinger-htaccess.js) (static files only;
+`/api/*` keeps the headers the PHP API sets; HSTS only in its `--production` rendering) and pinned by
+`tools/verify-build.js`; whether the host honours it is still the SDR-0002 E6 probe of the runbook.
 
 **Cache model.**
 
