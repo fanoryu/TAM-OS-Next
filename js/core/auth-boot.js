@@ -34,6 +34,22 @@
    subordinate machine, AuthFlow (js/core/auth-flow.js). It never touches identity;
    start() only gives it the first look at a credential link.
 
+   WP-1 (Account security): while AUTHENTICATED, the signed-in user's own Change password
+   (POST /api/auth/change-password) and Sign out all devices (POST /api/auth/logout-all),
+   each sent ONCE with the in-memory CSRF token and never replayed — not even after a 403.
+   The panel state is memory only and is reset by every state change (go()). The passwords
+   are parameters of changePassword() only: never stored, logged or put in the view model.
+     change-password 200   the server rotated the session: the answer must be the exact
+                           projection of the same principal with a new CSRF token; the
+                           token is installed and GET /api/auth/me must confirm the same
+                           principal AND that token. Anything else fails closed.
+     uncertain outcome     (503, network, timeout, 500, a malformed 200) never resent: /me
+                           once — 401 ends the session ('password_unconfirmed'); a live
+                           session stays, Change password is not offered again in it.
+     logout-all            confirmed ONLY by a 200 that is exactly { loggedOut: true } ->
+                           SIGNED_OUT 'signed_out_all'. 401 -> SIGNED_OUT unconfirmed; an
+                           uncertain outcome re-checks /me once; nothing else says "done".
+
    Classic shared global scope; top-level `const` bindings, not on window.
    ============================================================ */
 
@@ -91,6 +107,7 @@ const AuthBoot = (function(){
   function paint(){ if(typeof render === 'function') render(); }
 
   function go(next, msg, extra){
+    account = freshAccount();                // WP-1: no Account security panel outlives a state change
     state = next;
     message = msg || null;
     retryAfter = extra && extra.retryAfter;
@@ -122,6 +139,61 @@ const AuthBoot = (function(){
     const res = await SessionIdentityProvider.refresh();
     busy = false;
     settle(res);
+  }
+
+  /* ---------- WP-1: Account security (memory only) ----------
+     panel     null | 'menu' | 'password' | 'logout_all'
+     busy      a change-password or logout-all request (or its /me check) is in flight
+     message   a fixed failure key for the open panel; notice: a fixed outcome key
+     locked    an uncertain password change happened in this session: never offered again
+     focus     a one-shot focus request for the view (takeAccountFocus) */
+  let account = freshAccount();
+  function freshAccount(){
+    return { panel: null, busy: false, message: null, retryAfter: undefined, requestId: undefined, notice: null, locked: false, focus: null };
+  }
+  function accountPaint(focus){ account.focus = focus || null; paint(); }
+  // A refusal the server answered before acting (or a local refusal): stays signed in, panel open.
+  function accountFailed(msg, res){
+    account.busy = false;
+    account.message = msg;
+    account.retryAfter = res && res.retryAfter;
+    account.requestId = res && res.requestId;
+    accountPaint('message');
+  }
+  const PASSWORD_FAILURES = Object.freeze({
+    RATE_LIMITED: 'pw_rate_limited', CONFLICT: 'pw_conflict', DENIED: 'pw_rejected',
+    CLIENT_FAULT: 'pw_failed', NOT_FOUND: 'pw_failed'
+  });
+  const onlyField = function(res, name){ return !!res.fields && res.fields.length === 1 && res.fields[0] === name; };
+  // An answer whose effect is unknown (503, network, timeout, 500, a malformed 200): the change
+  // is NEVER resent. /me once decides what this device can still say.
+  async function passwordUncertain(principal, res){
+    account.locked = true;
+    const me = await SessionIdentityProvider.refresh();
+    if(state !== AUTH_STATES.AUTHENTICATED) return;
+    account.busy = false;
+    if(!me.ok && me.kind === API_RESULT_KINDS.UNAUTHENTICATED) return go(AUTH_STATES.SIGNED_OUT, 'password_unconfirmed', { requestId: res.requestId });
+    if(!me.ok || !samePrincipal(principal, SessionIdentityProvider.getCurrentUser())) return go(AUTH_STATES.UNAVAILABLE, 'unavailable', { requestId: me.requestId });
+    account.panel = null; account.message = null;
+    account.notice = 'pw_unconfirmed'; account.requestId = res.requestId;
+    accountPaint('notice');
+  }
+  // 200: the server revoked every session and issued this device a new one (new cookie, new
+  // CSRF token in the answer). Accepted only when the answer is the exact projection of the
+  // same principal and /me, under the new cookie, confirms that principal and that token.
+  async function passwordChanged(principal, res){
+    const rotated = mapSessionProjection(res.data);
+    if(!rotated || !samePrincipal(principal, rotated.principal)) return passwordUncertain(principal, res);
+    CsrfHolder.replace(rotated.csrfToken);
+    const me = await SessionIdentityProvider.refresh();
+    if(state !== AUTH_STATES.AUTHENTICATED) return;
+    account.busy = false;
+    if(!me.ok && me.kind === API_RESULT_KINDS.UNAUTHENTICATED) return go(AUTH_STATES.SIGNED_OUT, 'session_ended');
+    if(!me.ok || !samePrincipal(principal, SessionIdentityProvider.getCurrentUser()) || CsrfHolder.get() !== rotated.csrfToken){
+      return go(AUTH_STATES.UNAVAILABLE, 'unavailable', { requestId: me.requestId });
+    }
+    account.panel = null; account.message = null; account.notice = 'pw_changed';
+    accountPaint('notice');
   }
 
   const LOGIN_FAILURES = Object.freeze({
@@ -166,7 +238,7 @@ const AuthBoot = (function(){
     // Always ends SIGNED_OUT on this device. Only a confirmed server logout says so;
     // any other outcome warns that the server session may outlive this page.
     async signOut(){
-      if(state !== AUTH_STATES.AUTHENTICATED || busy) return;
+      if(state !== AUTH_STATES.AUTHENTICATED || busy || account.busy) return;
       busy = true; paint();
       const out = await authSessionMutation('/api/auth/logout', {});
       busy = false;
@@ -191,6 +263,68 @@ const AuthBoot = (function(){
       go(AUTH_STATES.UNAVAILABLE, 'unavailable');
     },
 
+    // WP-1: the Account security panel. 'menu' | 'password' | 'logout_all'; never while a
+    // request is in flight; Change password is not offered after an uncertain change.
+    openAccount(panel){
+      if(state !== AUTH_STATES.AUTHENTICATED || busy || account.busy) return;
+      if(panel !== 'menu' && panel !== 'password' && panel !== 'logout_all') return;
+      if(panel === 'password' && account.locked) return;
+      account.panel = panel; account.message = null; account.retryAfter = undefined; account.requestId = undefined; account.notice = null;
+      accountPaint(panel === 'password' ? 'current' : 'panel');
+    },
+    closeAccount(){
+      if(state !== AUTH_STATES.AUTHENTICATED || account.busy || !account.panel) return;
+      account.panel = null; account.message = null; account.retryAfter = undefined; account.requestId = undefined;
+      accountPaint('opener');
+    },
+
+    // WP-1: POST /api/auth/change-password, exactly { currentPassword, newPassword }, CSRF,
+    // sent once. The confirmation is compared here and never sent. No replay of any kind.
+    async changePassword(currentPassword, newPassword, confirmPassword){
+      if(state !== AUTH_STATES.AUTHENTICATED || busy || account.busy || account.panel !== 'password' || account.locked) return;
+      if(typeof currentPassword !== 'string' || typeof newPassword !== 'string' || typeof confirmPassword !== 'string'
+        || !currentPassword || !newPassword || !confirmPassword) return accountFailed('pw_missing');
+      if(newPassword !== confirmPassword) return accountFailed('pw_mismatch');
+      const principal = SessionIdentityProvider.getCurrentUser();
+      account.busy = true; account.message = null; account.retryAfter = undefined; account.requestId = undefined; accountPaint();
+      const res = await ApiClient.request('/api/auth/change-password', { method: 'POST', body: { currentPassword: currentPassword, newPassword: newPassword }, csrf: true });
+      if(state !== AUTH_STATES.AUTHENTICATED) return;
+      if(res.ok) return passwordChanged(principal, res);
+      if(res.kind === API_RESULT_KINDS.UNAVAILABLE || res.kind === API_RESULT_KINDS.SERVER_ERROR) return passwordUncertain(principal, res);
+      if(res.kind === API_RESULT_KINDS.UNAUTHENTICATED) return go(AUTH_STATES.SIGNED_OUT, 'session_ended');
+      if(res.kind === API_RESULT_KINDS.VALIDATION){
+        return accountFailed(onlyField(res, 'currentPassword') ? 'pw_current' : (onlyField(res, 'newPassword') ? 'pw_policy' : 'pw_failed'), res);
+      }
+      accountFailed(PASSWORD_FAILURES[res.kind] || 'pw_failed', res);
+    },
+
+    // WP-1: POST /api/auth/logout-all {} with CSRF, sent once. Only the exact { loggedOut: true }
+    // confirms it; this device then always ends SIGNED_OUT.
+    async signOutAll(){
+      if(state !== AUTH_STATES.AUTHENTICATED || busy || account.busy || account.panel !== 'logout_all') return;
+      const principal = SessionIdentityProvider.getCurrentUser();
+      account.busy = true; account.message = null; account.retryAfter = undefined; account.requestId = undefined; accountPaint();
+      const res = await ApiClient.request('/api/auth/logout-all', { method: 'POST', body: {}, csrf: true });
+      if(state !== AUTH_STATES.AUTHENTICATED) return;
+      const data = res.ok ? res.data : null;
+      if(res.ok && !!data && typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length === 1 && data.loggedOut === true){
+        return go(AUTH_STATES.SIGNED_OUT, 'signed_out_all');
+      }
+      if(!res.ok && res.kind === API_RESULT_KINDS.UNAUTHENTICATED) return go(AUTH_STATES.SIGNED_OUT, 'signout_all_unconfirmed', { requestId: res.requestId });
+      if(res.ok || res.kind === API_RESULT_KINDS.UNAVAILABLE || res.kind === API_RESULT_KINDS.SERVER_ERROR){
+        const me = await SessionIdentityProvider.refresh();
+        if(state !== AUTH_STATES.AUTHENTICATED) return;
+        if(!me.ok && me.kind === API_RESULT_KINDS.UNAUTHENTICATED) return go(AUTH_STATES.SIGNED_OUT, 'signout_all_unconfirmed', { requestId: res.requestId });
+        if(!me.ok || !samePrincipal(principal, SessionIdentityProvider.getCurrentUser())) return go(AUTH_STATES.UNAVAILABLE, 'unavailable', { requestId: me.requestId });
+        return accountFailed('all_unconfirmed', res);
+      }
+      accountFailed(res.kind === API_RESULT_KINDS.RATE_LIMITED ? 'all_rate_limited' : (res.kind === API_RESULT_KINDS.DENIED ? 'all_rejected' : 'all_failed'), res);
+    },
+
+    // WP-1: the view's one-shot focus request after a paint ('current' | 'panel' | 'message' |
+    // 'notice' | 'opener' | null).
+    takeAccountFocus(){ const f = account.focus; account.focus = null; return f; },
+
     // U1 (D-GS-1, GR-4): the SESSION shell only — AUTHENTICATED with a principal that has a
     // navigation model (sessionNavModel, js/ui/session-workspace-view.js). Never the LOCAL shell: render() sends every
     // SESSION paint to renderAuthView(). Every other state, and an unknown role, is false.
@@ -203,7 +337,10 @@ const AuthBoot = (function(){
     snapshot(){
       return Object.freeze({
         state: state, busy: busy, message: message, retryAfter: retryAfter, requestId: requestId,
-        principal: state === AUTH_STATES.AUTHENTICATED ? SessionIdentityProvider.getCurrentUser() : null
+        principal: state === AUTH_STATES.AUTHENTICATED ? SessionIdentityProvider.getCurrentUser() : null,
+        // WP-1: the Account security panel (fixed keys only; never a password).
+        account: Object.freeze({ panel: account.panel, busy: account.busy, message: account.message, retryAfter: account.retryAfter,
+          requestId: account.requestId, notice: account.notice, locked: account.locked })
       });
     }
   });

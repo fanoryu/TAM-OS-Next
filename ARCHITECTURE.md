@@ -1584,6 +1584,29 @@ every SESSION paint to `renderAuthView()` and Global Search returns outside LOCA
 data-nav routing and every LOCAL view stay unreachable in SESSION. Visibility only: the server Policy and scope still
 decide every request. No module, CSS, API or storage change.
 
+### SESSION Account security — WP-1 (Change password, Sign out all devices; not merged, not deployed)
+
+The SESSION frontend of the two BF-3B self-service routes. **"Account security"** sits beside Sign out in the page
+heading of every SESSION section (one wrapping `.head-controls` row) for the CEO and the Employee alike, and opens an
+inline panel (`sessionAccountSecurityHTML()` in js/ui/session-workspace-view.js; no route, no CSS change): Change
+password, Sign out all devices, Close. The state is `AuthBoot`'s (js/core/auth-boot.js), memory only, reset by every
+state change (`go()`); the view renders it by fixed message keys. The three password fields are read once on submit,
+cleared at once and handed to `AuthBoot.changePassword()` — never stored, logged or in the view model.
+
+| Request | Sent | Accepted as done only when |
+|---|---|---|
+| `POST /api/auth/change-password` `{ currentPassword, newPassword }` | once, directly through `ApiClient` with the CSRF token — no bounded-403 replay, never resent | the 200 is the exact `/me` projection of the same principal (`mapSessionProjection`), its new CSRF token is installed, and `GET /api/auth/me` under the rotated cookie confirms the same principal **and that token**; otherwise fail closed (UNAVAILABLE / SIGNED_OUT) |
+| `POST /api/auth/logout-all` `{}` | once, directly, with CSRF | the 200 data is exactly `{ loggedOut: true }` → SIGNED_OUT "signed out on all devices" |
+
+The confirmation field is compared locally and never sent. Refusals the server answers before acting (400
+`[currentPassword]` / `[newPassword]`, 403, 409, 429) keep the session and the panel with a fixed message. An
+**uncertain** change (503, network, timeout, 500, a malformed 200) is never resent: `/me` once — 401 ends the session
+with "could not confirm whether your password was changed"; a live session stays and Change password is no longer
+offered in it. An uncertain logout-all re-checks `/me` once and is never reported as done. Sign out waits for an
+Account security request. Proven by `tools/verify-auth-boot-runtime.js` (WP-1 section, mutation register M1–M6), nine
+additive `verify-build.js` checks, and a disposable real-backend loopback check (rotated cookie and CSRF token,
+revocation of the other device's session, logout-all's exact answer, uncertain outcomes injected with CDP).
+
 ### Read-only SESSION Employee workspace — AFI-4a1 (frontend; SESSION mode only, LOCAL still shipped)
 
 AFI-4a1 is the first slice of the authenticated Employee workspace (AFI-4a). In SESSION mode, AUTHENTICATED no

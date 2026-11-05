@@ -343,6 +343,117 @@ function sessionWorkspaceSelfHTML(w){
   ]);
 }
 
+/* ---------- WP-1: Account security (the signed-in user's own account) ----------
+   An inline panel under the page heading, opened by "Account security" beside Sign out, for the
+   CEO and the Employee alike: Change password and Sign out all devices. The state is
+   AuthBoot's (memory only); this file renders it and hands the submitted values over. Every
+   message is a fixed string chosen by key. The three password fields are read once on submit,
+   cleared at once and handed to AuthBoot.changePassword(); a re-render always draws them empty.
+   Rows that hold more than one button wrap (.head-controls), so nothing leaves a 320px screen. */
+const SESSION_ACCOUNT_MESSAGES = Object.freeze({
+  pw_missing: 'Enter your current password, then the new password in both fields.',
+  pw_mismatch: 'The two new passwords do not match. Enter them again.',
+  pw_current: 'The current password is not correct. Nothing was changed.',
+  pw_policy: 'That new password cannot be used. Choose a different one that follows the guidance above. Nothing was changed.',
+  pw_rate_limited: 'Too many attempts. Nothing was changed.',
+  pw_conflict: 'Your password was changed somewhere else at the same time. Nothing was changed here. Sign out and sign in again.',
+  pw_rejected: 'The request was refused by TAM OS. Nothing was changed. Reload the page and try again.',
+  pw_failed: 'Your password could not be changed. Nothing was changed. Try again.',
+  all_rate_limited: 'Too many requests. Your sessions were not ended.',
+  all_rejected: 'The request was refused by TAM OS. Your sessions were not ended. Reload the page and try again.',
+  all_failed: 'Your sessions could not be ended. Try again.',
+  all_unconfirmed: 'TAM OS could not confirm that your sessions were ended. They may still be active. Try again.'
+});
+const SESSION_ACCOUNT_NOTICES = Object.freeze({
+  pw_changed: 'Your password was changed. Every other session of your account has ended; this device stays signed in.',
+  pw_unconfirmed: 'TAM OS could not confirm whether your password was changed, so it is not offered again in this session. Sign out, then sign in with the new password first; if it is refused, use the previous one.'
+});
+
+function sessionAccountText(map, key, a){
+  let text = map[key] || '';
+  if(key === 'pw_rate_limited' || key === 'all_rate_limited') text += authWaitText(a.retryAfter);
+  return text + (a.requestId ? ' Reference: ' + a.requestId + '.' : '');
+}
+
+function sessionAccountOpenerHTML(auth){
+  const a = auth.account || {};
+  const open = !!a.panel;
+  return '<button class="btn" id="authAccountBtn" type="button" aria-controls="authAcctPanel" aria-expanded="' + open + '"'
+    + ((auth.busy || a.busy) ? ' disabled' : '') + '>Account security</button>';
+}
+
+function sessionAccountSecurityHTML(a){
+  if(!a) return '';
+  if(!a.panel){
+    if(!a.notice || !SESSION_ACCOUNT_NOTICES[a.notice]) return '';
+    const warn = a.notice === 'pw_unconfirmed';
+    return '<p class="auth-message' + (warn ? ' auth-message-warn' : '') + '" id="authAcctNotice" role="status" tabindex="-1">'
+      + escapeHtml(sessionAccountText(SESSION_ACCOUNT_NOTICES, a.notice, a)) + '</p>';
+  }
+  const dis = a.busy ? ' disabled' : '';
+  const message = '<p class="auth-message' + (a.message ? ' auth-message-warn' : '') + '" id="authAcctMessage" role="alert" tabindex="-1">'
+    + (a.message && SESSION_ACCOUNT_MESSAGES[a.message] ? escapeHtml(sessionAccountText(SESSION_ACCOUNT_MESSAGES, a.message, a)) : '') + '</p>';
+  let body;
+  if(a.panel === 'password'){
+    const field = function(id, label, auto, extra){
+      return '<div class="field"><label for="' + id + '">' + label + '</label>'
+        + '<input class="input" id="' + id + '" name="' + id + '" type="password" autocomplete="' + auto + '" required' + (extra || '') + dis + '></div>';
+    };
+    body = '<form class="auth-form" id="authAcctPwForm" method="post" novalidate' + (a.busy ? ' aria-busy="true"' : '') + '>'
+      + '<p class="auth-lead">Changing your password ends every other session of your account. This device stays signed in.</p>'
+      + field('authAcctCurrent', 'Current password', 'current-password')
+      + field('authAcctNew', 'New password', 'new-password', ' aria-describedby="authAcctPolicyHint"').replace('</div>', '<p class="hint" id="authAcctPolicyHint">' + escapeHtml(AUTH_FLOW_POLICY_HINT) + '</p></div>')
+      + field('authAcctConfirm', 'Confirm new password', 'new-password')
+      + message
+      + '<div class="head-controls"><button class="btn" id="authAcctBack" type="button"' + dis + '>Cancel</button>'
+      + '<button class="btn btn-accent" id="authAcctPwSubmit" type="submit"' + dis + (a.busy ? ' aria-busy="true"' : '') + '>' + (a.busy ? 'Changing…' : 'Change password') + '</button></div>'
+      + '</form>';
+  } else if(a.panel === 'logout_all'){
+    body = '<p class="auth-lead">This ends every session of your account on every device, including this one. You will need to sign in again.</p>'
+      + message
+      + '<div class="head-controls"><button class="btn" id="authAcctBack" type="button"' + dis + '>Cancel</button>'
+      + '<button class="btn btn-danger" id="authAcctAllConfirm" type="button"' + dis + (a.busy ? ' aria-busy="true"' : '') + '>' + (a.busy ? 'Signing out…' : 'Sign out all devices') + '</button></div>';
+  } else {
+    body = '<p class="auth-lead">Manage the sign-in of your own account.</p>'
+      + '<div class="head-controls">'
+      + (a.locked ? '' : '<button class="btn" id="authAcctPwBtn" type="button">Change password</button>')
+      + '<button class="btn" id="authAcctAllBtn" type="button">Sign out all devices</button>'
+      + '<button class="btn" id="authAcctClose" type="button">Close</button></div>';
+  }
+  return '<section class="card" id="authAcctPanel" aria-labelledby="authAcctTitle"' + (a.busy ? ' aria-busy="true"' : '') + '>'
+    + '<h2 class="section-title" id="authAcctTitle" tabindex="-1">' + (a.panel === 'password' ? 'Change password' : (a.panel === 'logout_all' ? 'Sign out all devices?' : 'Account security')) + '</h2>'
+    + body + '</section>';
+}
+
+function bindSessionAccountSecurity(app){
+  const on = function(id, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener('click', fn); };
+  on('authAccountBtn', function(){
+    if(AuthBoot.snapshot().account.panel) AuthBoot.closeAccount(); else AuthBoot.openAccount('menu');
+  });
+  on('authAcctPwBtn', function(){ AuthBoot.openAccount('password'); });
+  on('authAcctAllBtn', function(){ AuthBoot.openAccount('logout_all'); });
+  on('authAcctClose', function(){ AuthBoot.closeAccount(); });
+  on('authAcctBack', function(){ AuthBoot.openAccount('menu'); });
+  on('authAcctAllConfirm', function(){ AuthBoot.signOutAll(); });
+  const form = app.querySelector('#authAcctPwForm');
+  if(form){
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      const read = function(id){ const el = form.querySelector('#' + id); const v = el ? el.value : ''; if(el) el.value = ''; return v; };
+      const current = read('authAcctCurrent');
+      const next = read('authAcctNew');
+      const again = read('authAcctConfirm');
+      AuthBoot.changePassword(current, next, again);
+    });
+  }
+}
+
+// The element the Account security panel asked to focus after a paint, or null.
+function sessionAccountFocusTarget(app, hint){
+  const ids = { current: 'authAcctCurrent', panel: 'authAcctTitle', message: 'authAcctMessage', notice: 'authAcctNotice', opener: 'authAccountBtn' };
+  return hint && ids[hint] ? app.querySelector('#' + ids[hint]) : null;
+}
+
 // U1: the section buttons are the SESSION shell's sidebar items (sessionShellHTML,
 // sessionNavModel); none is enabled while a write of any section is in flight. Without a
 // navigation model (no principal, unknown role) the card renders alone — no shell.
@@ -369,7 +480,10 @@ function sessionWorkspaceHTML(auth, w){
   const card = '<section class="card" aria-labelledby="authTitle">'
     + '<div class="page-head"><div><h1 class="auth-title" id="authTitle" tabindex="-1">' + escapeHtml(title) + '</h1>'
     + '<p class="auth-lead">Signed in as <strong>' + escapeHtml(who) + '</strong>.</p></div>'
-    + '<div class="auth-actions"><button class="btn" id="authSignOutBtn" type="button"' + (auth.busy ? ' disabled aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>'
+    // WP-1: Account security beside Sign out, in a wrapping row (two buttons fit at 320px).
+    + '<div class="head-controls">' + sessionAccountOpenerHTML(auth)
+    + '<button class="btn" id="authSignOutBtn" type="button"' + ((auth.busy || (auth.account && auth.account.busy)) ? ' disabled' : '') + (auth.busy ? ' aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>'
+    + sessionAccountSecurityHTML(auth.account)
     + body + '</section>';
   const model = AuthBoot.allowsWorkspace() ? sessionNavModel(principal) : null;
   if(!model) return '<main class="auth-screen" id="main">' + card + '</main>';
@@ -379,6 +493,7 @@ function sessionWorkspaceHTML(auth, w){
 function bindSessionWorkspace(app){
   const on = function(id, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener('click', fn); };
   on('authSignOutBtn', function(){ AuthBoot.signOut(); });
+  bindSessionAccountSecurity(app);                             // WP-1: in every section
   // AFI-4b1: the section switch — never while an Employee write is in flight. AFI-4c1: nor while
   // an Overtime or Payroll write is; SessionPayroll.show decides who may open it (the CEO's Payroll,
   // AFI-4c2 an Employee's My payroll). AFI-4g: every other section closes Audit; SessionAudit.show
@@ -491,6 +606,9 @@ function renderSessionWorkspace(app, auth){
   const otHint = SessionOvertimeStore.takeFocus();
   const prHint = SessionPayrollStore.takeFocus();
   const auHint = SessionAuditStore.takeFocus();
+  // WP-1: an Account security request (open, failure, outcome, close) wins for this paint.
+  const acEl = sessionAccountFocusTarget(app, AuthBoot.takeAccountFocus());
+  if(acEl && typeof acEl.focus === 'function'){ acEl.focus(); return; }
   if(SessionPayrollStore.snapshot().open){
     const el = sessionPayrollFocusTarget(app, prHint);
     if(el && typeof el.focus === 'function'){ el.focus(); return; }
