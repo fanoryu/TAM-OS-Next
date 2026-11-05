@@ -8204,17 +8204,16 @@ console.log('== UI-DEV-02 — RR-4 PAYROLL DETAIL ACTION ROWS ==');
 // U2-WP1. No CSS change; ids, labels, role=group and aria-label=Month unchanged.
 console.log('== D-1 — AUDIT AND OVERTIME MONTH BARS ==');
 {
-  const monthBar = (file, sig) => (stripComments(read(path.join(root, 'js', 'ui', file))).match(new RegExp('function ' + sig.replace(/[()]/g, '\\$&') + '\\{[\\s\\S]*?\\n\\}')) || [''])[0];
+  const src = (file) => stripComments(read(path.join(root, 'js', 'ui', file)));
   const bars = [
-    ['session-audit-view.js', 'sessionAuditMonthBarHTML(w)', 'swau', 'D-1 (i): the Audit month bar'],
-    ['session-overtime-view.js', 'sessionOvertimeMonthBarHTML(w, dis)', 'swo', 'D-1 (ii): the Overtime month bar'],
+    [(src('session-audit-view.js').match(/function sessionAuditMonthBarHTML\(w\)\{[\s\S]*?\n\}/) || [''])[0], 'swau', 'D-1 (i): the Audit month bar'],
+    [(src('session-overtime-view.js').match(/function sessionOvertimeMonthBarHTML\(w, dis\)\{[\s\S]*?\n\}/) || [''])[0], 'swo', 'D-1 (ii): the Overtime month bar'],
   ];
-  for (const [file, sig, p, label] of bars) {
-    const bar = monthBar(file, sig);
+  for (const [bar, p, label] of bars) {
     check(/'<div class="head-controls" role="group" aria-label="Month">'/.test(bar) && !/auth-actions/.test(bar)
       && [p + 'PrevMonth', p + 'Month', p + 'NextMonth'].every((id) => bar.split('id="' + id + '"').length === 2)
       && bar.indexOf('id="' + p + 'PrevMonth"') < bar.indexOf('id="' + p + 'Month"') && bar.indexOf('id="' + p + 'Month"') < bar.indexOf('id="' + p + 'NextMonth"')
-      && new RegExp('<label for="' + p + 'Month">Month<\\/label>').test(bar),
+      && bar.split('<label for="' + p + 'Month">Month</label>').length === 2,
       label + ' is a wrapping .head-controls group (role=group, aria-label=Month) with Previous, the labelled month input and Next, in that order — not the right-aligned .auth-actions row');
   }
 }
