@@ -7,7 +7,7 @@
  * constants so the build and verify tools never hardcode a version string.
  *
  * Requirement (v2.6.4 Release Automation): there must be no independent version
- * source — build-single-file.js and verify-build.js both derive from here, which
+ * source — build-package.js and verify-build.js both derive from here, which
  * derives from constants.js.
  *
  * Exports readAppMeta() -> { version, releaseName, distName, distPath }.
