@@ -18,6 +18,8 @@ same-origin backend for future multi-user use is being built as source only and 
 ![HTML](https://img.shields.io/badge/HTML-static%20package-e34f26)
 ![Core](https://img.shields.io/badge/core-source%20repository-blue)
 
+Read [docs/STATUS.md](docs/STATUS.md) for the central development and gate record.
+
 > **Publicly viewable source — company data is separate.** This is the **source core** of TAM
 > Intelligence OS: application source, tooling, docs, and an empty-data default. Production company data
 > and configuration are **maintained separately** in a private company layer (see

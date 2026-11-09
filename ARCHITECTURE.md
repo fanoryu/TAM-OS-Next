@@ -1,5 +1,8 @@
 # TAM OS — Architecture
 
+Current source/release/deployment state: [docs/STATUS.md](docs/STATUS.md). Versioned descriptions
+below retain their milestone context; the published LOCAL baseline is separate from SESSION source.
+
 **Current published release:** **v2.11.0 — Identity Refresh** (**published, marked Latest** in
 `fanoryu/TAM-OS-Next`, annotated tag `v2.11.0` peeling to `04c1503d`). It carries the merged BRAND-1
 product-identity / offline-typography modernization; `APP_VERSION` **2.11.0**, `SCHEMA_VERSION` **6**,
@@ -8,7 +11,7 @@ Its published asset `tam-os-v2.11.0.html` (**1,676,709 bytes**, SHA-256
 `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`) is byte-identical to the tracked
 `dist/tam-os-v2.11.0.html`.
 
-**Release candidate — v3.0.0 (Core SESSION Foundation):** on the release-preparation branch `APP_VERSION` is
+**Release candidate — v3.0.0 (Core SESSION Foundation):** on main `APP_VERSION` is
 **3.0.0** (MAJOR, Owner decision 2026-11-05); it is a release only after a separately authorized merge, tag and GitHub
 Release, so v2.11.0 above remains the latest published release. Its artifact is the Distribution-1 package
 `tam-os-v3.0.0-package.zip` (no single-file artifact), running in `AUTH_MODE` SESSION against the same-origin backend

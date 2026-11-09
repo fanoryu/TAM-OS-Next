@@ -97,7 +97,7 @@ either layer, and do not "fix" a rejection by rewording the checker — remove t
 
 - **What exists today:** [`docs/02-architecture/`](docs/02-architecture/README.md) and the root
   [`ARCHITECTURE.md`](ARCHITECTURE.md).
-- **Current project state:** [`AI_CONTEXT.md`](AI_CONTEXT.md).
+- **Current project state and gates:** [`docs/STATUS.md`](docs/STATUS.md); detailed engineering records: [`AI_CONTEXT.md`](AI_CONTEXT.md).
 - **How governance flows:** [`docs/00-governance/Project_Governance.md`](docs/00-governance/Project_Governance.md).
 - **The documentation index:** [`docs/README.md`](docs/README.md).
 
