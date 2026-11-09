@@ -28,7 +28,7 @@
  * substantially (roughly ~2500-3000+ checks), evaluate splitting it into
  * domain-specific verifiers (e.g. finance, HR, grid, security) sharing a common
  * check() harness. This is a forward-looking guideline only — no split is authorized
- * by this note. See docs/01-roadmap/MAINT-001-repository-maintenance.md.
+ * by this note. See docs/99-archive/roadmap-completed/MAINT-001-repository-maintenance.md.
  */
 'use strict';
 const fs = require('fs');
