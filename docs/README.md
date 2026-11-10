@@ -8,6 +8,15 @@ navigation hubs — each links, none duplicates.
 The governance model for this folder is recorded in
 [ADR-0001](03b-repository-adr/ADR-0001-documentation-governance-model.md).
 
+## Start here
+
+| Question | Document |
+|---|---|
+| Current baseline, limitations and release/deployment gates | [STATUS.md](STATUS.md) |
+| Build and development entry point | [Root README](../README.md) |
+| Technical design and retained implementation details | [ARCHITECTURE](../ARCHITECTURE.md), [AI_CONTEXT](../AI_CONTEXT.md) |
+| Forward sequence | [Roadmap](01-roadmap/README.md) |
+
 ## Engineering governance library
 
 The numbered `NN-<area>/` folders are the project's engineering governance library, initialized by
@@ -44,8 +53,8 @@ The AI-facing entry point that requires this reading before implementation is
 | Repository & documentation governance | [`03b-repository-adr/`](03b-repository-adr/README.md) | Architecture Decision Records (`ADR-NNNN`, four-digit) |
 | Domain architecture | [`03-adr/`](03-adr/README.md) | Domain Architecture Decision Records (`ADR-001`…, three-digit) |
 | Security | [`security/`](security/README.md) | Security Decision Records (`SDR-NNNN`) |
-| Repository snapshots | [`99-archive/RDR/`](99-archive/RDR/README.md) | Repository Decision Records (`RDR-NNN`) — factual state snapshots at milestone boundaries. **Current baseline: [RDR-011](99-archive/RDR/RDR-011-epsilon-repository-snapshot.md)** (aggregate-backed Repository adoption complete, 7 of 7, `6714beb`); RDR-001 (Gamma), RDR-003 (Gateway boundary) and RDR-007 (Milestone Delta) are superseded as baseline |
-| Delivery progress reports | [`99-archive/DPR/`](99-archive/DPR/README.md) | Delivery Progress Reports (`DPR-NNN`). **Current report: [DPR-009](99-archive/DPR/DPR-009-epsilon-repository-adoption-completion.md)** (Epsilon Repository adoption complete); Milestone Delta completion remains [DPR-005](99-archive/DPR/DPR-005-delta-completion-report.md) |
+| Repository snapshots | [`99-archive/RDR/`](99-archive/RDR/README.md) | Repository Decision Records (`RDR-NNN`) — factual state snapshots at milestone boundaries. **Historical snapshot baseline: [RDR-011](99-archive/RDR/RDR-011-epsilon-repository-snapshot.md)** (aggregate-backed Repository adoption complete, 7 of 7, `6714beb`); RDR-001 (Gamma), RDR-003 (Gateway boundary) and RDR-007 (Milestone Delta) are superseded as baseline |
+| Delivery progress reports | [`99-archive/DPR/`](99-archive/DPR/README.md) | Delivery Progress Reports (`DPR-NNN`). **Historical report: [DPR-009](99-archive/DPR/DPR-009-epsilon-repository-adoption-completion.md)** (Epsilon Repository adoption complete); Milestone Delta completion remains [DPR-005](99-archive/DPR/DPR-005-delta-completion-report.md) |
 | Milestone closure records | [`99-archive/ECR/`](99-archive/ECR/README.md) | Milestone Closure Records (`ECR-NNN`) — the final historical record of a closed milestone. **Milestone Epsilon: [ECR-001](99-archive/ECR/ECR-001-milestone-epsilon-closure-record.md)** (Repository Adoption, closed at `0ad8150`) |
 | Governance artifact index | [`00-governance/Atlas_Governance_Register.md`](00-governance/Atlas_Governance_Register.md) | Discovery index of Atlas governance artifacts (published + pending source text) — points to homes, defines no new record type |
 | Point-in-time audits | [`99-archive/audit/`](99-archive/README.md) | Dated immutable audit/incident records, incl. [GHA-001](99-archive/audit/github-audit-2026-08-02/GHA-001-github-repository-comprehensive-audit.md) (2026-08-02 repository audit) |

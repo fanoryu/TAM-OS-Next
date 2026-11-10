@@ -617,11 +617,11 @@ check(dist.includes("const APP_NAME = 'TAM OS';"), 'APP_NAME is TAM OS (current 
 // v3.0.0 (Owner decision 2026-11-05: MAJOR, "Core SESSION Foundation") authorized revision. Was: one check, "README.md current-state identity is v2.11.0 / Identity Refresh".
 // The latest PUBLISHED identity is unchanged (the version badge tracks the released version — Owner decision); the
 // candidate is added as a separate, positively worded statement.
-check(/version-2\.11\.0/.test(readmeSrc) && /v2\.11\.0 — Identity Refresh/.test(readmeSrc),
-  'README.md latest published identity is v2.11.0 / Identity Refresh (the version badge tracks the released version)');
-check(/## Release candidate — v3\.0\.0 Core SESSION Foundation/.test(readmeSrc) && /\*\*release candidate\*\*/.test(readmeSrc)
-  && /remains the latest published release/.test(readmeSrc) && !/version-3\.0\.0/.test(readmeSrc),
-  'README.md names v3.0.0 Core SESSION Foundation as the release candidate and keeps v2.11.0 as the latest published release');
+// DOC-01: stable status keys replace badge/heading wording as the current-state contract.
+require('./verify-doc-status.js').verify(root, meta, check);
+// DOC-01-R2: keeps the pre-DOC-01 negative guard — no v3.0.0 version badge while v3.0.0 is unreleased.
+check(!/version-3\.0\.0/.test(readmeSrc),
+  'README.md carries no v3.0.0 version badge (the version badge tracks the published release)');
 // REPO-1 — CANONICAL REPOSITORY SLUG.
 // The canonical repository is fanoryu/TAM-OS-Next. The predecessor fanoryu/TAM-OS is retained as a
 // read-only archive and is still referenced legitimately as provenance (PROVENANCE.md, release history,

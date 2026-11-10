@@ -4,6 +4,9 @@ Where the project is going, and in what order. The roadmap is the single forward
 truth; the [Governance](../00-governance/README.md) layer above it is timeless and the
 [Milestones](../05-milestones/README.md) layer records what has landed.
 
+Current development/gate state: [STATUS.md](../STATUS.md). This roadmap owns future sequencing;
+the dated states below retain their historical context and do not clear release/deployment holds.
+
 ## Authoritative roadmap state
 
 Current as of `main` @ `113f0184` (2026-10-19) in the canonical repository **`fanoryu/TAM-OS-Next`**, after

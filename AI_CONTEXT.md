@@ -1,17 +1,20 @@
 # AI_CONTEXT.md — Repository Knowledge
 
-This document captures the **current state** of TAM OS to help future contributors and
+Current baseline and gates: [docs/STATUS.md](docs/STATUS.md). The detailed milestone entries below
+retain their historical context; do not treat an older milestone description as the current deployed state.
+
+This document captures the **engineering record** of TAM OS to help future contributors and
 AI assistants get productive quickly. It is descriptive (what *is*), whereas
 [`CLAUDE.md`](CLAUDE.md) is prescriptive (the timeless rules). For deep implementation detail and the
 authoritative module map, see [`ARCHITECTURE.md`](ARCHITECTURE.md) — this file summarizes and points
 there rather than duplicating it.
 
-**Release candidate (release-preparation branch):** `APP_VERSION` **3.0.0 — "Core SESSION Foundation"** (MAJOR, Owner
+**Release candidate (on main; current status in docs/STATUS.md):** `APP_VERSION` **3.0.0 — "Core SESSION Foundation"** (MAJOR, Owner
 decision 2026-11-05): the Distribution-1 package `tam-os-v3.0.0-package.zip`, SESSION-only, Core SESSION scope, LOCAL
 areas not migrated. It is a candidate until a separately authorized merge, tag and GitHub Release; **v2.11.0 remains
 the latest published release**. The paragraph below is kept as written at v2.11.0.
 
-**As of the current source state:** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the merged BRAND-1
+**Historical v2.11.0 source milestone (preserved):** `APP_VERSION` is **v2.11.0 — "Identity Refresh"** (the merged BRAND-1
 identity modernization); `SCHEMA_VERSION` 6; `ACTIONS` 21 (20 until BF-4a2 added `account.manage`). The published v2.11.0 portable artifact is
 `dist/tam-os-v2.11.0.html` (1,676,709 bytes, SHA-256
 `57d8b0c23c83509a70a766d903e2ee19aa57e5bcfc70950652d930e8f2358557`), now frozen history. **v2.11.0 is
@@ -1436,7 +1439,7 @@ At a glance: `index.html` + `css/` + `js/` + `vendor/` (modular source), `tools/
 templates), `docs/99-archive/audit/` (immutable dated records), and a frozen reference HTML (`tam-intelligence-os-v2.5.2.html`)
 retained as the **JS provenance** golden master. Since UX-002B it is no longer the CSS comparator —
 CSS is pinned by digest instead (see §19). The authoritative, detailed layout is in
-[`README.md`](README.md#project-structure) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
+[`README.md`](docs/README.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## 13. Current Engineering Practices
 
@@ -1680,7 +1683,7 @@ Directions (no committed release numbers unless already approved):
   Authenticated E2E for the §22 gate, "Acting as" removal (AFI-5b), production readiness, cutover and
   PILOT-1 have **not** happened; AFI-5b and AFI-5c are on hold.
 
-The canonical roadmap lives in [`README.md`](README.md#roadmap).
+The canonical roadmap lives in [`README.md`](docs/01-roadmap/README.md).
 
 ## 18. Technical Debt
 

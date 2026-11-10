@@ -1,5 +1,9 @@
 # Security Policy
 
+Current development and gate state: [docs/STATUS.md](docs/STATUS.md). Published LOCAL trust-model
+descriptions below are not a claim that the current SESSION source lacks a backend. Security
+reporting, data-custody rules and accepted SDR decisions remain authoritative.
+
 TAM Intelligence OS is proprietary internal software for **PT Total Asset Manajemen**. It stores
 finance, payroll, employee, and contract data locally in the browser. Please treat security issues
 with care.
@@ -120,7 +124,7 @@ Only the current codebase receives security fixes. Older builds are not maintain
 
 | Version | Supported |
 |---|---|
-| Current `main` of `fanoryu/TAM-OS-Next` (`APP_VERSION` **2.11.0**) | ✅ |
+| Current `main` of `fanoryu/TAM-OS-Next` (unreleased v3.0.0 SESSION candidate; [status](docs/STATUS.md)) | ✅ |
 | Any earlier build or release | ❌ |
 
 > **Provenance.** `fanoryu/TAM-OS-Next` is the canonical repository going forward. v2.10.0 was

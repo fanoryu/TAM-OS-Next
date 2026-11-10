@@ -15,6 +15,10 @@ For the *current* state of the project (modules, roadmap, decisions), see
 
 ---
 
+Current source and gates: [docs/STATUS.md](docs/STATUS.md). The client-only premise in sections 1
+and 4 describes the historical LOCAL baseline. The separately authorized ADR-0004 backend now
+exists in source; this pointer changes no engineering law, approval gate or accepted decision.
+
 ## 1. Project Identity
 
 TAM Intelligence OS is a **proprietary, single-page** finance, payroll, and operations application for

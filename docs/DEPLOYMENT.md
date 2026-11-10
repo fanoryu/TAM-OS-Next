@@ -1,5 +1,8 @@
 # Deployment & the Source-Core / Private-Company-Layer Split
 
+Current baseline and Owner gate state: [STATUS.md](STATUS.md). Procedures below authorize no
+host access or deployment; historical release descriptions retain their version context.
+
 This document explains how TAM Intelligence OS is structured for a **source core** with a
 **separate private company layer**, and how PT Total Asset Manajemen keeps production data and
 configuration outside this repository. It describes only what actually exists in the repo; for the

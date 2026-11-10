@@ -2,7 +2,7 @@
 
 **Release Name:** Core SESSION Foundation
 **Type:** **MAJOR** release candidate (Owner decision 2026-11-05) — breaking architectural and delivery changes.
-`APP_VERSION` is **3.0.0** on the release-preparation branch; `SCHEMA_VERSION` **remains 6** (no client data
+`APP_VERSION` is **3.0.0** on main; `SCHEMA_VERSION` **remains 6** (no client data
 migration); `ACTIONS` **21** (20 at v2.11.0; BF-4a2 added `account.manage`).
 
 > **Candidate status.** v3.0.0 is a **release candidate**. It becomes a release only through separate Owner
