@@ -54,8 +54,8 @@ transaction execution, cash flow, budgeting, and reporting — as a browser appl
 
 ## Status at a glance
 
-The current status, gates and limitations are recorded once, in [docs/STATUS.md](docs/STATUS.md). This
-section is orientation only; it authorizes nothing, and where it differs from that record, the record wins.
+The central release, deployment and production gate status is maintained in [docs/STATUS.md](docs/STATUS.md).
+This section is orientation only; it authorizes nothing, and where it differs from that record, the record wins.
 
 - **Published release.** **v2.11.0 — Identity Refresh** is **published** and **marked Latest**, from
   annotated tag `v2.11.0` in `fanoryu/TAM-OS-Next`. It is a client-only single HTML file
@@ -70,9 +70,9 @@ section is orientation only; it authorizes nothing, and where it differs from th
   browser-stored v2.x data is not migrated. Scope and limits: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 - **Gates.** Every release, deployment and production gate is currently restrictive, and the controlled
   internal pilot (**PILOT-1**) remains **ON HOLD** — it never launched and no real company data has been
-  entered. The gate values and the decisions behind them live only in
-  [docs/STATUS.md](docs/STATUS.md); a release, tag or deployment needs separate, explicit Owner
-  authorization ([`CLAUDE.md`](CLAUDE.md) §20).
+  entered. See [docs/STATUS.md](docs/STATUS.md) for central gate status and [AI_CONTEXT.md](AI_CONTEXT.md)
+  and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for additional pilot and operational context; a release,
+  tag or deployment needs separate, explicit Owner authorization ([`CLAUDE.md`](CLAUDE.md) §20).
 - **Previous release.** v2.10.0 (Governed Workspace) remains **published** and intact. It was
   **originally published** from the predecessor repository **`fanoryu/TAM-OS`** (private predecessor
   repository retained for historical provenance — not resolvable by public visitors) and
