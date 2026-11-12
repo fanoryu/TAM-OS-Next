@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "092810b9a6069a0ddc683b55c3768ea923ea0a9574195b32bdd2728e41d381d4",
+  "packageDigest": "1b35dbcccaaf7c73d313d050c6f443bb54ff363e8639a7b38f0562df9b68a517",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3182875,
-    "sha256": "6f9f9b4dc4dbf8727d9eaee596e16ed9c2b1586b026d5d3bfe527ed565b6edb5"
+    "bytes": 3183119,
+    "sha256": "59193589bdb98030728b5df4b78c1ba383242fa6679a6bb348d5ade081d3a581"
   },
   "files": [
     {
@@ -499,8 +499,8 @@
     },
     {
       "path": "js/ui/session-ledger-view.js",
-      "bytes": 22151,
-      "sha256": "3037aa8290092b1dc1112974952204ccdae8af5c70f1bb65f1715230331ba911"
+      "bytes": 22395,
+      "sha256": "da2b97e53af332bff7c346ea633e7adf256fbed5b9f70dcd1da0c14af18244c2"
     },
     {
       "path": "js/ui/session-overtime-view.js",

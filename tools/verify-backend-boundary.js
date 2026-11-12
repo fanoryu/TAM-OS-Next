@@ -251,6 +251,7 @@ const REPORT_STORE = 'server/src/Data/Report/FinancialReportStore.php';
 const FINANCIAL_POST_FILE = 'server/src/Transaction/FinancialPost.php';
 const FINANCIAL_POST_MIGRATION = 'server/migrations/0036_create_finance_transactions.sql';
 const FRONTEND_TRANSACTION_API = 'js/core/transaction-api.js';
+const TRANSACTION_INPUT = 'server/src/Transaction/TransactionInput.php';
 const TRANSACTION_ROUTES = ['/api/general-transactions/create', '/api/general-transactions/void'];
 const TRANSACTION_READ_ROUTES = { 'GET /api/general-transactions': "['from', 'to']", 'GET /api/reports/financial': "['from', 'to']" };
 const ACTION_COUNT = 21;
@@ -1001,12 +1002,26 @@ function checkTransactionStatements(file, lex) {
     }
   }
   if (file === TRANSACTION_STORE && inserts !== 2) out.push('TransactionStore has exactly two INSERT statements (a transaction and a void); found ' + inserts);
+  // PD-7 (Owner 2026-11-13): the history range reads LIST_CAP + 1 = 2001 rows and every report read REPORT_CAP + 1 = 20001,
+  // so the service can tell the cap was exceeded and fail closed (500) — never a silently truncated list or total.
+  for (const s of lex.strings) {
+    if (!/^SELECT /.test(s)) continue;
+    if (file === REPORT_STORE && !/ ORDER BY [\w, .]+ LIMIT 20001$/.test(s)) out.push('every financial report read ends ORDER BY … LIMIT 20001 (REPORT_CAP + 1) so the cap fails closed — never a silent truncation');
+    if (file === TRANSACTION_STORE && /transaction_date >= :from_date/.test(s) && !/ ORDER BY t\.transaction_date, t\.created_at, t\.id LIMIT 2001$/.test(s)) out.push('the general transaction range read ends ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001 (LIST_CAP + 1) so the cap fails closed — never a silent truncation');
+  }
   return out;
+}
+
+// Every migration except 0036, as [path, sql] (PD-3: none may touch financial_post).
+function otherPostMigrations() {
+  const dir = path.join(root, 'server', 'migrations');
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.sql') && 'server/migrations/' + f !== FINANCIAL_POST_MIGRATION)
+    .sort().map((f) => ['server/migrations/' + f, fs.readFileSync(path.join(dir, f), 'utf8')]);
 }
 
 // Phase 1: the four Financial Post codes — the enum cases, migration 0036's CHECK and the frontend
 // FINANCIAL_POSTS — are one closed list in one order.
-function checkFinancialPostParity(enumSrc, migrationSrc, frontendSrc) {
+function checkFinancialPostParity(enumSrc, migrationSrc, frontendSrc, inputSrc, otherMigrations) {
   const out = [];
   const enumCodes = [...enumSrc.matchAll(/^\s*case \w+ = '([A-Z]+)';$/gm)].map((m) => m[1]);
   const check = /finance_transactions_financial_post CHECK \(financial_post IN \(([^)]*)\)\)/.exec(migrationSrc);
@@ -1016,6 +1031,14 @@ function checkFinancialPostParity(enumSrc, migrationSrc, frontendSrc) {
   if (enumCodes.join(',') !== 'GA,NPIP,TJB,DRONE') out.push(FINANCIAL_POST_FILE + ': the Financial Posts are exactly GA, NPIP, TJB, DRONE');
   if (dbCodes.join(',') !== enumCodes.join(',')) out.push(FINANCIAL_POST_MIGRATION + ': the financial_post CHECK must equal ' + FINANCIAL_POST_FILE);
   if (feCodes.join(',') !== enumCodes.join(',')) out.push(FRONTEND_TRANSACTION_API + ': FINANCIAL_POSTS must equal ' + FINANCIAL_POST_FILE);
+  // PD-3 (Owner 2026-11-13): the enforcement around the list, not only the list itself.
+  if (!/^  financial_post VARCHAR\(8\) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,$/m.test(migrationSrc)) out.push(FINANCIAL_POST_MIGRATION + ': financial_post stays VARCHAR(8) ascii_bin NOT NULL (a case-sensitive exact match)');
+  if (!/^  category VARCHAR\(64\) NOT NULL,$/m.test(migrationSrc) || /CONSTRAINT finance_transactions_category CHECK \([^\n]*financial_post/.test(migrationSrc)) out.push(FINANCIAL_POST_MIGRATION + ': the category stays its own column, separate from the Financial Post');
+  if (!String(inputSrc || '').includes("if (!is_string($json['financialPost'] ?? null) || FinancialPost::tryFrom($json['financialPost']) === null) {")) out.push(TRANSACTION_INPUT + ': the server validates financialPost as a string against FinancialPost::tryFrom');
+  if (!String(frontendSrc || '').includes("function transactionIsPost(v){ return typeof v === 'string' && FINANCIAL_POSTS.some(function(p){ return p.code === v; }); }")) out.push(FRONTEND_TRANSACTION_API + ': the frontend checks a post only against FINANCIAL_POSTS (transactionIsPost)');
+  for (const [name, sql] of otherMigrations || []) {
+    if (/financial_post/i.test(sql)) out.push(name + ': only ' + FINANCIAL_POST_MIGRATION + ' may define financial_post — a later change to the Financial Posts must update this parity check with it');
+  }
   return out;
 }
 
@@ -1647,7 +1670,8 @@ function run() {
   const postMigration = path.join(root, FINANCIAL_POST_MIGRATION);
   const postFrontend = path.join(root, FRONTEND_TRANSACTION_API);
   if (!fs.existsSync(postFile) || !fs.existsSync(postMigration)) failures.push(FINANCIAL_POST_FILE + ' / ' + FINANCIAL_POST_MIGRATION + ': missing — Financial Post parity cannot be established');
-  else for (const v of checkFinancialPostParity(fs.readFileSync(postFile, 'utf8'), fs.readFileSync(postMigration, 'utf8'), fs.existsSync(postFrontend) ? fs.readFileSync(postFrontend, 'utf8') : '')) failures.push(v);
+  else for (const v of checkFinancialPostParity(fs.readFileSync(postFile, 'utf8'), fs.readFileSync(postMigration, 'utf8'), fs.existsSync(postFrontend) ? fs.readFileSync(postFrontend, 'utf8') : '',
+    fs.existsSync(path.join(root, TRANSACTION_INPUT)) ? fs.readFileSync(path.join(root, TRANSACTION_INPUT), 'utf8') : '', otherPostMigrations())) failures.push(v);
   // BF-4c1: payroll adds no Action — the vocabulary stays exactly ACTION_COUNT.
   if (fs.existsSync(actionFile) && (fs.readFileSync(actionFile, 'utf8').match(/^\s*case \w+ = '/gm) || []).length !== ACTION_COUNT) failures.push(ACTION_FILE + ': the server ACTIONS must stay ' + ACTION_COUNT);
   const ignored = gitIgnored(onDisk);
@@ -2558,6 +2582,49 @@ function selftest() {
   // Lower-case on purpose: `*secret*` matches case-sensitively on Linux, case-insensitively on Windows.
   cases.push({ name: 'the real .gitignore ignores a *secret* file name (trap is real)', run: () => (gitIgnored(['server/src/client_secret.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
   cases.push({ name: 'the real .gitignore ignores the local config', run: () => (gitIgnored(['server/config/config.local.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
+
+  // PD-3 (Owner 2026-11-13): Financial Post drift — codes, order, omissions, additions and the enforcement around them.
+  {
+    const rd = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+    const pe = rd(FINANCIAL_POST_FILE), pm = rd(FINANCIAL_POST_MIGRATION), pf = rd(FRONTEND_TRANSACTION_API), pi = rd(TRANSACTION_INPUT), po = otherPostMigrations();
+    const sub = (s, a, b) => { if (s.split(a).length !== 2) throw new Error('selftest fixture drifted: ' + a); return s.replace(a, () => b); };
+    const post = (name, o, needle) => cases.push({ name: 'Financial Post parity: ' + name, run: () => checkFinancialPostParity(o.e ?? pe, o.m ?? pm, o.f ?? pf, o.i ?? pi, o.o ?? po), expect: needle });
+    const CHK = "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE'))";
+    const FE_DRONE = ",\n  Object.freeze({ code: 'DRONE', name: 'Drone' })";
+    post('the real enum, migration, input and frontend pass', {}, 0);
+    post('a fifth code in the database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE', 'HR'))") }, 'CHECK must equal');
+    post('a code omitted from the database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB'))") }, 'CHECK must equal');
+    post('a reordered database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'DRONE', 'TJB'))") }, 'CHECK must equal');
+    post('a renamed database code is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPI', 'TJB', 'DRONE'))") }, 'CHECK must equal');
+    post('a lower-case database code is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('ga', 'NPIP', 'TJB', 'DRONE'))") }, 'CHECK must equal');
+    post('a dropped database CHECK is caught', { m: sub(pm, '  CONSTRAINT finance_transactions_financial_post ' + CHK + ',\n', '') }, 'CHECK must equal');
+    post('a case-insensitive financial_post column is caught', { m: sub(pm, 'financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL', 'financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL') }, 'case-sensitive');
+    post('a fifth enum case is caught', { e: sub(pe, "    case Drone = 'DRONE';\n", "    case Drone = 'DRONE';\n    case Hr = 'HR';\n") }, 'exactly GA, NPIP, TJB, DRONE');
+    post('an omitted enum case is caught', { e: sub(pe, "    case Drone = 'DRONE';\n", '') }, 'exactly GA, NPIP, TJB, DRONE');
+    post('a renamed enum code is caught', { e: sub(pe, "case Npip = 'NPIP';", "case Npip = 'NPI';") }, 'exactly GA, NPIP, TJB, DRONE');
+    post('a reordered enum is caught', { e: sub(sub(pe, "    case Tjb = 'TJB';\n", ''), "    case Drone = 'DRONE';\n", "    case Drone = 'DRONE';\n    case Tjb = 'TJB';\n") }, 'exactly GA, NPIP, TJB, DRONE');
+    post('a fifth frontend post is caught', { f: sub(pf, FE_DRONE, FE_DRONE + ",\n  Object.freeze({ code: 'HR', name: 'HR' })") }, 'FINANCIAL_POSTS must equal');
+    post('an omitted frontend post is caught', { f: sub(pf, FE_DRONE, '') }, 'FINANCIAL_POSTS must equal');
+    post('a renamed frontend code is caught', { f: sub(pf, "code: 'NPIP'", "code: 'NPI'") }, 'FINANCIAL_POSTS must equal');
+    post('a reordered frontend list is caught', { f: sub(sub(pf, "  Object.freeze({ code: 'TJB', name: 'TJB' }),\n", ''), FE_DRONE, FE_DRONE + ",\n  Object.freeze({ code: 'TJB', name: 'TJB' })") }, 'FINANCIAL_POSTS must equal');
+    post('a missing frontend client is caught', { f: '' }, 'FINANCIAL_POSTS must equal');
+    post('a frontend post check that stops using FINANCIAL_POSTS is caught', { f: sub(pf, "function transactionIsPost(v){ return typeof v === 'string' && FINANCIAL_POSTS.some(function(p){ return p.code === v; }); }", "function transactionIsPost(v){ return typeof v === 'string'; }") }, 'transactionIsPost');
+    post('a server input that stops validating financialPost is caught', { i: sub(pi, "|| FinancialPost::tryFrom($json['financialPost']) === null", '') }, 'FinancialPost::tryFrom');
+    post('a later migration that changes financial_post is caught', { o: po.concat([['server/migrations/0039_alter_posts.sql', "ALTER TABLE finance_transactions DROP CONSTRAINT finance_transactions_financial_post;\n"]]) }, 'only server/migrations/0036');
+    post('a category column merged into the post is caught', { m: sub(pm, '  category VARCHAR(64) NOT NULL,\n', '') }, 'category stays its own column');
+    post('a category CHECK tied to the post is caught', { m: sub(pm, 'CONSTRAINT finance_transactions_category CHECK (', 'CONSTRAINT finance_transactions_category CHECK (financial_post IS NOT NULL AND ') }, 'category stays its own column');
+  }
+  // PD-7 (Owner 2026-11-13): the cap reads stay one row above their caps.
+  {
+    const rt = fs.readFileSync(path.join(root, TRANSACTION_STORE), 'utf8'), rr = fs.readFileSync(path.join(root, REPORT_STORE), 'utf8');
+    clean('the real TransactionStore reads its range at LIMIT 2001', TRANSACTION_STORE, rt);
+    clean('the real FinancialReportStore reads at LIMIT 20001', REPORT_STORE, rr);
+    dirty('a range read truncated at the cap (LIMIT 2000) is caught', TRANSACTION_STORE, rt.replace('ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001', 'ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2000'), 'never a silent truncation');
+    dirty('a range read without a limit is caught', TRANSACTION_STORE, rt.replace(' ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001', ' ORDER BY t.transaction_date, t.created_at, t.id'), 'never a silent truncation');
+    dirty('a report transactions read truncated at the cap is caught', REPORT_STORE, rr.replace('ORDER BY t.id LIMIT 20001', 'ORDER BY t.id LIMIT 20000'), 'never a silent truncation');
+    dirty('a report postings read without a limit is caught', REPORT_STORE, rr.replace('month_key <= :to_month ORDER BY id LIMIT 20001', 'month_key <= :to_month ORDER BY id'), 'never a silent truncation');
+    dirty('a report executions read with a larger limit is caught', REPORT_STORE, rr.replace('executed_on <= :to_date ORDER BY id LIMIT 20001', 'executed_on <= :to_date ORDER BY id LIMIT 200001'), 'never a silent truncation');
+  }
 
   let passed = 0;
   const failed = [];

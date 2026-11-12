@@ -369,6 +369,24 @@ function firewall(rt, label){
     firewall(rt, 'F');
   }
 
+  /* ---------- H. the caps (PD-7, Owner 2026-11-13) ---------- */
+  {
+    const NARROW = /could not be loaded\. A date range with too many transactions cannot be shown in full: choose a shorter From and To range, then apply it\. If a short range also fails, try again later\./;
+    const rt = await open({ [REP(...APRIL)]: [err(500, 'internal_error')] });
+    check(rt.sf().report === null && NARROW.test(card(rt)) && !/id="sfPosts"|id="sfPayroll"|id="sfConsolidated"/.test(card(rt)) && /id="sfRetryBtn"/.test(card(rt)) && !/Try again in a moment/.test(card(rt)),
+      'H. a report that fails closed (500) shows no partial total and tells the CEO to choose a shorter range');
+    rt.net.routes[RANGE(...APRIL)] = [err(500, 'internal_error')];
+    rt.app.fire('sfTransactionsTab', 'click'); await flush();
+    check(NARROW.test(card(rt)) && !/data-sf-void=|transactions, oldest first/.test(card(rt)), 'H. a history that fails closed (500) lists nothing and tells the CEO to choose a shorter range');
+    firewall(rt, 'H');
+    const id = (n) => n.toString(16).padStart(32, '0');
+    const rows = (n) => Array.from({ length: n }, (_, i) => tx(id(i + 1), '2031-04-10'));
+    const TX = { rangeResponse: (o) => rt.TransactionDecoders.rangeResponse(rt.parse(JSON.stringify(o)), ...APRIL) };
+    const full = TX.rangeResponse({ generalTransactions: rows(2000) });
+    check(full !== null && full.length === 2000 && TX.rangeResponse({ generalTransactions: rows(2001) }) === null,
+      'H. the history decoder accepts exactly 2,000 rows and refuses 2,001 whole (never a truncated list)');
+  }
+
   /* ---------- G. session end ---------- */
   {
     const rt = await open({ [REP(...APRIL)]: [err(401, 'unauthenticated')], '/api/auth/me': [ok(ME_CEO)] });

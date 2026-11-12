@@ -186,7 +186,14 @@ return [
                 assertTrue(str_starts_with($value, 'SELECT ') && !preg_match('/FOR UPDATE|LOCK IN SHARE|\bSUM\s*\(|:self_employee_id/i', $value), $name . ': a plain company-scope SELECT');
             }
         }
-        assertSame('financial report reads are company scope only', assertThrows(\LogicException::class, static fn () => (new FinancialReportStore($db()))->transactions(Scope::of($emp), '2026-10-01', '2026-10-31'))->getMessage());
+        // PD-7 (Owner 2026-11-13): the caps, and every multi-row read takes exactly one row more so the cap fails closed.
+        assertSame([2000, 2001, 20000, 20001], [TransactionStore::LIST_CAP, TransactionStore::LIST_LIMIT, FinancialReportStore::REPORT_CAP, FinancialReportStore::REPORT_LIMIT]);
+        assertSame(366, TransactionInput::MAX_RANGE_DAYS);
+        assertTrue(str_ends_with(TransactionStore::RANGE_SQL, ' ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001'), 'the range read: total order, one above the cap');
+        foreach (['TRANSACTIONS_SQL', 'POSTINGS_SQL', 'EXECUTIONS_SQL'] as $name) {
+            assertTrue(str_ends_with((string) constant(FinancialReportStore::class . '::' . $name), ' ORDER BY id LIMIT 20001') || str_ends_with((string) constant(FinancialReportStore::class . '::' . $name), ' ORDER BY t.id LIMIT 20001'), $name . ': one above the cap');
+        }
+        assertSame('financial report reads are company scope only',assertThrows(\LogicException::class, static fn () => (new FinancialReportStore($db()))->transactions(Scope::of($emp), '2026-10-01', '2026-10-31'))->getMessage());
     },
     'Policy and audit: both writes are the existing record-free finance.manage (CeoOnly; ACTIONS stay 21); an Employee is 403 before any lookup; audit names create or void on financeTransaction, no field' => static function () use ($principal, $unreachable, $body, $db): void {
         assertSame(21, count(Action::cases()), 'ACTIONS stay 21');

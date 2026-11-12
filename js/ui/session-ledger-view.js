@@ -35,7 +35,8 @@ const SESSION_LEDGER_ERRORS = Object.freeze({
   RATE_LIMITED: 'Too many requests.',
   VALIDATION: 'Correct the highlighted fields, then try again.',
   CLIENT_FAULT: 'TAM OS could not process this request.',
-  SERVER_ERROR: 'The finance information could not be loaded. Try again in a moment.',
+  // PD-7: a range above its cap fails closed as a server error, so the guidance is to narrow the range.
+  SERVER_ERROR: 'The finance information could not be loaded. A date range with too many transactions cannot be shown in full: choose a shorter From and To range, then apply it. If a short range also fails, try again later.',
   UNAVAILABLE: 'The finance information could not be loaded. Check your connection, then try again.',
   INVALID_RESPONSE: 'TAM OS sent an unexpected response. Try again in a moment.'
 });

@@ -47,8 +47,9 @@ const PHASE1_MIGRATIONS = Object.freeze(['0036_create_finance_transactions.sql',
 // section below pins them, their order and the package. Was: 88 modules and 102 package files.
 const PHASE1_MODULES = Object.freeze(['core/transaction-api.js', 'core/session-ledger.js', 'ui/session-ledger-view.js']);
 const PHASE1_FILES = PHASE1_MODULES.length;
-// The Phase 1 deployment package digest (the three Ledger modules; the from/to query keys).
-const PHASE1_PACKAGE_DIGEST = '092810b9a6069a0ddc683b55c3768ea923ea0a9574195b32bdd2728e41d381d4';
+// The Phase 1 deployment package digest (the three Ledger modules; the from/to query keys; the PD-7
+// over-cap guidance in session-ledger-view.js, Owner 2026-11-13). Was: 092810b9… (commit eadf4274).
+const PHASE1_PACKAGE_DIGEST = '1b35dbcccaaf7c73d313d050c6f443bb54ff363e8639a7b38f0562df9b68a517';
 function migrationsBeforePhase1() {
   return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }

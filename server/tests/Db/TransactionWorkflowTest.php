@@ -12,7 +12,9 @@ declare(strict_types=1);
  * read honours its inclusive boundaries; and the report reconciles exactly with the database rows —
  * every Financial Post line, the general total, the voided rows, and a separate Payroll line made of
  * real Finance postings and executions that never appears inside a post — while the payroll posting
- * and payment rows stay byte-identical. Fabricated data only.
+ * and payment rows stay byte-identical. PD-7: the range read lists exactly 2,000 rows and fails closed
+ * (500, no partial list) at 2,001; the report totals exactly 20,000 rows and fails closed (500, no
+ * partial total) at 20,001. Fabricated data only.
  */
 
 use TamOs\Data\Auth\AuthData;
@@ -71,6 +73,30 @@ $void = static fn (array $w, string $id, string $key, string $reason = 'Fabricat
 $audits = static fn (Database $db, string $id): array => array_map(static fn (array $r): string => $r['action'] . ' ' . $r['entity'] . ' ' . $r['operation'] . ' ' . ($r['fields'] ?? '-'),
     $db->select('SELECT action, entity, operation, fields FROM audit_events WHERE entity_id = ? ORDER BY id', [$id]));
 $rows = static fn (Database $db): array => [$db->select('SELECT * FROM finance_transactions ORDER BY id'), $db->select('SELECT * FROM finance_transaction_voids ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
+/**
+ * PD-7: $count fabricated income rows of 1.00 for company $company, numbered from $from, dated across $month
+ * (day 1..28), the posts in turn GA, NPIP, TJB, DRONE. Inserted 1,000 per statement.
+ */
+$bulkTransactions = static function (Database $db, string $company, string $user, int $from, int $count, string $month): void {
+    $posts = ['GA', 'NPIP', 'TJB', 'DRONE'];
+    for ($start = $from; $start < $from + $count; $start += 1000) {
+        $values = [];
+        for ($n = $start; $n < min($start + 1000, $from + $count); $n++) {
+            $values[] = sprintf("('%032x', '%s', 'income', '%s', 'Fabricated Cap', 'Fabricated cap row', '1.00', '%s-%02d', '%s', 'c%031x', UTC_TIMESTAMP(6))",
+                $n + 1, $company, $posts[$n % 4], $month, 1 + $n % 28, $user, $n + 1);
+        }
+        $db->execute('INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES ' . implode(', ', $values));
+    }
+};
+/** PD-7: a failed-closed read is the bare error envelope — no data, no row, no total. */
+$failedClosed = static function (Response $r, string $label): void {
+    $e = envelope($r);
+    $keys = array_keys($e);
+    sort($keys);
+    assertSame(['error', 'ok', 'requestId'], $keys, $label . ': only the error envelope');
+    assertSame(false, $e['ok'], $label . ': not ok');
+    assertTrue(!str_contains($r->body, 'Fabricated') && !str_contains($r->body, 'generalTransactions') && !str_contains($r->body, 'financialReport') && !str_contains($r->body, '.00'), $label . ': nothing partial in the body');
+};
 /** e_a1's base plan of $month, approved, committed, posted (BF-4e) and, when $paidOn is given, executed (BF-4f): the posting. */
 $payroll = static function (array $w, string $month, ?string $paidOn) use ($post, $ok, $newKey): array {
     $plan = $ok($post($w, 'ceoA', '/api/payroll-plans/generate', ['month' => $month]), 'payroll generate')['payrollPlans'][0];
@@ -182,5 +208,37 @@ return [
         assertSame(['3500000.00', 1, '0.00', 0], [$nov['payroll']['posted']['amount'], $nov['payroll']['posted']['count'], $nov['payroll']['paid']['amount'], $nov['payroll']['paid']['count']], 'November: posted, not paid');
         assertSame('300000.00', $nov['general']['expense']);
         assertSame($before, $payrollRows(), 'general transactions and the report never write a posting, an execution or a plan');
+    },
+
+    // PD-7 (Owner 2026-11-13): the caps at their boundaries. The rows are fabricated in bulk straight into the
+    // table (the API would need one request per row); the reads go through the production routes.
+    'PD-7: the range read returns exactly 2,000 transactions, and at 2,001 fails closed with 500 internal_error and no partial list' => static function () use ($world, $get, $ok, $code, $bulkTransactions, $failedClosed): void {
+        $w = $world();
+        $bulkTransactions($w['db'], $w['a'], $w['ceoUser'], 0, 2000, '2026-10');
+        $bulkTransactions($w['db'], $w['a'], $w['ceoUser'], 2000, 5, '2026-11');      // outside the range: never counted against it
+        $list = $ok($get($w, 'ceoA', '/api/general-transactions', 'from=2026-10-01&to=2026-10-31'), '2,000 rows')['generalTransactions'];
+        assertSame(2000, count($list), 'exactly LIST_CAP rows are listed in full');
+        assertSame(2000, count(array_unique(array_column($list, 'id'))), 'each row once');
+        $bulkTransactions($w['db'], $w['a'], $w['ceoUser'], 2005, 1, '2026-10');
+        $r = $get($w, 'ceoA', '/api/general-transactions', 'from=2026-10-01&to=2026-10-31');
+        assertSame([500, 'internal_error'], $code($r), '2,001 rows: the cap fails closed');
+        $failedClosed($r, 'the history above its cap');
+        assertSame(5, count($ok($get($w, 'ceoA', '/api/general-transactions', 'from=2026-11-01&to=2026-11-30'), 'a short range')['generalTransactions']), 'a narrower range still reads');
+    },
+    'PD-7: the report reads exactly 20,000 transactions with exact totals, and at 20,001 fails closed with 500 internal_error and no partial total; payroll posted/paid semantics are unchanged' => static function () use ($world, $get, $ok, $code, $bulkTransactions, $failedClosed): void {
+        $w = $world();
+        $bulkTransactions($w['db'], $w['a'], $w['ceoUser'], 0, 20000, '2026-10');
+        $r = $ok($get($w, 'ceoA', '/api/reports/financial', 'from=2026-10-01&to=2026-10-31'), '20,000 rows')['financialReport'];
+        assertSame(['income' => '20000.00', 'expense' => '0.00', 'net' => '20000.00', 'count' => 20000], $r['general'], 'exactly REPORT_CAP rows are totalled in full');
+        assertSame([5000, 5000, 5000, 5000], array_column($r['posts'], 'count'), 'every Financial Post line is complete');
+        assertSame(['amount' => '0.00', 'count' => 0, 'fromMonth' => '2026-10', 'toMonth' => '2026-10'], $r['payroll']['posted'], 'payroll posted stays its own line, by month');
+        assertSame(['amount' => '0.00', 'count' => 0], $r['payroll']['paid'], 'payroll paid stays its own line, by date');
+        assertSame(['income' => '20000.00', 'expense' => '0.00', 'net' => '20000.00'], $r['consolidated'], 'consolidated stays general + payroll paid (PD-6)');
+        $bulkTransactions($w['db'], $w['a'], $w['ceoUser'], 20000, 1, '2026-10');
+        $over = $get($w, 'ceoA', '/api/reports/financial', 'from=2026-10-01&to=2026-10-31');
+        assertSame([500, 'internal_error'], $code($over), '20,001 rows: the cap fails closed');
+        $failedClosed($over, 'the report above its cap');
+        $day = $ok($get($w, 'ceoA', '/api/reports/financial', 'from=2026-10-01&to=2026-10-01'), 'a short range')['financialReport'];
+        assertSame((int) $w['db']->select("SELECT COUNT(*) AS n FROM finance_transactions WHERE company_id = ? AND transaction_date = '2026-10-01'", [$w['a']])[0]['n'], $day['general']['count'], 'a narrower range still reports, exactly');
     },
 ];
