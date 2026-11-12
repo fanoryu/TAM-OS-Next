@@ -46,6 +46,8 @@ final class RestoreWriter
         'supplemental_payroll_overtime' => ['id', 'company_id', 'supplemental_payroll_id', 'created_at'],
         'finance_postings' => ['id', 'company_id', 'source_kind', 'payroll_plan_id', 'supplemental_payroll_id', 'employee_id', 'month_key', 'amount', 'status', 'idempotency_key', 'posted_at'],
         'finance_executions' => ['id', 'company_id', 'finance_posting_id', 'employee_id', 'month_key', 'amount', 'executed_on', 'payment_method', 'idempotency_key', 'recorded_at'],
+        'finance_transactions' => ['id', 'company_id', 'kind', 'financial_post', 'category', 'description', 'amount', 'transaction_date', 'created_by_user_id', 'idempotency_key', 'created_at'],
+        'finance_transaction_voids' => ['id', 'company_id', 'finance_transaction_id', 'reason', 'voided_by_user_id', 'idempotency_key', 'voided_at'],
     ];
 
     /** Stored generated columns, in table order: backed up, never inserted. */
@@ -68,6 +70,8 @@ final class RestoreWriter
         'supplemental_payroll_overtime' => 'INSERT INTO supplemental_payroll_overtime (id, company_id, supplemental_payroll_id, created_at) VALUES (:id, :company_id, :supplemental_payroll_id, :created_at)',
         'finance_postings' => 'INSERT INTO finance_postings (id, company_id, source_kind, payroll_plan_id, supplemental_payroll_id, employee_id, month_key, amount, status, idempotency_key, posted_at) VALUES (:id, :company_id, :source_kind, :payroll_plan_id, :supplemental_payroll_id, :employee_id, :month_key, :amount, :status, :idempotency_key, :posted_at)',
         'finance_executions' => 'INSERT INTO finance_executions (id, company_id, finance_posting_id, employee_id, month_key, amount, executed_on, payment_method, idempotency_key, recorded_at) VALUES (:id, :company_id, :finance_posting_id, :employee_id, :month_key, :amount, :executed_on, :payment_method, :idempotency_key, :recorded_at)',
+        'finance_transactions' => 'INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (:id, :company_id, :kind, :financial_post, :category, :description, :amount, :transaction_date, :created_by_user_id, :idempotency_key, :created_at)',
+        'finance_transaction_voids' => 'INSERT INTO finance_transaction_voids (id, company_id, finance_transaction_id, reason, voided_by_user_id, idempotency_key, voided_at) VALUES (:id, :company_id, :finance_transaction_id, :reason, :voided_by_user_id, :idempotency_key, :voided_at)',
     ];
 
     private const LOCK_EMPTY_SQL = [
@@ -84,6 +88,8 @@ final class RestoreWriter
         'supplemental_payroll_overtime' => 'SELECT 1 AS present FROM supplemental_payroll_overtime LIMIT 1 LOCK IN SHARE MODE',
         'finance_postings' => 'SELECT 1 AS present FROM finance_postings LIMIT 1 LOCK IN SHARE MODE',
         'finance_executions' => 'SELECT 1 AS present FROM finance_executions LIMIT 1 LOCK IN SHARE MODE',
+        'finance_transactions' => 'SELECT 1 AS present FROM finance_transactions LIMIT 1 LOCK IN SHARE MODE',
+        'finance_transaction_voids' => 'SELECT 1 AS present FROM finance_transaction_voids LIMIT 1 LOCK IN SHARE MODE',
         'account_tokens' => 'SELECT 1 AS present FROM account_tokens LIMIT 1 LOCK IN SHARE MODE',
         'auth_rate_limits' => 'SELECT 1 AS present FROM auth_rate_limits LIMIT 1 LOCK IN SHARE MODE',
         'mail_outbox' => 'SELECT 1 AS present FROM mail_outbox LIMIT 1 LOCK IN SHARE MODE',

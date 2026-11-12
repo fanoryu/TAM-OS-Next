@@ -20,6 +20,9 @@
    AFI-4g: the CEO gets a fourth section, "Audit" (renderSessionAuditHTML(),
    js/ui/session-audit-view.js, SessionAudit's memory-only data) — read only; an Employee has
    no Audit section (D-AFI4g-3 = A).
+   Phase 1 (D-INT-1 / D-INT-2): the CEO gets a fifth section, "Finance" (renderSessionLedgerHTML(),
+   js/ui/session-ledger-view.js, SessionLedger's memory-only data) — the financial dashboard and the
+   general transactions by Financial Post; an Employee has no Finance section.
 
      CEO       Employees: Active / Archived tabs, the company list, a record's
                detail; the derived account state is status text only.
@@ -467,13 +470,16 @@ function sessionWorkspaceHTML(auth, w){
   const payroll = (ceo || employee) && pr.open;                        // AFI-4c1 CEO Payroll; AFI-4c2 Employee My payroll
   const overtime = (ceo || employee) && ot.open && !payroll;
   const audit = ceo && SessionAuditStore.snapshot().open && !payroll && !overtime;   // AFI-4g: the CEO's Audit
+  const fin = SessionLedgerStore.snapshot();
+  const finance = ceo && fin.open && !payroll && !overtime && !audit;                // Phase 1: the CEO's Finance
   const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING || ot.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING
-    || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING;
+    || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING || fin.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING;
   let title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
   let body;
   if(payroll){ title = renderSessionPayrollTitle(pr, principal); body = renderSessionPayrollHTML(principal, pr); }
   else if(overtime){ title = renderSessionOvertimeTitle(principal, ot); body = renderSessionOvertimeHTML(principal, ot); }
   else if(audit){ const au = SessionAuditStore.snapshot(); title = renderSessionAuditTitle(au); body = renderSessionAuditHTML(au); }
+  else if(finance){ title = renderSessionLedgerTitle(fin); body = renderSessionLedgerHTML(fin); }
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
   else body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_WORKSPACE_ERRORS.UNAVAILABLE) + '</p>';
@@ -487,7 +493,7 @@ function sessionWorkspaceHTML(auth, w){
     + body + '</section>';
   const model = AuthBoot.allowsWorkspace() ? sessionNavModel(principal) : null;
   if(!model) return '<main class="auth-screen" id="main">' + card + '</main>';
-  return sessionShellHTML(model, payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : SESSION_HOME_ROUTE)), busy, card);
+  return sessionShellHTML(model, payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? 'finance' : SESSION_HOME_ROUTE))), busy, card);
 }
 
 function bindSessionWorkspace(app){
@@ -501,18 +507,21 @@ function bindSessionWorkspace(app){
   const idle = function(){
     return SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING
       && SessionOvertimeStore.snapshot().mutation.status !== SESSION_OVERTIME_MUTATION_STATUS.PENDING
-      && SessionPayrollStore.snapshot().mutation.status !== SESSION_PAYROLL_MUTATION_STATUS.PENDING;
+      && SessionPayrollStore.snapshot().mutation.status !== SESSION_PAYROLL_MUTATION_STATUS.PENDING
+      && SessionLedgerStore.snapshot().mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING;
   };
   const sectionTo = function(overtime){
-    return function(){ if(!idle()) return; SessionPayroll.show(false); SessionAudit.show(false); SessionOvertime.show(overtime); };
+    return function(){ if(!idle()) return; SessionPayroll.show(false); SessionAudit.show(false); SessionLedger.show(false); SessionOvertime.show(overtime); };
   };
   on('swSectionMain', sectionTo(false));
   on('swSectionOvertime', sectionTo(true));
-  on('swSectionPayroll', function(){ if(!idle()) return; SessionOvertime.show(false); SessionAudit.show(false); SessionPayroll.show(true); });
-  on('swSectionAudit', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionAudit.show(true); });
+  on('swSectionPayroll', function(){ if(!idle()) return; SessionOvertime.show(false); SessionAudit.show(false); SessionLedger.show(false); SessionPayroll.show(true); });
+  on('swSectionAudit', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionLedger.show(false); SessionAudit.show(true); });
+  on('swSectionFinance', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionAudit.show(false); SessionLedger.show(true); });
   if(SessionPayrollStore.snapshot().open){ bindSessionPayroll(app); return; }
   if(SessionOvertimeStore.snapshot().open){ bindSessionOvertime(app); return; }
   if(SessionAuditStore.snapshot().open){ bindSessionAudit(app); return; }
+  if(SessionLedgerStore.snapshot().open){ bindSessionLedger(app); return; }
   on('swActiveTab', function(){ SessionWorkspace.showArchived(false); });
   on('swArchivedTab', function(){ SessionWorkspace.showArchived(true); });
   on('swBackBtn', function(){ SessionWorkspace.back(); });
@@ -595,6 +604,7 @@ function renderSessionWorkspace(app, auth){
   SessionOvertime.ensureLoaded(auth.principal);                // AFI-4b1: binds (or destroys) the Overtime data too
   SessionPayroll.ensureLoaded(auth.principal);                 // AFI-4c1: and the Payroll data (AFI-4c2: My payroll too)
   SessionAudit.ensureLoaded(auth.principal);                   // AFI-4g: and the CEO's Audit data
+  SessionLedger.ensureLoaded(auth.principal);                 // Phase 1: and the CEO's Finance data
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
@@ -606,6 +616,7 @@ function renderSessionWorkspace(app, auth){
   const otHint = SessionOvertimeStore.takeFocus();
   const prHint = SessionPayrollStore.takeFocus();
   const auHint = SessionAuditStore.takeFocus();
+  const fiHint = SessionLedgerStore.takeFocus();
   // WP-1: an Account security request (open, failure, outcome, close) wins for this paint.
   const acEl = sessionAccountFocusTarget(app, AuthBoot.takeAccountFocus());
   if(acEl && typeof acEl.focus === 'function'){ acEl.focus(); return; }
@@ -624,6 +635,11 @@ function renderSessionWorkspace(app, auth){
     if(el && typeof el.focus === 'function'){ el.focus(); return; }
     return sessionWorkspaceFocus(app, auHint ? 'heading' : null, kept);
   }
+  if(SessionLedgerStore.snapshot().open){
+    const el = sessionLedgerFocusTarget(app, fiHint);
+    if(el && typeof el.focus === 'function'){ el.focus(); return; }
+    return sessionWorkspaceFocus(app, fiHint ? 'heading' : null, kept);
+  }
   sessionWorkspaceFocus(app, hint, kept);
 }
 
@@ -636,8 +652,8 @@ function renderSessionWorkspace(app, auth){
    NOT renderShell(): the LOCAL shell, its data-nav routing over State.view, Global
    Search, Quick Actions and every LOCAL view stay unreachable in SESSION.
 
-     SESSION_ROUTES        the only SESSION destinations — the four existing SESSION
-                           sections. Each names its section button id (the same ids the
+     SESSION_ROUTES        the only SESSION destinations — the five SESSION sections
+                           (Phase 1 added Finance; was: the four). Each names its section button id (the same ids the
                            section tabs carried), its NAV_GROUPS group and item, and a
                            fixed label per role. A role absent from `labels` cannot see
                            the route.
@@ -667,6 +683,8 @@ const SESSION_ROUTES = Object.freeze([
     labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }) }),
   Object.freeze({ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',
     labels: Object.freeze({ ceo: 'Payroll', employee: 'My payroll' }) }),
+  Object.freeze({ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',
+    labels: Object.freeze({ ceo: 'Finance' }) }),
   Object.freeze({ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',
     labels: Object.freeze({ ceo: 'Audit' }) })
 ]);

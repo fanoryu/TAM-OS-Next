@@ -10,8 +10,10 @@ use TamOs\Data\Finance\FinanceExecutionStore;
 use TamOs\Data\Finance\FinancePostingStore;
 use TamOs\Data\Overtime\OvertimeStore;
 use TamOs\Data\Payroll\PayrollStore;
+use TamOs\Data\Report\FinancialReportStore;
 use TamOs\Data\Scope\ScopedDatabase;
 use TamOs\Data\Supplemental\SupplementalStore;
+use TamOs\Data\Transaction\TransactionStore;
 
 /**
  * The business data access point (BF-4a1; overtime BF-4b1; payroll BF-4c1; supplemental payroll BF-4d; Finance posting BF-4e; Finance execution BF-4f; the CEO audit read BF-4g): the scoped business stores over one lazily opened,
@@ -30,6 +32,8 @@ final class BusinessData
     private ?SupplementalStore $supplemental = null;
     private ?FinancePostingStore $finance = null;
     private ?FinanceExecutionStore $financeExecutions = null;
+    private ?TransactionStore $transactions = null;
+    private ?FinancialReportStore $report = null;
     private ?AuditLog $audit = null;
     private ?AuditEventStore $auditEvents = null;
 
@@ -78,6 +82,18 @@ final class BusinessData
     public function financeExecutions(): FinanceExecutionStore
     {
         return $this->financeExecutions ??= new FinanceExecutionStore($this->scoped());
+    }
+
+    /** Phase 1 (D-INT-1): the general transactions — the one writer of finance_transactions and its voids. */
+    public function transactions(): TransactionStore
+    {
+        return $this->transactions ??= new TransactionStore($this->scoped());
+    }
+
+    /** Phase 1 (D-INT-2): the read-only financial report. */
+    public function report(): FinancialReportStore
+    {
+        return $this->report ??= new FinancialReportStore($this->scoped());
     }
 
     public function audit(): AuditLog

@@ -93,6 +93,10 @@ $seed = static function (Database $db, int $authEvents = 3): array {
     $db->execute("INSERT INTO account_tokens (token_hash, user_id, purpose, created_at, expires_at) VALUES (?, ?, 'activation', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 DAY)", [$tokenHash, $ceo['userId']]);
     $db->execute('INSERT INTO auth_rate_limits (bucket, failures, window_started_at, locked_until) VALUES (?, 1, UTC_TIMESTAMP(6), NULL)', [hash('sha256', 'bucket-' . bin2hex(random_bytes(8)))]);
     $db->execute("INSERT INTO mail_outbox (user_id, kind, status, attempts, next_attempt_at, created_at, updated_at, request_id) VALUES (?, 'recovery', 'pending', 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), ?)", [$ceo['userId'], bin2hex(random_bytes(16))]);
+    // Phase 1: one general transaction at the DECIMAL edge and its void (fabricated).
+    $txn = bin2hex(random_bytes(16));
+    $db->execute("INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (?, ?, 'income', 'DRONE', 'Jasa ☕', 'Fabricated \"kutipan\" \\\\ / </script>', '999999999999999.00', '2024-02-29', ?, ?, '2026-10-31 23:59:59.999999')", [$txn, $c, $ceo['userId'], bin2hex(random_bytes(16))]);
+    $db->execute('INSERT INTO finance_transaction_voids (id, company_id, finance_transaction_id, reason, voided_by_user_id, idempotency_key, voided_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))', [bin2hex(random_bytes(16)), $c, $txn, 'Fabricated duplicate', $ceo['userId'], bin2hex(random_bytes(16))]);
     return ['ceo' => $ceo, 'e1' => $e1, 'secrets' => [$sessionHash, $tokenHash]];
 };
 
@@ -173,7 +177,8 @@ return [
         $evidence = $restorer($keys, 'test', null, null, $connections)->restore($path);
         assertSame(2, $connections, 'the restore connection, then a fresh one for the proof after commit');
         assertSame($original['backupId'], $evidence['backupId']);
-        assertSame([35, 35, 35], [$evidence['backupHead'], $evidence['targetHead'], $evidence['codeHead']]);
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame([38, 38, 38], [$evidence['backupHead'], $evidence['targetHead'], $evidence['codeHead']]);
         assertSame(array_column($original['tables'], 'rows', 'name'), $evidence['tables']);
         assertSame($source, $snapshot($db), 'every backed-up row, generated columns included, is byte-identical');
         foreach (BackupTables::INCLUDED as $table) {
@@ -211,7 +216,7 @@ return [
         assertSame(['payroll_plans' => ['live_key'], 'supplemental_payrolls' => ['open_key']], (new RestoreWriter($db))->generatedColumns());
     },
 
-    'a non-empty target is refused before anything is written — any one row in any of the 17 classified tables, excluded tables included' => static function () use ($seed, $backup, $restorer, $counts, $classified, $empty): void {
+    'a non-empty target is refused before anything is written — any one row in any of the 19 classified tables (17 before Phase 1), excluded tables included' => static function () use ($seed, $backup, $restorer, $counts, $classified, $empty): void {
         $db = authDatabase();
         $seed($db);
         $templates = [];
@@ -592,7 +597,7 @@ return [
         $id = (string) BackupStore::idOfFileName(basename($path));
         $fingerprint = substr(BackupReader::fingerprint((string) $base->db['host'], (int) $base->db['port'], (string) $base->db['name']), 0, 16);
         assertTrue(preg_match('/^restore: PASS\nbackup: ' . preg_quote($id, '/') . '\nmanifest: [0-9a-f]{64}\nkey: [0-9a-f]{16}\nsource: production [0-9a-f]{16}\ntarget: test ' . $fingerprint
-            . '\nschema: backup head 35, target head 35, code head 35\n(table: [a-z_]+ rows [0-9]+ ok\n){13}tables: 13 verified, rows [0-9]+\ndecimal totals: matched \([0-9]+ columns\)\nexcluded: 4 empty\nverified: in-transaction yes, post-commit yes\nstarted: [0-9T:-]+Z\nfinished: [0-9T:-]+Z\nduration_ms: [0-9]+\n$/D', $run['stdout']) === 1, $run['stdout']);
+            . '\nschema: backup head 38, target head 38, code head 38\n(table: [a-z_]+ rows [0-9]+ ok\n){15}tables: 15 verified, rows [0-9]+\ndecimal totals: matched \([0-9]+ columns\)\nexcluded: 4 empty\nverified: in-transaction yes, post-commit yes\nstarted: [0-9T:-]+Z\nfinished: [0-9T:-]+Z\nduration_ms: [0-9]+\n$/D', $run['stdout']) === 1, $run['stdout']);
         assertSame('', $run['stderr']);
         $again = runBackupCli(['restore', ...$args], $hostConfig);
         assertSame([1, '', "restore: target_not_empty\n"], [$again['exit'], $again['stdout'], $again['stderr']]);

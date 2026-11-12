@@ -90,7 +90,9 @@ return [
         foreach ([null, '', 'Employee', 'employees', 'auth', 'authEvent', 'auth_events', 'session', 'user', 'company', 'financeExecution', 'payroll'] as $bad) {
             assertSame([ErrorCode::ValidationFailed, ['entity']], $code(static fn () => AuditInput::record($bad, 'e_a1')), var_export($bad, true));
         }
-        assertSame(['employee', 'overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting'], array_keys(AuditInput::ENTITIES), 'the stored vocabulary of migration 0035');
+        // Phase 1 authorized revision: migration 0038 adds financeTransaction (finance.manage). Was: the
+        // five entities of migration 0035.
+        assertSame(['employee', 'overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction'], array_keys(AuditInput::ENTITIES), 'the stored vocabulary of migration 0038');
     },
     'the projection is exactly the eleven stored historical fields — never the company (D-BF4g-3 = A)' => static function () use ($row): void {
         $out = AuditEventView::event($row());

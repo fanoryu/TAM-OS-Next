@@ -28,15 +28,16 @@ const APP_VERSION = pick('APP_VERSION');
 const BRAND_MONOGRAM = pick('BRAND_MONOGRAM');
 
 // The U1 navigation, per role, in order: [group label, [[route, button id, icon, label], ...]]. The
-// Employee's Finance group is labelled "My work" (U1 correction 2).
+// Employee's Finance group is labelled "My work" (U1 correction 2). Phase 1 authorized revision: the CEO's
+// Finance group ends with Finance (the Ledger: dashboard and general transactions). Was: Overtime, Payroll.
 const NAV = Object.freeze({
   ceo: [['People', [['main', 'swSectionMain', '☺', 'Employees']]],
-    ['Finance', [['overtime', 'swSectionOvertime', '⏱', 'Overtime'], ['payroll', 'swSectionPayroll', '৳', 'Payroll']]],
+    ['Finance', [['overtime', 'swSectionOvertime', '⏱', 'Overtime'], ['payroll', 'swSectionPayroll', '৳', 'Payroll'], ['finance', 'swSectionFinance', '▣', 'Finance']]],
     ['System', [['audit', 'swSectionAudit', '☰', 'Audit']]]],
   employee: [['People', [['main', 'swSectionMain', '☺', 'My profile']]],
     ['My work', [['overtime', 'swSectionOvertime', '⏱', 'My overtime'], ['payroll', 'swSectionPayroll', '৳', 'My payroll']]]]
 });
-const ROUTES = Object.freeze({ ceo: ['main', 'overtime', 'payroll', 'audit'], employee: ['main', 'overtime', 'payroll'] });
+const ROUTES = Object.freeze({ ceo: ['main', 'overtime', 'payroll', 'finance', 'audit'], employee: ['main', 'overtime', 'payroll'] });
 
 function chromeOf(role, active, disabled){
   const nav = NAV[role].map(([label, items]) => '<div class="nav-group"><div class="nav-group-head"><span>' + label + '</span></div><div class="nav-group-items">'

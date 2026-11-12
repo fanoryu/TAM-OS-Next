@@ -53,6 +53,8 @@ final class BackupReader
         'supplemental_payroll_overtime' => 'SELECT * FROM supplemental_payroll_overtime WHERE id > :after ORDER BY id LIMIT 500',
         'finance_postings' => 'SELECT * FROM finance_postings WHERE id > :after ORDER BY id LIMIT 500',
         'finance_executions' => 'SELECT * FROM finance_executions WHERE id > :after ORDER BY id LIMIT 500',
+        'finance_transactions' => 'SELECT * FROM finance_transactions WHERE id > :after ORDER BY id LIMIT 500',
+        'finance_transaction_voids' => 'SELECT * FROM finance_transaction_voids WHERE id > :after ORDER BY id LIMIT 500',
     ];
 
     /** A table's row count inside the same snapshot — an independent check of the rows streamed. */
@@ -70,6 +72,8 @@ final class BackupReader
         'supplemental_payroll_overtime' => 'SELECT COUNT(*) AS n FROM supplemental_payroll_overtime',
         'finance_postings' => 'SELECT COUNT(*) AS n FROM finance_postings',
         'finance_executions' => 'SELECT COUNT(*) AS n FROM finance_executions',
+        'finance_transactions' => 'SELECT COUNT(*) AS n FROM finance_transactions',
+        'finance_transaction_voids' => 'SELECT COUNT(*) AS n FROM finance_transaction_voids',
     ];
 
     private readonly MigrationHistory $history;

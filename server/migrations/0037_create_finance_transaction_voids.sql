@@ -1,0 +1,20 @@
+CREATE TABLE finance_transaction_voids (
+  id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  company_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  finance_transaction_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  reason VARCHAR(200) NOT NULL,
+  voided_by_user_id CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  idempotency_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  voided_at DATETIME(6) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY finance_transaction_voids_company_id (company_id, id),
+  UNIQUE KEY finance_transaction_voids_transaction (company_id, finance_transaction_id),
+  UNIQUE KEY finance_transaction_voids_idempotency_key (company_id, idempotency_key),
+  CONSTRAINT finance_transaction_voids_company_fk FOREIGN KEY (company_id) REFERENCES companies (id),
+  CONSTRAINT finance_transaction_voids_transaction_fk FOREIGN KEY (company_id, finance_transaction_id) REFERENCES finance_transactions (company_id, id),
+  CONSTRAINT finance_transaction_voids_voided_by_fk FOREIGN KEY (voided_by_user_id) REFERENCES users (id),
+  CONSTRAINT finance_transaction_voids_id CHECK (id REGEXP '^[0-9a-f]{32}$'),
+  CONSTRAINT finance_transaction_voids_reason CHECK (CHAR_LENGTH(reason) BETWEEN 1 AND 200 AND CHAR_LENGTH(reason) = CHAR_LENGTH(TRIM(reason))),
+  CONSTRAINT finance_transaction_voids_voided_by CHECK (voided_by_user_id REGEXP '^[0-9a-f]{32}$'),
+  CONSTRAINT finance_transaction_voids_idempotency_key_format CHECK (idempotency_key REGEXP '^[0-9a-f]{32}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

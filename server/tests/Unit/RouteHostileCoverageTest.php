@@ -70,6 +70,11 @@ $coverage = [
     'POST /api/finance-executions/execute' => ['Db/FinanceHostileTest'],
     'GET /api/audit-events' => ['Db/AuditHostileTest', 'Db/HostileConfirmationsTest'],
     'GET /api/audit-events/record' => ['Db/AuditHostileTest', 'Db/HostileConfirmationsTest'],
+    // Phase 1 authorized revision: the four general transaction and report routes. Was: through the audit reads.
+    'GET /api/general-transactions' => ['Db/TransactionHostileTest'],
+    'POST /api/general-transactions/create' => ['Db/TransactionHostileTest'],
+    'POST /api/general-transactions/void' => ['Db/TransactionHostileTest'],
+    'GET /api/reports/financial' => ['Db/TransactionHostileTest'],
 ];
 
 return [
@@ -82,9 +87,11 @@ return [
         $listed = array_keys($coverage);
         sort($listed);
         assertSame($listed, $routes, 'the coverage table equals the production route table');
-        assertSame(54, count($routes), 'the E11 baseline counts 54 routes');
+        // Phase 1 authorized revision: 58 (the four general transaction and report routes). Was: 54.
+        assertSame(58, count($routes), 'the E11 baseline counts 58 routes (Phase 1)');
     },
-    'the authentication classes match the E11 baseline: 6 public, 1 optional, 47 required' => static function (): void {
+    // Phase 1 authorized revision: 51 required (the four general transaction and report routes). Was: 47.
+    'the authentication classes match the E11 baseline: 6 public, 1 optional, 51 required' => static function (): void {
         $by = ['None' => [], 'Optional' => [], 'Required' => []];
         foreach (productionRoutes(testConfig()) as $r) {
             $by[$r->auth->name][] = $r->method . ' ' . $r->path;
@@ -92,7 +99,7 @@ return [
         sort($by['None']);
         assertSame(['GET /api/health', 'GET /api/ready', 'POST /api/auth/activate', 'POST /api/auth/forgot-password', 'POST /api/auth/login', 'POST /api/auth/reset-password'], $by['None']);
         assertSame(['POST /api/auth/logout'], $by['Optional']);
-        assertSame(47, count($by['Required']));
+        assertSame(51, count($by['Required']));
     },
     'every listed suite exists and names the route it covers' => static function () use ($coverage): void {
         $root = dirname(__DIR__);

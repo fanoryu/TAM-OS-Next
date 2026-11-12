@@ -118,6 +118,7 @@ const AuthBoot = (function(){
       SessionOvertimeStore.clear();          // AFI-4b1: nor the SESSION Overtime data
       SessionPayrollStore.clear();           // AFI-4c1: nor the SESSION Payroll data
       SessionAuditStore.clear();             // AFI-4g: nor the SESSION Audit data
+      SessionLedgerStore.clear();           // Phase 1: nor the SESSION Finance data
     }
     paint();
   }

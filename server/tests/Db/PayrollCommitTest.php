@@ -393,7 +393,8 @@ return [
         // count is compared above — Commit is not a posting, D-FIN-3 = A). Was: no finance table at all.
         // BF-4f authorized revision: the Finance execution table exists too, and this flow never writes it
         // (its count is compared above). Was: finance_postings the one finance table.
-        assertSame([], array_values(array_filter(array_keys($after), static fn (string $t): bool => !in_array($t, ['finance_postings', 'finance_executions'], true) && (bool) preg_match('/finance|transaction|ledger|journal|payment|payslip|bank|cash/', $t))), 'no other finance table exists');
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame([], array_values(array_filter(array_keys($after), static fn (string $t): bool => !in_array($t, ['finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids'], true) && (bool) preg_match('/finance|transaction|ledger|journal|payment|payslip|bank|cash/', $t))), 'no other finance table exists');
         $cols = array_map(static fn (array $r): string => (string) $r['c'], $db->select("SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payroll_plans'"));
         assertSame([], array_values(array_filter($cols, static fn (string $c): bool => (bool) preg_match('/paid|payment|executed|posted|tax|pph|bpjs|thr|allowance|deduction|bonus|benefit|loan|net_|gross/', $c))), 'no paid, posted, executed or statutory column');
         assertSame('Committed', $c['status'], 'Committed — never Paid, Posted or Executed');

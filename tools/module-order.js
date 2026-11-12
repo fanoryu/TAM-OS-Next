@@ -154,6 +154,14 @@ module.exports = [
   'core/audit-api.js',
   'core/session-audit.js',
   'ui/session-audit-view.js',
+  // --- Phase 1 SESSION Finance (CEO only, D-INT-1 / D-INT-2): the strict general transaction and
+  //     financial report client (reads over ApiClient, writes over authSessionMutation), the
+  //     in-memory Finance section data and its controller, and its view (a section of the SESSION
+  //     workspace). Never State, never the LOCAL Transactions or Dashboard pages; the money is the
+  //     server's exact strings. Loads after payroll-api.js (payrollIdempotencyKey). ---
+  'core/transaction-api.js',
+  'core/session-ledger.js',
+  'ui/session-ledger-view.js',
   // --- AFI-4a1 read-only SESSION Employee workspace: the strict Employee read client
   //     (over ApiClient), the in-memory SESSION Employee data and its controller, and
   //     the view auth-view.js renders while AUTHENTICATED. Defined before the auth
