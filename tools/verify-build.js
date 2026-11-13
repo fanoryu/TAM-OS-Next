@@ -7983,18 +7983,22 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
 // U1 authorized revision (GR-4): the SESSION shell harness (verify-session-shell-runtime.js) is the
 // fourteenth, appended after its repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof
 // and its R-11 mutation self-test. Was: thirteen.
+// Phase 1 authorized revision (CD-1, Owner 2026-11-13): the SESSION Finance harness
+// (verify-session-ledger-runtime.js) is the fifteenth, appended after the shell harness, after its
+// repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof and its seeded-defect
+// self-proof. Was: fourteen.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
     'verify-identity-selection-runtime.js', 'verify-workspace-selfscope-runtime.js', 'verify-authz-runtime.js',
     'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js',
     'verify-session-overtime-runtime.js', 'verify-session-payroll-runtime.js', 'verify-session-audit-runtime.js',
-    'verify-dev-local-runtime.js', 'verify-afi5-runtime.js', 'verify-session-shell-runtime.js'];
+    'verify-dev-local-runtime.js', 'verify-afi5-runtime.js', 'verify-session-shell-runtime.js', 'verify-session-ledger-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the fourteen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the fifteen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');

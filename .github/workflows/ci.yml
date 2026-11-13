@@ -81,6 +81,9 @@ jobs:
       - name: Runtime harness - SESSION graduated shell (U1)
         run: node tools/verify-session-shell-runtime.js
 
+      - name: Runtime harness - SESSION Finance (Phase 1)
+        run: node tools/verify-session-ledger-runtime.js
+
       - name: Build deployment package
         run: node tools/build-package.js
 
