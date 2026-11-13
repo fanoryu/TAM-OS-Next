@@ -54,17 +54,20 @@ const SESSION_AUDIT_ACTIONS = Object.freeze({
   'account.manage': 'Login access',
   'overtime.createSelfDraft': 'Overtime draft created', 'overtime.updateSelfDraft': 'Overtime draft updated',
   'overtime.deleteSelfDraft': 'Overtime draft deleted', 'overtime.submitSelf': 'Overtime submitted', 'overtime.manage': 'Overtime decision',
-  'payroll.manage': 'Payroll plan', 'supplemental.manage': 'Supplemental payroll', 'finance.execute': 'Payment recorded'
+  'payroll.manage': 'Payroll plan', 'supplemental.manage': 'Supplemental payroll', 'finance.execute': 'Payment recorded',
+  'finance.manage': 'Finance transaction'
 });
 const SESSION_AUDIT_OPERATIONS = Object.freeze({
   provision: 'Create login', reissue: 'Resend activation email', disable: 'Disable login', enable: 'Enable login',
   submit: 'Submit', review: 'Review', reject: 'Reject', approve: 'Approve',
   create: 'Create', recalculate: 'Recalculate', return: 'Return to Draft', cancel: 'Cancel', commit: 'Commit', post: 'Post to Finance',
-  execute: 'Record payment'
+  execute: 'Record payment', void: 'Void'
 });
+// Phase 1 authorized revision (PH1-QA-01): the migration-0038 Finance transaction labels (action,
+// void operation, entity). Was: the migration-0035 labels only.
 const SESSION_AUDIT_ENTITIES = Object.freeze({
   employee: 'Employee', overtime: 'Overtime record', payrollPlan: 'Payroll plan', supplementalPayroll: 'Supplemental payroll',
-  financePosting: 'Finance posting'
+  financePosting: 'Finance posting', financeTransaction: 'Finance transaction'
 });
 
 function sessionAuditMonthLabel(key){

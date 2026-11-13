@@ -3051,7 +3051,8 @@ Every route needs a session and the CEO; an Employee is 403 before any lookup.
 runs in one READ COMMITTED transaction with exactly one `audit_events` row (`finance.manage`, `financeTransaction`,
 `create` or `void`, no field list, no value); an idempotent replay answers the original and writes nothing. The amounts
 live in the immutable rows, not in the audit row. `TransactionStore` is the only writer, with exactly two INSERTs and no
-UPDATE or DELETE.
+UPDATE or DELETE. The CEO's SESSION Audit section decodes and labels these events ("Finance transaction — Create" /
+"— Void", record "Finance transaction <id>"); `verify-build.js` pins its client vocabulary to migration 0038 (PH1-QA-01).
 
 **Financial report (D-INT-2, PD-6, PD-7).** For an inclusive range of at most **366** days, read in one REPEATABLE READ
 snapshot: one line per Financial Post (income, expense, net, count of Active rows); the general total; the voided rows
@@ -3075,8 +3076,8 @@ Employees see nothing new. Three modules after `ui/session-audit-view.js`: `core
 decoders), `core/session-ledger.js` (in-memory section data; one request key per form, so a resubmit never records
 twice) and `ui/session-ledger-view.js` (existing CSS classes only). They are named "Ledger" internally because the
 `sessionFinance*` names belong to the AFI-4e payroll posting UI; user-facing text says Finance. When a read fails, the
-view tells the CEO to choose a shorter range. The package holds **91** modules in **105** files, digest `1b35dbcc…`
-(`092810b9…` at `eadf4274`).
+view tells the CEO to choose a shorter range. The package holds **91** modules in **105** files, digest `b865f6f2…`
+(`1b35dbcc…` before the PH1-QA-01 Audit fix; `092810b9…` at `eadf4274`).
 
 **Owner decisions (2026-11-13).** PD-1 temporary `finance.manage`, CEO only; PD-2 void-only; PD-3 four fixed posts with
 drift detection; PD-4 free-text category with the standing condition below; PD-5 whole Rupiah and dates; PD-6 cash basis,

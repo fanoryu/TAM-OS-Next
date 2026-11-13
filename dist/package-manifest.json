@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 21,
   "entry": "index.html",
-  "packageDigest": "1b35dbcccaaf7c73d313d050c6f443bb54ff363e8639a7b38f0562df9b68a517",
+  "packageDigest": "b865f6f2e478bc5331c53f122e72c13479dcdab48876b198e0869c7fb42b88f8",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3183119,
-    "sha256": "59193589bdb98030728b5df4b78c1ba383242fa6679a6bb348d5ade081d3a581"
+    "bytes": 3183886,
+    "sha256": "a5aac40ee415bee11222db82d6f7b394190339394d3b8e55b2c80a1d1c334a5f"
   },
   "files": [
     {
@@ -109,8 +109,8 @@
     },
     {
       "path": "js/core/audit-api.js",
-      "bytes": 11436,
-      "sha256": "1d36a8a7d581844dcd64b27b32c918cbf21884fa8c9e76b6e39d1b4902f4d5c2"
+      "bytes": 11939,
+      "sha256": "d69db6fd2ab2070b6367d95c55ceb4744c78de047d2b0ec49e7e9f6df47d4646"
     },
     {
       "path": "js/core/auth-boot.js",
@@ -494,8 +494,8 @@
     },
     {
       "path": "js/ui/session-audit-view.js",
-      "bytes": 13636,
-      "sha256": "2e789ca97d577953543934195e41f37a62f53b82ab2e289296beecadfc665f61"
+      "bytes": 13900,
+      "sha256": "59b8bd6f2b8cac30e0afffe3ca3f576dc0cc27a75d7175bd40398c79a084c31b"
     },
     {
       "path": "js/ui/session-ledger-view.js",

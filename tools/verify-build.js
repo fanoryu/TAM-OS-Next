@@ -48,8 +48,9 @@ const PHASE1_MIGRATIONS = Object.freeze(['0036_create_finance_transactions.sql',
 const PHASE1_MODULES = Object.freeze(['core/transaction-api.js', 'core/session-ledger.js', 'ui/session-ledger-view.js']);
 const PHASE1_FILES = PHASE1_MODULES.length;
 // The Phase 1 deployment package digest (the three Ledger modules; the from/to query keys; the PD-7
-// over-cap guidance in session-ledger-view.js, Owner 2026-11-13). Was: 092810b9… (commit eadf4274).
-const PHASE1_PACKAGE_DIGEST = '1b35dbcccaaf7c73d313d050c6f443bb54ff363e8639a7b38f0562df9b68a517';
+// over-cap guidance in session-ledger-view.js, Owner 2026-11-13; the migration-0038 Audit vocabulary
+// and labels, PH1-QA-01, Owner 2026-11-13). Was: 1b35dbcc… (commit 094b8926); 092810b9… (commit eadf4274).
+const PHASE1_PACKAGE_DIGEST = 'b865f6f2e478bc5331c53f122e72c13479dcdab48876b198e0869c7fb42b88f8';
 function migrationsBeforePhase1() {
   return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -7877,21 +7878,25 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
     'AFI-4g: the event decoder accepts exactly AuditEventView::FIELDS (the eleven stored fields, never the company)');
   check(/const AUDIT_LIST_CAP = 2000;/.test(apiC) && /public const LIST_CAP = 2000;/.test(srv('src/Data/Audit/AuditEventStore.php')) && /data\.auditEvents\.length > AUDIT_LIST_CAP/.test(apiC),
     'AFI-4g: the client list cap equals AuditEventStore::LIST_CAP (2,000) — more is never accepted');
-  const m35 = srv('migrations/0035_replace_audit_events_finance_execute.sql');
-  const actions = ((/audit_events_action_v6 CHECK \(action IN \(([^)]*)\)\)/.exec(m35) || [])[1] || '').match(/'[a-zA-Z.]+'/g) || [];
+  // Phase 1 authorized revision (PH1-QA-01, Owner 2026-11-13): the client vocabulary is pinned to the
+  // newest audit migration, 0038 (finance.manage on financeTransaction: create, void), so a server
+  // vocabulary change can no longer leave the Audit section behind. Was: migration 0035 (twelve
+  // actions, six with operations; audit_events_action_v6 / audit_events_action_operation_v7).
+  const m38 = srv('migrations/0038_replace_audit_events_finance_manage.sql');
+  const actions = ((/audit_events_action_v7 CHECK \(action IN \(([^)]*)\)\)/.exec(m38) || [])[1] || '').match(/'[a-zA-Z.]+'/g) || [];
   const clientActions = (/const AUDIT_ACTION_ENTITY = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(apiC) || [])[1] || '';
-  check(actions.length === 12 && actions.map((a) => a.slice(1, -1)).sort().join() === (clientActions.match(/'([a-zA-Z.]+)':/g) || []).map((a) => a.slice(1, -2)).sort().join(),
-    'AFI-4g: the action vocabulary is exactly migration 0035\'s twelve actions');
-  const opsSql = (/audit_events_action_operation_v7 CHECK \(CASE action ([\s\S]*?) ELSE operation IS NULL END\)/.exec(m35) || [])[1] || '';
+  check(actions.length === 13 && actions.map((a) => a.slice(1, -1)).sort().join() === (clientActions.match(/'([a-zA-Z.]+)':/g) || []).map((a) => a.slice(1, -2)).sort().join(),
+    'AFI-4g/Phase 1: the action vocabulary is exactly migration 0038\'s thirteen actions');
+  const opsSql = (/audit_events_action_operation_v8 CHECK \(CASE action ([\s\S]*?) ELSE operation IS NULL END\)/.exec(m38) || [])[1] || '';
   const sqlOps = {}; (opsSql.match(/WHEN '[a-zA-Z.]+' THEN [^W]*/g) || []).forEach((w) => { sqlOps[/'([a-zA-Z.]+)'/.exec(w)[1]] = (w.split('THEN')[1].match(/'[a-z]+'/g) || []).map((x) => x.slice(1, -1)).join(); });
   const clientOps = {}; ((/const AUDIT_ACTION_OPERATIONS = Object\.freeze\(\{([\s\S]*?)\n\}\);/.exec(apiC) || [])[1] || '').split('\n').forEach((l) => { const m = /'([a-zA-Z.]+)': Object\.freeze\(\[([^\]]*)\]\)/.exec(l); if(m) clientOps[m[1]] = (m[2].match(/'[a-z]+'/g) || []).map((x) => x.slice(1, -1)).join(); });
-  check(Object.keys(sqlOps).length === 6 && JSON.stringify(Object.keys(sqlOps).sort().map((k) => [k, sqlOps[k]])) === JSON.stringify(Object.keys(clientOps).sort().map((k) => [k, clientOps[k]])),
-    'AFI-4g: the operations each action requires are exactly migration 0035\'s (every other action stores none)');
+  check(Object.keys(sqlOps).length === 7 && JSON.stringify(Object.keys(sqlOps).sort().map((k) => [k, sqlOps[k]])) === JSON.stringify(Object.keys(clientOps).sort().map((k) => [k, clientOps[k]])),
+    'AFI-4g/Phase 1: the operations each action requires are exactly migration 0038\'s (every other action stores none)');
   const ent = srv('src/Audit/AuditInput.php');
-  check(/'employee' => '\/\^\[A-Za-z0-9_-\]\{1,64\}\$\/D'/.test(ent) && ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting'].every((e) => new RegExp("'" + e + "' => '/\\^\\[0-9a-f\\]\\{32\\}\\$/D'").test(ent))
-    && /employee: \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/,/.test(apiC) && ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting'].every((e) => new RegExp(e + ': AUDIT_HEX32_PATTERN').test(apiC))
+  check(/'employee' => '\/\^\[A-Za-z0-9_-\]\{1,64\}\$\/D'/.test(ent) && ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction'].every((e) => new RegExp("'" + e + "' => '/\\^\\[0-9a-f\\]\\{32\\}\\$/D'").test(ent))
+    && /employee: \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/,/.test(apiC) && ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction'].every((e) => new RegExp(e + ': AUDIT_HEX32_PATTERN').test(apiC))
     && /const AUDIT_HEX32_PATTERN = \/\^\[0-9a-f\]\{32\}\$\/;/.test(apiC),
-    'AFI-4g: the entity id formats are exactly AuditInput::ENTITIES');
+    'AFI-4g/Phase 1: the entity id formats are exactly AuditInput::ENTITIES (financeTransaction included, PH1-QA-01)');
   check(/const AUDIT_JAKARTA_OFFSET_MS = 25200000;/.test(apiC) && /auditJakartaTime\(e\.occurredAt\)\.slice\(0, 7\) === monthKey/.test(apiC) && /e\.entity === entity && e\.entityId === id/.test(apiC)
     && /!auditBefore\(out\[out\.length - 1\], item\)/.test(apiC) && !/getTimezoneOffset|getHours|getMonth\(|getDate\(|toLocale|Intl\./.test(all),
     'AFI-4g: the company calendar is fixed UTC+7 (never the browser\'s zone); a month answer holds only its Jakarta month, a record answer only its record, in the server\'s order');

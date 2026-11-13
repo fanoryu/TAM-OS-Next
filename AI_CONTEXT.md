@@ -739,9 +739,9 @@ The CEO-only SESSION section **Finance** shows the report by Financial Post for 
 shown and never counted, payroll as its own posted / paid line, and a consolidated figure labelled **cash basis** (general
 expense plus payroll paid). The history fails closed above 2,000 rows and the report above 20,000 rows per read (HTTP 500,
 never a partial result; pagination deferred). Backup and restore include both new tables. Package 91 modules / 105 files,
-digest `1b35dbcc…`. Local evidence (disposable MariaDB 10.11.19): backend 926 passed, 0 failed (449 database tests),
-verifier 3092, boundary self-test 780, 45 runtime harnesses; the Finance harness is the fifteenth CI harness. CI has not
-yet run Phase 1. Details: ARCHITECTURE.md, "General transactions and the financial report — Phase 1".
+digest `b865f6f2…` (`1b35dbcc…` before the PH1-QA-01 Audit fix). Local evidence (disposable MariaDB 10.11.19): backend 926 passed, 0 failed (449 database tests),
+verifier 3092, boundary self-test 780, 45 runtime harnesses; the Finance harness is the fifteenth CI harness. Draft PR #85's
+first CI run passed 7/7 on `38bae289`; the PH1-QA-01 Audit fix has not yet run in GitHub CI. Details: ARCHITECTURE.md, "General transactions and the financial report — Phase 1".
 Owner decisions (2026-11-13), none a release approval: **PD-1** both writes use `finance.manage`, CEO only — temporary until
 Finance/HR roles are designed; **PD-2** void-only correction with a mandatory reason; **PD-3** the four fixed posts, changed
 only by migration plus coordinated code, with drift detection in the boundary self-test; **PD-4** free-text category (1–64
