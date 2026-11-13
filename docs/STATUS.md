@@ -1,9 +1,9 @@
 # TAM OS NEXT — Current status
 
 DOC-01-R2 proposed status record, 2026-11-09 (Asia/Jakarta), incorporating Owner decision D-2.
-Baseline refreshed 2026-11-13 by the repository cleanup after Finance Phase 1 merged; the D-2 decisions are unchanged.
-Source baseline snapshot: main at 40c63216c201e0ca0a4594505f9919800e597ff1, observed read-only on 2026-11-13
-(previous snapshot: 2f94adc6600708fa8cb8c06f3b5509cfcd582ca4, 2026-11-09).
+Baseline refreshed 2026-11-14 after UI-INT-1 merged (PR #88); the D-2 decisions are unchanged.
+Source baseline snapshot: main at ec3cf40e53a3203a59babf3e6e8c83e252a933ae, observed read-only on 2026-11-14
+(previous snapshot: 40c63216c201e0ca0a4594505f9919800e597ff1, 2026-11-13).
 This is a dated snapshot, not a permanently current commit; later commits to main do not update it.
 This file centralizes current status; it does not supersede accepted technical/security decisions
 or authorize work. Detailed historical wording stays in its original records.
@@ -65,11 +65,14 @@ that every browser-storage path is empty. See [ARCHITECTURE](../ARCHITECTURE.md)
 
 Core SESSION source includes sign-in/session identity, employee/login management, overtime, payroll,
 supplemental payroll, payroll-sourced posting/payment, audit, employee self-service and account security.
-Finance Phase 1 merged after the previous snapshot (PR #85, merge commit 79c8c497; documentation reconciled by
+Finance Phase 1 merged before the 2026-11-13 snapshot (PR #85, merge commit 79c8c497; documentation reconciled by
 PR #86): CEO-only general income and expense transactions against four fixed Financial Posts (GA, NP & IP, TJB,
 Drone), void-only correction with a mandatory reason, and a SESSION financial report with a cash-basis consolidated
 total (migrations 0036–0038, head 0038; 58 routes; ACTIONS stay 21). It is merged source in the v3.0.0 candidate:
 not deployed and not released, and a new encrypted backup-and-restore rehearsal must pass before any production deployment (PD-10).
+UI-INT-1 merged after the previous snapshot (PR #88, merge commit ec3cf40): the SESSION shell uses the v2.11.0
+sidebar labels and chrome over the existing SESSION pages, with unsupported areas hidden (frontend only; no CSS,
+backend, route, migration or storage change). It is merged source in the v3.0.0 candidate: not deployed and not released.
 The Distribution-1 package and backend source exist. These are source implementation statements, not
 hosting acceptance. Detailed milestone, PR and verification records remain in
 [AI_CONTEXT](../AI_CONTEXT.md), [CHANGELOG](../CHANGELOG.md), [Milestones](05-milestones/Milestones.md)

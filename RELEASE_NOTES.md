@@ -13,8 +13,10 @@ migration); `ACTIONS` **21** (20 at v2.11.0; BF-4a2 added `account.manage`).
 > **Status update (2026-11-13; this candidate record is kept as written).** The figures in this section describe the
 > candidate as prepared on `main` @ `8ef3d6be` (102 package files, migrations 0001–0035, package digest `819f74ac…`).
 > Finance Phase 1 has since merged into the v3.0.0 candidate on `main` as source (PR #85; see
-> [`CHANGELOG.md`](CHANGELOG.md), *Unreleased*): 105 package files, migrations 0001–0038, package digest `b865f6f2…`. It
-> is not released and not deployed. The artifacts below predate Phase 1, so a release needs a fresh candidate build
+> [`CHANGELOG.md`](CHANGELOG.md), *Unreleased*): 105 package files, migrations 0001–0038, package digest `b865f6f2…`.
+> UI-INT-1, the v2.11.0-style SESSION shell, has since merged into the same candidate as source (PR #88, `ec3cf40`;
+> frontend only): 105 package files, package digest `97658f5a…`. Neither is
+> released or deployed. The artifacts below predate Phase 1 and UI-INT-1, so a release needs a fresh candidate build
 > record and separate Owner authorization; every HOLD and NO-GO gate is unchanged.
 
 **Why this is a major version.** Since v2.11.0 the product changed how it is delivered, what it needs to run and what
