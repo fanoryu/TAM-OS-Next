@@ -78,6 +78,9 @@ overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-
 With AFI-5b (PR #62, merged) — see "Identity transition — AFI-5b" below — the verifier has 2993 checks, 13 harnesses run in
 CI, and the package holds 88 modules in 102 files. The E11 hostile-principal suites (PR #68, merged; post-merge CI
 verified) add 3 unit and 24 database tests: 470 PHP tests without the database, 901 with it.)*
+*(Phase 1, 2026-11-13 — a local candidate on `feature/phase1-financial-posts`, not merged or deployed; see "General
+transactions and the financial report — Phase 1" below: 91 modules in 105 package files, verifier 3092, fifteen CI
+harnesses, 477 PHP tests without the database and 926 with it, migration head 0038, 58 routes.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
@@ -2994,6 +2997,99 @@ It adds R3-CONFINEMENT, a comment- and string-aware check that allows one defini
 inside the LOCAL branch. It also pins the oracle and the 102-file package and moves the CI allowlist to thirteen
 entries. Every LOCAL runtime harness rewrites the one mode assignment in memory, loads the development identity after
 `identity.js` and installs the alias once.
+
+### General transactions and the financial report — Phase 1 (local candidate on `feature/phase1-financial-posts`; not merged, not deployed)
+
+Phase 1 implements the Owner specification D-INT-1, D-INT-2 and D-INT-4 in local commits on
+`feature/phase1-financial-posts`: `eadf4274` (the feature, from `main` at `a1614fd4`) and `094b8926` (the PD-3 / PD-7
+pre-merge corrections), followed by the CI and documentation changes. It is **not merged and not deployed**; it changes no release, gate or production state (Hostinger
+**NO-GO**, Gate D and Gate R **HOLD**, ENG-C1 **BLOCKED**, release v3.0.0 **HOLD**). It adds no Action (ACTIONS stay **21**),
+no storage key, no `SCHEMA_VERSION` change and no CSS. Payment requests, reimbursements, Finance/HR roles, browser-data
+import and category reporting are out of scope.
+
+**Financial Posts (PD-3).** Exactly four, in this order: `GA` (GA), `NPIP` (NP & IP), `TJB` (TJB), `DRONE` (Drone). The
+same closed list is migration `0036`'s CHECK `finance_transactions_financial_post` (a case-sensitive `ascii_bin` column),
+the enum `TamOs\Transaction\FinancialPost` and `FINANCIAL_POSTS` in `js/core/transaction-api.js`;
+`tools/verify-backend-boundary.js` fails unless all three agree in order, both validators still use the list, the category
+stays its own column and no later migration touches `financial_post`, and its `--selftest` seeds that drift (22 cases).
+Adding, removing or renaming a post is a new migration plus coordinated code and verifier changes — never data-driven.
+A Financial Post is not a category.
+
+**Transactions (D-INT-1).** A general transaction is income or expense with a Financial Post, a category, a description,
+an amount, a transaction date, its creator and its creation time.
+
+| Field | Rule (browser, server and database) |
+|---|---|
+| `kind` | `income` or `expense` |
+| `financialPost` | one of the four codes |
+| `category` | free text 1–64 characters, no control characters, no leading or trailing space; `Gaji`, `Payroll` and `Salary` (any case) refused, so payroll is never entered twice (PD-4) |
+| `description` | 1–500 characters, trimmed |
+| `amount` | a positive whole-Rupiah string `"N.00"` up to `999999999999999.00` (`DECIMAL(17,2)`; PD-5) |
+| `transactionDate` | a real date from `1900-01-01` to today in the company calendar (Asia/Jakarta, UTC+7); no future date (PD-5) |
+
+Correction is **void-only (PD-2)**: no edit and no delete. A void row carries a mandatory reason (1–200 characters), the
+actor and the time; a transaction has at most one void; the status (`Active` / `Voided`) is derived, never stored. The
+transaction row and its audit history are never changed.
+
+**Migrations.** `0036` creates `finance_transactions`, `0037` creates `finance_transaction_voids` (one per transaction,
+composite tenant key, no cascade), and `0038` replaces the audit CHECKs (action v7, entity v6, operation v8,
+action-operation v8) adding `finance.manage` on entity `financeTransaction` with operations `create` and `void`, keeping
+every earlier rule. Head **0038**. The migrations seed no rows.
+
+**Routes (PD-8).** Routes 54 → **58**, outside `/api/finance*` (which stays the payroll posting and execution surface).
+Every route needs a session and the CEO; an Employee is 403 before any lookup.
+
+| Route | Input | Answer | Errors |
+|---|---|---|---|
+| `GET /api/general-transactions` | exactly `from`, `to` | `{ generalTransactions: [T…] }` — the range, oldest first | 400 `invalid_query`; 403; 500 above 2,000 rows |
+| `POST /api/general-transactions/create` | exactly `kind`, `financialPost`, `category`, `description`, `amount`, `transactionDate`, `idempotencyKey` | `{ generalTransaction: T }` | 400 `validation_failed`; 403; 409 `conflict` (a key reused with other values) |
+| `POST /api/general-transactions/void` | exactly `financeTransactionId`, `reason`, `idempotencyKey` | `{ generalTransaction: T }` (Voided) | 400; 403; 404; 409 `conflict` (already voided, or a key reused) |
+| `GET /api/reports/financial` | exactly `from`, `to` | `{ financialReport: R }` | 400 `invalid_query`; 403; 500 above 20,000 rows in any read |
+
+**Authorization and audit (PD-1, PD-9).** Both writes declare the existing record-free `finance.manage` (CEO only) — a
+**temporary** assignment until Finance/HR roles are designed; the reads declare no Action and are CEO only. Each write
+runs in one READ COMMITTED transaction with exactly one `audit_events` row (`finance.manage`, `financeTransaction`,
+`create` or `void`, no field list, no value); an idempotent replay answers the original and writes nothing. The amounts
+live in the immutable rows, not in the audit row. `TransactionStore` is the only writer, with exactly two INSERTs and no
+UPDATE or DELETE.
+
+**Financial report (D-INT-2, PD-6, PD-7).** For an inclusive range of at most **366** days, read in one REPEATABLE READ
+snapshot: one line per Financial Post (income, expense, net, count of Active rows); the general total; the voided rows
+(shown, never counted); and a separate, unallocated **Payroll** line — *posted* (Finance postings of the payroll months
+the range touches) and *paid* (Finance executions dated in the range). The consolidated figure is **cash basis** and is
+labelled so: general income; general expense plus payroll **paid**. Posted payroll stays visible beside it and is never
+added, so payroll is counted once. All money is integer arithmetic in PHP over the stored strings — never SQL, never a
+float. **Limits (PD-7):** the history fails closed above **2,000** rows and the report above **20,000** rows in any of its
+three reads: HTTP 500 `internal_error`, the bare error envelope, never a truncated list or a partial total; each read
+takes one row more than its cap so the overflow is detected. Pagination is deferred. **No category-level report exists
+(PD-4).**
+
+**Backup and restore (PD-10).** Both tables are in the encrypted backup and the restore writer after
+`finance_executions`: **15** backed-up tables, **19** classified with the four excluded ones (the OPS-1/OPS-2 text above
+records the earlier 13 + 4 = 17). A head-0038 backup does not restore into older code. The E7 restore rehearsal predates
+these tables; a new encrypted backup-and-restore rehearsal must pass before any production deployment (PD-10).
+
+**SESSION Finance section (PD-11).** One CEO-only section **Finance** between Payroll and Audit, with *Dashboard*
+(default, current Asia/Jakarta month) and *Transactions* (range history, Record transaction, Void with a reason).
+Employees see nothing new. Three modules after `ui/session-audit-view.js`: `core/transaction-api.js` (client and strict
+decoders), `core/session-ledger.js` (in-memory section data; one request key per form, so a resubmit never records
+twice) and `ui/session-ledger-view.js` (existing CSS classes only). They are named "Ledger" internally because the
+`sessionFinance*` names belong to the AFI-4e payroll posting UI; user-facing text says Finance. When a read fails, the
+view tells the CEO to choose a shorter range. The package holds **91** modules in **105** files, digest `1b35dbcc…`
+(`092810b9…` at `eadf4274`).
+
+**Owner decisions (2026-11-13).** PD-1 temporary `finance.manage`, CEO only; PD-2 void-only; PD-3 four fixed posts with
+drift detection; PD-4 free-text category with the standing condition below; PD-5 whole Rupiah and dates; PD-6 cash basis,
+posted payroll visible; PD-7 366 days / 2,000 / 20,000, fail closed, pagination deferred; PD-8 the four routes; PD-9 audit
+without values; PD-10 backup scope with the standing condition below; PD-11 the Finance section. None is a release
+approval. A decision record (ADR-015) is deferred until the Finance/HR role design revisits PD-1 (CD-3).
+Standing conditions:
+- **PD-4:** no category-level reporting until the Owner approves a closed category taxonomy.
+- **PD-10:** a new encrypted backup-and-restore rehearsal must pass before production deployment.
+
+**Verification (local, disposable MariaDB 10.11.19).** Backend 926 passed, 0 failed (449 database tests; fresh
+`0001`–`0038` and upgrade `0035` → `0038`); `verify-build.js` 3092; `verify-backend-boundary.js --selftest` 780; 45 runtime
+harnesses; `tools/verify-session-ledger-runtime.js` 65 checks, the fifteenth CI harness. CI has not yet run Phase 1.
 
 ### Release engineering
 
