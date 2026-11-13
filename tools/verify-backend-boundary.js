@@ -239,6 +239,21 @@ const FINANCE_EXECUTION_ROUTE = '/api/finance-executions/execute';
 const FINANCE_EXECUTION_READ_ROUTE = 'GET /api/finance-executions';
 const FINANCE_EXECUTION_KEYS = 'financePostingId,expectedAmount,executedOn,paymentMethod,idempotencyKey';
 const PAYMENT_METHODS = 'cash,bankTransfer,qris,virtualAccount,creditCard,other';
+// Phase 1 (D-INT-1, D-INT-2): the general transaction and its void have one writer, which only inserts
+// — a transaction is immutable (no UPDATE, DELETE, REPLACE or TRUNCATE anywhere) and a void is its
+// only correction; its status is derived from the void, never stored. It locks only its transaction,
+// by primary key, and never computes money in SQL. Both writes declare exactly the existing
+// record-free finance.manage (ACTIONS stay 21); the range read and the financial report read declare
+// none. The report store is read only. The four Financial Post codes are one closed list: the enum,
+// migration 0036's CHECK and the frontend client agree exactly.
+const TRANSACTION_STORE = 'server/src/Data/Transaction/TransactionStore.php';
+const REPORT_STORE = 'server/src/Data/Report/FinancialReportStore.php';
+const FINANCIAL_POST_FILE = 'server/src/Transaction/FinancialPost.php';
+const FINANCIAL_POST_MIGRATION = 'server/migrations/0036_create_finance_transactions.sql';
+const FRONTEND_TRANSACTION_API = 'js/core/transaction-api.js';
+const TRANSACTION_INPUT = 'server/src/Transaction/TransactionInput.php';
+const TRANSACTION_ROUTES = ['/api/general-transactions/create', '/api/general-transactions/void'];
+const TRANSACTION_READ_ROUTES = { 'GET /api/general-transactions': "['from', 'to']", 'GET /api/reports/financial': "['from', 'to']" };
 const ACTION_COUNT = 21;
 // OPS-1 (D-AB-1..16 = recommended): encrypted database backups are operator tooling, never an HTTP
 // surface. The one cross-company reader (read-only), the backup classes and their CLI form a closed
@@ -426,6 +441,9 @@ const STRING_RULES = [
   // BF-4f: finance_executions has one writer, which only inserts — an execution is immutable.
   { id: 'finance-execution-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_executions\b/i, msg: 'finance_executions is written only by ' + FINANCE_EXECUTION_STORE, allow: (f) => f === FINANCE_EXECUTION_STORE || f === RESTORE_WRITER },
   { id: 'finance-execution-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_executions\b/i, msg: 'a Finance execution is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_executions (no reversal, no correction)' },
+  // Phase 1: finance_transactions and finance_transaction_voids have one writer, which only inserts.
+  { id: 'transaction-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_transaction(s|_voids)\b/i, msg: 'finance_transactions and finance_transaction_voids are written only by ' + TRANSACTION_STORE, allow: (f) => f === TRANSACTION_STORE || f === RESTORE_WRITER },
+  { id: 'transaction-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_transaction(s|_voids)\b/i, msg: 'a general transaction and its void are immutable: no UPDATE, DELETE, REPLACE or TRUNCATE (a void is the only correction)' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG || f === RESTORE_WRITER },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -470,7 +488,8 @@ function checkMigrationSql(src, file) {
 // `company_id CHAR(32) … NOT NULL`, a FK to companies, and a UNIQUE (company_id, id) that child
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
-const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings', 'finance_executions']);
+// Phase 1 authorized revision: the general transactions and their voids are company tables. Was: through finance_executions.
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -575,6 +594,25 @@ function checkRouteActions(src) {
     // routes. Was: the two postings and the posting month read only.
     if (key !== FINANCE_READ_ROUTE && key !== FINANCE_EXECUTION_READ_ROUTE && !(m[1] === 'POST' && (FINANCE_ROUTES[m[2]] || m[2] === FINANCE_EXECUTION_ROUTE))) out.push('Routes.php: ' + key + ' — the only Finance routes are the two postings, the execution and their two month reads (no batch, payment, actual, reversal, correction or reconciliation route)');
     if ((key === FINANCE_READ_ROUTE || key === FINANCE_EXECUTION_READ_ROUTE) && /\bAction::/.test(m[3])) out.push('Routes.php: ' + key + ' is a read and declares no Action');
+  }
+  // Phase 1: exactly the two general transaction writes declare the record-free finance.manage, the
+  // range and report reads take exactly ?from=&to= with a session and no Action, and no other
+  // general transaction or report route exists (no update, delete, payment or export).
+  for (const path of TRANSACTION_ROUTES) {
+    const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + path + "'"));
+    if (!line) out.push('Routes.php: general transaction route POST ' + path + ' is missing');
+    else if (!/RouteAuth::Required, Action::FinanceManage\),$/.test(line.trim())) out.push('Routes.php: general transaction route POST ' + path + ' must declare exactly Action::FinanceManage');
+  }
+  for (const [key, keys] of Object.entries(TRANSACTION_READ_ROUTES)) {
+    const [method, path] = key.split(' ');
+    const line = src.split('\n').find((l) => l.includes("new Route('" + method + "', '" + path + "', "));
+    if (!line) out.push('Routes.php: the read ' + key + ' is missing');
+    else if (!line.trim().endsWith(', ' + keys + ', RouteAuth::Required),')) out.push('Routes.php: the read ' + key + ' takes exactly ' + keys + ', requires a session and declares no Action');
+  }
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    const key = m[1] + ' ' + m[2];
+    if (/\bAction::FinanceManage\b/.test(m[3]) && !(m[1] === 'POST' && TRANSACTION_ROUTES.includes(m[2]))) out.push('Routes.php: ' + key + ' is not a general transaction write and must not declare Action::FinanceManage');
+    if (/^\/api\/(general-transactions|reports)\b/.test(m[2]) && !TRANSACTION_READ_ROUTES[key] && !(m[1] === 'POST' && TRANSACTION_ROUTES.includes(m[2]))) out.push('Routes.php: ' + key + ' — the only general transaction and report routes are create, void and the two reads (no update, delete, payment or export route)');
   }
   // BF-4g: exactly the two CEO audit reads — GET, their exact query keys, a session and no Action —
   // and no other audit or authentication-log route.
@@ -736,6 +774,7 @@ function checkPhp(file, src) {
   if (executionFile) for (const v of checkFinanceExecutionFirewall(lex)) out.push(v);
   if (file === FINANCE_EXECUTION_INPUT) for (const v of checkFinanceExecutionInput(lex)) out.push(v);
   for (const v of checkAuditReadStatements(file, lex)) out.push(v);
+  for (const v of checkTransactionStatements(file, lex)) out.push(v);
   if (file.startsWith(AUDIT_DIR) || file === AUDIT_CONTROLLER || file === AUDIT_EVENT_STORE) for (const v of checkAuditReadFirewall(lex)) out.push(v);
   if (file === AUDIT_INPUT) for (const v of checkAuditInput(lex)) out.push(v);
   return out;
@@ -934,6 +973,72 @@ function checkFinanceStatements(file, lex) {
     if (SQL_MONEY_ARITHMETIC.test(s) || /\bamount\s*[-+*\/]|[-+*\/]\s*:?amount\b/i.test(s)) out.push("Finance never computes money in SQL: the posted amount is the source's stored string");
   }
   if (inserts !== 2) out.push('FinancePostingStore has exactly two INSERT statements (one per source kind); found ' + inserts);
+  return out;
+}
+
+// Phase 1: the transaction store holds exactly two INSERT statements (a transaction, a void) — never
+// IGNORE or ON DUPLICATE KEY UPDATE — locks only a transaction by primary key, names no Employee scope
+// and never computes money in SQL. The report store only reads: no write and no locking read, and it
+// never computes money in SQL either (the report sums in PHP).
+function checkTransactionStatements(file, lex) {
+  if (file !== TRANSACTION_STORE && file !== REPORT_STORE) return [];
+  const out = [];
+  let inserts = 0;
+  for (const s of lex.strings) {
+    if (!SQL_VERB.test(s)) continue;
+    if (/:self_employee_id\b/.test(s)) out.push('the general transaction and report statements are CEO company scope only (no :self_employee_id)');
+    if (SQL_MONEY_ARITHMETIC.test(s) || /\bamount\s*[-+*\/]|[-+*\/]\s*:?amount\b/i.test(s)) out.push('general transactions and the report never compute money in SQL');
+    if (file === REPORT_STORE) {
+      if (!/^SELECT /.test(s) || /\b(INSERT|UPDATE|DELETE|REPLACE)\b|\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s)) out.push('the financial report store only reads: every statement is a plain SELECT (no write, no locking read)');
+      continue;
+    }
+    if (/^\s*INSERT\b/i.test(s)) {
+      inserts++;
+      if (/\bIGNORE\b|\bON\s+DUPLICATE\s+KEY\b/i.test(s)) out.push('a general transaction or void is inserted plainly — never IGNORE or ON DUPLICATE KEY UPDATE');
+    }
+    if (/\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s)
+      && (!/^SELECT [^;]* FROM finance_transactions WHERE id = :id AND company_id = :company_id FOR UPDATE$/.test(s) || /\bJOIN\b|\bOR\b/i.test(s))) {
+      out.push('a general transaction write locks only its transaction, by primary key — never a range, a join or a void');
+    }
+  }
+  if (file === TRANSACTION_STORE && inserts !== 2) out.push('TransactionStore has exactly two INSERT statements (a transaction and a void); found ' + inserts);
+  // PD-7 (Owner 2026-11-13): the history range reads LIST_CAP + 1 = 2001 rows and every report read REPORT_CAP + 1 = 20001,
+  // so the service can tell the cap was exceeded and fail closed (500) — never a silently truncated list or total.
+  for (const s of lex.strings) {
+    if (!/^SELECT /.test(s)) continue;
+    if (file === REPORT_STORE && !/ ORDER BY [\w, .]+ LIMIT 20001$/.test(s)) out.push('every financial report read ends ORDER BY … LIMIT 20001 (REPORT_CAP + 1) so the cap fails closed — never a silent truncation');
+    if (file === TRANSACTION_STORE && /transaction_date >= :from_date/.test(s) && !/ ORDER BY t\.transaction_date, t\.created_at, t\.id LIMIT 2001$/.test(s)) out.push('the general transaction range read ends ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001 (LIST_CAP + 1) so the cap fails closed — never a silent truncation');
+  }
+  return out;
+}
+
+// Every migration except 0036, as [path, sql] (PD-3: none may touch financial_post).
+function otherPostMigrations() {
+  const dir = path.join(root, 'server', 'migrations');
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.sql') && 'server/migrations/' + f !== FINANCIAL_POST_MIGRATION)
+    .sort().map((f) => ['server/migrations/' + f, fs.readFileSync(path.join(dir, f), 'utf8')]);
+}
+
+// Phase 1: the four Financial Post codes — the enum cases, migration 0036's CHECK and the frontend
+// FINANCIAL_POSTS — are one closed list in one order.
+function checkFinancialPostParity(enumSrc, migrationSrc, frontendSrc, inputSrc, otherMigrations) {
+  const out = [];
+  const enumCodes = [...enumSrc.matchAll(/^\s*case \w+ = '([A-Z]+)';$/gm)].map((m) => m[1]);
+  const check = /finance_transactions_financial_post CHECK \(financial_post IN \(([^)]*)\)\)/.exec(migrationSrc);
+  const dbCodes = check ? [...check[1].matchAll(/'([A-Z]+)'/g)].map((m) => m[1]) : [];
+  const fe = /const FINANCIAL_POSTS = Object\.freeze\(\[([^\]]*)\]\)/.exec(frontendSrc || '');
+  const feCodes = fe ? [...fe[1].matchAll(/code: '([A-Z]+)'/g)].map((m) => m[1]) : [];
+  if (enumCodes.join(',') !== 'GA,NPIP,TJB,DRONE') out.push(FINANCIAL_POST_FILE + ': the Financial Posts are exactly GA, NPIP, TJB, DRONE');
+  if (dbCodes.join(',') !== enumCodes.join(',')) out.push(FINANCIAL_POST_MIGRATION + ': the financial_post CHECK must equal ' + FINANCIAL_POST_FILE);
+  if (feCodes.join(',') !== enumCodes.join(',')) out.push(FRONTEND_TRANSACTION_API + ': FINANCIAL_POSTS must equal ' + FINANCIAL_POST_FILE);
+  // PD-3 (Owner 2026-11-13): the enforcement around the list, not only the list itself.
+  if (!/^  financial_post VARCHAR\(8\) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,$/m.test(migrationSrc)) out.push(FINANCIAL_POST_MIGRATION + ': financial_post stays VARCHAR(8) ascii_bin NOT NULL (a case-sensitive exact match)');
+  if (!/^  category VARCHAR\(64\) NOT NULL,$/m.test(migrationSrc) || /CONSTRAINT finance_transactions_category CHECK \([^\n]*financial_post/.test(migrationSrc)) out.push(FINANCIAL_POST_MIGRATION + ': the category stays its own column, separate from the Financial Post');
+  if (!String(inputSrc || '').includes("if (!is_string($json['financialPost'] ?? null) || FinancialPost::tryFrom($json['financialPost']) === null) {")) out.push(TRANSACTION_INPUT + ': the server validates financialPost as a string against FinancialPost::tryFrom');
+  if (!String(frontendSrc || '').includes("function transactionIsPost(v){ return typeof v === 'string' && FINANCIAL_POSTS.some(function(p){ return p.code === v; }); }")) out.push(FRONTEND_TRANSACTION_API + ': the frontend checks a post only against FINANCIAL_POSTS (transactionIsPost)');
+  for (const [name, sql] of otherMigrations || []) {
+    if (/financial_post/i.test(sql)) out.push(name + ': only ' + FINANCIAL_POST_MIGRATION + ' may define financial_post — a later change to the Financial Posts must update this parity check with it');
+  }
   return out;
 }
 
@@ -1560,6 +1665,13 @@ function run() {
   const actionFile = path.join(root, ACTION_FILE);
   if (!fs.existsSync(actionFile)) failures.push(ACTION_FILE + ': missing — ACTION parity cannot be established');
   else for (const v of checkActionParity(fs.readFileSync(actionFile, 'utf8'), fs.readFileSync(path.join(root, FRONTEND_AUTHZ), 'utf8'))) failures.push(v);
+  // Phase 1: the Financial Post codes agree across the server, the database and the frontend client.
+  const postFile = path.join(root, FINANCIAL_POST_FILE);
+  const postMigration = path.join(root, FINANCIAL_POST_MIGRATION);
+  const postFrontend = path.join(root, FRONTEND_TRANSACTION_API);
+  if (!fs.existsSync(postFile) || !fs.existsSync(postMigration)) failures.push(FINANCIAL_POST_FILE + ' / ' + FINANCIAL_POST_MIGRATION + ': missing — Financial Post parity cannot be established');
+  else for (const v of checkFinancialPostParity(fs.readFileSync(postFile, 'utf8'), fs.readFileSync(postMigration, 'utf8'), fs.existsSync(postFrontend) ? fs.readFileSync(postFrontend, 'utf8') : '',
+    fs.existsSync(path.join(root, TRANSACTION_INPUT)) ? fs.readFileSync(path.join(root, TRANSACTION_INPUT), 'utf8') : '', otherPostMigrations())) failures.push(v);
   // BF-4c1: payroll adds no Action — the vocabulary stays exactly ACTION_COUNT.
   if (fs.existsSync(actionFile) && (fs.readFileSync(actionFile, 'utf8').match(/^\s*case \w+ = '/gm) || []).length !== ACTION_COUNT) failures.push(ACTION_FILE + ': the server ACTIONS must stay ' + ACTION_COUNT);
   const ignored = gitIgnored(onDisk);
@@ -2060,6 +2172,24 @@ function selftest() {
   dirty('a browser overtime list on generate is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['payrollPlanId']);", "self::onlyKeys($json, ['payrollPlanId', 'overtimeIds']);"), 'exactly { payrollPlanId }');
   dirty('a commit without its idempotency key is caught', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal', 'idempotencyKey']);", "self::onlyKeys($json, ['id', 'expectedVersion', 'expectedTotal']);"), 'idempotencyKey');
   dirty('an employeeId key on a transition is caught (identity)', SUPPLEMENTAL_INPUT, realSuppInput.replace("self::onlyKeys($json, ['id', 'expectedVersion']);", "self::onlyKeys($json, ['employeeId']);"), 'never names an identity');
+  // Phase 1: one transaction writer that only inserts, a PK lock only, no SQL money, a read-only report
+  // store, the finance.manage route surface and the Financial Post parity.
+  const realTxn = fs.readFileSync(path.join(root, TRANSACTION_STORE), 'utf8');
+  const inTxn = (extra) => realTxn.replace('    public const LIST_CAP', '    ' + extra + '\n    public const LIST_CAP');
+  const realReport = fs.readFileSync(path.join(root, REPORT_STORE), 'utf8');
+  const inReport = (extra) => realReport.replace('    public const REPORT_CAP', '    ' + extra + '\n    public const REPORT_CAP');
+  clean('the real TransactionStore passes', TRANSACTION_STORE, realTxn);
+  clean('the real FinancialReportStore passes', REPORT_STORE, realReport);
+  dirty('a transaction UPDATE is caught (immutable)', TRANSACTION_STORE, inTxn("public const U_SQL = 'UPDATE finance_transactions SET amount = :amount WHERE id = :id AND company_id = :company_id';"), 'immutable');
+  dirty('a transaction DELETE is caught (immutable)', TRANSACTION_STORE, inTxn("public const D_SQL = 'DELETE FROM finance_transactions WHERE id = :id AND company_id = :company_id';"), 'immutable');
+  dirty('a void DELETE (un-void) is caught', TRANSACTION_STORE, inTxn("public const D_SQL = 'DELETE FROM finance_transaction_voids WHERE finance_transaction_id = :id AND company_id = :company_id';"), 'immutable');
+  dirty('a transaction write outside TransactionStore is caught', PAYROLL_STORE, fs.readFileSync(path.join(root, PAYROLL_STORE), 'utf8').replace('final class PayrollStore\n{\n', "final class PayrollStore\n{\n    public const T_SQL = 'INSERT INTO finance_transactions (id, company_id) VALUES (:id, :company_id)';\n"), 'written only by ' + TRANSACTION_STORE);
+  dirty('a third transaction INSERT is caught', TRANSACTION_STORE, inTxn("public const X_SQL = 'INSERT INTO finance_transaction_voids (id, company_id) VALUES (:id, :company_id)';"), 'exactly two INSERT statements');
+  dirty('an INSERT IGNORE transaction is caught', TRANSACTION_STORE, realTxn.replace("'INSERT INTO finance_transactions (", "'INSERT IGNORE INTO finance_transactions ("), 'never IGNORE');
+  dirty('a range lock of transactions is caught', TRANSACTION_STORE, inTxn("public const R_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_transactions WHERE company_id = :company_id AND transaction_date >= :from_date FOR UPDATE';"), 'only its transaction, by primary key');
+  dirty('an SQL sum in the report store is caught', REPORT_STORE, inReport("public const S_SQL = 'SELECT SUM(amount) AS t, company_id, NULL AS owner_employee_id FROM finance_transactions WHERE company_id = :company_id';"), 'never compute money in SQL');
+  dirty('a locking read in the report store is caught', REPORT_STORE, inReport("public const L_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_transactions WHERE company_id = :company_id FOR UPDATE';"), 'only reads');
+  dirty('an Employee transaction statement is caught', TRANSACTION_STORE, inTxn("public const M_SELF_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_transactions WHERE company_id = :company_id AND created_by_user_id = :self_employee_id';"), 'CEO company scope only');
   // BF-4e: one Finance writer that only inserts Planned postings, PK locks, no SQL money, no source
   // write or store call, Planned only (no execution, payment, actual, account, category, reversal),
   // strict inputs, routes under the source domain's Action.
@@ -2452,6 +2582,49 @@ function selftest() {
   // Lower-case on purpose: `*secret*` matches case-sensitively on Linux, case-insensitively on Windows.
   cases.push({ name: 'the real .gitignore ignores a *secret* file name (trap is real)', run: () => (gitIgnored(['server/src/client_secret.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
   cases.push({ name: 'the real .gitignore ignores the local config', run: () => (gitIgnored(['server/config/config.local.php']).length === 1 ? [] : ['not ignored']), expect: 0 });
+
+  // PD-3 (Owner 2026-11-13): Financial Post drift — codes, order, omissions, additions and the enforcement around them.
+  {
+    const rd = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+    const pe = rd(FINANCIAL_POST_FILE), pm = rd(FINANCIAL_POST_MIGRATION), pf = rd(FRONTEND_TRANSACTION_API), pi = rd(TRANSACTION_INPUT), po = otherPostMigrations();
+    const sub = (s, a, b) => { if (s.split(a).length !== 2) throw new Error('selftest fixture drifted: ' + a); return s.replace(a, () => b); };
+    const post = (name, o, needle) => cases.push({ name: 'Financial Post parity: ' + name, run: () => checkFinancialPostParity(o.e ?? pe, o.m ?? pm, o.f ?? pf, o.i ?? pi, o.o ?? po), expect: needle });
+    const CHK = "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE'))";
+    const FE_DRONE = ",\n  Object.freeze({ code: 'DRONE', name: 'Drone' })";
+    post('the real enum, migration, input and frontend pass', {}, 0);
+    post('a fifth code in the database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE', 'HR'))") }, 'CHECK must equal');
+    post('a code omitted from the database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB'))") }, 'CHECK must equal');
+    post('a reordered database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'DRONE', 'TJB'))") }, 'CHECK must equal');
+    post('a renamed database code is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPI', 'TJB', 'DRONE'))") }, 'CHECK must equal');
+    post('a lower-case database code is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('ga', 'NPIP', 'TJB', 'DRONE'))") }, 'CHECK must equal');
+    post('a dropped database CHECK is caught', { m: sub(pm, '  CONSTRAINT finance_transactions_financial_post ' + CHK + ',\n', '') }, 'CHECK must equal');
+    post('a case-insensitive financial_post column is caught', { m: sub(pm, 'financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL', 'financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL') }, 'case-sensitive');
+    post('a fifth enum case is caught', { e: sub(pe, "    case Drone = 'DRONE';\n", "    case Drone = 'DRONE';\n    case Hr = 'HR';\n") }, 'exactly GA, NPIP, TJB, DRONE');
+    post('an omitted enum case is caught', { e: sub(pe, "    case Drone = 'DRONE';\n", '') }, 'exactly GA, NPIP, TJB, DRONE');
+    post('a renamed enum code is caught', { e: sub(pe, "case Npip = 'NPIP';", "case Npip = 'NPI';") }, 'exactly GA, NPIP, TJB, DRONE');
+    post('a reordered enum is caught', { e: sub(sub(pe, "    case Tjb = 'TJB';\n", ''), "    case Drone = 'DRONE';\n", "    case Drone = 'DRONE';\n    case Tjb = 'TJB';\n") }, 'exactly GA, NPIP, TJB, DRONE');
+    post('a fifth frontend post is caught', { f: sub(pf, FE_DRONE, FE_DRONE + ",\n  Object.freeze({ code: 'HR', name: 'HR' })") }, 'FINANCIAL_POSTS must equal');
+    post('an omitted frontend post is caught', { f: sub(pf, FE_DRONE, '') }, 'FINANCIAL_POSTS must equal');
+    post('a renamed frontend code is caught', { f: sub(pf, "code: 'NPIP'", "code: 'NPI'") }, 'FINANCIAL_POSTS must equal');
+    post('a reordered frontend list is caught', { f: sub(sub(pf, "  Object.freeze({ code: 'TJB', name: 'TJB' }),\n", ''), FE_DRONE, FE_DRONE + ",\n  Object.freeze({ code: 'TJB', name: 'TJB' })") }, 'FINANCIAL_POSTS must equal');
+    post('a missing frontend client is caught', { f: '' }, 'FINANCIAL_POSTS must equal');
+    post('a frontend post check that stops using FINANCIAL_POSTS is caught', { f: sub(pf, "function transactionIsPost(v){ return typeof v === 'string' && FINANCIAL_POSTS.some(function(p){ return p.code === v; }); }", "function transactionIsPost(v){ return typeof v === 'string'; }") }, 'transactionIsPost');
+    post('a server input that stops validating financialPost is caught', { i: sub(pi, "|| FinancialPost::tryFrom($json['financialPost']) === null", '') }, 'FinancialPost::tryFrom');
+    post('a later migration that changes financial_post is caught', { o: po.concat([['server/migrations/0039_alter_posts.sql', "ALTER TABLE finance_transactions DROP CONSTRAINT finance_transactions_financial_post;\n"]]) }, 'only server/migrations/0036');
+    post('a category column merged into the post is caught', { m: sub(pm, '  category VARCHAR(64) NOT NULL,\n', '') }, 'category stays its own column');
+    post('a category CHECK tied to the post is caught', { m: sub(pm, 'CONSTRAINT finance_transactions_category CHECK (', 'CONSTRAINT finance_transactions_category CHECK (financial_post IS NOT NULL AND ') }, 'category stays its own column');
+  }
+  // PD-7 (Owner 2026-11-13): the cap reads stay one row above their caps.
+  {
+    const rt = fs.readFileSync(path.join(root, TRANSACTION_STORE), 'utf8'), rr = fs.readFileSync(path.join(root, REPORT_STORE), 'utf8');
+    clean('the real TransactionStore reads its range at LIMIT 2001', TRANSACTION_STORE, rt);
+    clean('the real FinancialReportStore reads at LIMIT 20001', REPORT_STORE, rr);
+    dirty('a range read truncated at the cap (LIMIT 2000) is caught', TRANSACTION_STORE, rt.replace('ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001', 'ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2000'), 'never a silent truncation');
+    dirty('a range read without a limit is caught', TRANSACTION_STORE, rt.replace(' ORDER BY t.transaction_date, t.created_at, t.id LIMIT 2001', ' ORDER BY t.transaction_date, t.created_at, t.id'), 'never a silent truncation');
+    dirty('a report transactions read truncated at the cap is caught', REPORT_STORE, rr.replace('ORDER BY t.id LIMIT 20001', 'ORDER BY t.id LIMIT 20000'), 'never a silent truncation');
+    dirty('a report postings read without a limit is caught', REPORT_STORE, rr.replace('month_key <= :to_month ORDER BY id LIMIT 20001', 'month_key <= :to_month ORDER BY id'), 'never a silent truncation');
+    dirty('a report executions read with a larger limit is caught', REPORT_STORE, rr.replace('executed_on <= :to_date ORDER BY id LIMIT 20001', 'executed_on <= :to_date ORDER BY id LIMIT 200001'), 'never a silent truncation');
+  }
 
   let passed = 0;
   const failed = [];

@@ -8,11 +8,13 @@ use TamOs\Controller\AuthController;
 use TamOs\Controller\EmployeeController;
 use TamOs\Controller\FinanceController;
 use TamOs\Controller\FinanceExecutionController;
+use TamOs\Controller\FinancialReportController;
 use TamOs\Controller\HealthController;
 use TamOs\Controller\OvertimeController;
 use TamOs\Controller\PayrollController;
 use TamOs\Controller\ReadyController;
 use TamOs\Controller\SupplementalController;
+use TamOs\Controller\TransactionController;
 use TamOs\Data\Readiness;
 use TamOs\Policy\Action;
 
@@ -71,6 +73,13 @@ use TamOs\Policy\Action;
  * GETs: no audit write, correction or deletion route exists, and the authentication log has no
  * route. ACTIONS stay 21.
  *
+ * Phase 1 (D-INT-1, D-INT-2): the general transactions — create and void, each declaring the existing
+ * record-free finance.manage (CeoOnly, decided by the kernel before the handler: an Employee is 403
+ * before the body) — the CEO range read, and the CEO financial report read; neither read declares
+ * an Action. There is no update or delete route: a transaction is immutable and a void is its only
+ * correction. They live outside /api/finance*, which stays the payroll posting and execution
+ * surface. ACTIONS stay 21.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -90,7 +99,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions, AuditController $audit): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions, AuditController $audit, TransactionController $transactions, FinancialReportController $report): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -160,6 +169,11 @@ final class Routes
             // BF-4g: the CEO audit read — read-only, company scope, no Action.
             new Route('GET', '/api/audit-events', $audit->month(...), ['month'], RouteAuth::Required),
             new Route('GET', '/api/audit-events/record', $audit->record(...), ['entity', 'id'], RouteAuth::Required),
+            // Phase 1: general income and expense by Financial Post, under finance.manage; the CEO report read.
+            new Route('GET', '/api/general-transactions', $transactions->range(...), ['from', 'to'], RouteAuth::Required),
+            new Route('POST', '/api/general-transactions/create', $transactions->create(...), [], RouteAuth::Required, Action::FinanceManage),
+            new Route('POST', '/api/general-transactions/void', $transactions->void(...), [], RouteAuth::Required, Action::FinanceManage),
+            new Route('GET', '/api/reports/financial', $report->report(...), ['from', 'to'], RouteAuth::Required),
         ]);
     }
 

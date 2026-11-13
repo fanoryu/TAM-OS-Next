@@ -222,8 +222,9 @@ async function boot(me, mutate, extra, drawerMode){
   await flush();
   return rt;
 }
+// Phase 1 authorized revision: the CEO's Finance group ends with Finance (the Ledger). Was: Overtime | Payroll.
 const EXPECT = {
-  ceo: [['people', ['main:Employees']], ['finance', ['overtime:Overtime', 'payroll:Payroll']], ['system', ['audit:Audit']]],
+  ceo: [['people', ['main:Employees']], ['finance', ['overtime:Overtime', 'payroll:Payroll', 'finance:Finance']], ['system', ['audit:Audit']]],
   employee: [['people', ['main:My profile']], ['finance', ['overtime:My overtime', 'payroll:My payroll']]]
 };
 const modelShape = (m) => m ? m.groups.map((g) => [g.id, g.items.map((i) => i.id + ':' + i.label)]) : null;
@@ -595,8 +596,8 @@ async function suite(mutate){
     const a = m({ principalType: 'ceo' }), b = m({ principalType: 'ceo' });
     t(a !== b && Object.isFrozen(a) && Object.isFrozen(a.groups) && a.groups.every((g) => Object.isFrozen(g) && Object.isFrozen(g.items) && g.items.every(Object.isFrozen)) && a.home === 'main',
       'the model is a new deeply frozen value each call, home "main"');
-    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 4 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
-      'SESSION_ROUTES is frozen: exactly the four SESSION sections');
+    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 5 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
+      'SESSION_ROUTES is frozen: exactly the five SESSION sections (Phase 1 added Finance; was four)');
   }
   return out;
 }

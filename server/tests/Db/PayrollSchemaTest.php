@@ -215,8 +215,9 @@ return [
         // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
         // BF-4e authorized revision: 0032–0033 follow (head 0033). Was: through 0031.
         // BF-4f authorized revision: 0034–0035 follow (head 0035). Was: through 0033.
-        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1, BF-4c2, BF-4d, BF-4e and BF-4f migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0035, current');
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame(['0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c1, BF-4c2, BF-4d, BF-4e and BF-4f migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0038, current (Phase 1)');
         assertSame($before, $snapshot(), 'every Employee, Overtime and audit row is unchanged');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM payroll_plans')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM payroll_plan_overtime')[0]['n']], 'no payroll row is seeded');
     },
@@ -273,8 +274,9 @@ return [
         // BF-4d authorized revision: 0029–0031 follow (head 0031). Was: through 0028.
         // BF-4e authorized revision: 0032–0033 follow (head 0033). Was: through 0031.
         // BF-4f authorized revision: 0034–0035 follow (head 0035). Was: through 0033.
-        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2, BF-4d, BF-4e and BF-4f migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0035, current');
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame(['0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit', '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4c2, BF-4d, BF-4e and BF-4f migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0038, current (Phase 1)');
         [$plans, $links, $audit] = $snapshot();
         $sorted = static function (array $r): array {
             ksort($r);

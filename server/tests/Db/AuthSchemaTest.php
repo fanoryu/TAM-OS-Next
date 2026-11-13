@@ -49,7 +49,7 @@ return [
     // 0001–0031, sixteen tables.
     // BF-4f authorized revision: 0034–0035 follow and create the Finance execution (head 0035). Was:
     // 0001–0033, seventeen tables.
-    'production migrations 0001–0035 apply in order, create exactly the auth tables, the employees, the mail outbox, the audit trail, the overtime records, the payroll plans with their overtime links, the Supplemental Payroll documents with theirs, the Finance postings and the Finance executions, and seed nothing' => static function () use ($tables, $authTables): void {
+    'production migrations 0001–0038 apply in order, create exactly the auth tables, the employees, the mail outbox, the audit trail, the overtime records, the payroll plans with their overtime links, the Supplemental Payroll documents with theirs, the Finance postings, the Finance executions and the general transactions with their voids, and seed nothing' => static function () use ($tables, $authTables): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         assertSame(['0001_create_companies', '0002_create_users', '0003_create_memberships', '0004_create_sessions', '0005_create_auth_rate_limits', '0006_create_auth_events',
@@ -60,9 +60,10 @@ return [
             '0020_create_overtime_records', '0021_replace_audit_events_overtime_checks',
             '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve',
             '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit',
-            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute'],
+            // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'],
             array_map(static fn ($m): string => $m->label(), $applied));
-        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
+        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'finance_transactions', 'finance_transaction_voids', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM finance_postings')[0]['n'], 'no Finance posting');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM finance_executions')[0]['n'], 'no Finance execution');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM supplemental_payrolls')[0]['n'], 'no Supplemental document');
@@ -98,7 +99,8 @@ return [
         // BF-4d authorized revision: through 0031. Was: 28 files through 0028 (BF-4c2).
         // BF-4e authorized revision: through 0033. Was: 31 files through 0031 (BF-4d).
         // BF-4f authorized revision: through 0035. Was: 33 files through 0033 (BF-4e).
-        assertSame(35, count($files), 'the production set through 0035 (BF-4f)');
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame(38, count($files), 'the production set through 0038 (Phase 1)');
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());
@@ -121,7 +123,9 @@ return [
         // FinancePostingSchemaTest. Was: every table but the four above.
         // BF-4f authorized revision: finance_executions (an exact money column and a DATE) is pinned in
         // FinanceExecutionSchemaTest. Was: every table but the five above.
-        $columns = $db->select("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS type, CHARACTER_SET_NAME AS cs, COLLATION_NAME AS coll, DATETIME_PRECISION AS prec FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME NOT IN ('schema_migrations', 'employees', 'overtime_records', 'payroll_plans', 'supplemental_payrolls', 'finance_postings', 'finance_executions')");
+        $columns = $db->select("SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS type, CHARACTER_SET_NAME AS cs, COLLATION_NAME AS coll, DATETIME_PRECISION AS prec FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME NOT IN ('schema_migrations', 'employees', 'overtime_records', 'payroll_plans', 'supplemental_payrolls', 'finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids')");
+        // Phase 1 authorized revision: finance_transactions and finance_transaction_voids (business text, an exact
+        // money column and a DATE) are pinned in TransactionSchemaTest. Was: every table but the six above.
         assertTrue(count($columns) === 71, 'expected 71 columns (42 auth, 9 mail outbox, 12 audit, 4 payroll link, 4 supplemental link), got ' . count($columns));
         foreach ($columns as $c) {
             $label = $c['t'] . '.' . $c['c'];
@@ -143,15 +147,21 @@ return [
     // BF-4f authorized revision: 0035 replaces the audit action, entity, operation and action-operation
     // CHECKs (v6, v5, v7, v7) and 0034 adds the Finance execution CHECKs and three foreign keys. Was:
     // action_v5, entity_v4, operation_v6, action_operation_v6 and no execution constraint.
+    // Phase 1 authorized revision: 0038 replaces the audit action, entity, operation and action-operation CHECKs
+    // (v7, v6, v8, v8) and 0036–0037 add the general transaction and void CHECKs and five foreign keys. Was:
+    // action_v6, entity_v5, operation_v7, action_operation_v7 and no general transaction constraint.
     'the named CHECK constraints and foreign keys exist' => static function (): void {
         $db = authDatabase();
         $checks = array_map(static fn (array $r): string => (string) $r['n'],
             $db->select('SELECT CONSTRAINT_NAME AS n FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() ORDER BY CONSTRAINT_NAME'));
         assertSame(['account_tokens_expiry', 'account_tokens_final', 'account_tokens_purpose_v2', 'account_tokens_used_in_time',
-            'audit_events_account_target', 'audit_events_action_operation_v7', 'audit_events_action_v6', 'audit_events_entity_id', 'audit_events_entity_v5', 'audit_events_fields', 'audit_events_operation_v7',
+            'audit_events_account_target', 'audit_events_action_operation_v8', 'audit_events_action_v7', 'audit_events_entity_id', 'audit_events_entity_v6', 'audit_events_fields', 'audit_events_operation_v8',
             'auth_events_event_v3', 'employees_code', 'employees_employment_status', 'employees_full_name', 'employees_id', 'employees_salary', 'employees_version',
             'finance_executions_amount', 'finance_executions_id', 'finance_executions_idempotency_key_format', 'finance_executions_month_key', 'finance_executions_payment_method',
             'finance_postings_amount', 'finance_postings_id', 'finance_postings_idempotency_key_format', 'finance_postings_month_key', 'finance_postings_source', 'finance_postings_status',
+            'finance_transactions_amount', 'finance_transactions_category', 'finance_transactions_created_by', 'finance_transactions_date_range', 'finance_transactions_description',
+            'finance_transactions_financial_post', 'finance_transactions_id', 'finance_transactions_idempotency_key_format', 'finance_transactions_kind',
+            'finance_transaction_voids_id', 'finance_transaction_voids_idempotency_key_format', 'finance_transaction_voids_reason', 'finance_transaction_voids_voided_by',
             'mail_outbox_attempts', 'mail_outbox_kind_v2', 'mail_outbox_status', 'memberships_employee_bound', 'memberships_employee_id', 'memberships_role', 'memberships_status',
             'overtime_records_approved_amount', 'overtime_records_date_in_month', 'overtime_records_hours', 'overtime_records_id', 'overtime_records_month_key', 'overtime_records_status_v2',
             'overtime_records_valuation', 'overtime_records_valuation_hours', 'overtime_records_valuation_method', 'overtime_records_valuation_salary', 'overtime_records_version',
@@ -171,6 +181,8 @@ return [
             'finance_executions.finance_executions_finance_posting_fk->finance_postings',
             'finance_postings.finance_postings_company_fk->companies', 'finance_postings.finance_postings_employee_fk->employees',
             'finance_postings.finance_postings_payroll_plan_fk->payroll_plans', 'finance_postings.finance_postings_supplemental_payroll_fk->supplemental_payrolls',
+            'finance_transactions.finance_transactions_company_fk->companies', 'finance_transactions.finance_transactions_created_by_fk->users',
+            'finance_transaction_voids.finance_transaction_voids_company_fk->companies', 'finance_transaction_voids.finance_transaction_voids_transaction_fk->finance_transactions', 'finance_transaction_voids.finance_transaction_voids_voided_by_fk->users',
             'mail_outbox.mail_outbox_user_fk->users',
             'memberships.memberships_company_fk->companies', 'memberships.memberships_employee_fk->employees', 'memberships.memberships_user_fk->users',
             'overtime_records.overtime_records_company_fk->companies', 'overtime_records.overtime_records_employee_fk->employees',

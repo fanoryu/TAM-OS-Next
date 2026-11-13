@@ -62,6 +62,10 @@ $seed = static function (Database $db): array {
     $db->execute('INSERT INTO auth_rate_limits (bucket, failures, window_started_at, locked_until) VALUES (?, 1, UTC_TIMESTAMP(6), NULL)', [$bucket]);
     $requestId = bin2hex(random_bytes(16));
     $db->execute("INSERT INTO mail_outbox (user_id, kind, status, attempts, next_attempt_at, created_at, updated_at, request_id) VALUES (?, 'recovery', 'pending', 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), ?)", [$ceo['userId'], $requestId]);
+    // Phase 1: one general transaction and its void (fabricated).
+    $txn = bin2hex(random_bytes(16));
+    $db->execute("INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (?, ?, 'expense', 'NPIP', 'Operasional ☕', 'Fabricated \"kutipan\"', '999999999999999.00', '2024-02-29', ?, ?, UTC_TIMESTAMP(6))", [$txn, $ceo['companyId'], $ceo['userId'], bin2hex(random_bytes(16))]);
+    $db->execute('INSERT INTO finance_transaction_voids (id, company_id, finance_transaction_id, reason, voided_by_user_id, idempotency_key, voided_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))', [bin2hex(random_bytes(16)), $ceo['companyId'], $txn, 'Fabricated duplicate', $ceo['userId'], bin2hex(random_bytes(16))]);
     return ['ceo' => $ceo, 'employeeId' => $employeeId, 'excluded' => [$sessionHash, $csrf, $tokenHash, $bucket, $requestId]];
 };
 
@@ -92,14 +96,15 @@ return [
         $keys = backupKeys();
         $dir = tempDir();
         $result = $creator($dir, $keys['publicKey'])->create();
-        assertSame(13, $result['tables']);
-        assertSame([35, 35, 0], [$result['databaseHead'], $result['codeHead'], $result['pruned']]);
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame(15, $result['tables']);
+        assertSame([38, 38, 0], [$result['databaseHead'], $result['codeHead'], $result['pruned']]);
         $path = $dir . DIRECTORY_SEPARATOR . BackupStore::fileName($result['backupId']);
         $m = (new BackupVerifier($keys['secretKey']))->verify($path);
         assertSame(BackupTables::INCLUDED, array_column($m['tables'], 'name'));
         assertSame([], $m['absentTables']);
         assertSame(BackupTables::EXCLUDED, $m['excludedTables']);
-        assertSame(35, count($m['schema']['migrations']));
+        assertSame(38, count($m['schema']['migrations'])); // Phase 1 authorized revision: 38 (was 35).
         $applied = $db->select('SELECT version, sha256 FROM schema_migrations ORDER BY version');
         assertSame(array_column($applied, 'sha256'), array_column($m['schema']['migrations'], 'sha256'), 'the applied history');
         $total = 0;
@@ -201,9 +206,10 @@ return [
         $keys = backupKeys();
         $dir = tempDir();
         $result = $creator($dir, $keys['publicKey'])->create();
-        assertSame([33, 35, 12], [$result['databaseHead'], $result['codeHead'], $result['tables']]);
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame([33, 38, 12], [$result['databaseHead'], $result['codeHead'], $result['tables']]);
         $m = (new BackupVerifier($keys['secretKey']))->verify($dir . DIRECTORY_SEPARATOR . BackupStore::fileName($result['backupId']));
-        assertSame(['finance_executions'], $m['absentTables']);
+        assertSame(['finance_executions', 'finance_transactions', 'finance_transaction_voids'], $m['absentTables']);
         assertSame(33, count($m['schema']['migrations']));
     },
 
@@ -302,7 +308,7 @@ return [
         $file = writeConfigFile($config);
         $run = runBackupCli(['create'], $file);
         assertSame(0, $run['exit'], $run['stderr']);
-        assertTrue(preg_match('/^backup: ([0-9]{8}T[0-9]{6}Z-[0-9a-f]{8})\nbytes: [0-9]+\ntables: 13, rows: [0-9]+\nschema: database head 35, code head 35\npruned: 0\n$/D', $run['stdout'], $m) === 1, $run['stdout']);
+        assertTrue(preg_match('/^backup: ([0-9]{8}T[0-9]{6}Z-[0-9a-f]{8})\nbytes: [0-9]+\ntables: 15, rows: [0-9]+\nschema: database head 38, code head 38\npruned: 0\n$/D', $run['stdout'], $m) === 1, $run['stdout']);
         $status = runBackupCli(['status'], $file);
         assertSame(0, $status['exit'], $status['stderr']);
         assertTrue(str_starts_with($status['stdout'], "backups: 1, intact: 1\nnewest: " . $m[1] . ' (0 h old, '), $status['stdout']);

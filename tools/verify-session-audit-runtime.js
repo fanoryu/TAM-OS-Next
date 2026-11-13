@@ -683,6 +683,65 @@ function firewall(rt, label){
       'O. no identity join: the actor and record are shown as stored ids — no Employee list is read for the Audit section');
   }
 
+  /* ---------- P. Phase 1 Finance events (migration 0038; PH1-QA-01) ---------- */
+  // Phase 1 authorized revision (PH1-QA-01, Owner 2026-11-13): migration 0038 adds finance.manage on
+  // financeTransaction with the operations create and void. One such event must decode and show
+  // beside every other event of its month — not fail the month — while every other vocabulary stays
+  // closed. Was: the migration-0035 vocabulary only.
+  {
+    const TX1 = '0123456789abcdef'.repeat(2);
+    const FC = ev(15, '2031-04-11T01:00:00.000000Z', { action: 'finance.manage', entity: 'financeTransaction', entityId: TX1, operation: 'create', fields: [] });
+    const FV = ev(16, '2031-04-12T01:00:00.000000Z', { action: 'finance.manage', entity: 'financeTransaction', entityId: TX1, operation: 'void', fields: [] });
+    const MIXED = [A1, A2, A3, FC, FV, A4];
+    const rt = await boot(ME_CEO);
+    const page = (o) => rt.parse(JSON.stringify(o));
+    const dec = (events) => rt.AuditDecoders.monthResponse(page({ auditEvents: events }), MONTH);
+    const c = dec([FC]), v = dec([FV]);
+    check(c !== null && v !== null && c[0].action === 'finance.manage' && c[0].entity === 'financeTransaction' && c[0].entityId === TX1 && c[0].operation === 'create'
+      && v[0].operation === 'void' && Object.isFrozen(c[0]),
+      'P. a Finance transaction create and a void (finance.manage, financeTransaction, create | void) decode exactly');
+    const mixed = dec(MIXED);
+    check(mixed !== null && mixed.map((e) => e.id).join() === '11,12,13,15,16,14',
+      'P. a month mixing Finance and earlier events decodes whole, in the server\'s order (the PH1-QA-01 month)');
+    const badFinance = [
+      ['finance.manage without an operation', Object.assign({}, FC, { operation: null })],
+      ['finance.manage with execute', Object.assign({}, FC, { operation: 'execute' })],
+      ['finance.manage with commit', Object.assign({}, FC, { operation: 'commit' })],
+      ['finance.manage with an edit operation', Object.assign({}, FC, { operation: 'edit' })],
+      ['finance.manage with a delete operation', Object.assign({}, FC, { operation: 'delete' })],
+      ['finance.manage on a Finance posting', Object.assign({}, FC, { entity: 'financePosting' })],
+      ['finance.execute on a Finance transaction', Object.assign({}, FC, { action: 'finance.execute', operation: 'execute' })],
+      ['payroll.manage with void', Object.assign({}, A4, { operation: 'void' })],
+      ['a Finance transaction id in the employee format', Object.assign({}, FC, { entityId: 'tx_1' })],
+      ['an upper-case Finance transaction id', Object.assign({}, FC, { entityId: TX1.toUpperCase() })],
+      ['an unknown Finance action', Object.assign({}, FC, { action: 'finance.void' })],
+      ['an unknown Finance entity', Object.assign({}, FC, { entity: 'generalTransaction' })]
+    ];
+    badFinance.forEach(function(b){ check(dec([b[1]]) === null && dec([A1, b[1]]) === null, 'P. unknown or mismatched vocabulary still fails the whole answer: ' + b[0]); });
+    const rec = (events, e, id) => rt.AuditDecoders.recordResponse(page({ auditEvents: events }), e, id);
+    check(rt.auditIsRecord('financeTransaction', TX1) && !rt.auditIsRecord('financeTransaction', 'tx_1') && !rt.auditIsRecord('generalTransaction', TX1)
+      && rec([FC, FV], 'financeTransaction', TX1) !== null && rec([FC, FV], 'financeTransaction', TX1).length === 2 && rec([FC, A3], 'financeTransaction', TX1) === null,
+      'P. a Finance transaction is a stored audit record: its history decodes, and holds only its own events');
+    const open2 = await open({ [LIST(MONTH)]: [ok({ auditEvents: MIXED })], [REC('financeTransaction', TX1)]: [ok({ auditEvents: [FC, FV] })] });
+    let html = open2.appHTML();
+    check(!/id="swauError"/.test(html) && (html.match(/data-swau-open="\d+"/g) || []).length === 6 && /6 events, oldest first\./.test(html)
+      && /<td>Finance transaction — Create<\/td><td>Finance transaction 0123456789abcdef0123456789abcdef<\/td>/.test(html)
+      && /<td>Finance transaction — Void<\/td><td>Finance transaction 0123456789abcdef0123456789abcdef<\/td>/.test(html)
+      && /<td>Employee updated<\/td>/.test(html) && /<td>Login access — Create login<\/td>/.test(html) && /<td>Overtime decision — Approve<\/td>/.test(html) && /<td>Payroll plan — Commit<\/td>/.test(html),
+      'P. the Audit month shows the Finance create and void with their labels beside the earlier events, and no error');
+    open2.app.row(4); await flush();
+    html = open2.appHTML();
+    check(/<h2 class="section-title" id="swauDetailTitle" tabindex="-1">Finance transaction — Void<\/h2>/.test(html) && /Void \(void\)/.test(html),
+      'P. a Finance void opens in full with its operation label');
+    open2.app.fire('swauRecordBtn', 'click'); await flush();
+    html = open2.appHTML();
+    check(countOf(open2, REC('financeTransaction', TX1)) === 1 && /History of Finance transaction 0123456789abcdef0123456789abcdef/.test(html) && (html.match(/data-swau-open/g) || []).length === 2,
+      'P. its record history reads GET /api/audit-events/record?entity=financeTransaction&id=… once and lists the create and the void');
+    check(open2.net.calls.every((x) => ((x.init && x.init.method) || 'GET') === 'GET') && auditCalls(open2).every((x) => /^\/api\/audit-events(\/record)?\?/.test(x.url)),
+      'P. the Audit section still only reads: no write, and only the two audit read paths');
+    firewall(open2, 'P. Finance events');
+  }
+
   console.log('');
   if(failures.length){
     console.log('AFI-4g SESSION AUDIT RUNTIME VERIFICATION FAILED -- ' + failures.length + ' failing:');

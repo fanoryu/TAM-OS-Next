@@ -32,6 +32,7 @@ final class AuditInput
         'payrollPlan' => '/^[0-9a-f]{32}$/D',
         'supplementalPayroll' => '/^[0-9a-f]{32}$/D',
         'financePosting' => '/^[0-9a-f]{32}$/D',
+        'financeTransaction' => '/^[0-9a-f]{32}$/D',
     ];
     public const UTC_FORMAT = 'Y-m-d H:i:s.u';
 

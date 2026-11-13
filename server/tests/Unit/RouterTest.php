@@ -21,7 +21,9 @@ return [
     // BF-4e authorized revision: the three Finance posting routes follow (fifty). Was: forty-seven.
     // BF-4f authorized revision: the two Finance execution routes follow (fifty-two). Was: fifty.
     // BF-4g authorized revision: the two CEO audit reads follow (fifty-four). Was: fifty-two.
-    'production has exactly fifty-four routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes; BF-4e: the three Finance posting routes; BF-4f: the two Finance execution routes; BF-4g: the two audit reads); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll, Supplemental, Finance and audit routes require one' => static function () use ($production): void {
+    // Phase 1 authorized revision: the general transaction range, create and void and the financial
+    // report read follow (fifty-eight). Was: fifty-four.
+    'production has exactly fifty-eight routes (BF-4c2: commit and the drift read; BF-4d: the nine Supplemental Payroll routes; BF-4e: the three Finance posting routes; BF-4f: the two Finance execution routes; BF-4g: the two audit reads; Phase 1: the four general transaction and report routes); activate, forgot-password and reset-password never resolve a session; change-password, logout-all, the Employee, account, overtime, payroll, Supplemental, Finance and audit routes require one' => static function () use ($production): void {
         $routes = $production();
         $summary = array_map(static fn ($r): array => [$r->method, $r->path, $r->queryKeys, $r->auth], $routes);
         assertSame([
@@ -79,6 +81,10 @@ return [
             ['POST', '/api/finance-executions/execute', [], RouteAuth::Required],
             ['GET', '/api/audit-events', ['month'], RouteAuth::Required],
             ['GET', '/api/audit-events/record', ['entity', 'id'], RouteAuth::Required],
+            ['GET', '/api/general-transactions', ['from', 'to'], RouteAuth::Required],
+            ['POST', '/api/general-transactions/create', [], RouteAuth::Required],
+            ['POST', '/api/general-transactions/void', [], RouteAuth::Required],
+            ['GET', '/api/reports/financial', ['from', 'to'], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

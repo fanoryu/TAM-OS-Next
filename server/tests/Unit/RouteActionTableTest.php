@@ -41,6 +41,8 @@ return [
     // (D-FIN-2 = A). Was: no Finance route.
     // BF-4f authorized revision: the one Finance execution joins under the existing, record-free
     // finance.execute (D-FEX-4 = A). Was: no finance.execute route.
+    // Phase 1 authorized revision: the two general transaction writes join under the existing,
+    // record-free finance.manage. Was: no finance.manage route.
     'the production table validates: its mutations are the self-service routes (no Action), the three Employee writes (BF-4a1), the four account routes under account.manage (BF-4a2) the six overtime writes under their existing overtime Actions (BF-4b1) approve under overtime.manage (BF-4b2), the five payroll writes under payroll.manage (BF-4c1) and the six Supplemental writes under supplemental.manage (BF-4d), the two Finance postings under payroll.manage and supplemental.manage (BF-4e) and the Finance execution under finance.execute (BF-4f)' => static function (): void {
         $routes = productionRoutes(testConfig());
         $selfService = [];
@@ -91,6 +93,8 @@ return [
             'POST /api/finance-postings/payroll-plan' => Action::PayrollManage,
             'POST /api/finance-postings/supplemental-payroll' => Action::SupplementalManage,
             'POST /api/finance-executions/execute' => Action::FinanceExecute,
+            'POST /api/general-transactions/create' => Action::FinanceManage,
+            'POST /api/general-transactions/void' => Action::FinanceManage,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

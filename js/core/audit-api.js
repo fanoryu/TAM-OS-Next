@@ -16,7 +16,8 @@
    STRICT DECODING: an event has exactly AuditEventView::FIELDS (server/src/Audit/AuditEventView.php)
    — never a company — with the server's grammars: a positive decimal id, occurredAt the stored
    UTC instant "YYYY-MM-DDTHH:MM:SS.ffffffZ", 32-hex actor, membership and request ids, an action
-   of the closed vocabulary of migration 0035, the one entity that action names, an entity id in
+   of the closed vocabulary of migration 0038 (Phase 1, PH1-QA-01: 0035's plus finance.manage on
+   financeTransaction; was 0035's), the one entity that action names, an entity id in
    that entity's format (AuditInput::ENTITIES), the operation that action allows (null when it
    allows none), a null or 32-hex target user and a list of field NAMES. A list holds at most
    AUDIT_LIST_CAP events, each id once, strictly in the server's order (occurredAt, id); a month
@@ -46,31 +47,37 @@ const AUDIT_HEX32_PATTERN = /^[0-9a-f]{32}$/;
 const AUDIT_EVENT_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const AUDIT_OCCURRED_PATTERN = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.([0-9]{6})Z$/;
 const AUDIT_FIELD_PATTERN = /^[a-z][A-Za-z]{0,31}$/;
-// AuditInput::ENTITIES — the stored audit entities and each one's id format.
+// AuditInput::ENTITIES — the stored audit entities and each one's id format (Phase 1: plus
+// financeTransaction, PH1-QA-01).
 const AUDIT_ENTITY_ID_PATTERNS = Object.freeze({
   employee: /^[A-Za-z0-9_-]{1,64}$/,
   overtime: AUDIT_HEX32_PATTERN,
   payrollPlan: AUDIT_HEX32_PATTERN,
   supplementalPayroll: AUDIT_HEX32_PATTERN,
-  financePosting: AUDIT_HEX32_PATTERN
+  financePosting: AUDIT_HEX32_PATTERN,
+  financeTransaction: AUDIT_HEX32_PATTERN
 });
-// Migration 0035 audit_events_action_v6 / audit_events_entity_v5: each action and the one entity
-// it names.
+// Migration 0038 audit_events_action_v7 / audit_events_entity_v6: each action and the one entity
+// it names. Phase 1 authorized revision (PH1-QA-01): plus finance.manage → financeTransaction.
+// Was: migration 0035's v6 / v5.
 const AUDIT_ACTION_ENTITY = Object.freeze({
   'employee.create': 'employee', 'employee.update': 'employee', 'employee.delete': 'employee', 'account.manage': 'employee',
   'overtime.createSelfDraft': 'overtime', 'overtime.updateSelfDraft': 'overtime', 'overtime.deleteSelfDraft': 'overtime',
   'overtime.submitSelf': 'overtime', 'overtime.manage': 'overtime',
-  'payroll.manage': 'payrollPlan', 'supplemental.manage': 'supplementalPayroll', 'finance.execute': 'financePosting'
+  'payroll.manage': 'payrollPlan', 'supplemental.manage': 'supplementalPayroll', 'finance.execute': 'financePosting',
+  'finance.manage': 'financeTransaction'
 });
-// Migration 0035 audit_events_action_operation_v7: the operations an action requires; an action
-// not named here stores none.
+// Migration 0038 audit_events_action_operation_v8: the operations an action requires; an action
+// not named here stores none. Phase 1 authorized revision (PH1-QA-01): plus finance.manage's create
+// and void. Was: migration 0035's v7.
 const AUDIT_ACTION_OPERATIONS = Object.freeze({
   'account.manage': Object.freeze(['provision', 'reissue', 'disable', 'enable']),
   'overtime.submitSelf': Object.freeze(['submit']),
   'overtime.manage': Object.freeze(['review', 'reject', 'approve']),
   'payroll.manage': Object.freeze(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post']),
   'supplemental.manage': Object.freeze(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post']),
-  'finance.execute': Object.freeze(['execute'])
+  'finance.execute': Object.freeze(['execute']),
+  'finance.manage': Object.freeze(['create', 'void'])
 });
 const AUDIT_ROUTES = Object.freeze({ month: '/api/audit-events', record: '/api/audit-events/record' });
 

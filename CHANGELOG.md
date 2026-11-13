@@ -2,7 +2,33 @@
 
 ## Unreleased
 
-Nothing yet beyond the 3.0.0 candidate below.
+Not deployed and not released: entries here are merged into `main` (or proposed for merge) but are not part of any
+published release, and none is on a production host. Hostinger stays NO-GO; Gate D, Gate R and v3.0.0 stay on HOLD.
+
+### Added
+- **Phase 1 — General transactions by Financial Post and the SESSION financial dashboard (PR #85; merged only after
+  Owner approval; not deployed, not released).** The CEO records general income and expense transactions against one
+  of four fixed Financial Posts — GA, NP & IP, TJB, Drone — in a new CEO-only **Finance** section of the SESSION
+  workspace (between Payroll and Audit). Amounts are positive whole Rupiah; dates are company-calendar dates
+  (Asia/Jakarta) and never in the future; Gaji, Payroll and Salary are refused as categories, since payroll is recorded
+  through Payroll. A transaction is never edited or deleted: a correction is a void with a mandatory reason, kept in
+  the history and excluded from every total. The dashboard shows income, expenses and net per Financial Post for a
+  chosen range, payroll posted and paid as a separate table, and a consolidated total on a cash basis ("Consolidated
+  (cash basis)") that counts payroll only when paid. There is no category-level report (PD-4).
+  Backend: migrations `0036` (`finance_transactions`), `0037` (`finance_transaction_voids`) and `0038` (the
+  `finance.manage` create/void audit vocabulary), head `0038`; routes `GET /api/general-transactions`,
+  `POST /api/general-transactions/create`, `POST /api/general-transactions/void` and `GET /api/reports/financial`
+  (58 routes); both writes use the existing CEO-only `finance.manage` action (`ACTIONS` stay 21) with one audit row
+  each. Reads fail closed: a range is at most 366 days, the history at most 2,000 rows and each report read at most
+  20,000 rows; above a cap the API answers 500 `internal_error` with no partial result and the Finance section asks
+  for a shorter range. Encrypted backup and restore include both new tables (15 included, 4 excluded). A backup taken
+  at head `0038` does not restore into older code, and a new encrypted backup-and-restore rehearsal must pass before
+  any production deployment (PD-10).
+  Tests and CI: Financial Post parity across enum, migration and frontend, and the LIMIT shape of every read, are
+  pinned by `verify-backend-boundary.js` (self-test 780); database tests cover 2,000 / 2,001 history rows and
+  20,000 / 20,001 report rows; the SESSION Finance runtime harness (`verify-session-ledger-runtime.js`, 65 checks) is
+  the fifteenth CI runtime harness (CI-HARDEN-1). `SCHEMA_VERSION` (6), storage keys, CSS and `APP_VERSION` are
+  unchanged.
 
 ## 3.0.0 — Core SESSION Foundation (release candidate)
 

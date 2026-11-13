@@ -38,6 +38,8 @@ final class BackupTables
         'supplemental_payroll_overtime',
         'finance_postings',
         'finance_executions',
+        'finance_transactions',
+        'finance_transaction_voids',
     ];
 
     public const EXCLUDED = [

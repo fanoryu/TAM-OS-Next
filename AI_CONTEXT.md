@@ -725,6 +725,38 @@ HP-1…HP-7 need the host); a SQL-seeded second company (the product bootstraps 
 database; payment date and method set by value setter. It does **not** satisfy SDR-0002 §22 item 8. Evidence is
 archived outside the repository (`WP-E2E-2_Evidence.zip`, sha256 `aa2b3146…`).
 
+**Phase 1 — general transactions by Financial Post and the SESSION financial dashboard (feature/phase1-financial-posts;
+local commits, NOT merged, NOT deployed).** Owner specification D-INT-1, D-INT-2, D-INT-4; implemented from `main` at
+`a1614fd4` as `eadf4274` (the feature) and `094b8926` (the PD-3 / PD-7 pre-merge corrections), followed by the CI and
+documentation changes. Four fixed Financial Posts
+— `GA` (GA), `NPIP` (NP & IP), `TJB` (TJB), `DRONE` (Drone) — kept equal across migration `0036`'s CHECK, the server enum
+and the frontend list by `verify-backend-boundary.js`; a post is not a category. General income and expense transactions
+(category, description, whole-Rupiah amount, date up to today in Asia/Jakarta, creator, one audit row each) are immutable
+and corrected only by a void with a reason. Migrations `0036`–`0038` (head **0038**); four routes
+(`GET /api/general-transactions`, `POST /api/general-transactions/create`, `POST /api/general-transactions/void`,
+`GET /api/reports/financial`; routes **58**); both writes use the existing `finance.manage` (CEO only, ACTIONS stay **21**).
+The CEO-only SESSION section **Finance** shows the report by Financial Post for a range of at most 366 days, voided rows
+shown and never counted, payroll as its own posted / paid line, and a consolidated figure labelled **cash basis** (general
+expense plus payroll paid). The history fails closed above 2,000 rows and the report above 20,000 rows per read (HTTP 500,
+never a partial result; pagination deferred). Backup and restore include both new tables. Package 91 modules / 105 files,
+digest `b865f6f2…` (`1b35dbcc…` before the PH1-QA-01 Audit fix). Local evidence (disposable MariaDB 10.11.19): backend 926 passed, 0 failed (449 database tests),
+verifier 3092, boundary self-test 780, 45 runtime harnesses; the Finance harness is the fifteenth CI harness. Draft PR #85's
+first CI run passed 7/7 on `38bae289`; the PH1-QA-01 Audit fix has not yet run in GitHub CI. Details: ARCHITECTURE.md, "General transactions and the financial report — Phase 1".
+Owner decisions (2026-11-13), none a release approval: **PD-1** both writes use `finance.manage`, CEO only — temporary until
+Finance/HR roles are designed; **PD-2** void-only correction with a mandatory reason; **PD-3** the four fixed posts, changed
+only by migration plus coordinated code, with drift detection in the boundary self-test; **PD-4** free-text category (1–64
+characters; Gaji / Payroll / Salary refused); **PD-5** positive whole Rupiah, dates 1900-01-01 to today, no future date;
+**PD-6** cash-basis consolidation with posted payroll visible and never added; **PD-7** 366 days, 2,000 history rows, 20,000
+rows per report read, fail closed, pagination deferred; **PD-8** the four routes, outside `/api/finance*`; **PD-9** one audit
+row per create / void, no values; **PD-10** both tables in backup and restore; **PD-11** one CEO-only Finance section,
+existing CSS only. A decision record (ADR-015) is deferred until the Finance/HR role design revisits PD-1. Standing
+conditions:
+- **PD-4:** no category-level reporting until the Owner approves a closed category taxonomy.
+- **PD-10:** a new encrypted backup-and-restore rehearsal must pass before production deployment.
+
+Out of scope: payment requests and reimbursements (Phase 2, planning only), Finance/HR roles, browser-data import (D-INT-5).
+Hostinger stays **NO-GO**, Gate D and Gate R **HOLD**, ENG-C1 **BLOCKED**, release v3.0.0 **HOLD**.
+
 **Owner direction (2026-11-05).** Core SESSION first; the first deployment is **staging only, with fabricated data**,
 conditional on a staging-specific Gate D ruling and the SDR-0006 X1–X8 evidence; phased Full Parity afterwards. The
 sequence is recorded in [`docs/01-roadmap/Milestone_Roadmap.md`](docs/01-roadmap/Milestone_Roadmap.md); it authorizes no
@@ -1420,7 +1452,8 @@ base plan or Supplemental document is posted, by an explicit CEO command per obl
 Planned posting — in SESSION mode from the CEO's Payroll details (AFI-4e). The CEO then records, by an explicit command
 per posting, that the Planned posting was paid in full outside TAM OS on a stated date by a stated method (BF-4f, not
 deployed; in SESSION mode "Record payment" on the same details, AFI-4f): a separate immutable execution record — the posting stays Planned, no money moves, nothing is
-reversed or corrected.
+reversed or corrected. Phase 1 (local candidate, not merged or deployed) adds general income and expense transactions by
+Financial Post and a CEO financial report with a cash-basis consolidated figure in SESSION mode; see "Phase 1" above.
 
 ## 11. Overtime Workflow
 
@@ -1465,8 +1498,8 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ## 15. CI/CD Overview
 
-- **CI** (`ci.yml`) builds + verifies on every push/PR to the main branch, runs the 12 allowlisted runtime
-  harnesses (CI-HARDEN-1), and uploads the deployment package ZIP as a build artifact; permissions are
+- **CI** (`ci.yml`) builds + verifies on every push/PR to the main branch, runs the fifteen allowlisted runtime
+  harnesses (CI-HARDEN-1; fifteen since Phase 1 added the SESSION Finance harness, 2026-11-13), and uploads the deployment package ZIP as a build artifact; permissions are
   read-only.
 - **CodeQL** (`codeql.yml`) runs code scanning on push/PR with two Analyze jobs
   (`javascript-typescript` and `actions`).

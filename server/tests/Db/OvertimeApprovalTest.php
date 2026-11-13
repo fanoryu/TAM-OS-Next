@@ -254,7 +254,8 @@ return [
         foreach (array_keys($after) as $t) {
             // BF-4f authorized revision: the Finance execution table exists too, and this flow never writes it
             // (its count is compared above). Was: finance_postings the one finance table.
-            assertTrue(in_array($t, ['finance_postings', 'finance_executions'], true) || preg_match('/payslip|payment|finance|transaction|ledger|journal/i', $t) !== 1, 'no other finance table: ' . $t);
+            // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+            assertTrue(in_array($t, ['finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids'], true) || preg_match('/payslip|payment|finance|transaction|ledger|journal/i', $t) !== 1, 'no other finance table: ' . $t);
             assertTrue(preg_match('/payroll/', $t) !== 1 || in_array($t, ['payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime'], true), 'only the BF-4c1 payroll and BF-4d Supplemental tables: ' . $t);
         }
     },

@@ -199,8 +199,9 @@ return [
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         // BF-4f authorized revision: 0034–0035 follow (head 0035). Was: only 0032–0033, head 0033.
-        assertSame(['0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4e and BF-4f migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0035, current');
+        // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+        assertSame(['0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4e, BF-4f and Phase 1 migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0038, current (Phase 1)');
         assertSame($before, $snapshot(), 'every payroll, Supplemental, overtime and audit row is unchanged');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM finance_postings')[0]['n'], 'no posting is seeded');
     },
