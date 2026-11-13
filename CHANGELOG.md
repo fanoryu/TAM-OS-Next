@@ -31,7 +31,7 @@ published release, and none is on a production host. Hostinger stays NO-GO; Gate
   unchanged.
 
 ### Changed
-- **UI-INT-1 — v2.11.0-style SESSION shell (local candidate; not committed, not deployed, not released).** Owner
+- **UI-INT-1 — v2.11.0-style SESSION shell (Draft PR #88; committed and pushed, not merged, not released, not deployed).** Owner
   decisions D-UI-1..D-UI-4 (2026-11-13). The signed-in SESSION workspace now uses the v2.11.0 wording, order and chrome
   over the same server-backed pages: CEO sidebar People: Employees; Finance: Overview (the Phase 1 financial dashboard),
   Payroll, Transactions (the Phase 1 transactions view), More ▸ Overtime; System: Activity Log (Audit). The Employee

@@ -757,7 +757,7 @@ conditions:
 Out of scope: payment requests and reimbursements (Phase 2, planning only), Finance/HR roles, browser-data import (D-INT-5).
 Hostinger stays **NO-GO**, Gate D and Gate R **HOLD**, ENG-C1 **BLOCKED**, release v3.0.0 **HOLD**.
 
-**UI-INT-1 — v2.11.0-style SESSION shell (feature/ui-int-1-v2110-shell; local candidate, NOT committed, NOT deployed).**
+**UI-INT-1 — v2.11.0-style SESSION shell (feature/ui-int-1-v2110-shell; committed and pushed, Draft PR #88 — NOT merged, NOT released, NOT deployed).**
 Owner decisions 2026-11-13: **D-UI-1** v2.11.0 labels and chrome over the existing SESSION pages (CEO: Employees;
 Finance: Overview = Phase 1 dashboard, Payroll, Transactions = Phase 1 transactions view, More ▸ Overtime; System:
 Activity Log = Audit); **D-UI-2** v2.11.0 areas with no server API are hidden, never shown as working; **D-UI-3** no
