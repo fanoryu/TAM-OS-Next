@@ -78,6 +78,7 @@ dist/*-package.zip
 .vscode/settings.json
 .vscode/*.log
 .idea/
+desktop.ini
 *.swp
 .claude/settings.local.json
 .DS_Store

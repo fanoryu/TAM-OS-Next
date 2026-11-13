@@ -78,7 +78,7 @@ overtime 656, contract timeline 349, SESSION audit 219); backend: `tools/verify-
 With AFI-5b (PR #62, merged) — see "Identity transition — AFI-5b" below — the verifier has 2993 checks, 13 harnesses run in
 CI, and the package holds 88 modules in 102 files. The E11 hostile-principal suites (PR #68, merged; post-merge CI
 verified) add 3 unit and 24 database tests: 470 PHP tests without the database, 901 with it.)*
-*(Phase 1, 2026-11-13 — a local candidate on `feature/phase1-financial-posts`, not merged or deployed; see "General
+*(Phase 1, 2026-11-13 — merged into `main` via PR #85, not deployed; see "General
 transactions and the financial report — Phase 1" below: 91 modules in 105 package files, verifier 3092, fifteen CI
 harnesses, 477 PHP tests without the database and 926 with it, migration head 0038, 58 routes.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
@@ -2998,11 +2998,11 @@ inside the LOCAL branch. It also pins the oracle and the 102-file package and mo
 entries. Every LOCAL runtime harness rewrites the one mode assignment in memory, loads the development identity after
 `identity.js` and installs the alias once.
 
-### General transactions and the financial report — Phase 1 (local candidate on `feature/phase1-financial-posts`; not merged, not deployed)
+### General transactions and the financial report — Phase 1 (merged into `main` via PR #85; not deployed)
 
-Phase 1 implements the Owner specification D-INT-1, D-INT-2 and D-INT-4 in local commits on
+Phase 1 implements the Owner specification D-INT-1, D-INT-2 and D-INT-4 in commits on
 `feature/phase1-financial-posts`: `eadf4274` (the feature, from `main` at `a1614fd4`) and `094b8926` (the PD-3 / PD-7
-pre-merge corrections), followed by the CI and documentation changes. It is **not merged and not deployed**; it changes no release, gate or production state (Hostinger
+pre-merge corrections), followed by the CI and documentation changes. It is **merged into `main` via PR #85 (merge commit `79c8c497`) and not deployed**; it changes no release, gate or production state (Hostinger
 **NO-GO**, Gate D and Gate R **HOLD**, ENG-C1 **BLOCKED**, release v3.0.0 **HOLD**). It adds no Action (ACTIONS stay **21**),
 no storage key, no `SCHEMA_VERSION` change and no CSS. Payment requests, reimbursements, Finance/HR roles, browser-data
 import and category reporting are out of scope.
@@ -3090,7 +3090,8 @@ Standing conditions:
 
 **Verification (local, disposable MariaDB 10.11.19).** Backend 926 passed, 0 failed (449 database tests; fresh
 `0001`–`0038` and upgrade `0035` → `0038`); `verify-build.js` 3092; `verify-backend-boundary.js --selftest` 780; 45 runtime
-harnesses; `tools/verify-session-ledger-runtime.js` 65 checks, the fifteenth CI harness. CI has not yet run Phase 1.
+harnesses; `tools/verify-session-ledger-runtime.js` 65 checks, the fifteenth CI harness. GitHub CI passed 7/7 on `2e5dc146` and 6/6 on merge commit `79c8c497`; CI is not
+production approval.
 
 ### Release engineering
 

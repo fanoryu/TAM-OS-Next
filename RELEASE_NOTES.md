@@ -10,6 +10,13 @@ migration); `ACTIONS` **21** (20 at v2.11.0; BF-4a2 added `account.manage`).
 > §7 and §11). Until then **v2.11.0 — Identity Refresh remains the latest published release** (recorded below). Nothing
 > here approves a deployment: Gate D and Gate R stay on **HOLD**.
 
+> **Status update (2026-11-13; this candidate record is kept as written).** The figures in this section describe the
+> candidate as prepared on `main` @ `8ef3d6be` (102 package files, migrations 0001–0035, package digest `819f74ac…`).
+> Finance Phase 1 has since merged into the v3.0.0 candidate on `main` as source (PR #85; see
+> [`CHANGELOG.md`](CHANGELOG.md), *Unreleased*): 105 package files, migrations 0001–0038, package digest `b865f6f2…`. It
+> is not released and not deployed. The artifacts below predate Phase 1, so a release needs a fresh candidate build
+> record and separate Owner authorization; every HOLD and NO-GO gate is unchanged.
+
 **Why this is a major version.** Since v2.11.0 the product changed how it is delivered, what it needs to run and what
 it offers. A v2.11.0 user cannot simply replace the file:
 

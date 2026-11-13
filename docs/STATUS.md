@@ -1,7 +1,9 @@
 # TAM OS NEXT — Current status
 
 DOC-01-R2 proposed status record, 2026-11-09 (Asia/Jakarta), incorporating Owner decision D-2.
-Source baseline snapshot: main at 2f94adc6600708fa8cb8c06f3b5509cfcd582ca4, observed read-only on 2026-11-09.
+Baseline refreshed 2026-11-13 by the repository cleanup after Finance Phase 1 merged; the D-2 decisions are unchanged.
+Source baseline snapshot: main at 40c63216c201e0ca0a4594505f9919800e597ff1, observed read-only on 2026-11-13
+(previous snapshot: 2f94adc6600708fa8cb8c06f3b5509cfcd582ca4, 2026-11-09).
 This is a dated snapshot, not a permanently current commit; later commits to main do not update it.
 This file centralizes current status; it does not supersede accepted technical/security decisions
 or authorize work. Detailed historical wording stays in its original records.
@@ -63,6 +65,11 @@ that every browser-storage path is empty. See [ARCHITECTURE](../ARCHITECTURE.md)
 
 Core SESSION source includes sign-in/session identity, employee/login management, overtime, payroll,
 supplemental payroll, payroll-sourced posting/payment, audit, employee self-service and account security.
+Finance Phase 1 merged after the previous snapshot (PR #85, merge commit 79c8c497; documentation reconciled by
+PR #86): CEO-only general income and expense transactions against four fixed Financial Posts (GA, NP & IP, TJB,
+Drone), void-only correction with a mandatory reason, and a SESSION financial report with a cash-basis consolidated
+total (migrations 0036–0038, head 0038; 58 routes; ACTIONS stay 21). It is merged source in the v3.0.0 candidate:
+not deployed and not released, and a new encrypted backup-and-restore rehearsal must pass before any production deployment (PD-10).
 The Distribution-1 package and backend source exist. These are source implementation statements, not
 hosting acceptance. Detailed milestone, PR and verification records remain in
 [AI_CONTEXT](../AI_CONTEXT.md), [CHANGELOG](../CHANGELOG.md), [Milestones](05-milestones/Milestones.md)
@@ -70,10 +77,11 @@ and [RELEASE_NOTES](../RELEASE_NOTES.md).
 
 ## Incomplete work and limitations
 
-SESSION is not production-ready. Dashboards, Contracts, general Finance/Transactions, Import,
+SESSION is not production-ready. Dashboards, Contracts, the LOCAL Finance Overview and Transactions ledger, Import,
 Recurring, Cash Flow, Budget, Execution, Bank Accounts, Projects, Vendors, Calendar, Reports,
-Global Search, Settings and Data Portability have not reached full SESSION parity. Core payroll
-Finance actions do not mean the general Finance workspace has migrated. Refer to
+Global Search, Settings and Data Portability have not reached full SESSION parity. Neither the payroll
+posting/payment actions nor the Phase 1 Financial Post transactions and report mean the LOCAL Finance workspace
+has migrated; Phase 1 has no category-level reporting (PD-4). Refer to
 [release scope](../RELEASE_NOTES.md) and the [forward roadmap](01-roadmap/Milestone_Roadmap.md).
 
 Hosting runtime/header/database/security evidence remains incomplete; repository checks and local

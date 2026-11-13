@@ -22,6 +22,12 @@ the **v2.11.0 official release** (Identity Refresh; the prior v2.10.0 release re
 > *Status update (v3.0.0 candidate):* Core SESSION is prepared as the **v3.0.0 — Core SESSION Foundation** release
 > candidate (MAJOR); v2.11.0 remains the latest published release until a separately authorized tag and Release.
 
+> **Current-status note (2026-11-13; the notes above and the table below are kept as written).** `main` @ `40c63216`
+> also carries the U1 graduated SESSION shell (PR #70) and **Finance Phase 1** — general transactions by Financial Post
+> and the SESSION financial report (PR #85; documentation PR #86), both merged source in the v3.0.0 candidate: not
+> released, not deployed, not production-ready. Row 14's "v3.0.0" label predates the 2026-11-05 Owner decision that assigned v3.0.0
+> to the Core SESSION Foundation candidate. Current gates: [STATUS.md](../STATUS.md).
+
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in
 > [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) before the clean migration. They do **not** resolve
