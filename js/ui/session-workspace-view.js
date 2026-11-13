@@ -483,17 +483,19 @@ function sessionWorkspaceHTML(auth, w){
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
   else body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_WORKSPACE_ERRORS.UNAVAILABLE) + '</p>';
-  const card = '<section class="card" aria-labelledby="authTitle">'
-    + '<div class="page-head"><div><h1 class="auth-title" id="authTitle" tabindex="-1">' + escapeHtml(title) + '</h1>'
+  const head = '<div class="page-head"><div><h1 class="auth-title" id="authTitle" tabindex="-1">' + escapeHtml(title) + '</h1>'
     + '<p class="auth-lead">Signed in as <strong>' + escapeHtml(who) + '</strong>.</p></div>'
     // WP-1: Account security beside Sign out, in a wrapping row (two buttons fit at 320px).
     + '<div class="head-controls">' + sessionAccountOpenerHTML(auth)
-    + '<button class="btn" id="authSignOutBtn" type="button"' + ((auth.busy || (auth.account && auth.account.busy)) ? ' disabled' : '') + (auth.busy ? ' aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>'
-    + sessionAccountSecurityHTML(auth.account)
-    + body + '</section>';
+    + '<button class="btn" id="authSignOutBtn" type="button"' + ((auth.busy || (auth.account && auth.account.busy)) ? ' disabled' : '') + (auth.busy ? ' aria-busy="true"' : '') + '>' + (auth.busy ? 'Signing out…' : 'Sign out') + '</button></div></div>';
   const model = AuthBoot.allowsWorkspace() ? sessionNavModel(principal) : null;
-  if(!model) return '<main class="auth-screen" id="main">' + card + '</main>';
-  return sessionShellHTML(model, payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? 'finance' : SESSION_HOME_ROUTE))), busy, card);
+  // No shell (no navigation model): the single card, as before.
+  if(!model) return '<main class="auth-screen" id="main"><section class="card" aria-labelledby="authTitle">' + head + sessionAccountSecurityHTML(auth.account) + body + '</section></main>';
+  // UI-INT-1: in the shell the page head sits above the cards, as on every v2.11.0 page; Account
+  // security is its own card under it.
+  const page = head + sessionAccountSecurityHTML(auth.account) + '<section class="card" aria-labelledby="authTitle">' + body + '</section>';
+  const route = payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? (fin.view === 'transactions' ? 'transactions' : 'finance') : SESSION_HOME_ROUTE)));
+  return sessionShellHTML(model, route, busy, page);
 }
 
 function bindSessionWorkspace(app){
@@ -517,7 +519,17 @@ function bindSessionWorkspace(app){
   on('swSectionOvertime', sectionTo(true));
   on('swSectionPayroll', function(){ if(!idle()) return; SessionOvertime.show(false); SessionAudit.show(false); SessionLedger.show(false); SessionPayroll.show(true); });
   on('swSectionAudit', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionLedger.show(false); SessionAudit.show(true); });
-  on('swSectionFinance', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionAudit.show(false); SessionLedger.show(true); });
+  // UI-INT-1: Overview and Transactions are the Finance section's two views, as two sidebar pages.
+  const ledgerTo = function(view){
+    return function(){
+      if(!idle()) return;
+      SessionOvertime.show(false); SessionPayroll.show(false); SessionAudit.show(false);
+      if(!SessionLedgerStore.snapshot().open) SessionLedger.show(true);
+      if(SessionLedgerStore.snapshot().open && SessionLedgerStore.snapshot().view !== view) SessionLedger.setView(view);
+    };
+  };
+  on('swSectionFinance', ledgerTo('dashboard'));
+  on('swSectionTransactions', ledgerTo('transactions'));
   if(SessionPayrollStore.snapshot().open){ bindSessionPayroll(app); return; }
   if(SessionOvertimeStore.snapshot().open){ bindSessionOvertime(app); return; }
   if(SessionAuditStore.snapshot().open){ bindSessionAudit(app); return; }
@@ -676,17 +688,23 @@ function renderSessionWorkspace(app, auth){
    Classic shared global scope; existing CSS classes only.
    ------------------------------------------------------------ */
 
+// UI-INT-1 (Owner D-UI-1, 2026-11-13): the v2.11.0 wording and order over the SESSION sections —
+// Finance: Overview (the Phase 1 dashboard), Payroll, Transactions, More ▸ Overtime; System:
+// Activity Log (the Audit section). `more` lists the roles that see the route under "More".
+// Areas with no server API are not listed (D-UI-2). Was (U1/Phase 1): Overtime, Payroll, Finance, Audit.
 const SESSION_ROUTES = Object.freeze([
   Object.freeze({ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',
     labels: Object.freeze({ ceo: 'Employees', employee: 'My profile' }) }),
+  Object.freeze({ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',
+    labels: Object.freeze({ ceo: 'Overview' }) }),
   Object.freeze({ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',
-    labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }) }),
+    labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }), more: Object.freeze(['ceo']) }),
   Object.freeze({ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',
     labels: Object.freeze({ ceo: 'Payroll', employee: 'My payroll' }) }),
-  Object.freeze({ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',
-    labels: Object.freeze({ ceo: 'Finance' }) }),
+  Object.freeze({ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions',
+    labels: Object.freeze({ ceo: 'Transactions' }) }),
   Object.freeze({ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',
-    labels: Object.freeze({ ceo: 'Audit' }) })
+    labels: Object.freeze({ ceo: 'Activity Log' }) })
 ]);
 // Per-role group labels over NAV_GROUPS (display only): an Employee has no Finance access, so
 // their own overtime and payroll sit under "My work".
@@ -711,7 +729,7 @@ function sessionNavModel(principal){
       const own = Object.prototype.hasOwnProperty.call(SESSION_GROUP_LABELS, role) && Object.prototype.hasOwnProperty.call(SESSION_GROUP_LABELS[role], g.id);
       out = { id: g.id, label: own ? SESSION_GROUP_LABELS[role][g.id] : g.label, items: [] }; groups.push(out);
     }
-    out.items.push(Object.freeze({ id: r.id, button: r.button, label: r.labels[role], ic: n.ic }));
+    out.items.push(Object.freeze({ id: r.id, button: r.button, label: r.labels[role], ic: n.ic, more: !!r.more && r.more.indexOf(role) !== -1 }));
   });
   if(!groups.some(function(g){ return g.items.some(function(i){ return i.id === SESSION_HOME_ROUTE; }); })) return null;
   return Object.freeze({ role: role, home: SESSION_HOME_ROUTE,
@@ -725,26 +743,70 @@ function sessionRouteAllowed(model, id){
 
 function sessionNavItemHTML(item, active, busy){
   const on = item.id === active;
-  return '<button class="nav-item' + (on ? ' active' : '') + '" type="button" id="' + item.button + '"' + (on ? ' aria-current="page"' : '') + (busy ? ' disabled' : '') + '>'
+  return '<button class="nav-item' + (on ? ' active' : '') + '" type="button" id="' + item.button + '"' + (on ? ' aria-current="page"' : '') + (busy ? ' disabled' : '') + ' title="' + escapeHtml(item.label) + '">'
     + '<span class="ic" aria-hidden="true">' + item.ic + '</span><span class="nav-label">' + escapeHtml(item.label) + '</span></button>';
 }
 
-// The shell around `content` (the workspace card). `active` is a route id of the model.
+// UI-INT-1: the v2.11.0 sidebar state for SESSION — desktop rail collapse, collapsed groups and
+// the Finance "More" disclosure. Memory only (never State, never storage); the group that holds
+// the current route is always expanded, and "More" is always open while its item is current.
+// "More" starts open (v2.11.0 starts it closed) so Overtime is visible on first sight.
+const SessionShellNav = { collapsed: false, groups: {}, more: true };
+
+function sessionNavGroupHTML(g, current, busy){
+  const own = g.items.some(function(i){ return i.id === current; });
+  const collapsed = !own && SessionShellNav.groups[g.id] === true;
+  const primary = g.items.filter(function(i){ return !i.more; });
+  const more = g.items.filter(function(i){ return i.more; });
+  const moreOpen = more.some(function(i){ return i.id === current; }) || SessionShellNav.more === true;
+  const moreHTML = more.length
+    ? '<button class="nav-item nav-more-head" type="button" id="swNavMore" aria-expanded="' + moreOpen + '" title="More"' + (busy ? ' disabled' : '') + '>'
+      + '<span class="ic" aria-hidden="true">⋯</span><span class="nav-label">More</span><span class="chev" aria-hidden="true">' + (moreOpen ? '▾' : '▸') + '</span></button>'
+      + (moreOpen ? '<div class="nav-more-items">' + more.map(function(i){ return sessionNavItemHTML(i, current, busy); }).join('') + '</div>' : '')
+    : '';
+  // A closed group or "More" renders no items (the SESSION DOM carries no inline style); a toggle repaints.
+  return '<div class="nav-group"><button class="nav-group-head" type="button" id="swNavGroup-' + g.id + '" data-sw-group="' + g.id + '" aria-expanded="' + !collapsed + '">'
+    + '<span>' + escapeHtml(g.label) + '</span><span class="chev" aria-hidden="true">' + (collapsed ? '▸' : '▾') + '</span></button>'
+    + (collapsed ? '' : '<div class="nav-group-items">' + primary.map(function(i){ return sessionNavItemHTML(i, current, busy); }).join('') + moreHTML + '</div>') + '</div>';
+}
+
+// The v2.11.0 breadcrumb (Domain / Page) for the current route: text only, the page is current.
+function sessionBreadcrumbHTML(model, current){
+  const g = model.groups.find(function(x){ return x.items.some(function(i){ return i.id === current; }); });
+  const item = g ? g.items.find(function(i){ return i.id === current; }) : null;
+  if(!g || !item) return '';
+  return '<nav class="breadcrumb" aria-label="Breadcrumb"><ol class="crumb-list"><li class="crumb"><span class="crumb-text">' + escapeHtml(g.label) + '</span></li>'
+    + '<span class="crumb-sep" aria-hidden="true">/</span><li class="crumb"><span class="crumb-text" aria-current="page">' + escapeHtml(item.label) + '</span></li></ol></nav>';
+}
+
+// The shell around `content` (the page head and cards). `active` is a route id of the model.
 function sessionShellHTML(model, active, busy, content){
   const current = sessionRouteAllowed(model, active) ? active : model.home;
-  const nav = model.groups.map(function(g){
-    return '<div class="nav-group"><div class="nav-group-head"><span>' + escapeHtml(g.label) + '</span></div>'
-      + '<div class="nav-group-items">' + g.items.map(function(i){ return sessionNavItemHTML(i, current, busy); }).join('') + '</div></div>';
-  }).join('');
+  const nav = model.groups.map(function(g){ return sessionNavGroupHTML(g, current, busy); }).join('');
   return '<a class="skip-link" href="#main" id="skipLink">Skip to main content</a>'
     + '<button class="nav-hamburger" id="navHamburger" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span aria-hidden="true">☰</span></button>'
     + '<div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>'
     + '<div class="sidebar" id="sidebar"><div class="brand"><div class="brand-lockup">'
     + '<img class="brand-monogram" src="' + BRAND_MONOGRAM + '" alt="" aria-hidden="true" width="34" height="34" draggable="false">'
-    + '<div class="mark">TAM&nbsp;<span class="os">OS</span></div></div></div>'
+    + '<div class="mark">TAM&nbsp;<span class="os">OS</span></div></div>'
+    + '<button class="sidebar-collapse-btn" id="sidebarCollapseBtn" type="button" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar"><span aria-hidden="true">«</span></button></div>'
     + '<nav class="nav" aria-label="Primary navigation">' + nav + '</nav>'
-    + '<div class="sidebar-foot">' + escapeHtml(APP_NAME) + ' v' + APP_VERSION + '<br>' + escapeHtml(SESSION_SHELL_FOOT) + '</div></div>'
-    + '<main class="main" id="main" tabindex="-1">' + content + '</main>';
+    + '<div class="sidebar-foot">' + escapeHtml(APP_NAME) + ' v' + APP_VERSION + '<br>' + escapeHtml(APP_TAGLINE) + '<br>' + escapeHtml(SESSION_SHELL_FOOT) + '</div></div>'
+    + '<main class="main" id="main" tabindex="-1">' + sessionBreadcrumbHTML(model, current) + content + '</main>';
+}
+
+// The desktop rail collapse (UI-INT-1): applied to the rendered sidebar; never in drawer mode.
+function sessionShellApplyRail(app){
+  const sidebar = app.querySelector('#sidebar');
+  const collapsed = !sidebarIsDrawerMode() && SessionShellNav.collapsed === true;
+  if(sidebar && sidebar.classList) sidebar.classList.toggle('collapsed', collapsed);
+  const b = app.querySelector('#sidebarCollapseBtn');
+  if(b && typeof b.setAttribute === 'function'){
+    const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    b.setAttribute('aria-expanded', String(!collapsed)); b.setAttribute('aria-label', label); b.setAttribute('title', label);
+    const bar = b.querySelector ? b.querySelector('span') : null;
+    if(bar) bar.textContent = collapsed ? '»' : '«';
+  }
 }
 
 // The mobile drawer: memory only, owned here (never State, never storage). The shell is
@@ -873,6 +935,30 @@ function bindSessionShell(app, model){
     if(e && e.relatedTarget && typeof sidebar.contains === 'function' && sidebar.contains(e.relatedTarget)) return;
     sessionShellApplyDrawer(app);
   });
+  // UI-INT-1: the rail collapse toggles in place; a group head or "More" flips SessionShellNav and
+  // repaints (focus stays on the same control, by id). The current route's group and "More" stay open.
+  const cbtn = app.querySelector('#sidebarCollapseBtn');
+  if(cbtn) cbtn.addEventListener('click', function(e){ e.preventDefault(); SessionShellNav.collapsed = !SessionShellNav.collapsed; sessionShellApplyRail(app); });
+  const heads = app.querySelectorAll('[data-sw-group]');
+  for(let h = 0; h < heads.length; h++){
+    heads[h].addEventListener('click', function(e){
+      e.preventDefault();
+      const id = this.getAttribute('data-sw-group');
+      const g = model.groups.find(function(x){ return x.id === id; });
+      if(!g || g.items.some(function(i){ return !!app.querySelector('#' + i.button + '[aria-current="page"]'); })) return;
+      SessionShellNav.groups[id] = SessionShellNav.groups[id] !== true;
+      if(typeof render === 'function') render();
+    });
+  }
+  const moreBtn = app.querySelector('#swNavMore');
+  if(moreBtn) moreBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    const items = this.nextElementSibling;
+    if(items && typeof items.querySelector === 'function' && items.querySelector('[aria-current="page"]')) return;
+    SessionShellNav.more = !SessionShellNav.more;
+    if(typeof render === 'function') render();
+  });
+  sessionShellApplyRail(app);
   // A tap in the mobile drawer navigates, then dismisses it (as in the LOCAL shell).
   model.groups.forEach(function(g){ g.items.forEach(function(i){
     const b = app.querySelector('#' + i.button);
@@ -885,6 +971,7 @@ function bindSessionShell(app, model){
       const root = document.getElementById('app');
       if(!root || !root.querySelector('#sidebar')) return;
       if(!sidebarIsDrawerMode() && SessionShellDrawer.open) sessionShellCloseDrawer(root, false); else sessionShellApplyDrawer(root);
+      sessionShellApplyRail(root);                                  // UI-INT-1: the rail is desktop only
       if(!sidebarIsDrawerMode()) sessionShellDesktopFocus(root);   // UI-DEV-03 (R4-4): mobile -> desktop
     };
     if(SessionShellDrawer.mq.addEventListener) SessionShellDrawer.mq.addEventListener('change', onMq); else if(SessionShellDrawer.mq.addListener) SessionShellDrawer.mq.addListener(onMq);
@@ -905,5 +992,6 @@ function bindSessionShell(app, model){
 // Leaving the shell (any non-AUTHENTICATED view): no drawer stays open behind the auth views.
 function sessionShellReset(app){
   SessionShellDrawer.open = false; SessionShellDrawer.ret = null; SessionShellDrawer.held = false; SessionShellDrawer.hamLast = false;
+  SessionShellNav.collapsed = false; SessionShellNav.groups = {}; SessionShellNav.more = true;   // UI-INT-1: the next user starts expanded
   if(app.classList) app.classList.remove('drawer-open');
 }

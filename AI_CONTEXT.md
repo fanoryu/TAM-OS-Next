@@ -757,6 +757,16 @@ conditions:
 Out of scope: payment requests and reimbursements (Phase 2, planning only), Finance/HR roles, browser-data import (D-INT-5).
 Hostinger stays **NO-GO**, Gate D and Gate R **HOLD**, ENG-C1 **BLOCKED**, release v3.0.0 **HOLD**.
 
+**UI-INT-1 — v2.11.0-style SESSION shell (feature/ui-int-1-v2110-shell; local candidate, NOT committed, NOT deployed).**
+Owner decisions 2026-11-13: **D-UI-1** v2.11.0 labels and chrome over the existing SESSION pages (CEO: Employees;
+Finance: Overview = Phase 1 dashboard, Payroll, Transactions = Phase 1 transactions view, More ▸ Overtime; System:
+Activity Log = Audit); **D-UI-2** v2.11.0 areas with no server API are hidden, never shown as working; **D-UI-3** no
+browser-only LOCAL module inside the signed-in app (one authoritative store, §7.7); **D-UI-4** local frontend edits only.
+Chrome added from existing CSS classes (collapse «, group chevrons, More, breadcrumb, page head above the card, footer);
+SESSION DOM keeps no inline style, and the U2 drawer and focus rules are unchanged. Package 105 files, digest
+`97658f5a…`; verifier 3092; 45 runtime harnesses pass. Remaining differences from v2.11.0 are listed in the UI-INT-1
+evidence package outside the repository.
+
 **Owner direction (2026-11-05).** Core SESSION first; the first deployment is **staging only, with fabricated data**,
 conditional on a staging-specific Gate D ruling and the SDR-0006 X1–X8 evidence; phased Full Parity afterwards. The
 sequence is recorded in [`docs/01-roadmap/Milestone_Roadmap.md`](docs/01-roadmap/Milestone_Roadmap.md); it authorizes no
