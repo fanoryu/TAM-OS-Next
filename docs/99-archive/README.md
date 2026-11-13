@@ -6,7 +6,8 @@ Everything in this folder was written in the source repository **`fanoryu/TAM-OS
 `TAM-OS-Next` **verbatim**, as evidence of how the system reached its current state. Nothing here is
 a status page, a specification of present behaviour, or authorization to implement anything.
 
-For current state, read [`AI_CONTEXT.md`](../../AI_CONTEXT.md); for present architecture, read
+For current state, read [`STATUS.md`](../STATUS.md), with detailed context in
+[`AI_CONTEXT.md`](../../AI_CONTEXT.md); for present architecture, read
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for what is authorized next, read the
 [roadmap](../01-roadmap/README.md). Where an archived document and a current document disagree, the
 **current document wins** — the archived one is a record of what was true when it was written.
@@ -27,7 +28,8 @@ See [`PROVENANCE.md`](../../PROVENANCE.md) for the migration record.
 - **Relative links inside these documents may not resolve.** They were written against the source
   repository's directory layout, before this archive existed. The document bodies were preserved
   verbatim rather than rewritten, so their internal cross-references were deliberately left untouched.
-  Use the folder listings below to navigate instead.
+  Use the folder listings below to navigate instead, or the [archive link map](LINK-MAP.md), which gives the
+  current location of every unresolved link without editing the records.
 
 ## Contents
 

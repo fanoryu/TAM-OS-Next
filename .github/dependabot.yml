@@ -3,12 +3,13 @@
 # Scope (approved Engineering Decision Package, Season 2 / Sprint 3):
 #   - ONLY the github-actions ecosystem. No npm/pip/docker/etc. — no dependency
 #     manifests for those exist in this repository, so they are deliberately absent.
-#   - The application ships zero runtime dependencies (CLAUDE.md §4.2/§6.2) and the
-#     tools/ Node scripts import only the Node standard library, so there is nothing
-#     for an npm updater to scan.
-#   - The SheetJS CDN <script> is NOT covered here (Dependabot does not monitor CDN
-#     script tags); its integrity is guarded by the SRI pin (SDR-0001 / PR-2.2) and
-#     version bumps remain a manual, SRI-rehashed change.
+#   - The application ships no runtime dependency beyond the vendored SheetJS parser
+#     (CLAUDE.md §6.2) and the tools/ Node scripts import only the Node standard
+#     library, so there is nothing for an npm updater to scan.
+#   - The vendored SheetJS parser (vendor/sheetjs/, loaded by index.html with an
+#     integrity attribute) is NOT covered here: Dependabot does not monitor vendored
+#     files, so version bumps remain a manual, integrity-rehashed change. The published
+#     v2.11.0 single file still loads it from a CDN under the SRI pin (SDR-0001 / PR-2.2).
 #
 # Policy: security + version updates (patch/minor/major), weekly, all GitHub Actions
 # grouped into a single PR, open-PR limit 5, reviewer @fanoryu, no auto-merge

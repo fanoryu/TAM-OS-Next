@@ -127,8 +127,8 @@ The browser never reaches the database. **No separate managed backend service an
 required.** The backend is **not deployed**. Its source covers the foundation, sign-in and sessions, the
 account lifecycle, recovery mail, authorization and data scope, and the Employee, Overtime, Payroll,
 Supplemental, Finance posting/execution and Audit domains, with backup and restore tooling (migrations
-`0001`–`0035`); it is **not production-ready**. Phase 1 (general transactions and the financial report; a local candidate on
-`feature/phase1-financial-posts`, not merged) adds migrations `0036`–`0038` (head `0038`). See [`Milestones.md`](05-milestones/Milestones.md)
+`0001`–`0035`); it is **not production-ready**. Phase 1 (general transactions and the financial report; merged into `main` via
+PR #85, not deployed) adds migrations `0036`–`0038` (head `0038`). See [`Milestones.md`](05-milestones/Milestones.md)
 for Multi-User status. Supabase, selected by the superseded ADR-0003, is not the target.
 
 **Deployment dependency — Overtime approval (owner decision D-BF4b2-5 = A).**
@@ -209,7 +209,7 @@ routes the section shows a failure and nothing else, which is not a supported co
 restore include both new tables, and a backup taken at head `0038` does not restore into older code. **Before any
 production deployment, a new encrypted backup-and-restore rehearsal must pass (PD-10)**: the E7 rehearsal predates these
 tables. Category-level reporting does not exist and is not to be added until the Owner approves a closed category
-taxonomy (PD-4). Phase 1 is not merged and not deployed; Hostinger stays NO-GO and Gate D HOLD.
+taxonomy (PD-4). Phase 1 is merged into `main` (PR #85) and not deployed; Hostinger stays NO-GO and Gate D HOLD.
 
 Plan facts confirmed by the maintainer in hPanel (2026-09-29):
 

@@ -21,6 +21,7 @@ them into named eras. Detailed, per-milestone scope is recorded in
 | **Multi-User-0** | **Completed · accepted baseline** | Shared Multi-User Architecture Decision — architecture/governance only. One authoritative company dataset behind a server-enforced trust boundary ([ADR-0003](../03b-repository-adr/ADR-0003-shared-multi-user-architecture.md), **Accepted** 2026-08-12; **superseded 2026-09-29 by [ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md)**). **Implements nothing**; acceptance settled direction only |
 | **Multi-User-1…8** | **In progress · source only** (backend not deployed; production SESSION mode not enabled; AFI-5b merged as source (PR #62), not deployed; AFI-5c on hold) | Shared multi-user implementation — governance/backend foundation, authentication, shared persistence, server authorization & read scope, domain migration, audit/backup/recovery, multi-user E2E acceptance, cutover. Target: same-origin PHP + MariaDB on the existing Hostinger hosting ([ADR-0004](../03b-repository-adr/ADR-0004-hostinger-same-origin-backend.md)); `CLAUDE.md` §4.3 permits only that backend; SDR-0002 Accepted; Distribution-1 completed; each milestone separately authorized |
 | **Core SESSION** | **Engineering complete · not released** | Sign-in, Account security (Change password, Sign out all devices) and the SESSION domains (Employees, Overtime, Payroll, Supplemental, Finance posting, Record payment, Audit). Merged via PR #76, #77, #78 (`main` @ `8ef3d6be`); validated locally by WP-E2E-2 (282/282 E2E, 901/0 PHP). No version, tag or deployment |
+| **Finance Phase 1** | **Merged · not released · not deployed** | General income and expense transactions against four fixed Financial Posts (GA, NP & IP, TJB, Drone), void-only correction with a reason, and the CEO-only SESSION financial report with a cash-basis consolidated total. Merged via PR #85 (`79c8c497`; documentation PR #86); migrations `0036`–`0038`. Production deployment needs a new encrypted backup-and-restore rehearsal (PD-10); no category-level reporting until a closed taxonomy is approved (PD-4) |
 | **Staging Deployment** | **Next · gated** | First deployment, **staging only, fabricated data, CEO-only**, per [`BACKEND-DEPLOYMENT-RUNBOOK.md`](../BACKEND-DEPLOYMENT-RUNBOOK.md). Requires a **staging-specific Gate D ruling**, the SDR-0006 X1–X8 evidence, a separately authorized release candidate, and Owner decisions OD-W2-1…3; host evidence E1–E6/E9 and the HP-1…HP-7 probe (incl. F-2) on the host |
 | **Staging Stabilization** | Upcoming | Triage and fix what staging surfaces; re-run the regression on the deployed commit |
 | **GitHub Repository Cleanup** | Upcoming | Merged branches (remote and local), branch-deletion setting, repository metadata. No history rewrite, no evidence deletion |
@@ -43,6 +44,10 @@ Foundation** release candidate (MAJOR, Owner decision 2026-11-05) in a draft rel
 not a release until its separately authorized merge, tag and GitHub Release, and it does not change any gate in the
 sequence above.
 
+*Status update (2026-11-13; rows and paragraphs above kept as written):* `APP_VERSION` on `main` is 3.0.0, the
+unreleased candidate; the latest published version is still 2.11.0. Finance Phase 1 (row above) is merged source in
+that candidate, not released and not deployed. Current gates: [STATUS.md](../STATUS.md).
+
 **README Badge & Link Audit — recorded findings (future cleanup; not fixed here).**
 
 1. The five Shields.io badges (Version, License, JavaScript, HTML, Core) are not wrapped in links, so selecting one
@@ -51,6 +56,11 @@ sequence above.
 3. The Version badge is a hard-coded `2.11.0`; it must track the actually released version.
 4. README states `ACTIONS` **20** for v2.11.0 while `main` carries 21: verify the historical count at the `v2.11.0`
    tag before changing any wording.
+
+*Status update (repository cleanup, 2026-11-13; findings kept as written):* finding 1 — all seven badges now link to a
+destination (Version → the v2.11.0 Release, License → `LICENSE`, JavaScript → `ARCHITECTURE.md`, HTML →
+`docs/DEPLOYMENT.md`, Core → `docs/STATUS.md`); finding 3 — the Version badge stays 2.11.0, the latest published
+release, until a new release is published (Owner decision D2); finding 4 — README no longer states an `ACTIONS` count.
 
 **Superseded themes (recorded, not deleted).** Two milestones were re-chartered as their work was
 authorized; the original directions are preserved here and remain available as future themes:

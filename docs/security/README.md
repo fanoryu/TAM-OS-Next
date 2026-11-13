@@ -28,6 +28,8 @@ back; it never rewrites history (`CLAUDE.md` §14.4, §16.2). This register is a
 | [SDR-0006](SDR-0006-hostinger-account-access-risk-exception.md) | Hostinger Account Access-Risk Exception | Accepted | 2026-10-26 | Every 90 days while in force |
 | [SDR-0007](SDR-0007-recovery-mailbox-two-factor-exception.md) | Recovery Mailbox Two-Factor Exception | Accepted | 2026-10-26 | With SDR-0006 (every 90 days while in force) |
 
+**SDR-0005.** No record under this number is held in this repository. The number is not reused.
+
 ## Timeline
 
 - **2026-08-01** — SDR-0001 Accepted (CodeQL baseline: 1 resolved, 4 false positives, 1 accepted risk).

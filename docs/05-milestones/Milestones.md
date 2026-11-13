@@ -455,6 +455,14 @@ when payroll has a backend store; each domain migration extends the hostile-prin
 See `ARCHITECTURE.md` → Backend foundation, Data foundation, Authentication and sessions, Account
 lifecycle, Authorization and data scope, and Password recovery and governed mail.
 
+**Status update (2026-11-13; the progress records above are kept as written).** Since those records, the following
+merged into `main` as source only — none is released or deployed: the U1 graduated SESSION shell (PR #70); Core
+SESSION, recorded as merged via PR #76, #77 and #78 (`main` @ `8ef3d6be`) and prepared as the unreleased
+**v3.0.0 — Core SESSION Foundation** candidate; and **Finance Phase 1**, merged into that candidate — CEO-only general
+transactions against four fixed Financial Posts and the SESSION financial report (PR #85, `79c8c497`; migrations
+`0036`–`0038`). Current gates:
+[STATUS.md](../STATUS.md).
+
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today
 throughout. **MU-5 is the first irreversible step**, and it is deliberately gated behind MU-4, whose
 sole acceptance criterion is proving that an authenticated Employee **cannot** fetch a colleague's
