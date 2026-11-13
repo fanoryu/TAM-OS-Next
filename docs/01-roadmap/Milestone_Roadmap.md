@@ -27,7 +27,7 @@ them into named eras. Detailed, per-milestone scope is recorded in
 | **Staging Stabilization** | Upcoming | Triage and fix what staging surfaces; re-run the regression on the deployed commit |
 | **GitHub Repository Cleanup** | In progress | Merged branches (remote and local), branch-deletion setting, repository metadata. No history rewrite, no evidence deletion. Documentation sync (PR #87) and merged-branch cleanup done; the branch-deletion setting and repository metadata are not |
 | **Documentation Simplification and Finalization** | In progress | Shorter current-state entry documents with clear status lines; historical entries and governance records preserved |
-| **README Badge & Link Audit** | In progress | The README badge findings below. PR #87 is partial evidence only; closing needs a complete audit checklist and separate Owner approval |
+| **README Badge & Link Audit** | Completed | The README badge findings below. Fixed by PR #87; closed by the full audit of 2026-11-14 at `main` @ `5839744` (7 badges, 60 link and image references, 10 cross-document checks: 0 FAIL, 2 not verifiable by design); Owner closure approval 2026-11-14 |
 | **Phased Full Parity** | Upcoming | The remaining LOCAL domains migrate to SESSION **one domain at a time**, each separately authorized, verified and released |
 | **Production Readiness & Cutover** | Future · separately gated | Production Gate D on a tagged release and Gate R; E7 restore rehearsal, E8 data residency, E10 Hostinger 2FA, E12 external security review, governed mail, production-only secrets and keys, SDR-0002 §22 items 1 and 8 on the production host, the `DEPLOYMENT.md` §8 cutover gate |
 | **General-Use Readiness** | Future | The gap between "a controlled pilot succeeded" and "anyone may use this"; scope defined after the exit review |
@@ -62,6 +62,13 @@ that candidate, not released and not deployed. Current gates: [STATUS.md](../STA
 destination (Version → the v2.11.0 Release, License → `LICENSE`, JavaScript → `ARCHITECTURE.md`, HTML →
 `docs/DEPLOYMENT.md`, Core → `docs/STATUS.md`); finding 3 — the Version badge stays 2.11.0, the latest published
 release, until a new release is published (Owner decision D2); finding 4 — README no longer states an `ACTIONS` count.
+
+*Audit closure (2026-11-14; findings and the update above kept as written):* a full read-only audit at `main` @
+`5839744` re-verified findings 1–4 and checked all 7 badges (7 PASS), 60 README link and image references and 10
+cross-document statements: 0 FAIL, 0 needing an Owner decision. Two items are not verifiable by design and were
+accepted by the Owner without change: the loopback address `http://127.0.0.1:8765/` and the private predecessor
+repository `fanoryu/TAM-OS`. The Version badge stays a fixed value and must be updated by hand at the next release.
+The Owner approved closing this milestone as Completed on 2026-11-14; no gate changed.
 
 **Superseded themes (recorded, not deleted).** Two milestones were re-chartered as their work was
 authorized; the original directions are preserved here and remain available as future themes:
