@@ -232,8 +232,8 @@ function firewall(rt, label){
   {
     const rt = await boot(ME_CEO);
     const html = rt.appHTML();
-    check((parseSessionShell(html) || {}).role === 'ceo' && /id="swSectionPayroll"[\s\S]*id="swSectionFinance"[\s\S]*id="swSectionAudit"/.test(html) && ledgerCalls(rt).length === 0,
-      'A. the CEO has a Finance item between Payroll and Audit; nothing is read before it is opened');
+    check((parseSessionShell(html) || {}).role === 'ceo' && /id="swSectionFinance"[\s\S]*id="swSectionPayroll"[\s\S]*id="swSectionTransactions"[\s\S]*id="swSectionAudit"/.test(html) && ledgerCalls(rt).length === 0,
+      'A. the CEO has Overview and Transactions items (Overview, Payroll, Transactions, then Activity Log; UI-INT-1, was Finance between Payroll and Audit); nothing is read before it is opened');
     firewall(rt, 'A. CEO');
   }
   {
@@ -253,8 +253,8 @@ function firewall(rt, label){
     check(rt.sf().open && rt.sf().view === 'dashboard' && rt.sf().range.from === '2031-04-01' && rt.sf().range.to === '2031-04-30'
       && rt.net.calls.filter((c) => c.url === REP(...APRIL)).length === 1 && ledgerCalls(rt).length === 1,
       'B. opening Finance reads exactly the report of the current Asia/Jakarta month (2031-04-01 to 2031-04-30), once');
-    check((parseSessionShell(rt.appHTML()) || {}).active === 'finance' && /<h1 class="auth-title" id="authTitle" tabindex="-1">Finance<\/h1>/.test(html) && rt.dom.focused[rt.dom.focused.length - 1] === 'authTitle',
-      'B. the Finance item is current, the heading is "Finance" and focus moves to it');
+    check((parseSessionShell(rt.appHTML()) || {}).active === 'finance' && /<h1 class="auth-title" id="authTitle" tabindex="-1">Finance Overview<\/h1>/.test(html) && rt.dom.focused[rt.dom.focused.length - 1] === 'authTitle',
+      'B. the Overview item is current, the heading is "Finance Overview" (v2.11.0 title, UI-INT-1; was "Finance") and focus moves to it');
     const rows = (html.match(/<tr><th scope="row">[^<]*<\/th><td>[^<]*<\/td><td>[^<]*<\/td><td>[^<]*<\/td><td>[^<]*<\/td><\/tr>/g) || []);
     check(rows.length === 5 && /<th scope="row">GA<\/th><td>0\.00<\/td><td>2500000\.00<\/td><td>-2500000\.00<\/td><td>1<\/td>/.test(rows[0])
       && /<th scope="row">NP &amp; IP<\/th>/.test(rows[1]) && /<th scope="row">TJB<\/th>/.test(rows[2]) && /<th scope="row">Drone<\/th><td>12000000\.00<\/td>/.test(rows[3])

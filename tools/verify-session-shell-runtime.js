@@ -224,7 +224,8 @@ async function boot(me, mutate, extra, drawerMode){
 }
 // Phase 1 authorized revision: the CEO's Finance group ends with Finance (the Ledger). Was: Overtime | Payroll.
 const EXPECT = {
-  ceo: [['people', ['main:Employees']], ['finance', ['overtime:Overtime', 'payroll:Payroll', 'finance:Finance']], ['system', ['audit:Audit']]],
+  // UI-INT-1 (Owner D-UI-1): v2.11.0 wording and order; Overtime sits under "More". Was: overtime | payroll | finance:Finance / audit:Audit.
+  ceo: [['people', ['main:Employees']], ['finance', ['finance:Overview', 'overtime:Overtime', 'payroll:Payroll', 'transactions:Transactions']], ['system', ['audit:Activity Log']]],
   employee: [['people', ['main:My profile']], ['finance', ['overtime:My overtime', 'payroll:My payroll']]]
 };
 const modelShape = (m) => m ? m.groups.map((g) => [g.id, g.items.map((i) => i.id + ':' + i.label)]) : null;
@@ -596,8 +597,8 @@ async function suite(mutate){
     const a = m({ principalType: 'ceo' }), b = m({ principalType: 'ceo' });
     t(a !== b && Object.isFrozen(a) && Object.isFrozen(a.groups) && a.groups.every((g) => Object.isFrozen(g) && Object.isFrozen(g.items) && g.items.every(Object.isFrozen)) && a.home === 'main',
       'the model is a new deeply frozen value each call, home "main"');
-    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 5 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
-      'SESSION_ROUTES is frozen: exactly the five SESSION sections (Phase 1 added Finance; was four)');
+    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 6 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
+      'SESSION_ROUTES is frozen: exactly the six SESSION routes (UI-INT-1 split Finance into Overview and Transactions; was five)');
   }
   return out;
 }
@@ -610,7 +611,7 @@ const swap = (file, a, b) => (f, src) => {
 };
 const MUTATIONS = [
   ['M1 allowsWorkspace() true in every state', swap('core/auth-boot.js', 'return state === AUTH_STATES.AUTHENTICATED && typeof sessionNavModel', 'return true || typeof sessionNavModel')],
-  ['M2 an Employee is given the Audit item', swap('ui/session-workspace-view.js', "labels: Object.freeze({ ceo: 'Audit' })", "labels: Object.freeze({ ceo: 'Audit', employee: 'Audit' })")],
+  ['M2 an Employee is given the Audit item', swap('ui/session-workspace-view.js', "labels: Object.freeze({ ceo: 'Activity Log' })", "labels: Object.freeze({ ceo: 'Activity Log', employee: 'Audit' })")],
   ['M3 render() gated on allowsWorkspace() again (LOCAL shell when AUTHENTICATED)', swap('ui/shell-render.js', '  if(AUTH_MODE !== AUTH_MODES.LOCAL){', "  if(AUTH_MODE !== AUTH_MODES.LOCAL && !(typeof AuthBoot !== 'undefined' && AuthBoot.allowsWorkspace())){")],
   ['M4 sessionNavModel accepts any role', (f, src) => swap('ui/session-workspace-view.js', '  if(role !== PRINCIPAL_TYPES.CEO && role !== PRINCIPAL_TYPES.EMPLOYEE) return null;\n', '')(f,
     swap('ui/session-workspace-view.js', "  if(!groups.some(function(g){ return g.items.some(function(i){ return i.id === SESSION_HOME_ROUTE; }); })) return null;\n", '')(f, src))],

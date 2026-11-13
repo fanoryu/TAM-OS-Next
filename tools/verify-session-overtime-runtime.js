@@ -920,7 +920,8 @@ function firewall(rt, label){
     check(posts(rt).length === 1 && lastFocus(rt) === 'swoMutationMessage' && /role="status" tabindex="-1">Overtime record created/.test(rt.appHTML()),
       'Q. keyboard submission runs the same guarded handler; the confirmation is a focused status message');
     // U1 authorized revision (GR-4): the section switch is the labelled primary nav with one aria-current item. Was: "Workspace sections" pressed buttons.
-    check(/<nav class="nav" aria-label="Primary navigation">/.test(rt.appHTML()) && (rt.appHTML().match(/aria-current="page"/g) || []).length === 1 && !!activeRoute(rt.appHTML()),
+    // UI-INT-1: the v2.11.0 breadcrumb carries its own aria-current page crumb; the sidebar keeps exactly one.
+    check(/<nav class="nav" aria-label="Primary navigation">/.test(rt.appHTML()) && ((/<nav class="nav"[\s\S]*?<\/nav>/.exec(rt.appHTML()) || [''])[0].match(/aria-current="page"/g) || []).length === 1 && !!activeRoute(rt.appHTML()),
       'Q. the section switch is a labelled nav with exactly one current item');
   }
 

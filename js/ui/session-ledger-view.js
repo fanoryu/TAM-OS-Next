@@ -203,7 +203,8 @@ function sessionLedgerTransactionsHTML(w){
 }
 
 // The section title (the workspace heading) and body.
-function renderSessionLedgerTitle(w){ return w.view === 'transactions' ? 'Transactions' : 'Finance'; }
+// UI-INT-1: the v2.11.0 page title for the dashboard (was 'Finance').
+function renderSessionLedgerTitle(w){ return w.view === 'transactions' ? 'Transactions' : 'Finance Overview'; }
 function renderSessionLedgerHTML(w){
   const dis = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING || w.form || w.voidTarget ? ' disabled' : '';
   const notice = w.notice === 'created' || w.notice === 'voided'

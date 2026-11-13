@@ -51,6 +51,9 @@ const PHASE1_FILES = PHASE1_MODULES.length;
 // over-cap guidance in session-ledger-view.js, Owner 2026-11-13; the migration-0038 Audit vocabulary
 // and labels, PH1-QA-01, Owner 2026-11-13). Was: 1b35dbcc… (commit 094b8926); 092810b9… (commit eadf4274).
 const PHASE1_PACKAGE_DIGEST = 'b865f6f2e478bc5331c53f122e72c13479dcdab48876b198e0869c7fb42b88f8';
+// UI-INT-1 authorized revision (Owner D-UI-4, 2026-11-13): js/ui/session-workspace-view.js changed (the v2.11.0-style
+// SESSION shell); no module and no file added. Prior pin was PHASE1_PACKAGE_DIGEST.
+const UIINT1_PACKAGE_DIGEST = '97658f5a0f64a109fc74caa320b5f0eb74d7429b4d8faeed17dfea5f5a3dc9df';
 function migrationsBeforePhase1() {
   return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -6436,14 +6439,18 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // frozen SESSION_ROUTES (same ids, same labels, same order); the active item is the open section,
   // else Employees / My profile. Was: a tab row, sessionWorkspaceSectionsHTML() with tab(...) calls.
   check(!/<nav aria-label="Workspace sections">|function sessionWorkspaceSectionsHTML/.test(wsC)
-    && /const SESSION_ROUTES = Object\.freeze\(\[\s*Object\.freeze\(\{ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',\s*labels: Object\.freeze\(\{ ceo: 'Employees', employee: 'My profile' \}\) \}\),\s*Object\.freeze\(\{ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',\s*labels: Object\.freeze\(\{ ceo: 'Overtime', employee: 'My overtime' \}\) \}\),\s*Object\.freeze\(\{ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\) \}\),\s*Object\.freeze\(\{ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',\s*labels: Object\.freeze\(\{ ceo: 'Finance' \}\) \}\),\s*Object\.freeze\(\{ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Audit' \}\) \}\)\s*\]\);/.test(wsC)
-    && /return sessionShellHTML\(model, payroll \? 'payroll' : \(overtime \? 'overtime' : \(audit \? 'audit' : \(finance \? 'finance' : SESSION_HOME_ROUTE\)\)\), busy, card\);/.test(wsC)
+    // UI-INT-1 authorized revision (Owner D-UI-1, 2026-11-13): v2.11.0 wording and order — Overview (the Ledger
+    // dashboard), Overtime under "More", Payroll, Transactions (the Ledger's transactions view), Activity Log (Audit);
+    // the Ledger's route follows its view. Was: Employees | Overtime | Payroll | Finance | Audit and a
+    // sessionShellHTML(model, … (finance ? 'finance' : SESSION_HOME_ROUTE) …, busy, card) return.
+    && /const SESSION_ROUTES = Object\.freeze\(\[\s*Object\.freeze\(\{ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',\s*labels: Object\.freeze\(\{ ceo: 'Employees', employee: 'My profile' \}\) \}\),\s*Object\.freeze\(\{ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',\s*labels: Object\.freeze\(\{ ceo: 'Overview' \}\) \}\),\s*Object\.freeze\(\{ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',\s*labels: Object\.freeze\(\{ ceo: 'Overtime', employee: 'My overtime' \}\), more: Object\.freeze\(\['ceo'\]\) \}\),\s*Object\.freeze\(\{ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\) \}\),\s*Object\.freeze\(\{ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions',\s*labels: Object\.freeze\(\{ ceo: 'Transactions' \}\) \}\),\s*Object\.freeze\(\{ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Activity Log' \}\) \}\)\s*\]\);/.test(wsC)
+    && /const route = payroll \? 'payroll' : \(overtime \? 'overtime' : \(audit \? 'audit' : \(finance \? \(fin\.view === 'transactions' \? 'transactions' : 'finance'\) : SESSION_HOME_ROUTE\)\)\);\s*return sessionShellHTML\(model, route, busy, page\);/.test(wsC)
     && /const finance = ceo && fin\.open && !payroll && !overtime && !audit;/.test(wsC)
     && /const payroll = \(ceo \|\| employee\) && pr\.open;/.test(wsC)
     && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(wsC),
     // Phase 1 authorized revision: the CEO's fifth section is Finance (the Ledger: dashboard and general
     // transactions), between Payroll and Audit; an Employee has none. Was: Employees | Overtime | Payroll | Audit.
-    'AFI-4b1/AFI-4c1/AFI-4c2/AFI-4g/Phase 1: the workspace sections are Employees | Overtime | Payroll | Finance | Audit (CEO) and My profile | My overtime | My payroll (Employee); the existing one stays the default');
+    'AFI-4b1/AFI-4c1/AFI-4c2/AFI-4g/Phase 1/UI-INT-1: the workspace routes are Employees | Overview | More ▸ Overtime | Payroll | Transactions | Activity Log (CEO) and My profile | My overtime | My payroll (Employee); the existing one stays the default');
   // Invariants held by this slice.
   const migrations = migrationsBeforePhase1();
   // BF-4c2 authorized revision: the head moved to 0028 (BF-4c2). Was: 0026 after BF-4c1 (0023 after BF-4b2, 0021 before).
@@ -7905,7 +7912,7 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   check(/if\(value === true && !sessionAuditIsCeo\(principalNow\(\)\)\) return;/.test(storeC) && /if\(!s\.open \|\| !sessionAuditIsCeo\(principal\)\) return;/.test(storeC)
     && /function canRead\(\)\{ return sessionAuditIsCeo\(principalNow\(\)\) && SessionAuditStore\.snapshot\(\)\.open; \}/.test(storeC)
     // U1 authorized revision (GR-4): the Audit item is the route with a CEO label only. Was: (ceo ? tab('swSectionAudit', …) : '').
-    && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(ws) && /id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Audit' \}\) \}\)/.test(ws),
+    && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(ws) && /id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Activity Log' \}\) \}\)/.test(ws),   // UI-INT-1: v2.11.0 label (was 'Audit')
     'AFI-4g/U1: CEO only — the Audit item has a CEO label alone and every SessionAudit entry point checks the CEO again (the server decides)');
   check(/SessionAuditStore\.clear\(\);\s+\/\/ AFI-4g/.test(read(path.join(root, 'js', 'core', 'auth-boot.js'))) && /if\(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)\{\s*AuthBoot\.sessionLost\(\);/.test(storeC)
     && /bindPrincipal\(p\)\{\s*const key = keyOf\(p\);\s*if\(key === principalKey\) return false;\s*clear\(\);/.test(storeC)
@@ -8189,7 +8196,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === PHASE1_PACKAGE_DIGEST,
+    && pkg5.packageDigest === UIINT1_PACKAGE_DIGEST,   // UI-INT-1 (was PHASE1_PACKAGE_DIGEST)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8212,7 +8219,7 @@ console.log('== U1 — SESSION GRADUATED SHELL ==');
   check(jsFiles.filter((f) => /\bsessionShellHTML\(/.test(code(rd(f)))).join() === 'ui/session-workspace-view.js' && (wsU.match(/\bsessionShellHTML\(/g) || []).length === 2
     && jsFiles.filter((f) => /\bsessionShellReset\(/.test(code(rd(f)))).sort().join() === 'ui/auth-view.js,ui/session-workspace-view.js',
     'U1: the shell is rendered only by sessionWorkspaceHTML(), and reset only by renderAuthView() outside AUTHENTICATED');
-  check(/const model = AuthBoot\.allowsWorkspace\(\) \? sessionNavModel\(principal\) : null;\s*if\(!model\) return '<main class="auth-screen" id="main">' \+ card \+ '<\/main>';/.test(wsU),
+  check(/const model = AuthBoot\.allowsWorkspace\(\) \? sessionNavModel\(principal\) : null;\s*if\(!model\) return '<main class="auth-screen" id="main"><section class="card" aria-labelledby="authTitle">' \+ head \+ sessionAccountSecurityHTML\(auth\.account\) \+ body \+ '<\/section><\/main>';/.test(wsU),   // UI-INT-1: the card is built inline (was: + card +)
     'U1: no model (allowsWorkspace() false, unknown role) -> the card alone, no shell (fail closed)');
   check(/if\(role !== PRINCIPAL_TYPES\.CEO && role !== PRINCIPAL_TYPES\.EMPLOYEE\) return null;/.test(wsU) && /if\(!Object\.prototype\.hasOwnProperty\.call\(r\.labels, role\)\) return;/.test(wsU),
     'U1: sessionNavModel admits only the CEO and Employee roles, and a route only for a role it labels');
@@ -8507,8 +8514,8 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(pkg.files.length === 102 + PHASE1_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions === 21
-    && pkg.packageDigest === PHASE1_PACKAGE_DIGEST,
-    'Phase 1: the package holds 105 files, the three Ledger modules included, at the Phase 1 digest ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… (819f74ac… at v3.0.0)');
+    && pkg.packageDigest === UIINT1_PACKAGE_DIGEST,   // UI-INT-1 (was PHASE1_PACKAGE_DIGEST)
+    'Phase 1: the package holds 105 files, the three Ledger modules included, at the UI-INT-1 digest ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… (' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
 console.log('');

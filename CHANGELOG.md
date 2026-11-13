@@ -30,6 +30,20 @@ published release, and none is on a production host. Hostinger stays NO-GO; Gate
   the fifteenth CI runtime harness (CI-HARDEN-1). `SCHEMA_VERSION` (6), storage keys, CSS and `APP_VERSION` are
   unchanged.
 
+### Changed
+- **UI-INT-1 — v2.11.0-style SESSION shell (Draft PR #88; committed and pushed, not merged, not released, not deployed).** Owner
+  decisions D-UI-1..D-UI-4 (2026-11-13). The signed-in SESSION workspace now uses the v2.11.0 wording, order and chrome
+  over the same server-backed pages: CEO sidebar People: Employees; Finance: Overview (the Phase 1 financial dashboard),
+  Payroll, Transactions (the Phase 1 transactions view), More ▸ Overtime; System: Activity Log (Audit). The Employee
+  sidebar is unchanged in content. Added v2.11.0 chrome from existing CSS classes only: the sidebar collapse button
+  («), collapsible group heads with chevrons, the "More" sub-list, a breadcrumb, the page head (title, "Signed in as",
+  Account security and Sign out) above the content card, and the three-line sidebar footer. v2.11.0 areas with no
+  server API stay hidden (D-UI-2) and no browser-only LOCAL module runs in the signed-in app (D-UI-3). Only
+  `js/ui/session-workspace-view.js` and `js/ui/session-ledger-view.js` changed (the dashboard heading reads "Finance
+  Overview"); no module, route, migration, CSS, storage key, `SCHEMA_VERSION` or `APP_VERSION` change. Tests: the U1
+  chrome oracle `tools/session-shell-chrome.js` and the shell, ledger and overtime harness pins and the
+  `verify-build.js` pins were re-pinned (package digest `97658f5a…`, 105 files).
+
 ## 3.0.0 — Core SESSION Foundation (release candidate)
 
 **MAJOR** (Owner decision 2026-11-05). Candidate only: it becomes a release through a separately authorized merge, tag
