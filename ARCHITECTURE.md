@@ -1597,6 +1597,20 @@ every SESSION paint to `renderAuthView()` and Global Search returns outside LOCA
 data-nav routing and every LOCAL view stay unreachable in SESSION. Visibility only: the server Policy and scope still
 decide every request. No module, CSS, API or storage change.
 
+### SESSION shell alignment — UI-INT-1 (merged as PR #88, not deployed)
+
+UI-INT-1 (Owner decisions D-UI-1..4) gives the U1 shell the v2.11.0 labels and chrome without adding a page or route.
+`sessionNavGroupHTML()` in js/ui/session-workspace-view.js builds the groups: for the CEO, People: Employees; Finance:
+Overview (the Phase 1 financial dashboard), Payroll, Transactions, and a More sub-list holding Overtime; System:
+Activity Log (the audit page). For an Employee, People: My profile; My work: My overtime, My payroll. The chrome is the
+sidebar collapse button «, collapsible group heads with chevrons, More, a breadcrumb, a page head above the card
+(title, signed-in line, Account security, Sign out) and the three-line sidebar footer, all with existing CSS classes.
+Areas with no server API stay hidden (D-UI-2) and no LOCAL module runs in SESSION (D-UI-3). Navigation state is
+`SessionShellNav` (`collapsed`, `groups`, `more`), held in memory only, never in State or storage, so it resets on
+reload. The group holding the current route always stays expanded and More stays open while its item is current. The U2
+drawer and focus rules above are unchanged. Frontend only: no CSS, backend, route, migration or storage change; the
+package stays at 105 files (digest `97658f5a…`).
+
 ### SESSION Account security — WP-1 (Change password, Sign out all devices; not merged, not deployed)
 
 *Status update (supersedes "not merged" in the heading; heading kept as written):* merged into `main` via PR #77 on

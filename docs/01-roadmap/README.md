@@ -28,6 +28,10 @@ the **v2.11.0 official release** (Identity Refresh; the prior v2.10.0 release re
 > released, not deployed, not production-ready. Row 14's "v3.0.0" label predates the 2026-11-05 Owner decision that assigned v3.0.0
 > to the Core SESSION Foundation candidate. Current gates: [STATUS.md](../STATUS.md).
 
+> **Current-status note (2026-11-14; the notes above are kept as written).** `main` @ `ec3cf40` also carries
+> **UI-INT-1** — the v2.11.0-style SESSION shell (PR #88), merged source in the v3.0.0 candidate: not released, not
+> deployed, not production-ready. Current gates: [STATUS.md](../STATUS.md).
+
 > **Reading the commit references below.** Every SHA in this table is a **predecessor-repository** commit
 > — the UX-006, Readiness and release work all landed in
 > [`fanoryu/TAM-OS`](https://github.com/fanoryu/TAM-OS) before the clean migration. They do **not** resolve

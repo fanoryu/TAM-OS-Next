@@ -460,7 +460,8 @@ merged into `main` as source only — none is released or deployed: the U1 gradu
 SESSION, recorded as merged via PR #76, #77 and #78 (`main` @ `8ef3d6be`) and prepared as the unreleased
 **v3.0.0 — Core SESSION Foundation** candidate; and **Finance Phase 1**, merged into that candidate — CEO-only general
 transactions against four fixed Financial Posts and the SESSION financial report (PR #85, `79c8c497`; migrations
-`0036`–`0038`). Current gates:
+`0036`–`0038`). On 2026-11-14 **UI-INT-1** — the v2.11.0-style SESSION shell — merged into the same candidate
+(PR #88, `ec3cf40`; frontend only), also not released or deployed. Current gates:
 [STATUS.md](../STATUS.md).
 
 **MU-1 through MU-4 are additive and reversible** — the product keeps working exactly as today
