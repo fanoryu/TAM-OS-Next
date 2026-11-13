@@ -726,7 +726,7 @@ database; payment date and method set by value setter. It does **not** satisfy S
 archived outside the repository (`WP-E2E-2_Evidence.zip`, sha256 `aa2b3146…`).
 
 **Phase 1 — general transactions by Financial Post and the SESSION financial dashboard (feature/phase1-financial-posts;
-local commits, NOT merged, NOT deployed).** Owner specification D-INT-1, D-INT-2, D-INT-4; implemented from `main` at
+merged into `main` via PR #85, NOT deployed, NOT released).** Owner specification D-INT-1, D-INT-2, D-INT-4; implemented from `main` at
 `a1614fd4` as `eadf4274` (the feature) and `094b8926` (the PD-3 / PD-7 pre-merge corrections), followed by the CI and
 documentation changes. Four fixed Financial Posts
 — `GA` (GA), `NPIP` (NP & IP), `TJB` (TJB), `DRONE` (Drone) — kept equal across migration `0036`'s CHECK, the server enum
@@ -741,7 +741,7 @@ expense plus payroll paid). The history fails closed above 2,000 rows and the re
 never a partial result; pagination deferred). Backup and restore include both new tables. Package 91 modules / 105 files,
 digest `b865f6f2…` (`1b35dbcc…` before the PH1-QA-01 Audit fix). Local evidence (disposable MariaDB 10.11.19): backend 926 passed, 0 failed (449 database tests),
 verifier 3092, boundary self-test 780, 45 runtime harnesses; the Finance harness is the fifteenth CI harness. Draft PR #85's
-first CI run passed 7/7 on `38bae289`; the PH1-QA-01 Audit fix has not yet run in GitHub CI. Details: ARCHITECTURE.md, "General transactions and the financial report — Phase 1".
+first CI run passed 7/7 on `38bae289`; GitHub CI passed 7/7 on the PH1-QA-01 Audit fix `2e5dc146` and 6/6 on merge commit `79c8c497`. CI is not production approval. Details: ARCHITECTURE.md, "General transactions and the financial report — Phase 1".
 Owner decisions (2026-11-13), none a release approval: **PD-1** both writes use `finance.manage`, CEO only — temporary until
 Finance/HR roles are designed; **PD-2** void-only correction with a mandatory reason; **PD-3** the four fixed posts, changed
 only by migration plus coordinated code, with drift detection in the boundary self-test; **PD-4** free-text category (1–64
@@ -1452,7 +1452,7 @@ base plan or Supplemental document is posted, by an explicit CEO command per obl
 Planned posting — in SESSION mode from the CEO's Payroll details (AFI-4e). The CEO then records, by an explicit command
 per posting, that the Planned posting was paid in full outside TAM OS on a stated date by a stated method (BF-4f, not
 deployed; in SESSION mode "Record payment" on the same details, AFI-4f): a separate immutable execution record — the posting stays Planned, no money moves, nothing is
-reversed or corrected. Phase 1 (local candidate, not merged or deployed) adds general income and expense transactions by
+reversed or corrected. Phase 1 (development and merge complete via PR #85; production deployment NO-GO) adds general income and expense transactions by
 Financial Post and a CEO financial report with a cash-basis consolidated figure in SESSION mode; see "Phase 1" above.
 
 ## 11. Overtime Workflow
