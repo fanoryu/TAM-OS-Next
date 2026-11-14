@@ -3564,9 +3564,15 @@ matching the local tooling — a single source of truth):
 - `.github/workflows/ci.yml` — on push / PR to `main` and on demand: `build-single-file.js` →
   `verify-build.js` (109 checks) → confirm the version-derived dist exists → upload it as an
   artifact. No `npm install` (the app has no dependencies).
-- `.github/workflows/release.yml` — on `v*` tags: rebuild, verify, re-derive the version, and
-  **refuse to publish unless the tag equals `v<APP_VERSION>`** and the portable HTML exists; then
-  create/refresh the GitHub Release idempotently and upload the asset.
+- `.github/workflows/release.yml` — on `v*` tags (PR #92 revision): a read-only `verify` job checks
+  eligibility with `tools/release-publish.js --eligibility` (an annotated tag equal to `v<APP_VERSION>` on a commit
+  in `main`'s history, and the workflow at that commit), verifies, rebuilds and confirms the package ZIP matches
+  the committed manifest. The `publish` job, the only one with `contents: write`, then publishes **draft-first**
+  through `tools/release-publish.js --publish`: it refuses if any release or draft exists for the tag, uploads
+  the package ZIP and `package-manifest.json` once each, compares GitHub's SHA-256 digests before publishing,
+  and never replaces, edits or deletes a release or asset. Single-file HTML releases (v2.11.0 and earlier) are
+  frozen history. Tags on commits before the PR #92 merge run their earlier workflow; see
+  [RELEASE-PROCESS §12/§14](docs/RELEASE-PROCESS.md).
 
 **Governance & docs** (non-runtime files): issue templates + `config.yml`, `pull_request_template.md`,
 `CODEOWNERS` (@fanoryu), `SECURITY.md`, `CONTRIBUTING.md`, `PROPRIETARY-LICENSE-NOTICE.md`
