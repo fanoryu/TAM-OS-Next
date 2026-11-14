@@ -96,12 +96,36 @@ Obtain **separate** explicit approval to release. A merged release preparation P
 release. Nothing below runs until this approval is given.
 
 ## 12. Tag
-Create the annotated tag on the **authorized merged `main` commit**:
+No tag is created while v3.0.0 and the release gates are on HOLD, and none without the separate release
+authorization of §11.
+
+Create the annotated tag on the **authorized merged `main` commit**. That commit must also contain the reviewed
+release workflow: GitHub runs the `release.yml` of the tagged commit, and older commits (including most of
+`main`'s history) carry the previous workflow, which publishes directly and can replace assets (§14). Being in
+the history of `main` does not prove the reviewed workflow is present, so check the files themselves before tagging.
+
+`<PR #92 merge commit>` below is a **placeholder**. After PR #92 is merged, it must be replaced in this document
+with the full 40-character merge commit SHA, verified on GitHub (`gh pr view 92 --json mergeCommit`) and recorded
+through a reviewed pull request. **No release tag may be created until that SHA has been recorded and verified.**
+Never substitute a SHA that has not been verified.
+
+Both required checks must pass:
+1. **Ancestry** — the target descends from the PR #92 merge commit.
+2. **Reviewed workflow present** — the target's `release.yml` and `tools/release-publish.js` are byte-identical
+   to the reviewed files at the PR #92 merge commit (any later change to either needs its own review first).
 ```bash
+git merge-base --is-ancestor <PR #92 merge commit> <merged-main-commit>        # 1. must succeed
+git diff --quiet <PR #92 merge commit> <merged-main-commit> -- \
+  .github/workflows/release.yml tools/release-publish.js                         # 2. must succeed (no output)
+# Supplementary evidence only (not proof of workflow integrity):
+git show <merged-main-commit>:.github/workflows/release.yml | grep -F 'tools/release-publish.js --publish'
 git tag -a vX.Y.Z <merged-main-commit> -m "TAM Intelligence OS vX.Y.Z"
 git cat-file -t vX.Y.Z            # must print: tag  (annotated, not lightweight)
 git rev-parse vX.Y.Z^{commit}     # must equal the authorized merged main commit
 ```
+The `grep` line shows only that the workflow calls the guard. It does not prove that the workflow or the guard
+are the reviewed versions; check 2 does that. If check 1 or check 2 fails, or the placeholder has not been
+replaced with a verified SHA, stop: do not create or push the tag.
 
 ## 13. Push the tag
 Push **only** the tag. `main` is already up to date via the merge in §10, and a direct push to
@@ -111,7 +135,10 @@ git push origin refs/tags/vX.Y.Z
 ```
 
 ## 14. GitHub Release
-Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`. Its read-only `verify` job runs the
+Pushing the `vX.Y.Z` tag triggers the `.github/workflows/release.yml` **of the tagged commit**. What follows
+describes the reviewed revision (PR #92) and holds only when §12's checks passed. A tag on an older commit runs
+that commit's previous workflow, which has none of these checks, creates the release directly and replaces the
+assets of an existing release (`--clobber`); nothing technical disables it. In the reviewed revision, the read-only `verify` job runs the
 offline guard selftest, then `tools/release-publish.js --eligibility`: the run must be a tag push in this
 repository, the running workflow must be the one at the tagged commit, the tag must be an **annotated** tag
 equal to `v<APP_VERSION>` that resolves to the triggering commit (locally and on GitHub), the checkout must hold
@@ -169,8 +196,10 @@ tag, release URL, asset names, CI status, branch, and working-tree status.
   authorization to merge (§7) and to release (§11) before any new tag, release or asset is published. The
   corrective version's release notes state the problem and the fix.
 - **What the tag ruleset does not cover:** it protects Git tags only. A GitHub Release and its uploaded assets can
-  still be edited or deleted by anyone with write access. `release.yml` no longer replaces assets: a run for a
-  tag that already has a release or draft refuses without changing it (§14). The repository's Immutable Releases
+  still be edited or deleted by anyone with write access. The reviewed `release.yml` (PR #92) does not replace
+  assets: a run for a tag that already has a release or draft refuses without changing it (§14). Older commits keep
+  the previous workflow, which can, if a tag on such a commit triggers it (§12). The tag ruleset does not restrict
+  creating a new `v*` tag. The repository's Immutable Releases
   setting is **off**, so nothing technical stops a manual edit, and releases published before it is enabled are not
   immutable. Under §13.4 they are treated as immutable regardless: do not edit or delete a published release or
   its assets, or re-run the release workflow for a published version.

@@ -1516,7 +1516,10 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 - **Release** (`release.yml`) is tag-triggered, re-derives the version, enforces the tag-equals-version
   guardrail, and publishes the GitHub Release draft-first through `tools/release-publish.js` (annotated tag on
   a main ancestor; refuses if any release or draft exists for the tag; never replaces, edits or deletes one;
-  digests verified before publishing — see docs/RELEASE-PROCESS.md §14), uploading the deployment package ZIP and
+  digests verified before publishing — see docs/RELEASE-PROCESS.md §14; this holds only for a tag on a commit
+  that contains this reviewed revision (PR #92): GitHub runs the tagged commit's `release.yml`, older commits
+  keep the previous workflow that publishes directly and can replace assets, and main ancestry alone does not
+  prove which one a commit carries; eligibility is not release authorization), uploading the deployment package ZIP and
   `dist/package-manifest.json` as release assets (v2.11.0 and earlier shipped a single HTML file). It titles
   the Release `TAM OS <tag>` — the short convention, which is why the latest published Release, v2.11.0
   (2026-08-14), is titled `TAM OS v2.11.0` rather than including the release name. (Releases published

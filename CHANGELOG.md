@@ -31,7 +31,7 @@ published release, and none is on a production host. Hostinger stays NO-GO; Gate
   unchanged.
 
 ### Changed
-- **Release immutability hardening — Approach C, defense in depth (proposed; not merged, not released).**
+- **Release immutability hardening — Approach C, defense in depth (PR #92; not released, not deployed).**
   `.github/workflows/release.yml` no longer has the `gh release upload --clobber` path. Publication now runs through
   the new `tools/release-publish.js`: a read-only `verify` job checks eligibility (tag push in this repository, the
   workflow at the tagged commit, an annotated tag equal to `v<APP_VERSION>` on the triggering commit, full history,
