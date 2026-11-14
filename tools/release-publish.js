@@ -417,6 +417,39 @@ async function main(argv) {
 // ---------------------------------------------------------------------------------------
 // --selftest: offline scenarios against a mocked GitHub, git and gh.
 // ---------------------------------------------------------------------------------------
+// URLs the mock receives are parsed and compared exactly (origin, every path segment, query
+// keys) — never matched by prefix or by a regular expression built from a URL string.
+function parsedUrl(u) {
+  try { return new URL(u); } catch (e) { return null; }
+}
+// Path segments of an exact-origin URL with no credentials or fragment, or null.
+function exactSegments(u, origin) {
+  const p = parsedUrl(u);
+  if (!p || p.origin !== origin || p.username || p.password || p.hash) return null;
+  return { p, seg: p.pathname.split('/') };
+}
+const REPO_PREFIX = ['', 'repos'].concat(REPOSITORY.split('/'), ['releases']);
+const hasRepoPrefix = (seg) => REPO_PREFIX.every((s, i) => seg[i] === s);
+// An asset upload: https://uploads.github.com/repos/<owner>/<repo>/releases/<id>/assets?name=<name>.
+function uploadTarget(u) {
+  const x = exactSegments(u, UPLOAD_ORIGIN);
+  if (!x || x.seg.length !== REPO_PREFIX.length + 2 || !hasRepoPrefix(x.seg)) return null;
+  const id = x.seg[REPO_PREFIX.length];
+  if (!/^\d+$/.test(id) || x.seg[REPO_PREFIX.length + 1] !== 'assets') return null;
+  const keys = Array.from(x.p.searchParams.keys());
+  const name = x.p.searchParams.get('name');
+  if (keys.length !== 1 || keys[0] !== 'name' || !name) return null;
+  return { id: Number(id), name };
+}
+const isUpload = (u) => uploadTarget(u) !== null;
+// One release by id: https://api.github.com/repos/<owner>/<repo>/releases/<id>, no query.
+function releaseIdTarget(u) {
+  const x = exactSegments(u, API_URL);
+  if (!x || x.p.search || x.seg.length !== REPO_PREFIX.length + 1 || !hasRepoPrefix(x.seg)) return null;
+  const id = x.seg[REPO_PREFIX.length];
+  return /^\d+$/.test(id) ? Number(id) : null;
+}
+
 function mockWorld(over) {
   const o = over || {};
   const sha = 'a'.repeat(40);
@@ -484,10 +517,10 @@ function mockWorld(over) {
       w.releases.push(r);
       return { status: 201, data: f.createAnswer ? f.createAnswer(r) : view(r) };
     }
-    const up = new RegExp('^' + UPLOAD_ORIGIN.replace(/\./g, '\\.') + '/repos/' + REPOSITORY + '/releases/(\\d+)/assets\\?name=(.+)$').exec(url);
+    const up = uploadTarget(url);
     if (method === 'POST' && up) {
-      const r = w.releases.find((x) => x.id === Number(up[1]));
-      const name = decodeURIComponent(up[2]);
+      const r = w.releases.find((x) => x.id === up.id);
+      const name = up.name;
       if (!r || !r.draft) return { status: 404, data: {} };
       if (r.assets.some((a) => a.name === name)) return { status: 422, data: { message: 'already_exists' } };
       if (f.uploadFailAt && f.uploadFailAt === r.assets.length + 1) {
@@ -502,13 +535,14 @@ function mockWorld(over) {
       if (f.extraAsset && r.assets.length === 1) r.assets.push({ id: w.nextAsset++, name: f.extraAsset, size: 1, state: 'uploaded', digest: 'sha256:' + sha256(Buffer.from('x')) });
       return { status: 201, data: a };
     }
-    const one = new RegExp('^' + api('/releases/').replace(/[./]/g, '\\$&') + '(\\d+)$').exec(url);
+    const oneId = releaseIdTarget(url);
+    const one = oneId !== null;
     if (one && method === 'GET') {
-      const r = w.releases.find((x) => x.id === Number(one[1]));
+      const r = w.releases.find((x) => x.id === oneId);
       return r ? { status: 200, data: view(r) } : { status: 404, data: {} };
     }
     if (one && method === 'PATCH') {
-      const r = w.releases.find((x) => x.id === Number(one[1]));
+      const r = w.releases.find((x) => x.id === oneId);
       if (!r) return { status: 404, data: {} };
       r.draft = op.json.draft;
       if (f.afterPublish) f.afterPublish(r);
@@ -551,7 +585,9 @@ async function selftest() {
     const draftIds = new Set(w.releases.filter((r) => r.id >= 100 && r.id < 999).map((r) => String(r.id)));
     ok(w.calls.filter((c) => c.method !== 'GET' && /\/releases\/\d+/.test(c.url)).every((c) => created && draftIds.has(/\/releases\/(\d+)/.exec(c.url)[1])),
       name + ': only the draft this run created is ever changed');
-    const uploads = w.calls.filter((c) => c.method === 'POST' && c.url.startsWith(UPLOAD_ORIGIN)).map((c) => c.url);
+    ok(w.calls.filter((c) => c.method === 'POST' && c.url !== API_URL + '/repos/' + REPOSITORY + '/releases').every((c) => isUpload(c.url)),
+      name + ': every other POST is an exact asset upload (origin, path and query)');
+    const uploads = w.calls.filter((c) => c.method === 'POST' && isUpload(c.url)).map((c) => c.url);
     ok(new Set(uploads).size === uploads.length, name + ': no asset upload is retried');
     ok(!w.calls.some((c) => /clobber/i.test(c.url)), name + ': no clobber');
   };
@@ -573,7 +609,7 @@ async function selftest() {
     ok(e === null, n + ': publishes (' + (e && e.message) + ')');
     const r = w.releases.find((x) => x.id === 100);
     ok(r && r.draft === false && r.assets.length === 2, n + ': one published release with two assets');
-    const seq = mutations(w).map((c) => c.method + (c.url.startsWith(UPLOAD_ORIGIN) ? ' upload' : ''));
+    const seq = mutations(w).map((c) => c.method + (isUpload(c.url) ? ' upload' : ''));
     ok(seq.join() === 'POST,POST upload,POST upload,PATCH', n + ': exact sequence create, upload, upload, publish (got ' + seq.join() + ')');
     const patchAt = w.calls.findIndex((c) => c.method === 'PATCH');
     ok(w.calls.slice(0, patchAt).some((c) => c.method === 'GET' && c.url.endsWith('/releases/100')), n + ': draft read back and verified before publish');
@@ -701,20 +737,20 @@ async function selftest() {
   }
   await scenario('S10b concurrent draft appears', { fail: { raceDraft: true } }, (w, e, n) => {
     refused(e, 'draft-left', /more than one release/, n);
-    ok(!w.calls.some((c) => c.method === 'PATCH' || c.url.startsWith(UPLOAD_ORIGIN)), n + ': nothing uploaded or published');
+    ok(!w.calls.some((c) => c.method === 'PATCH' || isUpload(c.url)), n + ': nothing uploaded or published');
     ok(w.releases.some((r) => r.id === 999), n + ': the other draft is not touched');
   });
 
   // 11. Partial upload.
   await scenario('S11 second upload fails', { fail: { uploadFailAt: 2 } }, (w, e, n) => {
     refused(e, 'draft-left', /upload of package-manifest\.json failed.*no retry/, n);
-    ok(w.calls.filter((c) => c.url.startsWith(UPLOAD_ORIGIN)).length === 2, n + ': exactly two upload attempts');
+    ok(w.calls.filter((c) => isUpload(c.url)).length === 2, n + ': exactly two upload attempts');
     ok(!w.calls.some((c) => c.method === 'PATCH'), n + ': not published');
     ok(w.releases.find((r) => r.id === 100).draft === true, n + ': draft left for Owner review');
   });
-  await scenario('S11b first upload times out', { fail: { timeoutCall: (m, u) => m === 'POST' && u.startsWith(UPLOAD_ORIGIN) } }, (w, e, n) => {
+  await scenario('S11b first upload times out', { fail: { timeoutCall: (m, u) => m === 'POST' && isUpload(u) } }, (w, e, n) => {
     refused(e, 'draft-left', /timeout/, n);
-    ok(w.calls.filter((c) => c.url.startsWith(UPLOAD_ORIGIN)).length === 1, n + ': no retry');
+    ok(w.calls.filter((c) => isUpload(c.url)).length === 1, n + ': no retry');
   });
 
   // 12. Publish failure.
@@ -735,6 +771,25 @@ async function selftest() {
   });
   await scenario('S14b immutable but gh lacks verify', { immutable: true, ghFail: (a) => a[2] === '--help' }, (w, e, n) => { refused(e, 'post-publish', /no "release verify"/, n); });
   await scenario('S14c immutable and attestation fails', { immutable: true, ghFail: (a) => a[1] === 'verify-asset' }, (w, e, n) => { refused(e, 'post-publish', /verify-asset failed/, n); });
+
+  // The mock's URL matchers accept only the exact origin, repository path and query shape.
+  {
+    const U = UPLOAD_ORIGIN + '/repos/' + REPOSITORY + '/releases/100/assets';
+    const A = API_URL + '/repos/' + REPOSITORY + '/releases/';
+    const up = uploadTarget(U + '?name=' + encodeURIComponent('tam-os-v3.0.0-package.zip'));
+    ok(up && up.id === 100 && up.name === 'tam-os-v3.0.0-package.zip', 'matcher: exact upload URL parsed (id, decoded name)');
+    for (const bad of [U.replace('uploads.github.com', 'uploads.github.com.evil.test') + '?name=x', U.replace('uploads.github.com', 'uploadsXgithub.com') + '?name=x',
+      'http://uploads.github.com' + U.slice(UPLOAD_ORIGIN.length) + '?name=x', U.replace('https://', 'https://u:p@') + '?name=x', U + '?name=x#f',
+      U + '?name=x&clobber=1', U + '?name=', U, U + '/extra?name=x', U.replace('/releases/100/', '/releases/1a/') + '?name=x',
+      U.replace(REPOSITORY, 'someone/TAM-OS-Next') + '?name=x', 'not a url']) {
+      ok(!isUpload(bad), 'matcher: rejects upload lookalike ' + JSON.stringify(bad));
+    }
+    ok(releaseIdTarget(A + '100') === 100, 'matcher: exact release-by-id URL parsed');
+    for (const bad of [A.replace('api.github.com', 'api.github.com.evil.test') + '100', A.replace('api.github.com', 'apiXgithub.com') + '100',
+      A + '100?x=1', A + '100#f', A + '100/assets', A + 'tags', A + '', A.replace(REPOSITORY, 'someone/TAM-OS-Next') + '100']) {
+      ok(releaseIdTarget(bad) === null, 'matcher: rejects release-by-id lookalike ' + JSON.stringify(bad));
+    }
+  }
 
   // Static guards on the workflow that drives this script.
   {
