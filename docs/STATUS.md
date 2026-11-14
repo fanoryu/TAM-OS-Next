@@ -101,10 +101,18 @@ ENG-C1 remains BLOCKED; v3.0.0 is HOLD (Owner decision D-2). These offline desig
 and provide no independent human approval. They are not implemented or committed to this baseline and have no
 repository evidence links here. Do not imply they are deployed.
 
-The unchanged [.github/workflows/release.yml](../.github/workflows/release.yml) still publishes on v*
-tag pushes and can replace existing assets. Documentation does not neutralize that behavior. Do not
-create a tag or run a release workflow under DOC-01. Rulesets, app permission changes and release
-controls need separate authorization and live verification.
+[.github/workflows/release.yml](../.github/workflows/release.yml) still publishes on v* tag pushes, and
+GitHub runs the `release.yml` of the tagged commit. The reviewed revision (PR #92) publishes draft-first
+through `tools/release-publish.js` and refuses, without changing anything, when a release or draft already
+exists for the tag; it does not replace assets. That applies only to a tag on a commit that contains this
+revision. Older commits, including most of `main`'s history, carry the previous workflow, which publishes
+directly and can replace assets; being in the history of `main` does not mean a commit has the reviewed
+workflow. That previous workflow is not technically disabled, and the tag ruleset does not restrict creating
+a new v* tag. The reviewed behavior is proven only offline (mocked selftest); no release workflow has run
+with it. Its eligibility checks are not release authorization. No tag may be created while v3.0.0 and the
+release gates are on HOLD; do not create a tag or run a release workflow under DOC-01. Rulesets, the
+Immutable Releases setting (off), app permission changes and release controls need separate authorization
+and live verification.
 
 ## Deployment gates
 

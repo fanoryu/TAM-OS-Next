@@ -1,28 +1,65 @@
 name: Release
 
-# Publishes a GitHub Release when a version tag (v*) is pushed.
-# Guardrails: the tag MUST equal v<APP_VERSION>, verify + build MUST pass, the build MUST
-# reproduce the committed package manifest, and the version-derived package ZIP MUST exist
-# and match that manifest — otherwise nothing is published (Distribution-1).
+# Publishes a GitHub Release when a version tag (v*) is pushed — fail closed, draft first.
+# Guardrails: the tag MUST be an annotated tag equal to v<APP_VERSION> on a commit in the
+# history of main, the running workflow MUST be the one at that commit, verify + build MUST
+# pass, the build MUST reproduce the committed package manifest, and the version-derived
+# package ZIP MUST match it — otherwise nothing is created (Distribution-1).
+#
+# Publication (tools/release-publish.js) never replaces, edits or deletes an existing release,
+# draft or asset, and never retries a mutation: it refuses if ANY release or draft exists for
+# the tag, creates a draft, uploads the exact assets once, compares GitHub's SHA-256 digests
+# with the local files and the committed manifest, publishes only then, and reads the release
+# back. A failure before publication leaves a draft for Owner review; it is never deleted here.
+#
+# Eligibility is not authorization: the separate Owner release GO (CLAUDE.md §20,
+# docs/RELEASE-PROCESS.md §11) comes before any tag is pushed.
 on:
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
+
+# One run per tag at a time. A later run for the same tag waits and then refuses (the release
+# exists); an active publication is never cancelled, and other tags are not blocked.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout tagged commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js (LTS)
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: lts/*
+
+      - name: Log tool versions
+        run: |
+          node --version
+          git --version
+          gh --version
+
+      - name: Release guard selftest (offline)
+        run: node tools/release-publish.js --selftest
+
+      - name: Refresh the tag object and main from origin
+        run: git fetch --no-tags --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" "+refs/heads/main:refs/remotes/origin/main"
+
+      - name: Release eligibility (annotated tag, tag target, workflow revision, main ancestry)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release-publish.js --eligibility
 
       - name: Verify build
         run: node tools/verify-build.js
@@ -37,14 +74,14 @@ jobs:
         id: meta
         run: |
           VERSION="$(node -e "process.stdout.write(require('./tools/app-version.js').readAppMeta().version)")"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "zip=dist/tam-os-v$VERSION-package.zip" >> "$GITHUB_OUTPUT"
           echo "expected_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Confirm tag matches APP_VERSION
+        env:
+          EXPECTED: ${{ steps.meta.outputs.expected_tag }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          EXPECTED="${{ steps.meta.outputs.expected_tag }}"
           if [ "$TAG" != "$EXPECTED" ]; then
             echo "::error::Tag '$TAG' does not match APP_VERSION ('$EXPECTED'). Refusing to publish."
             exit 1
@@ -52,14 +89,48 @@ jobs:
           echo "Tag $TAG matches APP_VERSION."
 
       - name: Confirm package ZIP exists and matches the committed manifest
+        env:
+          ZIP: ${{ steps.meta.outputs.zip }}
         run: |
-          ZIP="${{ steps.meta.outputs.zip }}"
           if [ ! -f "$ZIP" ]; then
             echo "::error::Package ZIP not found: $ZIP"
             exit 1
           fi
           node -e "const m=require('./dist/package-manifest.json');const h=require('crypto').createHash('sha256').update(require('fs').readFileSync(process.argv[1])).digest('hex');if(m.zip.name!==require('path').basename(process.argv[1])||m.zip.sha256!==h){console.error('::error::Package ZIP does not match dist/package-manifest.json');process.exit(1)}" "$ZIP"
           echo "Found $ZIP ($(wc -c < "$ZIP") bytes), matching dist/package-manifest.json"
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js (LTS)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+
+      - name: Log tool versions
+        run: |
+          node --version
+          git --version
+          gh --version
+
+      - name: Refresh the tag object and main from origin
+        run: git fetch --no-tags --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" "+refs/heads/main:refs/remotes/origin/main"
+
+      - name: Build deployment package
+        run: node tools/build-package.js
+
+      - name: Confirm the build reproduces the committed package manifest
+        run: git diff --exit-code -- dist/package-manifest.json
 
       - name: Resolve release notes source
         id: notes
@@ -70,19 +141,12 @@ jobs:
             echo "file=CHANGELOG.md" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub Release (idempotent) and upload assets
+      # Re-checks eligibility and the local package, then publishes draft-first. Never re-run
+      # this job by hand after it has started: a later run refuses while the draft or release exists.
+      - name: Publish GitHub Release (draft first, verified digests, no replacement)
         env:
           GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ steps.notes.outputs.file }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          ZIP="${{ steps.meta.outputs.zip }}"
-          NOTES="${{ steps.notes.outputs.file }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — refreshing assets only (no duplicate release)."
-            gh release upload "$TAG" "$ZIP" dist/package-manifest.json --clobber
-          else
-            gh release create "$TAG" "$ZIP" dist/package-manifest.json \
-              --title "TAM OS $TAG" \
-              --notes-file "$NOTES" \
-              --verify-tag
-          fi
+          node tools/release-publish.js --publish --title "TAM OS $TAG" --notes-file "$NOTES"
