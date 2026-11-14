@@ -7,8 +7,10 @@ follow the steps below.
 
 > **`main` is protected by repository rules.** Every change to `main` — including release preparation
 > — lands through a **pull request** whose required checks pass; a direct push to `main` is rejected.
-> The permitted merge method is a **merge commit**. **Release tags are outside the branch ruleset**, so
-> tagging and the tag-triggered release workflow are unaffected.
+> The permitted merge method is a **merge commit**. **Release tags are outside the branch ruleset.** While the
+> separate tag ruleset is active, a pushed `v*` tag cannot be deleted, moved or force-updated, by anyone; it
+> does not restrict creating one, so tagging and the tag-triggered release workflow are otherwise unaffected.
+> Published tags stay immutable under [`CLAUDE.md`](../CLAUDE.md) §13.4 regardless of that technical protection.
 >
 > **Merge authorization and release authorization are separate events.** Approval to merge a release
 > preparation PR is *not* approval to tag or publish. Temporarily disabling the ruleset, or using a
@@ -127,8 +129,26 @@ are attached, and that the ZIP's SHA-256 equals the manifest's `zip.sha256`. Rec
 tag, release URL, asset names, CI status, branch, and working-tree status.
 
 ## Rollback
-- **Bad release, tag not yet relied upon:** delete the GitHub Release and tag
-  (`gh release delete vX.Y.Z`, `git push origin :refs/tags/vX.Y.Z`), fix, re-release.
+- **Problem found before the tag is pushed (§13):** stop and do not push the tag. Correct the candidate
+  through a pull request (§§7–10) and obtain a fresh release authorization (§11). A tag created in §12 but not
+  pushed exists only locally; removing it (`git tag -d vX.Y.Z`) is a `git tag` action and needs the owner's
+  approval ([`CLAUDE.md`](../CLAUDE.md) §20).
+- **Problem found after the tag is pushed or the release is published:** while the tag ruleset is active, a pushed
+  `v*` tag cannot be deleted or updated, even if `release.yml` refused to publish; under [`CLAUDE.md`](../CLAUDE.md)
+  §13.4 it stays immutable regardless of that technical protection. Keep the tag, its commit, the GitHub Release
+  and its assets as the historical record — never delete, move or re-push the tag. Record the problem and its
+  impact, then fix it in a **new corrective version** through this process from §1, with separate owner
+  authorization to merge (§7) and to release (§11) before any new tag, release or asset is published. The
+  corrective version's release notes state the problem and the fix.
+- **What the tag ruleset does not cover:** it protects Git tags only. A GitHub Release and its uploaded assets can
+  still be edited or deleted by anyone with write access, and `release.yml` replaces existing assets
+  (`--clobber`) if it runs again for a published version. Under §13.4 they are treated as immutable regardless:
+  do not edit or delete a published release or its assets, or re-run the release workflow for a published
+  version.
+- **Exceptions:** any exception (for example, withdrawing an asset that exposes a secret or real data — see
+  [`SECURITY.md`](../SECURITY.md)) needs a separate, narrowly scoped owner approval that names the exact object
+  and action, with the evidence recorded. Disabling a ruleset is not a rollback step; it is itself a separately
+  authorized change. Nothing here changes ENG-C1, the v3.0.0 HOLD or any release or deployment gate.
 - **Bad code already on main:** revert the release commit (`git revert <hash>`) on a branch and land
   the revert through a pull request — `main` accepts no direct push — then rebuild, verify, and cut a
   new patch version. Never force-push or rewrite `main`; the ruleset rejects both.
