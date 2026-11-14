@@ -31,6 +31,18 @@ published release, and none is on a production host. Hostinger stays NO-GO; Gate
   unchanged.
 
 ### Changed
+- **Release immutability hardening — Approach C, defense in depth (PR #92; not released, not deployed).**
+  `.github/workflows/release.yml` no longer has the `gh release upload --clobber` path. Publication now runs through
+  the new `tools/release-publish.js`: a read-only `verify` job checks eligibility (tag push in this repository, the
+  workflow at the tagged commit, an annotated tag equal to `v<APP_VERSION>` on the triggering commit, full history,
+  `origin/main` equal to GitHub's `main`, main ancestry) and the package; the `publish` job, the only one with
+  `contents: write`, refuses if any release or draft exists for the tag, creates a draft, uploads the two exact assets
+  once, requires GitHub's SHA-256 digests to equal the local files and the committed manifest, publishes, and reads
+  the release back (including `immutable`; `gh release verify`/`verify-asset` when it is true). Nothing is retried,
+  replaced or deleted, and a failure names one recovery stage (docs/RELEASE-PROCESS.md §14). Per-tag concurrency
+  with `cancel-in-progress: false`; actions pinned to commit SHAs. Tests: `node tools/release-publish.js --selftest`
+  (mocked GitHub API, git and gh; run by `ci.yml` and before publication) and three `verify-build.js` checks. The
+  release asset format is unchanged; the Immutable Releases setting, rulesets, tags and releases are unchanged.
 - **UI-INT-1 — v2.11.0-style SESSION shell (PR #88, merged into `main` as `ec3cf40`; not released, not deployed).** Owner
   decisions D-UI-1..D-UI-4 (2026-11-13). The signed-in SESSION workspace now uses the v2.11.0 wording, order and chrome
   over the same server-backed pages: CEO sidebar People: Employees; Finance: Overview (the Phase 1 financial dashboard),

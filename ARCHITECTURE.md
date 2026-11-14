@@ -3111,8 +3111,15 @@ production approval.
 
 `release.yml` is **tag-triggered**: it verifies, rebuilds the Distribution-1 package, re-derives the
 version from `APP_VERSION`, refuses to publish unless the tag equals that version and the build reproduces
-the committed `dist/package-manifest.json` (and the ZIP matches it), then creates or refreshes the GitHub
-Release idempotently and uploads the package ZIP and manifest. The package build is **reproducible** —
+the committed `dist/package-manifest.json` (and the ZIP matches it), then publishes the GitHub Release
+draft-first through `tools/release-publish.js`: it refuses if any release or draft exists for the tag (a re-run
+changes nothing), requires an annotated tag on a commit in the history of `main`, uploads the package ZIP and
+manifest to a draft once, compares GitHub's SHA-256 digests with the local files and the committed manifest, and
+only then publishes and reads the release back ([RELEASE-PROCESS §14](docs/RELEASE-PROCESS.md)). This describes the
+reviewed revision (PR #92) and holds only for a tag on a commit that contains it: GitHub runs the tagged commit's
+`release.yml`, and older commits, most of `main`'s history included, keep the previous workflow, which publishes
+directly and can replace assets. Main ancestry alone does not prove which revision a commit carries
+([RELEASE-PROCESS §12](docs/RELEASE-PROCESS.md)); eligibility is not release authorization. The package build is **reproducible** —
 the same source yields byte-identical files, ZIP and manifest, so the recorded SHA-256 values verify any
 downloaded or deployed copy. (Up to v2.11.0 the asset was the single-file HTML; those releases are frozen.) Shipped releases are never rewritten. The workflow titles a Release
 `TAM OS <tag>` — the short convention — which is why the published v2.9.0 Release is titled

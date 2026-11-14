@@ -84,6 +84,11 @@ jobs:
       - name: Runtime harness - SESSION Finance (Phase 1)
         run: node tools/verify-session-ledger-runtime.js
 
+      # Offline release guard (release immutability hardening): mocked GitHub API, git and gh;
+      # never touches the network, a tag or a release.
+      - name: Release guard selftest
+        run: node tools/release-publish.js --selftest
+
       - name: Build deployment package
         run: node tools/build-package.js
 
