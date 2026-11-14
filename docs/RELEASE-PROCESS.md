@@ -104,18 +104,25 @@ release workflow: GitHub runs the `release.yml` of the tagged commit, and older 
 `main`'s history) carry the previous workflow, which publishes directly and can replace assets (§14). Being in
 the history of `main` does not prove the reviewed workflow is present, so check the files themselves before tagging.
 
-`<PR #92 merge commit>` below is a **placeholder**. After PR #92 is merged, it must be replaced in this document
-with the full 40-character merge commit SHA, verified on GitHub (`gh pr view 92 --json mergeCommit`) and recorded
-through a reviewed pull request. **No release tag may be created until that SHA has been recorded and verified.**
-Never substitute a SHA that has not been verified.
+The reviewed baseline is the **PR #92 merge commit `d7d253204af205b455440640840723dcf03d6972`** (merged
+2026-11-14; parents `5ca7ba4…` and the reviewed PR head `94ceda6…`; verified on GitHub with
+`gh pr view 92 --json mergeCommit`). It is recorded here through a reviewed pull request. If a later reviewed change
+to `release.yml` or `tools/release-publish.js` becomes the new baseline, that change records its own merge commit
+here, through its own reviewed pull request, before any tag relies on it.
 
-Both required checks must pass:
-1. **Ancestry** — the target descends from the PR #92 merge commit.
+Before any tag, all of the following must hold:
+- the separate Owner release authorization (§11) has been given;
+- v3.0.0 and the release gates are no longer on HOLD;
+- both checks below pass.
+
+The two checks:
+1. **Ancestry** — the target descends from the reviewed baseline commit.
 2. **Reviewed workflow present** — the target's `release.yml` and `tools/release-publish.js` are byte-identical
-   to the reviewed files at the PR #92 merge commit (any later change to either needs its own review first).
+   to the reviewed files at the baseline commit (any later change to either needs its own review first).
 ```bash
-git merge-base --is-ancestor <PR #92 merge commit> <merged-main-commit>        # 1. must succeed
-git diff --quiet <PR #92 merge commit> <merged-main-commit> -- \
+BASE=d7d253204af205b455440640840723dcf03d6972                                    # reviewed baseline (PR #92 merge)
+git merge-base --is-ancestor "$BASE" <merged-main-commit>                       # 1. must succeed
+git diff --quiet "$BASE" <merged-main-commit> -- \
   .github/workflows/release.yml tools/release-publish.js                         # 2. must succeed (no output)
 # Supplementary evidence only (not proof of workflow integrity):
 git show <merged-main-commit>:.github/workflows/release.yml | grep -F 'tools/release-publish.js --publish'
@@ -124,8 +131,8 @@ git cat-file -t vX.Y.Z            # must print: tag  (annotated, not lightweight
 git rev-parse vX.Y.Z^{commit}     # must equal the authorized merged main commit
 ```
 The `grep` line shows only that the workflow calls the guard. It does not prove that the workflow or the guard
-are the reviewed versions; check 2 does that. If check 1 or check 2 fails, or the placeholder has not been
-replaced with a verified SHA, stop: do not create or push the tag.
+are the reviewed versions; check 2 does that. If the authorization is missing, a HOLD is still active, or check 1
+or check 2 fails, stop: do not create or push the tag.
 
 ## 13. Push the tag
 Push **only** the tag. `main` is already up to date via the merge in §10, and a direct push to
@@ -174,6 +181,28 @@ checks, and any exception needs its own explicit Owner approval naming the exact
 | `post-publish` | Published, but the read-back did not fully verify | Record the finding; never change the release — a correction is a new version (§13.4) |
 
 A cancelled runner (or job timeout) stops at whatever stage it reached and is handled the same way.
+
+**When the log names no stage.** A forced termination (a runner that is lost or killed, or a cancellation that
+escalates past the guard's signal handler) can stop the job before the final `Release refused at stage …` and
+`Recovery boundary:` lines are written. Recover **read-only**, using only these steps:
+1. Open the Actions run and both job logs (`gh run view <run-id> --log`). Note the last line the guard wrote:
+   `Created draft release id …`, `Uploaded <asset> to draft …`, `Draft assets verified …`,
+   `Published release id …` or `Release … published and verified`.
+2. List every release for the tag, drafts included. Drafts are visible only with push access:
+   `gh api 'repos/fanoryu/TAM-OS-Next/releases?per_page=100' --jq '.[] | select(.tag_name=="vX.Y.Z") | {id, draft, published_at, immutable}'`.
+3. For each release found, read its assets and their reported metadata, and compare them with
+   `dist/package-manifest.json` at the tagged commit:
+   `gh api repos/fanoryu/TAM-OS-Next/releases/<id> --jq '.assets[] | {name, state, size, digest}'`.
+4. Work out the last **confirmed** stage:
+   - no release → `pre-draft` or `draft-uncertain`;
+   - a draft with fewer than the two exact assets, any asset not `uploaded`, or a missing or mismatched digest → `draft-left`;
+   - a draft with both assets verified but not published → `draft-left`;
+   - a published release → `publish-uncertain` until steps 1–3 confirm every asset, then `post-publish`.
+5. Treat anything ambiguous as requiring Owner review: more than one release for the tag, an asset that is not
+   `uploaded`, a digest that is missing or does not match, or a log that contradicts the API.
+
+Recovery never retries an upload, deletes a draft, replaces or deletes an asset, or republishes. Any such change
+is a separate, explicitly authorized Owner action that names the exact object.
 
 ## 15. Asset verification
 ```bash
