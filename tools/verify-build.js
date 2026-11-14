@@ -376,6 +376,18 @@ console.log('== WP-2 — HOSTINGER DOCUMENT-ROOT HEADERS ==');
   check(/node tools\/build-package\.js/.test(ciYml) && !/build-single-file/.test(ciYml), 'ci.yml builds the Distribution-1 package (not the retired single file)');
   check(/node tools\/build-package\.js/.test(relYml) && !/build-single-file/.test(relYml) && /package-manifest\.json/.test(relYml),
     'release.yml builds and publishes the Distribution-1 package ZIP and manifest');
+  // Release immutability hardening (Approach C): publication is draft-first through the guard
+  // script and can never replace, edit or delete a release or asset. Behaviour is proven by
+  // tools/release-publish.js --selftest (run by ci.yml and by release.yml before publishing).
+  const relCode = relYml.replace(/\r\n/g, '\n').replace(/^\s*#.*$/gm, '');
+  check(!/--clobber|gh release (upload|delete|edit|create)|delete-asset/.test(relCode)
+    && /node tools\/release-publish\.js --publish /.test(relCode) && /node tools\/release-publish\.js --eligibility/.test(relCode),
+    'release hardening: release.yml publishes only through tools/release-publish.js (no --clobber, no gh release upload/delete/edit/create)');
+  check(/^permissions:\n  contents: read\n/m.test(relCode) && (relCode.match(/contents: write/g) || []).length === 1
+    && /^concurrency:\n  group: release-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false\n/m.test(relCode),
+    'release hardening: release.yml is read-only at top level, writes in one job, and never cancels an active publication');
+  check(/^\s*run: node tools\/release-publish\.js --selftest\s*$/m.test(ciYml) && fs.existsSync(path.join(root, 'tools', 'release-publish.js')),
+    'release hardening: ci.yml runs the offline release guard selftest');
   check(/-\s*"vendor\/\*\*"/.test(read(path.join(root, '.github', 'codeql', 'codeql-config.yml'))),
     'CodeQL excludes vendored third-party code (vendor/**)');
   check(/^\/vendor\/\s+@fanoryu/m.test(read(path.join(root, '.github', 'CODEOWNERS'))), 'CODEOWNERS covers /vendor/');

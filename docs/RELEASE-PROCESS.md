@@ -111,14 +111,42 @@ git push origin refs/tags/vX.Y.Z
 ```
 
 ## 14. GitHub Release
-Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which verifies, rebuilds the
-package, confirms the build reproduces the committed manifest and the tag equals `v<APP_VERSION>`,
-and publishes the release with the package ZIP and `package-manifest.json` as assets.
-If publishing manually instead:
-```bash
-gh release create vX.Y.Z dist/tam-os-vX.Y.Z-package.zip dist/package-manifest.json \
-  --title "TAM OS vX.Y.Z" --notes-file RELEASE_NOTES.md --verify-tag
-```
+Pushing the `vX.Y.Z` tag triggers `.github/workflows/release.yml`. Its read-only `verify` job runs the
+offline guard selftest, then `tools/release-publish.js --eligibility`: the run must be a tag push in this
+repository, the running workflow must be the one at the tagged commit, the tag must be an **annotated** tag
+equal to `v<APP_VERSION>` that resolves to the triggering commit (locally and on GitHub), the checkout must hold
+full history, its `origin/main` must equal GitHub's current `main`, and the tagged commit must be in the history
+of `main`. It then verifies, rebuilds the package, and confirms the build reproduces the committed manifest and
+the ZIP matches it. Eligibility is evidence, **not authorization** — §11 still comes first.
+
+Only then does the `publish` job (the one job with `contents: write`) run
+`tools/release-publish.js --publish`, which:
+1. re-checks eligibility and the local package (ZIP size and SHA-256 equal the committed manifest; the built
+   manifest equals the one committed at the tag);
+2. **refuses if any release or draft already exists for the tag** — it never edits, replaces or deletes one;
+3. creates a **draft** release and confirms it is the only release for the tag;
+4. uploads exactly `tam-os-vX.Y.Z-package.zip` and `package-manifest.json`, once each, with no retry;
+5. reads the draft back and requires exactly those two assets, state `uploaded`, the local sizes and a
+   GitHub `sha256:` digest equal to the local SHA-256 — a missing, ambiguous or mismatched digest blocks publication;
+6. publishes the draft, then reads the published release back (id, assets, digests, `immutable` state). When the
+   release reports `immutable: true` it also runs `gh release verify` and `gh release verify-asset` for every
+   asset; while Immutable Releases is off it logs that immutability rests on [`CLAUDE.md`](../CLAUDE.md) §13.4.
+
+Runs are serialized per tag (`concurrency: release-<tag ref>`, `cancel-in-progress: false`): a duplicate run waits
+and then refuses because the release exists. Do not publish manually with `gh release create`: it bypasses these
+checks, and any exception needs its own explicit Owner approval naming the exact action.
+
+**Recovery boundary.** The workflow never cleans up. When it stops, its log names one stage:
+
+| Stage | Meaning | Owner action |
+|---|---|---|
+| `pre-draft` | Refused before anything was created (eligibility, package, an existing release or draft, an unreadable release list) | Fix the cause; a re-run needs release authorization and still refuses while any release or draft exists |
+| `draft-uncertain` | Draft creation failed, timed out or answered unexpectedly | Inspect the releases list, drafts included; a draft may exist |
+| `draft-left` | A draft exists but was not published (partial upload, missing or mismatched digest, a concurrent draft, cancellation) | Review the draft; it is never deleted, edited or re-uploaded by the workflow, and later runs refuse while it exists. Removing it is a separate, explicitly authorized Owner action |
+| `publish-uncertain` | The publish request failed or timed out; the release may be published | Do not re-run; inspect the release |
+| `post-publish` | Published, but the read-back did not fully verify | Record the finding; never change the release — a correction is a new version (§13.4) |
+
+A cancelled runner (or job timeout) stops at whatever stage it reached and is handled the same way.
 
 ## 15. Asset verification
 ```bash
@@ -141,10 +169,11 @@ tag, release URL, asset names, CI status, branch, and working-tree status.
   authorization to merge (§7) and to release (§11) before any new tag, release or asset is published. The
   corrective version's release notes state the problem and the fix.
 - **What the tag ruleset does not cover:** it protects Git tags only. A GitHub Release and its uploaded assets can
-  still be edited or deleted by anyone with write access, and `release.yml` replaces existing assets
-  (`--clobber`) if it runs again for a published version. Under §13.4 they are treated as immutable regardless:
-  do not edit or delete a published release or its assets, or re-run the release workflow for a published
-  version.
+  still be edited or deleted by anyone with write access. `release.yml` no longer replaces assets: a run for a
+  tag that already has a release or draft refuses without changing it (§14). The repository's Immutable Releases
+  setting is **off**, so nothing technical stops a manual edit, and releases published before it is enabled are not
+  immutable. Under §13.4 they are treated as immutable regardless: do not edit or delete a published release or
+  its assets, or re-run the release workflow for a published version.
 - **Exceptions:** any exception (for example, withdrawing an asset that exposes a secret or real data — see
   [`SECURITY.md`](../SECURITY.md)) needs a separate, narrowly scoped owner approval that names the exact object
   and action, with the evidence recorded. Disabling a ruleset is not a rollback step; it is itself a separately
@@ -158,6 +187,6 @@ tag, release URL, asset names, CI status, branch, and working-tree status.
   [`BACKEND-DEPLOYMENT-RUNBOOK.md`](BACKEND-DEPLOYMENT-RUNBOOK.md) §8 (close the API, re-upload the previous verified
   package and backend, recreate a staging database, or restore an encrypted backup off-host under the §7.1
   safeguards). Complete Backup belongs to the LOCAL application and does not apply to SESSION data.
-- **Publication flags (v3.0.0):** `release.yml` creates the Release with `gh release create` and no
-  `--latest`/`--prerelease` flag, so GitHub marks it **Latest** by default; whether v3.0.0 may become Latest is an
+- **Publication flags (v3.0.0):** `release.yml` publishes the draft with no `make_latest` and with
+  `prerelease: false`, so GitHub marks it **Latest** by default; whether v3.0.0 may become Latest is an
   Owner decision taken before the tag is pushed.

@@ -1514,7 +1514,9 @@ summary: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 - **CodeQL** (`codeql.yml`) runs code scanning on push/PR with two Analyze jobs
   (`javascript-typescript` and `actions`).
 - **Release** (`release.yml`) is tag-triggered, re-derives the version, enforces the tag-equals-version
-  guardrail, and creates/refreshes the GitHub Release idempotently, uploading the deployment package ZIP and
+  guardrail, and publishes the GitHub Release draft-first through `tools/release-publish.js` (annotated tag on
+  a main ancestor; refuses if any release or draft exists for the tag; never replaces, edits or deletes one;
+  digests verified before publishing — see docs/RELEASE-PROCESS.md §14), uploading the deployment package ZIP and
   `dist/package-manifest.json` as release assets (v2.11.0 and earlier shipped a single HTML file). It titles
   the Release `TAM OS <tag>` — the short convention, which is why the latest published Release, v2.11.0
   (2026-08-14), is titled `TAM OS v2.11.0` rather than including the release name. (Releases published
