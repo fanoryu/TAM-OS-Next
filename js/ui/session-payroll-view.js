@@ -404,8 +404,8 @@ function sessionPayrollMinePlansHTML(w, dis){
   if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return '<p class="auth-lead" role="status" aria-busy="true">Loading your payroll…</p>';
   if(!w.list.length) return '<div class="empty">No committed payroll for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '.</div>';
   const rows = w.list.map(function(p, i){
-    return '<tr><td>' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</td><td>' + escapeHtml(sessionPayrollStatusText(p.status)) + '</td>'
-      + '<td>' + escapeHtml(p.baseSalary) + '</td><td>' + escapeHtml(p.overtimeAmount) + '</td><td>' + escapeHtml(p.totalAmount) + '</td>'
+    return '<tr><td>' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</td><td>' + statusBadgeHTML(sessionPayrollStatusText(p.status), p.status === 'Committed' ? 'final' : 'neutral') + '</td>'
+      + '<td>' + moneyHTML(p.baseSalary) + '</td><td>' + moneyHTML(p.overtimeAmount) + '</td><td>' + moneyHTML(p.totalAmount) + '</td>'
       + '<td><button class="btn" type="button" id="swpOpen' + i + '"' + dis + '>View</button></td></tr>';
   }).join('');
   return '<div class="table-wrap"><table><thead><tr><th scope="col">Month</th><th scope="col">Status</th>'
@@ -464,6 +464,58 @@ function sessionPayrollListHTML(w){
   return head + sessionPayrollPlansHTML(w, dis) + sessionSupplementalAreaHTML(w, dis);   // AFI-4d: the Supplemental card follows the plans
 }
 
+// UX-1 (Owner GO 2026-11-17, Payroll TO-BE A): the stage of each plan as the CEO works it. In the
+// month list the stage is the stored status only — the Finance and payment status stay in the plan
+// detail (D-AFI4e-4 = A, D-AFI4f-6 = A). In the detail a Committed plan's stage follows its Finance
+// card (posted, payment recorded), in the approved words. Each stage names the one action that
+// moves it on; the action itself stays in the plan, with its own confirmation. Display mapping only
+// (CLAUDE.md §8.3); counts of plans only — never money across plans (no payroll total).
+const SESSION_PAYROLL_STAGES = Object.freeze([
+  Object.freeze({ key: 'Draft', label: SESSION_PAYROLL_STATUS_TEXT.Draft, tone: 'neutral', next: SESSION_PAYROLL_ACTION_BUTTONS.review.label }),
+  Object.freeze({ key: 'Reviewed', label: SESSION_PAYROLL_STATUS_TEXT.Reviewed, tone: 'info', next: SESSION_PAYROLL_ACTION_BUTTONS.approve.label }),
+  Object.freeze({ key: 'Ready', label: SESSION_PAYROLL_STATUS_TEXT.Ready, tone: 'attention', next: SESSION_PAYROLL_ACTION_BUTTONS.commit.label }),
+  Object.freeze({ key: 'Committed', label: SESSION_PAYROLL_STATUS_TEXT.Committed, tone: 'final', next: 'Open the plan' }),
+  Object.freeze({ key: 'Cancelled', label: SESSION_PAYROLL_STATUS_TEXT.Cancelled, tone: 'stop', next: '' })
+]);
+const SESSION_PAYROLL_DETAIL_STAGES = Object.freeze({
+  unposted: Object.freeze({ key: 'Committed', label: SESSION_PAYROLL_STATUS_TEXT.Committed, tone: 'final', next: SESSION_FINANCE_PANELS.finPostPlan.submit }),
+  posted: Object.freeze({ key: 'Committed', label: SESSION_FINANCE_STATE_TEXT.posted, tone: 'planned', next: SESSION_FINANCE_EXECUTION_TEXT.record }),
+  recorded: Object.freeze({ key: 'Committed', label: SESSION_FINANCE_EXECUTION_TEXT.recorded.split('. ')[0], tone: 'done', next: '' }),
+  checking: Object.freeze({ key: 'Committed', label: SESSION_PAYROLL_STATUS_TEXT.Committed, tone: 'final', next: '' })
+});
+// The list filter: memory only (never storage); 'all' or a status. Reset when the shell is left.
+const SessionPayrollFilter = { stage: 'all' };
+
+function sessionPayrollStageOf(w, p){ return p.status; }
+// The detail's stage of a plan: its status, and for a Committed plan what its Finance card shows.
+function sessionPayrollDetailStage(w, p){
+  if(p.status !== 'Committed') return sessionPayrollStageDef(p.status);
+  const x = sessionFinanceExecutionStatus(w, 'payrollPlan', p);
+  if(x) return x.state === 'recorded' ? SESSION_PAYROLL_DETAIL_STAGES.recorded
+    : (x.state === 'unrecorded' ? SESSION_PAYROLL_DETAIL_STAGES.posted : SESSION_PAYROLL_DETAIL_STAGES.checking);
+  const f = sessionFinanceStatus(w, 'payrollPlan', p);
+  return f && f.state === 'unposted' ? SESSION_PAYROLL_DETAIL_STAGES.unposted : SESSION_PAYROLL_DETAIL_STAGES.checking;
+}
+function sessionPayrollStageDef(key){
+  return SESSION_PAYROLL_STAGES.find(function(d){ return d.key === key; }) || null;
+}
+// The positions (in the month's list) of the plans the filter shows.
+function sessionPayrollFiltered(w){
+  const out = [];
+  (w.list || []).forEach(function(p, i){ if(SessionPayrollFilter.stage === 'all' || sessionPayrollStageOf(w, p) === SessionPayrollFilter.stage) out.push(i); });
+  return out;
+}
+function sessionPayrollChipsHTML(w, dis){
+  const counts = {};
+  (w.list || []).forEach(function(p){ const k = sessionPayrollStageOf(w, p); counts[k] = (counts[k] || 0) + 1; });
+  const chip = function(key, label, n){
+    return '<button class="ux-chip" type="button" id="swpStage-' + key + '" data-swp-stage="' + key + '" aria-pressed="' + (SessionPayrollFilter.stage === key) + '"' + dis + '>'
+      + escapeHtml(label) + ' <span class="ux-chip-count">' + escapeHtml(String(n)) + '</span></button>';
+  };
+  return '<div class="ux-chips" role="group" aria-label="Show plans by stage">' + chip('all', 'All', (w.list || []).length)
+    + SESSION_PAYROLL_STAGES.filter(function(d){ return counts[d.key]; }).map(function(d){ return chip(d.key, d.key, counts[d.key]); }).join('') + '</div>';
+}
+
 // The month's plans (the CEO list), or its loading / error / empty state.
 function sessionPayrollPlansHTML(w, dis){
   if(w.listStatus === SESSION_PAYROLL_STATUS.ERROR && w.error && w.error.scope === 'list'){
@@ -472,13 +524,20 @@ function sessionPayrollPlansHTML(w, dis){
   }
   if(w.listStatus !== SESSION_PAYROLL_STATUS.READY || !w.list || w.listMonth !== w.month) return '<p class="auth-lead" role="status" aria-busy="true">Loading payroll plans…</p>';
   if(!w.list.length) return '<div class="empty">No payroll plans for ' + escapeHtml(sessionPayrollMonthLabel(w.month)) + '. Prepare payroll for this month to create them.</div>';
-  const rows = w.list.map(function(p, i){
-    return '<tr><td>' + escapeHtml(p.employeeCode) + '</td><td>' + escapeHtml(p.employeeName) + '</td><td>' + escapeHtml(sessionPayrollStatusText(p.status)) + '</td>'
-      + '<td>' + escapeHtml(p.baseSalary) + '</td><td>' + escapeHtml(p.overtimeAmount) + '</td><td>' + escapeHtml(p.totalAmount) + '</td>'
-      + '<td><button class="btn" type="button" id="swpOpen' + i + '"' + dis + '>View</button></td></tr>';
+  if(SessionPayrollFilter.stage !== 'all' && !sessionPayrollFiltered(w).length) SessionPayrollFilter.stage = 'all';
+  const shown = sessionPayrollFiltered(w);
+  const rows = shown.map(function(i){
+    const p = w.list[i];
+    const d = sessionPayrollStageDef(sessionPayrollStageOf(w, p)) || { label: sessionPayrollStatusText(p.status), tone: 'neutral', next: '' };
+    return '<tr><td>' + escapeHtml(p.employeeCode) + '</td><td>' + escapeHtml(p.employeeName) + '</td><td>' + statusBadgeHTML(d.label, d.tone) + '</td>'
+      + '<td>' + moneyHTML(p.baseSalary) + '</td><td>' + moneyHTML(p.overtimeAmount) + '</td><td>' + moneyHTML(p.totalAmount) + '</td>'
+      + '<td>' + (d.next ? escapeHtml(d.next) : '<span class="ux-muted">Nothing to do</span>') + '</td>'
+      + '<td><button class="btn" type="button" id="swpOpen' + i + '"' + dis + ' aria-label="Open the plan of ' + escapeHtml(p.employeeName) + '">View</button></td></tr>';
   }).join('');
-  return '<div class="table-wrap"><table><thead><tr><th scope="col">Code</th><th scope="col">Employee</th><th scope="col">Status</th>'
-    + '<th scope="col">Base salary (Rp)</th><th scope="col">Overtime (Rp)</th><th scope="col">Total (Rp)</th><th scope="col" aria-label="Open plan"></th></tr></thead>'
+  return sessionPayrollChipsHTML(w, dis)
+    + '<p class="hint" role="status">' + escapeHtml(String(shown.length)) + ' of ' + escapeHtml(String(w.list.length)) + (w.list.length === 1 ? ' plan' : ' plans') + ' shown. Open a plan to act on it; every action asks for confirmation.</p>'
+    + '<div class="table-wrap"><table><thead><tr><th scope="col">Code</th><th scope="col">Employee</th><th scope="col">Stage</th>'
+    + '<th scope="col">Base salary (Rp)</th><th scope="col">Overtime (Rp)</th><th scope="col">Total (Rp)</th><th scope="col">Next step</th><th scope="col" aria-label="Open plan"></th></tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>';
 }
 
@@ -511,7 +570,11 @@ function sessionPayrollDetailHTML(principal, w){
       + w.detail.overtime.map(function(r){ return '<tr><td>' + escapeHtml(r.id) + '</td><td>' + escapeHtml(r.hours) + '</td><td>' + escapeHtml(r.amount) + '</td></tr>'; }).join('')
       + '</tbody></table></div>'
     : '<p class="hint">No approved overtime is counted in this plan.</p>';
+  const stage = sessionPayrollDetailStage(w, p);
+  const nextId = sessionPayrollNextInStage(w, p);
+  const next = !w.panel && nextId ? ' <button class="btn" type="button" id="swpNextStageBtn"' + dis + '>Next plan in this stage</button>' : '';
   return '<h2 class="section-title">' + escapeHtml(p.employeeName) + ' — ' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + '</h2>'
+    + (stage ? '<div class="head-controls"><span class="ux-muted">' + statusBadgeHTML(stage.label, stage.tone) + (stage.next ? ' Next step: ' + escapeHtml(stage.next) + '.' : '') + '</span>' + next + '</div>' : '')
     + (w.panel ? '' : sessionPayrollMutationHTML(w))
     + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionPayrollValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
     + '<section class="card" aria-labelledby="swpOvertimeTitle"><h2 class="section-title" id="swpOvertimeTitle">Approved overtime counted</h2>' + ot + '</section>'
@@ -520,6 +583,24 @@ function sessionPayrollDetailHTML(principal, w){
     + (p.status === 'Committed' ? sessionSupplementalRelatedHTML(w, p, dis) : '')
     + back + reload + actions + '</div>'
     + (w.panel && w.panel.id === p.id ? sessionPayrollPanelHTML(w) : '');
+}
+
+// UX-1: the id of the next plan (in list order, wrapping) in the same stage as `p` — the stage the
+// detail shows (sessionPayrollDetailStage), so a Committed plan's Finance card decides it: posted,
+// payment recorded and unposted plans are three different stages. A stage still being read or
+// inconsistent ('checking') has no next plan and is never a target. Opening a plan only reads it.
+// G-4 correction (2026-11-17). Was: the stored status, so every Committed plan was one stage.
+function sessionPayrollNextInStage(w, p){
+  const list = w.list || [];
+  if(w.listMonth !== p.monthKey) return null;
+  const stage = sessionPayrollDetailStage(w, p);
+  if(!stage || stage === SESSION_PAYROLL_DETAIL_STAGES.checking) return null;
+  const at = list.findIndex(function(x){ return x.id === p.id; });
+  for(let k = 1; k < list.length; k++){
+    const q = list[(at + k) % list.length];
+    if(q.id !== p.id && sessionPayrollDetailStage(w, q) === stage) return q.id;
+  }
+  return null;
 }
 
 // The section title (the workspace heading) and body. AFI-4c2: an Employee's is My payroll.
@@ -971,6 +1052,10 @@ function bindSessionPayroll(app){
   click('swpRetryCommitBtn', function(){ SessionPayroll.retryCommit(); });
   const w = SessionPayrollStore.snapshot();
   (w.list || []).forEach(function(row, i){ click('swpOpen' + i, function(){ SessionPayroll.openDetail(row.id); }); });
+  // UX-1: the stage filter repaints the list (memory only); Next plan in this stage opens that plan.
+  const chips = app.querySelectorAll('[data-swp-stage]');
+  for(let c = 0; c < chips.length; c++) chips[c].addEventListener('click', function(){ SessionPayrollFilter.stage = this.getAttribute('data-swp-stage'); if(typeof render === 'function') render(); });
+  click('swpNextStageBtn', function(){ const id = w.detail && w.detail.plan ? sessionPayrollNextInStage(w, w.detail.plan) : null; if(id) SessionPayroll.openDetail(id); });
   // AFI-4d: Supplemental payroll — rows open by position, as the plans do.
   click('swpSuppRetryBtn', function(){ SessionPayroll.retrySupplemental(); });
   click('swpSuppReloadBtn', function(){ SessionPayroll.reloadSupplemental(); });

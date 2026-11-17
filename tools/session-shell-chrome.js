@@ -33,16 +33,20 @@ const APP_TAGLINE = pick('APP_TAGLINE');
 // Employee's Finance group is labelled "My work" (U1 correction 2). UI-INT-1 (Owner D-UI-1, 2026-11-13): the
 // v2.11.0 wording and order — CEO Finance: Overview, Payroll, Transactions, More > Overtime; System: Activity
 // Log. Was (Phase 1): Overtime, Payroll, Finance; Audit.
+// UX-1 (Owner GO 2026-11-17): Home (the Dashboard group, labelled "Home") comes first for both roles and is
+// the landing page; Overtime is a primary Finance item after Payroll (no "More").
 const NAV = Object.freeze({
-  ceo: [['People', [['main', 'swSectionMain', '☺', 'Employees', false]]],
+  ceo: [['Home', [['home', 'swSectionHome', '◆', 'Home', false]]],
+    ['People', [['main', 'swSectionMain', '☺', 'Employees', false]]],
     ['Finance', [['finance', 'swSectionFinance', '▣', 'Overview', false], ['payroll', 'swSectionPayroll', '৳', 'Payroll', false],
-      ['transactions', 'swSectionTransactions', '≡', 'Transactions', false], ['overtime', 'swSectionOvertime', '⏱', 'Overtime', true]]],
+      ['overtime', 'swSectionOvertime', '⏱', 'Overtime', false], ['transactions', 'swSectionTransactions', '≡', 'Transactions', false]]],
     ['System', [['audit', 'swSectionAudit', '☰', 'Activity Log', false]]]],
-  employee: [['People', [['main', 'swSectionMain', '☺', 'My profile', false]]],
-    ['My work', [['overtime', 'swSectionOvertime', '⏱', 'My overtime', false], ['payroll', 'swSectionPayroll', '৳', 'My payroll', false]]]]
+  employee: [['Home', [['home', 'swSectionHome', '◆', 'Home', false]]],
+    ['People', [['main', 'swSectionMain', '☺', 'My profile', false]]],
+    ['My work', [['payroll', 'swSectionPayroll', '৳', 'My payroll', false], ['overtime', 'swSectionOvertime', '⏱', 'My overtime', false]]]]
 });
-const ROUTES = Object.freeze({ ceo: ['main', 'finance', 'payroll', 'transactions', 'overtime', 'audit'], employee: ['main', 'overtime', 'payroll'] });
-const GROUP_IDS = Object.freeze({ 'People': 'people', 'Finance': 'finance', 'My work': 'finance', 'System': 'system' });
+const ROUTES = Object.freeze({ ceo: ['home', 'main', 'finance', 'payroll', 'overtime', 'transactions', 'audit'], employee: ['home', 'main', 'payroll', 'overtime'] });
+const GROUP_IDS = Object.freeze({ 'Home': 'dashboard', 'People': 'people', 'Finance': 'finance', 'My work': 'finance', 'System': 'system' });
 
 // The chrome in its first-paint state: rail expanded, every group expanded, "More" open; then the breadcrumb (Group / Page) opening <main>.
 function chromeOf(role, active, disabled){
@@ -51,7 +55,9 @@ function chromeOf(role, active, disabled){
   let crumb = '';
   const nav = NAV[role].map(([label, items]) => {
     const own = items.find((i) => i[0] === active);
-    if(own) crumb = '<nav class="breadcrumb" aria-label="Breadcrumb"><ol class="crumb-list"><li class="crumb"><span class="crumb-text">' + label + '</span></li>'
+    if(own) crumb = label === own[3]   // UX-1: one crumb when the group and the page share a name (Home)
+      ? '<nav class="breadcrumb" aria-label="Breadcrumb"><ol class="crumb-list"><li class="crumb"><span class="crumb-text" aria-current="page">' + own[3] + '</span></li></ol></nav>'
+      : '<nav class="breadcrumb" aria-label="Breadcrumb"><ol class="crumb-list"><li class="crumb"><span class="crumb-text">' + label + '</span></li>'
       + '<span class="crumb-sep" aria-hidden="true">/</span><li class="crumb"><span class="crumb-text" aria-current="page">' + own[3] + '</span></li></ol></nav>';
     const more = items.filter((i) => i[4]);
     const open = more.length > 0;   // "More" starts open in SESSION (UI-INT-1)

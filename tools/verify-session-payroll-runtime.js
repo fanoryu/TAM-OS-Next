@@ -50,12 +50,20 @@
    no money-moving semantics. TAM OS only records a payment made outside it.
    ============================================================ */
 
+// UX-1: the one thing the address bar may carry — the SESSION shell route (#/name).
+const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 // U1 (GR-4): the exact SESSION shell chrome, written out from the U1 specification. The current
 // section is the shell's aria-current item (was: an aria-pressed tab button).
 const { parseSessionShell, stripSessionShell } = require('./session-shell-chrome.js');
+const { unmoney } = require('./ux-money-oracle.js');   // UX-1 (UX-OD-07): display-only money grouping
+// UX-1 (Owner GO 2026-11-17, Payroll TO-BE A): a status is text + shape + colour — the exact badge, written out here
+// from the spec (not computed by the production code); the words inside are the approved server status words.
+const PAY_TONES = { neutral: '○', info: '◐', attention: '◆', final: '■', stop: '✕' };
+const payBadge = (text, tone) => '<span class="ux-badge ux-tone-' + tone + '"><span class="ux-badge-mark" aria-hidden="true">' + PAY_TONES[tone] + '</span>' + text + '</span>';
+const payCell = (text, tone) => '<td>' + payBadge(text, tone) + '</td>';
 const activeRoute = (html) => (parseSessionShell(html) || {}).active;
 const shellRole = (html) => (parseSessionShell(html) || {}).role;
 
@@ -329,8 +337,13 @@ function loadRuntime(routes, opts){
     AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session), storage: undefined,
     addEventListener: noop, removeEventListener: noop, confirm: () => { access.url.push('confirm()'); return true; },
-    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
-    history: { replaceState: (a, b, u) => { access.url.push(String(u)); }, pushState: (a, b, u) => { access.url.push(String(u)); } },
+    // UX-1 authorized revision (Owner GO 2026-11-17): the SESSION shell writes its route (#/name) to the address
+    // bar, so this recording history also moves location.hash, as a browser does. The harness boots through the
+    // direct link #/employees (the People page; My profile for an Employee), so the landing Home and its reads
+    // stay out of these flows (Home is verified in verify-session-shell-runtime.js). Only a route name may be
+    // written (ROUTE_ONLY below); confirm() is still recorded and still fails. Was: an empty hash; any write failed.
+    location: { hash: '#/employees', search: '', pathname: '/', href: 'http://127.0.0.1/#/employees' },
+    history: { replaceState: (a, b, u) => { access.url.push(String(u)); if(/^#/.test(String(u))) sandbox.location.hash = String(u); }, pushState: (a, b, u) => { access.url.push(String(u)); if(/^#/.test(String(u))) sandbox.location.hash = String(u); } },
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: document
@@ -349,7 +362,12 @@ function loadRuntime(routes, opts){
   vm.runInContext(src, vm.createContext(sandbox), { filename: 'tam-afi4c1-runtime.js' });
   const rt = sandbox.__TAM__;
   rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr; rt.crypto = cryptoLog;
-  rt.appHTML = () => (els.app ? els.app.innerHTML : '');
+  // UX-1 authorized revision (UX-OD-07): list amounts are <data class="ux-money" value="EXACT">GROUPED</data>. The page
+  // is read back with each amount replaced by its exact value attribute, so every exact-string check below
+  // still reads the server string; rawHTML() is the page as rendered, and the firewall checks its grouping
+  // against the independent oracle. Was: the raw page (no ux-money element existed).
+  rt.rawHTML = () => (els.app ? els.app.innerHTML : '');
+  rt.appHTML = () => unmoney(rt.rawHTML()).html;
   rt.app = els.app; rt.dom = dom; rt.loc = sandbox.location;
   rt.pr = () => rt.SessionPayrollStore.snapshot();
   rt.state = () => rt.AuthBoot.snapshot().state;
@@ -470,6 +488,13 @@ function firewall(rt, label, overtimeOpened){
     .replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Post this (payroll|supplemental payroll) to Finance\?<\/h2>[\s\S]*?<\/section>/, '')
     .replace(/<section class="card" aria-labelledby="swpPanelTitle"[^>]*><h2 [^>]*>Record the payment of this (payroll|supplemental payroll)\?<\/h2>[\s\S]*?<\/section>/, '');
   if(finOwned) finFree = finFree.replace(/<p class="auth-message[^"]*" id="swpMutationMessage"[^>]*>[^<]*<\/p>/, '');
+  // UX-1 authorized revision (Owner GO 2026-11-17, Payroll TO-BE A): in the plan DETAIL only, a Committed plan's
+  // stage line reuses the approved Finance words (D-AFI4e-5 / D-AFI4f-3) — its stage badge and Next step text — and
+  // nothing else; the month list stays Finance-free (D-AFI4e-4 / D-AFI4f-6, checked by F4 / X3). Exactly those
+  // placements are set aside here. Was: Finance wording only in the Finance card.
+  finFree = finFree.split('<span class="ux-badge ux-tone-planned"><span class="ux-badge-mark" aria-hidden="true">▲</span>Posted to Finance — Planned, not paid</span>').join('')
+    .split('<span class="ux-badge ux-tone-done"><span class="ux-badge-mark" aria-hidden="true">✓</span>Payment recorded — paid outside TAM OS</span>').join('')
+    .split(' Next step: Post to Finance.').join('').split(' Next step: Record payment.').join('');
   check(!/Finance|ledger|journal|payment|Execut|Posted|Post to/i.test(finFree) && !/\bPaid\b|Mark paid|\bPay\b/.test(html),
     label + ': no Finance, payment, execution or posting wording (only the preparation and Commit confirmations say nothing is posted to Finance; AFI-4e: the Finance card, the posting confirmation and its messages)');
   // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Commit payroll / Retry commit exist, on a Ready
@@ -490,7 +515,7 @@ function firewall(rt, label, overtimeOpened){
   check(!new RegExp('[0-9a-f]{32}').test(html.replace(RID, '').replace(new RegExp(IDO + '|' + IDO2 + '|' + IDO3, 'g'), '')), label + ': no opaque plan or document id in the page (only an overtime record id, by design)');
   check(rt.State.employees.length === 0 && rt.State.payrollPlans.length === 0 && rt.State.storageReady === false && rt.spy.indexOf("renderShell") === -1,
     label + ': legacy State (employees, payroll plans) stays empty and the business shell is never granted');
-  check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
+  check(rt.access.url.every(ROUTE_ONLY) && ROUTE_ONLY(rt.loc.hash) && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
   const bad = posts(rt).filter((c) => {
     const b = bodyOf(c);
     const want = c.url === W.generate ? 'month' : c.url === W.commit ? COMMIT_KEYS : 'expectedVersion,id';
@@ -628,10 +653,17 @@ function firewall(rt, label, overtimeOpened){
     check(html.indexOf('<td>8000000.50</td><td>12345.00</td><td>999.00</td>') !== -1, 'C. money is shown exactly as sent — the deliberately inconsistent total 999.00 verbatim (no client arithmetic, rounding or reformatting)');
     // U1 authorized revision (GR-4): checked on the card; the shell chrome (brand <img>, base64 logo,
     // "Finance" group label) is pinned exactly by tools/session-shell-chrome.js. Was: the whole page.
-    check(/Base salary \(Rp\)/.test(html) && /Total \(Rp\)/.test(html) && !/Rp ?[0-9]|[0-9]\.[0-9]{3},|8\.000\.000/.test(stripSessionShell(html)), 'C. amounts are labelled (Rp) and never reformatted (no locale grouping)');
+    // UX-1 authorized revision (UX-OD-07 = display-only grouping): the list shows 8.000.000,50 while the exact
+    // 8000000.50 stays in <data value>; read back (html) the page has no grouped text at all. Was: no grouping.
+    const um = unmoney(stripSessionShell(rt.rawHTML()));
+    check(/Base salary \(Rp\)/.test(html) && /Total \(Rp\)/.test(html) && !/Rp ?[0-9]|[0-9]\.[0-9]{3},|8\.000\.000/.test(stripSessionShell(html))
+      && um.ok && um.count === 15 && /<data class="ux-money" value="8000000\.50">8\.000\.000,50<\/data>/.test(rt.rawHTML()),
+      'C. amounts are labelled (Rp); UX-1: each is the exact server string in <data value>, shown with display-only grouping (never recomputed)');
     // AFI-4c2 authorized revision (D-AFI4c2-3 = A): Committed reads "Committed — final, not paid". Was: "Committed".
-    check(/<td>Ready — approved, not paid<\/td>/.test(html) && /<td>Committed — final, not paid<\/td>/.test(html) && /<td>Cancelled<\/td>/.test(html) && /<td>Reviewed<\/td>/.test(html) && /<td>Draft<\/td>/.test(html)
-      && !/<td>Approved<\/td>/.test(html), 'C. the server status words are shown (D-AFI4c1-3 = A): Ready reads "Ready — approved, not paid"; never the LOCAL "Approved"');
+    // UX-1 authorized revision: each status is its stage badge (the same server words). Was: the bare words in the cell.
+    check(html.indexOf(payCell('Ready — approved, not paid', 'attention')) !== -1 && html.indexOf(payCell('Committed — final, not paid', 'final')) !== -1
+      && html.indexOf(payCell('Cancelled', 'stop')) !== -1 && html.indexOf(payCell('Reviewed', 'info')) !== -1 && html.indexOf(payCell('Draft', 'neutral')) !== -1
+      && !/>Approved</.test(html), 'C. the server status words are shown (D-AFI4c1-3 = A): Ready reads "Ready — approved, not paid"; never the LOCAL "Approved"');
     check(/Fabricated &lt;Alpha&gt;/.test(html) && !/<Alpha>/.test(html), 'C. server text is escaped');
     check(!/Total payroll|Sum|Grand total/i.test(html) && (html.match(/999\.00/g) || []).length === 1, 'C. no month total or summary is computed');
     check(/Prepare payroll for April 2031/.test(html) && !/>[^<]*(Generate|Pay\b|Run payroll)/.test(html), 'C. the primary action reads "Prepare payroll for April 2031" — not pay, run or commit');
@@ -685,7 +717,7 @@ function firewall(rt, label, overtimeOpened){
     const calls = rt.net.calls.length;
     rt.app.set('swpMonth', '2031-13'); rt.app.set('swpMonth', 'bad'); rt.SessionPayroll.setMonth('1899-12'); await flush();
     check(rt.pr().month === '2031-07' && rt.net.calls.length === calls, 'E. an invalid month changes nothing and reads nothing');
-    check(rt.access.url.length === 0 && rt.loc.search === '' && rt.access.local.length === 0, 'E. the month lives in memory only (no URL, history or storage)');
+    check(rt.access.url.every(ROUTE_ONLY) && rt.loc.search === '' && rt.access.local.length === 0, 'E. the month lives in memory only (no URL, history or storage)');
     firewall(rt, 'E. month');
   }
 
@@ -1122,7 +1154,8 @@ function firewall(rt, label, overtimeOpened){
     let html = rt.appHTML();
     check(rt.pr().open === true && /<h1[^>]*>My payroll<\/h1>/.test(html) && shellRole(html) === 'employee' && activeRoute(html) === 'payroll' && countOf(rt, LIST(MONTH)) === 1,
       'O. My payroll opens on the current month with one read of the month');
-    check(html.indexOf('<td>April 2031</td><td>Committed — final, not paid</td><td>1000000.00</td><td>54688.00</td><td>777.00</td>') !== -1,
+    // UX-1 authorized revision: the status is its badge; the amounts read back exact (unmoney). Was: the bare status word.
+    check(html.indexOf('<td>April 2031</td>' + payCell('Committed — final, not paid', 'final') + '<td>1000000.00</td><td>54688.00</td><td>777.00</td>') !== -1,
       'O. the own Committed plan, money verbatim (the inconsistent total 777.00 as sent), Committed — final, not paid');
     check(!/Prepare payroll|Not included|swpGenerateBtn/.test(html), 'O. no preparation, no exclusions');
     rt.app.fire('swpOpen0', 'click'); await flush();
@@ -1629,7 +1662,7 @@ function firewall(rt, label, overtimeOpened){
     check(Object.isFrozen(S.snapshot().suppIntent), 'S7. the Supplemental intent is one frozen record');
     S.clear();
     check(S.applyElig(e1, P([])) === false && S.snapshot().suppIntent === null && S.snapshot().suppDetail === null, 'S7. after clear() no earlier answer applies, and the intent is gone');
-    check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0 && rt.access.url.length === 0 && rt.spy.length === 0,
+    check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0 && rt.access.url.every(ROUTE_ONLY) && rt.spy.length === 0,
       'S7. no storage, cookie, URL / history or LOCAL engine use anywhere');
   }
 
@@ -2291,6 +2324,40 @@ function firewall(rt, label, overtimeOpened){
     }
     const l = await open({ [FIN(MONTH)]: [finOk([posting(FID1, 'payrollPlan', P4, '5000000.00')])] });
     check(!/swpPayment|Payment|Record payment/.test(l.appHTML()) && countOf(l, EXE(MONTH)) === 1, 'X3. the month list shows no payment column or status (D-AFI4f-6 = A: details only), though the executions are read');
+    // UX-1 G-4 correction (2026-11-17): "Next plan in this stage" moves within the stage the detail SHOWS. Five
+    // Committed plans in list order: A posted, B unposted, C payment recorded, D posted, E unposted.
+    {
+      const N = (c) => c.repeat(16);
+      const A = plan(N('f1'), 'e_na', 'EMP-0NA', 'Committed', 4), B = plan(N('f2'), 'e_nb', 'EMP-0NB', 'Committed', 4), C = plan(N('f3'), 'e_nc', 'EMP-0NC', 'Committed', 4);
+      const D = plan(N('f4'), 'e_nd', 'EMP-0ND', 'Committed', 4), E = plan(N('f5'), 'e_ne', 'EMP-0NE', 'Committed', 4);
+      const PA = posting(N('b1'), 'payrollPlan', A, '5000000.00'), PC = posting(N('b3'), 'payrollPlan', C, '5000000.00'), PD = posting(N('b4'), 'payrollPlan', D, '5000000.00');
+      const XC = execution(N('c3'), PC, '2031-04-10', 'cash');
+      const LISTN = { payrollPlans: [A, B, C, D, E] };
+      const routesN = (fin, exe) => Object.assign({ [LIST(MONTH)]: [ok(LISTN)], [FIN(MONTH)]: [fin || finOk([PA, PC, PD])], [EXE(MONTH)]: [exe || exeOk([XC])] },
+        ...[A, B, C, D, E].map((p) => ({ [DET(p.id)]: [ok(det(p))], [DRIFT(p.id)]: [driftOk(p.id, [])] })));
+      const openN = async (p, fin, exe) => { const rt = await boot(ME_CEO, routesN(fin, exe)); rt.app.fire('swSectionPayroll', 'click'); await flush();
+        rt.app.fire('swpOpen' + LISTN.payrollPlans.indexOf(p), 'click'); await flush(); return rt; };
+      const shown = (rt) => (rt.pr().detail && rt.pr().detail.plan) ? rt.pr().detail.plan.id : null;
+      const step = async (rt) => { rt.app.fire('swpNextStageBtn', 'click'); await flush(); return shown(rt); };
+      const writes = (rt) => rt.net.calls.filter((c) => c.init && c.init.method && c.init.method !== 'GET');
+      const a = await openN(A);
+      const a1 = await step(a), a2 = await step(a);
+      check(a1 === D.id && a2 === A.id && /Posted to Finance — Planned, not paid/.test(a.appHTML()),
+        'UX-1 G-4: from a posted plan, Next plan in this stage opens the next POSTED plan (never the unposted B or the recorded C), and wraps');
+      const b = await openN(B);
+      const b1 = await step(b), b2 = await step(b);
+      check(b1 === E.id && b2 === B.id && /Next step: Post to Finance\./.test(b.appHTML()),
+        'UX-1 G-4: from an unposted plan it opens only the next UNPOSTED plan (never a posted or payment-recorded plan)');
+      const c = await openN(C);
+      check(!/id="swpNextStageBtn"/.test(c.appHTML()) && /Payment recorded — paid outside TAM OS/.test(c.appHTML()),
+        'UX-1 G-4: the only payment-recorded plan offers no Next plan in this stage');
+      const lo = await openN(A, 'HANG');
+      check(!/id="swpNextStageBtn"/.test(lo.appHTML()), 'UX-1 G-4: while the Finance status is still being read, no Next plan in this stage is offered');
+      check([a, b, c, lo].every((rt) => writes(rt).length === 0), 'UX-1 G-4: navigating between plans sends no write of any kind (no financial state changes)');
+      const lst = await boot(ME_CEO, routesN()); lst.app.fire('swSectionPayroll', 'click'); await flush();
+      check(!/Finance|Payment|Record payment|Posted/.test(stripSessionShell(lst.appHTML()).replace(/Not posted to Finance/g, '')),
+        'UX-1 G-4: the month list still shows no Finance or payment status (D-AFI4e-4 / D-AFI4f-6)');
+    }
   }
 
   /* ---------- X4. AFI-4f the unknown outcome and Retry recording (D-AFI4f-5 = A) ---------- */

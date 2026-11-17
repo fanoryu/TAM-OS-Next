@@ -107,10 +107,44 @@ const SESSION_OVERTIME_ACTION_BUTTONS = Object.freeze({
   edit: { id: 'swoEditBtn', label: 'Edit', cls: 'btn' },
   delete: { id: 'swoDeleteBtn', label: 'Delete', cls: 'btn btn-danger' },
   submit: { id: 'swoSubmitBtn', label: 'Submit', cls: 'btn' },
-  review: { id: 'swoReviewBtn', label: 'Review', cls: 'btn' },
+  review: { id: 'swoReviewBtn', label: 'Mark reviewed', cls: 'btn' },   // UX-1: was 'Review' — review is not approval
   reject: { id: 'swoRejectBtn', label: 'Reject', cls: 'btn btn-danger' },
   approve: { id: 'swoApproveBtn', label: 'Approve', cls: 'btn btn-accent' }
 });
+
+// UX-1 (Owner GO 2026-11-17, Overtime TO-BE A): status tones, the CEO's "Needs decision" filter
+// (Submitted or Reviewed — memory only, never storage) and the two-step decision path. Review and
+// approval stay two separate actions, each with its own confirmation; nothing is batched.
+const SESSION_OVERTIME_TONES = Object.freeze({ Draft: 'neutral', Submitted: 'info', Reviewed: 'info', Approved: 'final', Rejected: 'stop' });
+const SessionOvertimeFilter = { decision: false };
+function sessionOvertimeBadgeHTML(status){
+  return statusBadgeHTML(status, Object.prototype.hasOwnProperty.call(SESSION_OVERTIME_TONES, status) ? SESSION_OVERTIME_TONES[status] : 'neutral');
+}
+function sessionOvertimeNeedsDecision(r){ return r.status === 'Submitted' || r.status === 'Reviewed'; }
+// The id of the next record (list order, wrapping) that needs a decision, other than `id`, or null.
+function sessionOvertimeNextDecision(w, id){
+  const list = w.list || [];
+  const at = list.findIndex(function(x){ return x.id === id; });
+  for(let k = 1; k <= list.length; k++){
+    const q = list[((at < 0 ? 0 : at) + k) % list.length];
+    if(q && q.id !== id && sessionOvertimeNeedsDecision(q)) return q.id;
+  }
+  return null;
+}
+// The decision path of a record, for the CEO (Submitted -> Reviewed -> Approved or Rejected).
+function sessionOvertimeStepsHTML(principal, d){
+  if(!principal || principal.principalType !== PRINCIPAL_TYPES.CEO || ['Submitted', 'Reviewed', 'Approved', 'Rejected'].indexOf(d.status) === -1) return '';
+  const step = function(n, label, state){
+    return '<li class="ux-step' + (state === 'done' ? ' ux-step-done' : '') + '"' + (state === 'current' ? ' aria-current="step"' : '') + '>'
+      + (state === 'done' ? '✓ ' : '') + 'Step ' + n + ': ' + escapeHtml(label) + '</li>';
+  };
+  const final = d.status === 'Approved' || d.status === 'Rejected';
+  return '<ol class="ux-steps" aria-label="Decision steps">'
+    + step(1, 'Mark reviewed', d.status === 'Submitted' ? 'current' : (d.status === 'Rejected' ? '' : 'done'))
+    + step(2, final ? (d.status === 'Approved' ? 'Approved' : 'Rejected') : 'Approve or reject', final ? 'done' : (d.status === 'Reviewed' ? 'current' : ''))
+    + '</ol>'
+    + (final ? '' : '<p class="hint">Marking a record reviewed is not approval. Only Approve freezes the valuation and makes the record final.</p>');
+}
 
 function sessionOvertimeValue(v){
   return (v === null || v === undefined || v === '') ? '—' : escapeHtml(String(v));
@@ -120,6 +154,9 @@ function sessionOvertimeMonthLabel(key){
 }
 function sessionOvertimeLabel(principal, w, employeeId){
   return sessionOvertimeOwnerLabel(principal, w.labelsStatus, w.people, employeeId);
+}
+function sessionOvertimeOwnerAria(principal, w, r){
+  return sessionOvertimeLabel(principal, w, r.employeeId) + ', ' + (r.overtimeDate || '');
 }
 function sessionOvertimeBusy(w){ return w.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING; }
 
@@ -308,12 +345,22 @@ function sessionOvertimeListHTML(principal, w){
   }
   if(w.listStatus !== SESSION_OVERTIME_STATUS.READY || !w.list || w.listMonth !== w.month) return head + '<p class="auth-lead" role="status" aria-busy="true">Loading overtime records…</p>';
   if(!w.list.length) return head + labels + '<div class="empty">No overtime records for ' + escapeHtml(sessionOvertimeMonthLabel(w.month)) + '.</div>';
+  const ceo = principal.principalType === PRINCIPAL_TYPES.CEO;
+  const waiting = w.list.filter(sessionOvertimeNeedsDecision).length;
+  if(!waiting) SessionOvertimeFilter.decision = false;
+  const only = ceo && SessionOvertimeFilter.decision;
   const rows = w.list.map(function(r, i){
+    if(only && !sessionOvertimeNeedsDecision(r)) return '';
     return '<tr><td>' + sessionOvertimeValue(r.overtimeDate) + '</td><td>' + escapeHtml(sessionOvertimeLabel(principal, w, r.employeeId)) + '</td>'
-      + '<td>' + escapeHtml(r.hours) + '</td><td>' + escapeHtml(r.status) + '</td>'
-      + '<td><button class="btn" type="button" id="swoOpen' + i + '"' + dis + '>View</button></td></tr>';
+      + '<td>' + escapeHtml(r.hours) + '</td><td>' + sessionOvertimeBadgeHTML(r.status) + '</td>'
+      + '<td><button class="btn" type="button" id="swoOpen' + i + '"' + dis + ' aria-label="Open the record of ' + escapeHtml(sessionOvertimeOwnerAria(principal, w, r)) + '">View</button></td></tr>';
   }).join('');
-  return head + labels + '<div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Employee</th><th scope="col">Hours</th>'
+  const filter = ceo && waiting
+    ? '<div class="ux-banner" role="status"><span>' + escapeHtml(String(waiting)) + (waiting === 1 ? ' record needs' : ' records need') + ' a decision (Submitted or Reviewed).</span>'
+      + '<span class="ux-chips"><button class="ux-chip" type="button" id="swoFilterDecision" aria-pressed="' + only + '"' + dis + '>Needs decision <span class="ux-chip-count">' + escapeHtml(String(waiting)) + '</span></button>'
+      + '<button class="ux-chip" type="button" id="swoFilterAll" aria-pressed="' + !only + '"' + dis + '>All <span class="ux-chip-count">' + escapeHtml(String(w.list.length)) + '</span></button></span></div>'
+    : '';
+  return head + labels + filter + '<div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Employee</th><th scope="col">Hours</th>'
     + '<th scope="col">Status</th><th scope="col" aria-label="Open record"></th></tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>';
 }
@@ -362,13 +409,17 @@ function sessionOvertimeDetailHTML(principal, w){
   }).join('');
   const rows = [
     ['Employee', sessionOvertimeLabel(principal, w, d.employeeId)], ['Month', sessionOvertimeMonthLabel(d.monthKey)], ['Date', d.overtimeDate],
-    ['Hours', d.hours], ['Work description', d.workDescription], ['Notes', d.notes], ['Status', d.status]
+    ['Hours', d.hours], ['Work description', d.workDescription], ['Notes', d.notes]
   ];
+  const nextId = !w.panel && principal.principalType === PRINCIPAL_TYPES.CEO && w.listMonth === d.monthKey ? sessionOvertimeNextDecision(w, d.id) : null;
+  const next = nextId ? '<button class="btn" type="button" id="swoNextDecisionBtn"' + dis + '>Next record needing a decision</button>' : '';
   return '<h2 class="section-title">' + escapeHtml(sessionOvertimeMonthLabel(d.monthKey)) + ' — ' + escapeHtml(d.hours) + ' hours</h2>'
     + (w.panel ? '' : sessionOvertimeMutationHTML(w))
-    + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionOvertimeValue(r[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+    + sessionOvertimeStepsHTML(principal, d)
+    + '<div class="table-wrap"><table><tbody>' + rows.map(function(r){ return '<tr><th scope="row">' + escapeHtml(r[0]) + '</th><td>' + sessionOvertimeValue(r[1]) + '</td></tr>'; }).join('')
+    + '<tr><th scope="row">Status</th><td>' + sessionOvertimeBadgeHTML(d.status) + '</td></tr></tbody></table></div>'
     + sessionOvertimeValuationHTML(principal, w)
-    + back + actions + '</div>'
+    + back + actions + next + '</div>'
     + (w.panel && w.panel.id === d.id ? sessionOvertimePanelHTML(principal, w) : '');
 }
 
@@ -401,6 +452,10 @@ function bindSessionOvertime(app){
   click('swoFormCancel', function(){ SessionOvertime.cancelForm(); });
   const w = SessionOvertimeStore.snapshot();
   (w.list || []).forEach(function(row, i){ click('swoOpen' + i, function(){ SessionOvertime.openDetail(row.id); }); });
+  // UX-1: the CEO's list filter (memory only) and the next record needing a decision.
+  click('swoFilterDecision', function(){ SessionOvertimeFilter.decision = true; if(typeof render === 'function') render(); });
+  click('swoFilterAll', function(){ SessionOvertimeFilter.decision = false; if(typeof render === 'function') render(); });
+  click('swoNextDecisionBtn', function(){ const id = w.detail ? sessionOvertimeNextDecision(w, w.detail.id) : null; if(id) SessionOvertime.openDetail(id); });
   // The draft follows the fields as they change; Save hands the last values over first. The
   // owner is chosen by position in the selector that was rendered.
   const form = app.querySelector('#swoForm');

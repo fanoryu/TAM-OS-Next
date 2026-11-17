@@ -242,3 +242,44 @@ td.num, th.num{text-align:right;font-family:var(--sans);font-variant-numeric:tab
 .auth-message{margin:0;min-height:1.2em;font-size:var(--fs-2);color:var(--text-dim);}
 .auth-message-warn{color:var(--warn);}
 .auth-actions{display:flex;justify-content:flex-end;gap:var(--space-2);}
+/* UX-1 (Owner GO 2026-11-17, UX-OD-01): additive Unified Experience components. No existing
+   rule or token value changes; the --ink-* tokens are new, for badge text over the existing
+   -soft backgrounds (the solid tones do not all reach 4.5:1 in the light theme). */
+:root, :root[data-theme="dark"]{--ink-info:#8DB8E4;--ink-attention:#E8A563;--ink-final:#2FD3CA;--ink-planned:#D9B577;--ink-done:#6CC596;--ink-stop:#E58471;--ink-neutral:var(--text-dim);--final-soft:rgba(8,185,176,0.14);}
+:root[data-theme="light"]{--ink-info:#1F5290;--ink-attention:#7A4A0E;--ink-final:#066B65;--ink-planned:#7A5214;--ink-done:#1E6340;--ink-stop:#8F2E1B;--final-soft:rgba(10,133,126,0.12);}
+.ux-money{font-variant-numeric:tabular-nums;white-space:nowrap;}
+td .ux-money{display:inline-block;text-align:right;}
+.ux-badge{display:inline-flex;align-items:center;gap:var(--space-1);padding:2px var(--space-2);border-radius:var(--radius-full);font-size:var(--fs-2);font-weight:600;white-space:nowrap;background:var(--surface-3);color:var(--ink-neutral);}
+.ux-badge-mark{font-size:var(--fs-1);line-height:1;}
+.ux-tone-info{background:var(--blue-soft);color:var(--ink-info);}
+.ux-tone-attention{background:var(--warn-soft);color:var(--ink-attention);}
+.ux-tone-final{background:var(--final-soft);color:var(--ink-final);}
+.ux-tone-planned{background:var(--accent-soft);color:var(--ink-planned);}
+.ux-tone-done{background:var(--green-soft);color:var(--ink-done);}
+.ux-tone-stop{background:var(--brick-soft);color:var(--ink-stop);}
+.ux-home-grid{display:grid;gap:var(--space-3);grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:var(--space-4);}
+.ux-home-grid > *{min-width:0;}
+.ux-card{display:flex;flex-direction:column;gap:var(--space-2);}
+.ux-card h2{margin:0;}
+.ux-card-value{font-family:var(--sans);font-variant-numeric:tabular-nums;font-size:clamp(18px,2.4vw,28px);font-weight:600;line-height:1.15;overflow-wrap:normal;}
+.ux-card-actions{margin-top:auto;display:flex;gap:var(--space-2);flex-wrap:wrap;}
+.ux-kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-3);margin:0;font-size:var(--fs-3);}
+.ux-kv dt{color:var(--text-dim);margin:0;}
+.ux-kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;}
+.ux-chips{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:0 0 var(--space-3) 0;}
+.ux-chip{display:inline-flex;align-items:center;gap:var(--space-1);min-height:32px;padding:var(--space-1) var(--space-3);border-radius:var(--radius-full);border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:var(--fs-2);cursor:pointer;}
+.ux-chip[aria-pressed="true"]{background:var(--interactive-soft);border-color:var(--interactive);color:var(--text);font-weight:600;}
+.ux-chip:focus-visible{outline:2px solid var(--interactive);outline-offset:2px;}
+.ux-chip:disabled{opacity:.55;cursor:not-allowed;}
+.ux-chip-count{font-variant-numeric:tabular-nums;font-weight:700;}
+.ux-steps{display:flex;flex-wrap:wrap;gap:var(--space-2);list-style:none;margin:0 0 var(--space-3) 0;padding:0;font-size:var(--fs-2);}
+.ux-step{padding:var(--space-1) var(--space-2);border-radius:var(--radius-sm);border:1px solid var(--border-soft);color:var(--text-dim);}
+.ux-step[aria-current="step"]{border-color:var(--interactive);color:var(--text);font-weight:600;background:var(--interactive-soft);}
+.ux-step-done{color:var(--ink-done);}
+.ux-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);background:var(--warn-soft);color:var(--text);margin-bottom:var(--space-3);font-size:var(--fs-3);}
+.ux-muted{color:var(--text-dim);font-size:var(--fs-2);margin:0;}
+.ux-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-1);font-size:var(--fs-3);}
+.ux-list li{display:flex;justify-content:space-between;gap:var(--space-2);flex-wrap:wrap;}
+.ux-list .mono{font-size:var(--fs-1);color:var(--text-faint);overflow-wrap:anywhere;}
+@media(max-width:768px){.ux-chip, .ux-card-actions .btn{min-height:44px;}}
+@media(prefers-reduced-motion:reduce){.ux-chip, .ux-badge{transition:none;}}

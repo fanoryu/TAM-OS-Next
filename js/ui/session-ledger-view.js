@@ -85,14 +85,6 @@ function sessionLedgerRangeHTML(w, dis){
     + '<button class="btn" type="submit" id="sfApplyBtn"' + dis + '>Apply</button></form>' + message;
 }
 
-function sessionLedgerTabsHTML(w, dis){
-  const tab = function(v, label, id){
-    const on = w.view === v;
-    return '<button class="tab' + (on ? ' active' : '') + '" type="button" id="' + id + '" role="tab" aria-selected="' + on + '"' + dis + '>' + label + '</button>';
-  };
-  return '<div class="tabs" role="tablist" aria-label="Finance views">' + tab('dashboard', 'Dashboard', 'sfDashboardTab') + tab('transactions', 'Transactions', 'sfTransactionsTab') + '</div>';
-}
-
 function sessionLedgerRangeLabel(r){
   return r ? (r.from === r.to ? r.from : r.from + ' to ' + r.to) : '—';
 }
@@ -103,23 +95,35 @@ function sessionLedgerDashboardHTML(w){
   if(w.reportStatus !== SESSION_LEDGER_STATUS.READY || !w.report) return head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_LEDGER_TEXT.loadingReport) + '</p>';
   const r = w.report;
   const row = function(label, l, scope){
-    return '<tr><th scope="' + (scope || 'row') + '">' + escapeHtml(label) + '</th><td>' + escapeHtml(l.income) + '</td><td>' + escapeHtml(l.expense) + '</td><td>' + escapeHtml(l.net) + '</td>'
+    return '<tr><th scope="' + (scope || 'row') + '">' + escapeHtml(label) + '</th><td>' + moneyHTML(l.income) + '</td><td>' + moneyHTML(l.expense) + '</td><td>' + moneyHTML(l.net) + '</td>'
       + '<td>' + (l.count === undefined ? '—' : escapeHtml(String(l.count))) + '</td></tr>';
   };
   const posts = '<div class="table-wrap" id="sfPosts"><table><caption>Income and expenses by Financial Post</caption><thead><tr><th scope="col">Financial Post</th>'
     + '<th scope="col">Income (Rp)</th><th scope="col">Expenses (Rp)</th><th scope="col">Net (Rp)</th><th scope="col">Transactions</th></tr></thead><tbody>'
     + r.posts.map(function(p){ return row(p.name, p); }).join('')
     + row('All Financial Posts', r.general) + '</tbody></table></div>'
-    + '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.voidedNote) + ' Voided in this range: ' + escapeHtml(String(r.voided.count)) + ' (Rp ' + escapeHtml(r.voided.amount) + ').</p>';
+    + '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.voidedNote) + ' Voided in this range: ' + escapeHtml(String(r.voided.count)) + ' (Rp ' + moneyHTML(r.voided.amount) + ').</p>';
   const p = r.payroll;
   const payroll = '<h3 class="section-title">Payroll</h3><div class="table-wrap" id="sfPayroll"><table><caption>Payroll, reported separately</caption><thead><tr><th scope="col">Payroll</th><th scope="col">Amount (Rp)</th><th scope="col">Records</th></tr></thead><tbody>'
-    + '<tr><th scope="row">Posted for ' + escapeHtml(p.posted.fromMonth === p.posted.toMonth ? p.posted.fromMonth : p.posted.fromMonth + ' to ' + p.posted.toMonth) + '</th><td>' + escapeHtml(p.posted.amount) + '</td><td>' + escapeHtml(String(p.posted.count)) + '</td></tr>'
-    + '<tr><th scope="row">Paid in this range</th><td>' + escapeHtml(p.paid.amount) + '</td><td>' + escapeHtml(String(p.paid.count)) + '</td></tr>'
+    + '<tr><th scope="row">Posted for ' + escapeHtml(p.posted.fromMonth === p.posted.toMonth ? p.posted.fromMonth : p.posted.fromMonth + ' to ' + p.posted.toMonth) + '</th><td>' + moneyHTML(p.posted.amount) + '</td><td>' + escapeHtml(String(p.posted.count)) + '</td></tr>'
+    + '<tr><th scope="row">Paid in this range</th><td>' + moneyHTML(p.paid.amount) + '</td><td>' + escapeHtml(String(p.paid.count)) + '</td></tr>'
     + '</tbody></table></div><p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.payrollNote) + '</p>';
   const c = r.consolidated;
   const consolidated = '<h3 class="section-title">Consolidated (cash basis)</h3><div class="table-wrap" id="sfConsolidated"><table><caption>Consolidated total, cash basis: general income and expenses plus payroll paid in this range</caption><thead><tr><th scope="col">Total</th><th scope="col">Income (Rp)</th><th scope="col">Expenses (Rp)</th><th scope="col">Net (Rp)</th></tr></thead><tbody>'
-    + '<tr><th scope="row">Financial Posts and payroll paid (cash basis)</th><td>' + escapeHtml(c.income) + '</td><td>' + escapeHtml(c.expense) + '</td><td>' + escapeHtml(c.net) + '</td></tr></tbody></table></div>';
+    + '<tr><th scope="row">Financial Posts and payroll paid (cash basis)</th><td>' + moneyHTML(c.income) + '</td><td>' + moneyHTML(c.expense) + '</td><td>' + moneyHTML(c.net) + '</td></tr></tbody></table></div>';
   return head + posts + payroll + consolidated;
+}
+
+// UX-1 (UX-OD-07): what the typed amount reads as, display only — the field value is sent exactly as
+// typed. An entry that looks like grouped thousands ("150.000", "150,000") is named, never converted.
+function sessionLedgerAmountPreview(value){
+  const v = typeof value === 'string' ? value : '';
+  // G-4 correction (2026-11-17): the transaction validator (transactionIsAmount) decides; the preview
+  // never reads back a value it would refuse (zero, more than 15 digits). Was: any whole N.00.
+  if(transactionIsAmount(v)) return 'Reads as Rp ' + moneyDisplay(v) + '.';
+  if(/^[0-9]+\.[0-9]{2}$/.test(v)) return 'This amount is not accepted. Use a whole Rupiah amount above zero, up to 15 digits, written as 150000.00.';
+  if(/[.,][0-9]{3}(?![0-9])/.test(v) || /,/.test(v)) return 'Write the amount without thousands separators, for example 150000.00. Dots and commas are not read as thousands.';
+  return '';
 }
 
 function sessionLedgerFieldHTML(def, value, invalid, disabled){
@@ -137,7 +141,8 @@ function sessionLedgerFieldHTML(def, value, invalid, disabled){
   else control = '<input class="input" type="' + def.type + '"' + (def.inputmode ? ' inputmode="' + def.inputmode + '"' : '') + ' autocomplete="off"' + attrs + ' value="' + escapeHtml(value) + '">';
   return '<div class="field"><label for="' + id + '">' + escapeHtml(def.label) + ' <span aria-hidden="true">*</span></label>' + control
     + (def.hint ? '<p class="hint" id="' + hintId + '">' + escapeHtml(def.hint) + '</p>' : '')
-    + (invalid ? '<p class="hint auth-message-warn" id="' + errorId + '">' + escapeHtml(def.error) + '</p>' : '') + '</div>';
+    + (invalid ? '<p class="hint auth-message-warn" id="' + errorId + '">' + escapeHtml(def.error) + '</p>' : '')
+    + (def.name === 'amount' ? '<p class="hint" id="sff-amount-preview" aria-live="polite">' + escapeHtml(sessionLedgerAmountPreview(value)) + '</p>' : '') + '</div>';
 }
 
 function sessionLedgerWriteHTML(w, kind){
@@ -193,8 +198,8 @@ function sessionLedgerTransactionsHTML(w){
   const body = w.list.map(function(t, i){
     const voided = t.status === 'Voided';
     return '<tr><td>' + escapeHtml(t.transactionDate) + '</td><td>' + escapeHtml(SESSION_LEDGER_KIND_LABELS[t.kind]) + '</td><td>' + escapeHtml(transactionPostName(t.financialPost)) + '</td>'
-      + '<td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.amount) + '</td>'
-      + '<td>' + (voided ? 'Voided: ' + escapeHtml(t.void.reason) : 'Active') + '</td>'
+      + '<td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + moneyHTML(t.amount) + '</td>'
+      + '<td>' + (voided ? statusBadgeHTML('Voided', 'stop') + ' ' + escapeHtml(t.void.reason) : statusBadgeHTML('Active', 'done')) + '</td>'
       + '<td>' + (voided ? '' : '<button class="btn" type="button" data-sf-void="' + i + '"' + dis + '>Void</button>') + '</td></tr>';
   }).join('');
   return head + '<p class="hint">' + w.list.length + (w.list.length === 1 ? ' transaction' : ' transactions') + ', oldest first.</p>'
@@ -209,14 +214,12 @@ function renderSessionLedgerHTML(w){
   const dis = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING || w.form || w.voidTarget ? ' disabled' : '';
   const notice = w.notice === 'created' || w.notice === 'voided'
     ? '<p class="auth-message" id="sfMessage" role="status" tabindex="-1">' + escapeHtml(SESSION_LEDGER_TEXT[w.notice]) + '</p>' : '';
-  return '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.lead) + '</p>' + sessionLedgerRangeHTML(w, dis) + sessionLedgerTabsHTML(w, dis) + notice
+  return '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.lead) + '</p>' + sessionLedgerRangeHTML(w, dis) + notice
     + (w.view === 'transactions' ? sessionLedgerTransactionsHTML(w) : sessionLedgerDashboardHTML(w));
 }
 
 function bindSessionLedger(app){
   const on = function(id, type, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener(type, fn); };
-  on('sfDashboardTab', 'click', function(){ SessionLedger.setView('dashboard'); });
-  on('sfTransactionsTab', 'click', function(){ SessionLedger.setView('transactions'); });
   on('sfFrom', 'input', function(){ SessionLedger.setRangeDraft('from', this.value); });
   on('sfTo', 'input', function(){ SessionLedger.setRangeDraft('to', this.value); });
   on('sfRangeForm', 'submit', function(e){
@@ -237,6 +240,8 @@ function bindSessionLedger(app){
       const el = form.querySelector('#sff-' + def.name);
       if(el){ el.addEventListener('input', keep); el.addEventListener('change', keep); }
     });
+    const amount = form.querySelector('#sff-amount'), preview = form.querySelector('#sff-amount-preview');
+    if(amount && preview) amount.addEventListener('input', function(){ preview.textContent = sessionLedgerAmountPreview(this.value); });
     form.addEventListener('submit', function(e){
       e.preventDefault();
       SESSION_LEDGER_FORM.forEach(function(def){ const el = form.querySelector('#sff-' + def.name); if(el) SessionLedger.setDraft(def.name, el.value); });

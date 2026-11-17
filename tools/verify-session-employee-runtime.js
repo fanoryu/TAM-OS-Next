@@ -207,8 +207,13 @@ function loadRuntime(routes){
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session), storage: undefined,
     addEventListener: noop, removeEventListener: noop, confirm: ()=>true,
     // AFI-4a3: a recording URL — nothing in the SESSION workspace may write the address bar.
-    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
-    history: { replaceState: (a, b, u) => { access.url.push(String(u)); }, pushState: (a, b, u) => { access.url.push(String(u)); } },
+    // UX-1 authorized revision (Owner GO 2026-11-17): the SESSION shell writes its route (#/name) to the address
+    // bar, so this recording history also moves location.hash, as a browser does. The harness boots through the
+    // direct link #/employees (the People page; My profile for an Employee) — the section it exercises — so the
+    // landing Home and its reads stay out of these flows (Home is verified in verify-session-shell-runtime.js).
+    // Was: an empty hash; any write failed.
+    location: { hash: '#/employees', search: '', pathname: '/', href: 'http://127.0.0.1/#/employees' },
+    history: { replaceState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; }, pushState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; } },   // UX-1: a bare-path write clears the hash
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: { addEventListener:noop, removeEventListener:noop,
@@ -268,7 +273,11 @@ function firewall(rt, label){
     label + ': the DOM carries no "Acting as", navigation, Overtime / Payroll / Finance entry or local data tool (the card; the exact SESSION shell is checked above)');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.spy.indexOf('renderShell') === -1,
     label + ': legacy State stays empty and the LOCAL business shell is never mounted');
-  check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');
+  // UX-1 authorized revision: only the SESSION shell route (#/name) may be written — never an email, draft, id,
+  // state or query. Was: nothing written at all.
+  // UX-1 authorized revision: leaving the shell (sign-out, session loss) clears the route with one write of the bare
+  // path ('/', no hash, no query) — never another value. Was: route fragments only.
+  check(rt.access.url.every((u) => /^#\/[a-z]+$/.test(u) || u === '/') && /^(#\/[a-z]+)?$/.test(rt.loc.hash) && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query) — only the shell route name (#/name), or its clear (/) when the shell is left');
   // AFI-4a3 authorized revision: account administration exists only for the CEO, only on the
   // record detail, and only as the exact BF-4a2 requests. Was: no account route or control at all.
   const acct = rt.net.calls.filter((c) => /provision-account|reissue-activation|disable-account|enable-account/.test(c.url));
