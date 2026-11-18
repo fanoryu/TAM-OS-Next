@@ -92,7 +92,8 @@ return [
         }
         // Phase 1 authorized revision: migration 0038 adds financeTransaction (finance.manage). Was: the
         // five entities of migration 0035.
-        assertSame(['employee', 'overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction'], array_keys(AuditInput::ENTITIES), 'the stored vocabulary of migration 0038');
+        // ADR-016 (AWP-01) authorized revision: migration 0041 adds financeRequest. Was: the six entities of 0038.
+        assertSame(['employee', 'overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction', 'financeRequest'], array_keys(AuditInput::ENTITIES), 'the stored vocabulary of migration 0041');
     },
     'the projection is exactly the eleven stored historical fields — never the company (D-BF4g-3 = A)' => static function () use ($row): void {
         $out = AuditEventView::event($row());

@@ -13,6 +13,7 @@ use TamOs\Controller\HealthController;
 use TamOs\Controller\OvertimeController;
 use TamOs\Controller\PayrollController;
 use TamOs\Controller\ReadyController;
+use TamOs\Controller\RequestController;
 use TamOs\Controller\SupplementalController;
 use TamOs\Controller\TransactionController;
 use TamOs\Data\Readiness;
@@ -80,6 +81,14 @@ use TamOs\Policy\Action;
  * correction. They live outside /api/finance*, which stays the payroll posting and execution
  * surface. ACTIONS stay 21.
  *
+ * Phase 2 (ADR-016): the finance requests — payment requests and reimbursements. create, update and
+ * submit declare the record-bearing reimbursement self actions (CeoOrOwnDraft, decided by the handler
+ * after its scoped load: 404 before 403; a payment request is decided there under finance.manage);
+ * approve, reject and cancel declare the record-free finance.manage and pay the record-free
+ * finance.execute, decided by the kernel before the handler (an Employee is 403 before the body). The
+ * two reads declare no Action (company scope for the CEO, own reimbursements for an Employee). There
+ * is no delete, return-to-Draft, partial payment, reversal or correction route. ACTIONS 21 → 24.
+ *
  * BF-3C: every mutation is either a business mutation that declares its server Action, or one of
  * the account self-service routes below, which act only on the caller's own credentials and are
  * governed by SDR-0002 §2–§5, not by the ACTIONS. validate() refuses anything else, so the
@@ -99,7 +108,7 @@ final class Routes
     ];
 
     /** @return list<Route> */
-    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions, AuditController $audit, TransactionController $transactions, FinancialReportController $report): array
+    public static function production(Readiness $readiness, AuthController $auth, EmployeeController $employees, OvertimeController $overtime, PayrollController $payroll, SupplementalController $supplemental, FinanceController $finance, FinanceExecutionController $financeExecutions, AuditController $audit, TransactionController $transactions, FinancialReportController $report, RequestController $requests): array
     {
         return self::validate([
             new Route('GET', '/api/health', HealthController::handle(...)),
@@ -174,6 +183,16 @@ final class Routes
             new Route('POST', '/api/general-transactions/create', $transactions->create(...), [], RouteAuth::Required, Action::FinanceManage),
             new Route('POST', '/api/general-transactions/void', $transactions->void(...), [], RouteAuth::Required, Action::FinanceManage),
             new Route('GET', '/api/reports/financial', $report->report(...), ['from', 'to'], RouteAuth::Required),
+            // Phase 2 (ADR-016): payment requests and reimbursements, one lifecycle; pay records the linked general expense.
+            new Route('GET', '/api/finance-requests', $requests->list(...), ['from', 'to', 'status', 'kind'], RouteAuth::Required),
+            new Route('GET', '/api/finance-request', $requests->find(...), ['id'], RouteAuth::Required),
+            new Route('POST', '/api/finance-requests/create', $requests->create(...), [], RouteAuth::Required, Action::ReimbursementCreateSelfDraft),
+            new Route('POST', '/api/finance-requests/update', $requests->update(...), [], RouteAuth::Required, Action::ReimbursementUpdateSelfDraft),
+            new Route('POST', '/api/finance-requests/submit', $requests->submit(...), [], RouteAuth::Required, Action::ReimbursementSubmitSelf),
+            new Route('POST', '/api/finance-requests/approve', $requests->approve(...), [], RouteAuth::Required, Action::FinanceManage),
+            new Route('POST', '/api/finance-requests/reject', $requests->reject(...), [], RouteAuth::Required, Action::FinanceManage),
+            new Route('POST', '/api/finance-requests/cancel', $requests->cancel(...), [], RouteAuth::Required, Action::FinanceManage),
+            new Route('POST', '/api/finance-requests/pay', $requests->pay(...), [], RouteAuth::Required, Action::FinanceExecute),
         ]);
     }
 

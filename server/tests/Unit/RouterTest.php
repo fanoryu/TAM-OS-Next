@@ -85,6 +85,16 @@ return [
             ['POST', '/api/general-transactions/create', [], RouteAuth::Required],
             ['POST', '/api/general-transactions/void', [], RouteAuth::Required],
             ['GET', '/api/reports/financial', ['from', 'to'], RouteAuth::Required],
+            // ADR-016 (AWP-01) authorized revision: the nine finance request routes follow (sixty-seven). Was: fifty-eight.
+            ['GET', '/api/finance-requests', ['from', 'to', 'status', 'kind'], RouteAuth::Required],
+            ['GET', '/api/finance-request', ['id'], RouteAuth::Required],
+            ['POST', '/api/finance-requests/create', [], RouteAuth::Required],
+            ['POST', '/api/finance-requests/update', [], RouteAuth::Required],
+            ['POST', '/api/finance-requests/submit', [], RouteAuth::Required],
+            ['POST', '/api/finance-requests/approve', [], RouteAuth::Required],
+            ['POST', '/api/finance-requests/reject', [], RouteAuth::Required],
+            ['POST', '/api/finance-requests/cancel', [], RouteAuth::Required],
+            ['POST', '/api/finance-requests/pay', [], RouteAuth::Required],
         ], $summary);
     },
     'auth routes: POST-only login, logout, the BF-3B lifecycle and BF-3D recovery routes, GET/HEAD-only me' => static function () use ($router): void {

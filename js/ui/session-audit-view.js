@@ -55,19 +55,24 @@ const SESSION_AUDIT_ACTIONS = Object.freeze({
   'overtime.createSelfDraft': 'Overtime draft created', 'overtime.updateSelfDraft': 'Overtime draft updated',
   'overtime.deleteSelfDraft': 'Overtime draft deleted', 'overtime.submitSelf': 'Overtime submitted', 'overtime.manage': 'Overtime decision',
   'payroll.manage': 'Payroll plan', 'supplemental.manage': 'Supplemental payroll', 'finance.execute': 'Payment recorded',
-  'finance.manage': 'Finance transaction'
+  'finance.manage': 'Finance transaction',
+  // AWP-01 (ADR-016): the three reimbursement self actions (migration 0041).
+  'reimbursement.createSelfDraft': 'Reimbursement draft created', 'reimbursement.updateSelfDraft': 'Reimbursement draft updated',
+  'reimbursement.submitSelf': 'Reimbursement submitted'
 });
+// AWP-01 (ADR-016): finance.manage and finance.execute on a finance request are named for the request.
+const SESSION_AUDIT_REQUEST_ACTIONS = Object.freeze({ 'finance.manage': 'Finance request', 'finance.execute': 'Finance request paid' });
 const SESSION_AUDIT_OPERATIONS = Object.freeze({
   provision: 'Create login', reissue: 'Resend activation email', disable: 'Disable login', enable: 'Enable login',
   submit: 'Submit', review: 'Review', reject: 'Reject', approve: 'Approve',
   create: 'Create', recalculate: 'Recalculate', return: 'Return to Draft', cancel: 'Cancel', commit: 'Commit', post: 'Post to Finance',
-  execute: 'Record payment', void: 'Void'
+  execute: 'Record payment', void: 'Void', update: 'Update', pay: 'Pay'
 });
 // Phase 1 authorized revision (PH1-QA-01): the migration-0038 Finance transaction labels (action,
 // void operation, entity). Was: the migration-0035 labels only.
 const SESSION_AUDIT_ENTITIES = Object.freeze({
   employee: 'Employee', overtime: 'Overtime record', payrollPlan: 'Payroll plan', supplementalPayroll: 'Supplemental payroll',
-  financePosting: 'Finance posting', financeTransaction: 'Finance transaction'
+  financePosting: 'Finance posting', financeTransaction: 'Finance transaction', financeRequest: 'Finance request'
 });
 
 function sessionAuditMonthLabel(key){
@@ -75,7 +80,8 @@ function sessionAuditMonthLabel(key){
 }
 // "Action" or "Action — Operation", from the fixed vocabularies (the decoder admits no other).
 function sessionAuditActionLabel(e){
-  return SESSION_AUDIT_ACTIONS[e.action] + (e.operation === null ? '' : ' — ' + SESSION_AUDIT_OPERATIONS[e.operation]);
+  const action = e.entity === 'financeRequest' && SESSION_AUDIT_REQUEST_ACTIONS[e.action] ? SESSION_AUDIT_REQUEST_ACTIONS[e.action] : SESSION_AUDIT_ACTIONS[e.action];
+  return action + (e.operation === null ? '' : ' — ' + SESSION_AUDIT_OPERATIONS[e.operation]);
 }
 function sessionAuditRecordLabel(entity, entityId){
   return SESSION_AUDIT_ENTITIES[entity] + ' ' + entityId;

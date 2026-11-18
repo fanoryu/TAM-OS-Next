@@ -230,8 +230,15 @@ function firewall(rt, label){
       'B. SESSION boot runs none of the LOCAL boot steps');
     // AFI-4a1 revision: once AUTHENTICATED, the CEO workspace makes its one Employee read
     // (GET /api/employees). Was: no request after /me. The session is still checked first.
-    check(calls(rt, '/api/auth/me') === 1 && rt.net.calls.length === 2 && rt.net.calls[0].url === '/api/auth/me' && rt.net.calls[1].url === '/api/employees',
-      'B. SESSION boot checks the session first: exactly one GET /api/auth/me, then only the workspace read GET /api/employees');
+    // UX-1 authorized revision (Owner GO 2026-11-17, UX-OD-08): the CEO lands on Home, whose reads are exactly the
+    // month's payroll plans, overtime records, Financial report and audit events (GET, authorized APIs only; no
+    // Finance posting/execution read, no write), beside the unchanged workspace read GET /api/employees. Was: only
+    // the Employees read GET /api/employees.
+    const UX1_CEO_HOME_READS = 'GET /api/audit-events, GET /api/employees, GET /api/overtime-records, GET /api/payroll-plans, GET /api/reports/financial';
+    const homeUrls = rt.net.calls.slice(1).map((c) => (c.method || 'GET') + ' ' + c.url.split('?')[0]).sort().join(', ');
+    check(calls(rt, '/api/auth/me') === 1 && rt.net.calls[0].url === '/api/auth/me' && rt.net.calls.length === 6
+      && homeUrls === UX1_CEO_HOME_READS,
+      'B. SESSION boot checks the session first: exactly one GET /api/auth/me, then only the workspace read and the four CEO Home reads >> ' + homeUrls);
     const s = rt.AuthBoot.snapshot();
     check(s.state === 'AUTHENTICATED' && s.principal && s.principal.principalType === 'ceo', 'D. /me 200 valid -> AUTHENTICATED (CEO)');
     check(/Signed in/.test(rt.appHTML()) && /Signed in as <strong>CEO<\/strong>/.test(rt.appHTML()) && /authSignOutBtn/.test(rt.appHTML()),
@@ -239,10 +246,11 @@ function firewall(rt, label){
     // AFI-4a1 revision: AUTHENTICATED now renders the read-only SESSION Employee workspace on
     // the auth-view path (not the business shell — the firewall below still holds). Was: the
     // "not available in this sign-in mode" holding view.
-    check(!/authSignInForm/.test(rt.appHTML()) && /<h1 class="auth-title" id="authTitle" tabindex="-1">Employees<\/h1>/.test(rt.appHTML())
+    // UX-1 authorized revision: the landing page is Home (h1 Home, Home active). Was: Employees, active 'main'.
+    check(!/authSignInForm/.test(rt.appHTML()) && /<h1 class="auth-title" id="authTitle" tabindex="-1">Home<\/h1>/.test(rt.appHTML())
       // U1 authorized revision (GR-4): inside the exact CEO SESSION shell, Employees active. Was: allowsWorkspace() === false.
-      && rt.AuthBoot.allowsWorkspace() === true && ((parseSessionShell(rt.appHTML()) || {}).role === 'ceo') && parseSessionShell(rt.appHTML()).active === 'main',
-      'D. AUTHENTICATED renders the SESSION Employee workspace inside the CEO SESSION shell, never the LOCAL business shell');
+      && rt.AuthBoot.allowsWorkspace() === true && ((parseSessionShell(rt.appHTML()) || {}).role === 'ceo') && parseSessionShell(rt.appHTML()).active === 'home',
+      'D. AUTHENTICATED renders the SESSION Home inside the CEO SESSION shell, never the LOCAL business shell');
     firewall(rt, 'D. AUTHENTICATED CEO');
     // U1 authorized revision (GR-4, D-GS-1 supersedes D-A): the SESSION shell is granted here. Was: false.
     check(rt.AuthBoot.allowsWorkspace() === true && rt.spy.indexOf('renderShell') === -1, 'D. AuthBoot grants the SESSION shell (not the LOCAL renderShell) in AUTHENTICATED');
@@ -712,9 +720,10 @@ function firewall(rt, label){
     const rt = await acct(m);
     check(/id="authAccountBtn"[^>]*aria-expanded="false"[^>]*>Account security<\/button><button class="btn" id="authSignOutBtn"/.test(rt.appHTML()) && /<div class="head-controls"><button class="btn" id="authAccountBtn"/.test(rt.appHTML()),
       'WP-1 ' + who + ': "Account security" sits beside Sign out in a wrapping .head-controls row; the panel is closed');
+    const before = rt.net.calls.length;   // UX-1 authorized revision: the landing Home reads come first. Was: exactly 2 calls.
     rt.AuthBoot.openAccount('menu');
     check(acc(rt).panel === 'menu' && /id="authAcctPanel"/.test(rt.appHTML()) && /id="authAcctPwBtn"/.test(rt.appHTML()) && /id="authAcctAllBtn"/.test(rt.appHTML())
-      && /aria-expanded="true"/.test(rt.appHTML()) && rt.net.calls.length === 2, 'WP-1 ' + who + ': the panel offers Change password and Sign out all devices; opening it sends nothing');
+      && /aria-expanded="true"/.test(rt.appHTML()) && rt.net.calls.length === before, 'WP-1 ' + who + ': the panel offers Change password and Sign out all devices; opening it sends nothing');
     rt.AuthBoot.closeAccount();
     check(acc(rt).panel === null && !/id="authAcctPanel"/.test(rt.appHTML()), 'WP-1 ' + who + ': Close removes the panel');
     for(const [c, l] of await WP1.success(m, 'WP-1 change ' + who)) check(c, l);

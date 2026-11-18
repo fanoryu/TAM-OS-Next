@@ -25,10 +25,17 @@
    storage, URL or LOCAL reach.
    ============================================================ */
 
+// UX-1: the one thing the address bar may carry — the SESSION shell route (#/name).
+const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
+// UX-1 authorized revision: leaving the shell (sign-out, session loss) clears the route with one write of the bare
+// path ('/', no hash, no query) — never another value. Was: route fragments only.
+const ROUTE_OR_CLEAR = (u) => ROUTE_ONLY(u) || u === '/';
+const HASH_OK = (h) => ROUTE_ONLY(h) || h === '';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { parseSessionShell } = require('./session-shell-chrome.js');
+const { unmoney } = require('./ux-money-oracle.js');   // UX-1 (UX-OD-07): display-only money grouping
 
 let passed = 0; const failures = [];
 function check(cond, label){
@@ -60,7 +67,10 @@ const REPORT = { financialReport: { from: '2031-04-01', to: '2031-04-30',
   posts: [post('GA', 'GA', '0.00', '2500000.00', '-2500000.00', 1), post('NPIP', 'NP & IP', '0.00', '0.00', '0.00', 0), post('TJB', 'TJB', '0.00', '0.00', '0.00', 0), post('DRONE', 'Drone', '12000000.00', '0.00', '12000000.00', 1)],
   general: { income: '12000000.00', expense: '2500000.00', net: '9500000.00', count: 2 }, voided: { count: 1, amount: '2500000.00' },
   payroll: { posted: { amount: '7021875.00', count: 3, fromMonth: '2031-04', toMonth: '2031-04' }, paid: { amount: '3500000.00', count: 1 } },
-  consolidated: { income: '12000000.00', expense: '6000000.00', net: '6000000.00' } } };
+  consolidated: { income: '12000000.00', expense: '6000000.00', net: '6000000.00' },
+  // AWP-01 (ADR-016 §6) authorized revision: the Approved-not-paid line, outside every total. Was: absent.
+  approvedNotPaid: { posts: [{ code: 'GA', amount: '750000.00', count: 2 }, { code: 'NPIP', amount: '0.00', count: 0 }, { code: 'TJB', amount: '0.00', count: 0 }, { code: 'DRONE', amount: '1000000.00', count: 1 }],
+    amount: '1750000.00', count: 3 } } };
 const RANGE = (f, t) => '/api/general-transactions?from=' + f + '&to=' + t;
 const REP = (f, t) => '/api/reports/financial?from=' + f + '&to=' + t;
 const APRIL = ['2031-04-01', '2031-04-30'];
@@ -139,7 +149,8 @@ function loadRuntime(routes){
   const src = parts.join('\n')
     + '\n;window.__TAM__ = { State: State, AuthBoot: AuthBoot, TransactionApi: TransactionApi, TransactionDecoders: TransactionDecoders, TransactionRequests: TransactionRequests,'
     + ' FINANCIAL_POSTS: FINANCIAL_POSTS, transactionMonthRange: transactionMonthRange, transactionIsRange: transactionIsRange,'
-    + ' SessionLedgerStore: SessionLedgerStore, SessionLedger: SessionLedger, sessionNavModel: sessionNavModel, render: render, parse: function(j){ return JSON.parse(j); } };';
+    + ' SessionLedgerStore: SessionLedgerStore, SessionLedger: SessionLedger, sessionNavModel: sessionNavModel, render: render,'
+    + ' transactionIsAmount: transactionIsAmount, sessionLedgerAmountPreview: sessionLedgerAmountPreview, parse: function(j){ return JSON.parse(j); } };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => ({ getItem: (k) => { log.push('get:' + k); return null; }, setItem: (k) => { log.push('set:' + k); }, removeItem: (k) => { log.push('remove:' + k); },
@@ -183,8 +194,13 @@ function loadRuntime(routes){
     requestAnimationFrame: (fn) => setTimeout(fn, 0), AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session),
     addEventListener: noop, removeEventListener: noop, confirm: () => { access.url.push('confirm()'); return true; },
-    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
-    history: { replaceState: (a, b, u) => { access.url.push(String(u)); }, pushState: (a, b, u) => { access.url.push(String(u)); } },
+    // UX-1 authorized revision (Owner GO 2026-11-17): the SESSION shell writes its route (#/name) to the address
+    // bar, so this recording history also moves location.hash, as a browser does. The harness boots through the
+    // direct link #/employees (the People page; My profile for an Employee), so the landing Home and its reads
+    // stay out of these flows (Home is verified in verify-session-shell-runtime.js). Only a route name may be
+    // written (ROUTE_ONLY below); confirm() is still recorded and still fails. Was: an empty hash; any write failed.
+    location: { hash: '#/employees', search: '', pathname: '/', href: 'http://127.0.0.1/#/employees' },
+    history: { replaceState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; }, pushState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; } },   // UX-1: a bare-path write clears the hash
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }), getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: document
   };
@@ -200,7 +216,14 @@ function loadRuntime(routes){
 const flush = async (n) => { for(let i = 0; i < (n || 12); i++) await new Promise((r) => setImmediate(r)); };
 const ledgerCalls = (rt) => rt.net.calls.filter((c) => /^\/api\/(general-transactions|reports)/.test(c.url));
 const posts = (rt, path) => rt.net.calls.filter((c) => c.url === path && c.init && c.init.method === 'POST');
-const card = (rt) => { const s = parseSessionShell(rt.appHTML()); return s ? s.content : rt.appHTML(); };
+// UX-1 authorized revision: money cells are <data class="ux-money" value="EXACT">GROUPED</data>; the card reads the
+// exact value back (unmoney) so every exact-string check below still reads the server string, and money(rt)
+// checks the shown grouping against the independent oracle. The Dashboard / Transactions tabs are gone (the
+// sidebar's Overview and Transactions items are the two views): the flows open Transactions from the sidebar.
+// Was: raw strings in the cells and an sfTransactionsTab tab.
+const shellContent = (rt) => { const s = parseSessionShell(rt.appHTML()); return s ? s.content : rt.appHTML(); };
+const card = (rt) => unmoney(shellContent(rt)).html;
+const money = (rt) => unmoney(shellContent(rt));
 const SELF = { id: 'emp_srv_1', employeeCode: 'EMP-777', fullName: 'Fabricated Self', jobTitle: null, department: null, employmentStatus: 'Active',
   joinDate: null, contactEmail: null, phone: null, monthlyBaseSalary: '1000000.00' };
 async function boot(me, routes){
@@ -215,7 +238,7 @@ async function open(routes){
   return rt;
 }
 function firewall(rt, label){
-  check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0 && rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '',
+  check(rt.access.local.length === 0 && rt.access.session.length === 0 && rt.access.cookie.length === 0 && rt.access.url.every(ROUTE_OR_CLEAR) && HASH_OK(rt.loc.hash) && rt.loc.search === '',
     label + ': zero localStorage / sessionStorage / cookie / address-bar access');
   check(rt.spy.length === 0 && rt.spyErr.length === 0 && rt.State.txns.length === 0, label + ': no LOCAL boot, shell, Transactions, Dashboard or other domain was called; LOCAL State.txns stays empty' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
   check(!/<script|\son[a-z]+=|style="|Acting as|data-nav=/i.test(card(rt)), label + ': the card carries no script, inline handler, inline style, "Acting as" or LOCAL navigation');
@@ -267,6 +290,9 @@ function firewall(rt, label){
     check(/<h3 class="section-title">Consolidated \(cash basis\)<\/h3><div class="table-wrap" id="sfConsolidated">/.test(html) && /Financial Posts and payroll paid \(cash basis\)<\/th>/.test(html)
       && /id="sfConsolidated"[\s\S]*<td>12000000\.00<\/td><td>6000000\.00<\/td><td>6000000\.00<\/td>/.test(html) && /Voided in this range: 1 \(Rp 2500000\.00\)/.test(html),
       'B. the consolidated total and the voided transactions are shown exactly as the server sent them');
+    const m = money(rt);
+    check(m.ok && m.count === 21 && /<data class="ux-money" value="-2500000\.00">-2\.500\.000,00<\/data>/.test(shellContent(rt)),
+      'B. UX-1 (UX-OD-07): every dashboard amount is the exact server string in <data value>, shown with display-only grouping (21 amounts; the negative net keeps its sign)');
     firewall(rt, 'B');
   }
 
@@ -279,7 +305,14 @@ function firewall(rt, label){
       'a float amount': Object.assign({}, bad, { general: Object.assign({}, bad.general, { income: '12000000.5' }) }),
       'an extra key': Object.assign({}, bad, { companyId: 'x' }),
       'another range': Object.assign({}, bad, { to: '2031-04-29' }),
-      'a payroll inside the posts': Object.assign({}, bad, { posts: bad.posts.map((p, i) => i === 0 ? Object.assign({}, p, { payroll: '1.00' }) : p) })
+      'a payroll inside the posts': Object.assign({}, bad, { posts: bad.posts.map((p, i) => i === 0 ? Object.assign({}, p, { payroll: '1.00' }) : p) }),
+      // AWP-01 (ADR-016 §6): the Approved-not-paid line is required and strictly shaped.
+      'no approvedNotPaid line': (() => { const r = Object.assign({}, bad); delete r.approvedNotPaid; return r; })(),
+      'approvedNotPaid posts out of order': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { posts: [bad.approvedNotPaid.posts[3], bad.approvedNotPaid.posts[1], bad.approvedNotPaid.posts[2], bad.approvedNotPaid.posts[0]] }) }),
+      'approvedNotPaid counts that do not add up': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { count: 4 }) }),
+      'an approvedNotPaid amount with a zero count': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { posts: bad.approvedNotPaid.posts.map((p, i) => i === 1 ? Object.assign({}, p, { amount: '5.00' }) : p) }) }),
+      'a float approvedNotPaid amount': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { amount: '1750000.5' }) }),
+      'an extra approvedNotPaid key': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { requests: [] }) })
     };
     for(const [label, r] of Object.entries(variants)){
       const rt = await open({ [REP(...APRIL)]: [ok({ financialReport: r })] });
@@ -300,11 +333,11 @@ function firewall(rt, label){
   /* ---------- D. the history and the range ---------- */
   {
     const rt = await open();
-    rt.app.fire('sfTransactionsTab', 'click'); await flush();
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
     const html = card(rt);
     check(rt.net.calls.filter((c) => c.url === RANGE(...APRIL)).length === 1 && /<h1 class="auth-title" id="authTitle" tabindex="-1">Transactions<\/h1>/.test(html) && /3 transactions, oldest first\./.test(html),
       'D. Transactions reads exactly the range of the month once and lists it oldest first');
-    check(/Fabricated &lt;b&gt;rent&lt;\/b&gt;/.test(html) && !/<b>rent<\/b>/.test(html) && /<td>Drone<\/td>/.test(html) && /<td>Voided: Fabricated duplicate<\/td><td><\/td>/.test(html)
+    check(/Fabricated &lt;b&gt;rent&lt;\/b&gt;/.test(html) && !/<b>rent<\/b>/.test(html) && /<td>Drone<\/td>/.test(html) && /<td><span class="ux-badge ux-tone-stop"><span class="ux-badge-mark" aria-hidden="true">✕<\/span>Voided<\/span> Fabricated duplicate<\/td><td><\/td>/.test(html)
       && (html.match(/data-sf-void="\d+"/g) || []).join() === 'data-sf-void="0",data-sf-void="1"',
       'D. server text is escaped; the post shows its display name; a voided row shows its reason and has no Void button');
     const before = ledgerCalls(rt).length;
@@ -323,7 +356,7 @@ function firewall(rt, label){
     const CREATE = '/api/general-transactions/create';
     const made = tx('4'.repeat(32), '2031-04-15', { kind: 'income', financialPost: 'TJB', category: 'Sewa Alat', description: 'Fabricated rental', amount: '750000.00' });
     const rt = await open({ [CREATE]: [() => NETFAIL(), ok({ generalTransaction: made })] });
-    rt.app.fire('sfTransactionsTab', 'click'); await flush();
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
     rt.app.fire('sfAddBtn', 'click'); await flush();
     check(!!rt.sf().form && /^[0-9a-f]{32}$/.test(rt.sf().form.key) && /id="sfForm"/.test(card(rt)) && rt.dom.focused[rt.dom.focused.length - 1] === 'sff-kind',
       'E. Record transaction opens an inline form with a 32-hex request key made once, focus on its first field');
@@ -349,12 +382,41 @@ function firewall(rt, label){
     firewall(rt, 'E');
   }
 
+  /* ---------- E2. the amount preview (UX-1 G-4 correction, 2026-11-17) ---------- */
+  // The preview reads back only what the transaction validator accepts (written out here from the
+  // validator's contract: a whole Rupiah N.00 above zero, at most 15 integer digits); a 16-digit value
+  // is never shown as an amount, and the form still refuses it before sending.
+  {
+    const rt = await open({});
+    const P = rt.sessionLedgerAmountPreview;
+    const READS = /^Reads as Rp /, REFUSED = /^This amount is not accepted\./, GROUPED = /^Write the amount without thousands separators/;
+    const cases = [
+      ['1500000.00', READS, 'Reads as Rp 1.500.000,00.'], ['1.00', READS, 'Reads as Rp 1,00.'],
+      ['999999999999999.00', READS, 'Reads as Rp 999.999.999.999.999,00.'],
+      ['1000000000000000.00', REFUSED], ['9999999999999999.00', REFUSED], ['0.00', REFUSED], ['00.00', REFUSED],
+      ['1500000.50', REFUSED], ['01500000.00', REFUSED],
+      ['1.500.000', GROUPED], ['1,500,000.00', GROUPED], ['1500000', null], ['', null]
+    ];
+    const bad = cases.filter(([v, re, exact]) => { const out = P(v); return re ? (!re.test(out) || (exact && out !== exact)) : out !== ''; });
+    check(bad.length === 0, 'E2. the amount preview reads back exactly the amounts the validator accepts; 16 digits, zero and non-.00 values are refused, never read back'
+      + (bad.length ? ' >> ' + bad.map(([v]) => v + '→' + JSON.stringify(P(v))).join('; ') : ''));
+    const agree = cases.every(([v]) => READS.test(P(v)) === rt.transactionIsAmount(v));
+    check(agree, 'E2. "Reads as" is shown exactly when transactionIsAmount() accepts the value (one source of truth)');
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    rt.app.fire('sfAddBtn', 'click'); await flush();
+    for(const [k, v] of Object.entries({ kind: 'income', financialPost: 'TJB', category: 'Sewa Alat', description: 'Fabricated rental', amount: '1000000000000000.00', transactionDate: '2031-04-15' })) rt.app.type('sff-' + k, v);
+    rt.app.fire('sfForm', 'submit'); await flush();
+    check(posts(rt, '/api/general-transactions/create').length === 0 && /id="sff-amount"[^>]*aria-invalid="true"/.test(card(rt)),
+      'E2. a 16-digit amount is still refused before sending and its field is marked invalid (validation unchanged)');
+    firewall(rt, 'E2');
+  }
+
   /* ---------- F. Void ---------- */
   {
     const VOID = '/api/general-transactions/void';
     const voided = Object.assign({}, T1, { status: 'Voided', void: { reason: 'Fabricated mistake', voidedByUserId: U, voidedAt: '2031-04-15T03:00:00.000000Z' } });
     const rt = await open({ [VOID]: [ok({ generalTransaction: voided })] });
-    rt.app.fire('sfTransactionsTab', 'click'); await flush();
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
     rt.app.voidRow(2); await flush();
     check(rt.sf().voidTarget === null, 'F. a voided row cannot be voided again (no panel)');
     rt.app.voidRow(0); await flush();
@@ -376,7 +438,7 @@ function firewall(rt, label){
     check(rt.sf().report === null && NARROW.test(card(rt)) && !/id="sfPosts"|id="sfPayroll"|id="sfConsolidated"/.test(card(rt)) && /id="sfRetryBtn"/.test(card(rt)) && !/Try again in a moment/.test(card(rt)),
       'H. a report that fails closed (500) shows no partial total and tells the CEO to choose a shorter range');
     rt.net.routes[RANGE(...APRIL)] = [err(500, 'internal_error')];
-    rt.app.fire('sfTransactionsTab', 'click'); await flush();
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
     check(NARROW.test(card(rt)) && !/data-sf-void=|transactions, oldest first/.test(card(rt)), 'H. a history that fails closed (500) lists nothing and tells the CEO to choose a shorter range');
     firewall(rt, 'H');
     const id = (n) => n.toString(16).padStart(32, '0');

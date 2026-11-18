@@ -40,6 +40,8 @@ final class BackupTables
         'finance_executions',
         'finance_transactions',
         'finance_transaction_voids',
+        'finance_requests',
+        'finance_request_payments',
     ];
 
     public const EXCLUDED = [

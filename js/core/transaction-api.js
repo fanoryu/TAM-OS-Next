@@ -10,7 +10,8 @@
                                 in the inclusive range, oldest first
      report(from, to)           GET  /api/reports/financial?from=&to=         the Financial Post
                                 lines, the general total, the voided rows, the separate Payroll line
-                                and the consolidated total
+                                and the consolidated total; AWP-01 (ADR-016 §6): plus the
+                                Approved-not-paid finance requests, shown outside every total
      create(values, key)        POST /api/general-transactions/create         one income or expense
      void(id, reason, key)      POST /api/general-transactions/void           the only correction
 
@@ -25,7 +26,9 @@
    with exactly { reason, voidedByUserId, voidedAt }. A range list holds at most
    TRANSACTION_LIST_CAP rows, each id once, every date inside the range, in date order. A report
    holds exactly the four posts in FINANCIAL_POSTS order and every amount is "N.00" ("-N.00" only
-   for a net). Anything else is INVALID_RESPONSE and nothing of it is returned. MONEY is the exact
+   for a net). AWP-01 (ADR-016 §6): approvedNotPaid is required — the four posts in order, each and
+   the whole with a count and an "N.00" amount that is "0.00" exactly when its count is 0, and the
+   post counts adding up to the whole; it is never added to any total here. Anything else is INVALID_RESPONSE and nothing of it is returned. MONEY is the exact
    server string: never parsed into a float, never rounded, never recomputed here.
 
    Nothing is persisted, cached, logged or resent here. The idempotency key of a write is made
@@ -142,11 +145,29 @@ const TransactionDecoders = (function(){
     if(!isPlain(o) || !exactKeys(o, keys.slice().sort())) return false;
     return keys.every(function(k){ return k === 'count' ? count(o[k]) : (k === 'net' ? typeof o[k] === 'string' && TRANSACTION_NET.test(o[k]) : typeof o[k] === 'string' && pattern.test(o[k])); });
   }
+  // AWP-01 (ADR-016 §6): an amount line whose amount is "0.00" exactly when its count is 0.
+  function pendingLine(o, keys){
+    return line(o, keys, TRANSACTION_TOTAL) && (o.count === 0) === (o.amount === '0.00');
+  }
+  // The Approved-not-paid line: the four posts in FINANCIAL_POSTS order, their counts adding up.
+  function validApprovedNotPaid(a){
+    if(!isPlain(a) || !exactKeys(a, ['amount', 'count', 'posts']) || !Array.isArray(a.posts) || a.posts.length !== FINANCIAL_POSTS.length) return false;
+    let counted = 0;
+    for(let i = 0; i < FINANCIAL_POSTS.length; i++){
+      const p = a.posts[i];
+      if(!isPlain(p) || p.code !== FINANCIAL_POSTS[i].code || !exactKeys(p, ['amount', 'code', 'count'])) return false;
+      if(!pendingLine({ amount: p.amount, count: p.count }, ['amount', 'count'])) return false;
+      counted += p.count;
+    }
+    return pendingLine({ amount: a.amount, count: a.count }, ['amount', 'count']) && counted === a.count;
+  }
   // True when { financialReport: report } is exactly a report of this range.
   function validReport(data, from, to){
     if(!isPlain(data) || !exactKeys(data, ['financialReport'])) return false;
     const r = data.financialReport;
-    if(!isPlain(r) || !exactKeys(r, ['consolidated', 'from', 'general', 'payroll', 'posts', 'to', 'voided']) || r.from !== from || r.to !== to) return false;
+    // AWP-01 (ADR-016 §6) authorized revision: approvedNotPaid joins the report. Was: the seven Phase 1 keys.
+    if(!isPlain(r) || !exactKeys(r, ['approvedNotPaid', 'consolidated', 'from', 'general', 'payroll', 'posts', 'to', 'voided']) || r.from !== from || r.to !== to) return false;
+    if(!validApprovedNotPaid(r.approvedNotPaid)) return false;
     if(!Array.isArray(r.posts) || r.posts.length !== FINANCIAL_POSTS.length) return false;
     for(let i = 0; i < FINANCIAL_POSTS.length; i++){
       const p = r.posts[i];
@@ -171,6 +192,7 @@ const TransactionDecoders = (function(){
       copy.posts = Object.freeze(copy.posts.map(Object.freeze));
       ['general', 'voided', 'consolidated'].forEach(function(k){ Object.freeze(copy[k]); });
       copy.payroll = Object.freeze({ posted: Object.freeze(copy.payroll.posted), paid: Object.freeze(copy.payroll.paid) });
+      copy.approvedNotPaid = Object.freeze({ posts: Object.freeze(copy.approvedNotPaid.posts.map(Object.freeze)), amount: copy.approvedNotPaid.amount, count: copy.approvedNotPaid.count });
       return Object.freeze(copy);
     },
     // { generalTransaction: transaction } -> the transaction, or null.

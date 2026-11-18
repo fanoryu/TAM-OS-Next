@@ -97,6 +97,14 @@ $seed = static function (Database $db, int $authEvents = 3): array {
     $txn = bin2hex(random_bytes(16));
     $db->execute("INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (?, ?, 'income', 'DRONE', 'Jasa ☕', 'Fabricated \"kutipan\" \\\\ / </script>', '999999999999999.00', '2024-02-29', ?, ?, '2026-10-31 23:59:59.999999')", [$txn, $c, $ceo['userId'], bin2hex(random_bytes(16))]);
     $db->execute('INSERT INTO finance_transaction_voids (id, company_id, finance_transaction_id, reason, voided_by_user_id, idempotency_key, voided_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))', [bin2hex(random_bytes(16)), $c, $txn, 'Fabricated duplicate', $ceo['userId'], bin2hex(random_bytes(16))]);
+    // AWP-01 (ADR-016 M4): a Paid reimbursement with its payment and linked paid expense, and a Rejected
+    // payment request at the DECIMAL edge (fabricated); the round trip carries both request tables.
+    $req = bin2hex(random_bytes(16));
+    $paidTxn = bin2hex(random_bytes(16));
+    $db->execute("INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (?, ?, 'reimbursement', 'TJB', 'Transport ☕', 'Fabricated \"taksi\"', '125000.00', NULL, ?, '2024-02-29', 'Paid', NULL, 4, ?, ?, '2026-10-31 23:59:59.999999', UTC_TIMESTAMP(6))", [$req, $c, $e1, bin2hex(random_bytes(16)), $ceo['userId']]);
+    $db->execute("INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (?, ?, 'expense', 'TJB', 'Transport ☕', 'Fabricated \"taksi\"', '125000.00', '2026-11-01', ?, ?, UTC_TIMESTAMP(6))", [$paidTxn, $c, $ceo['userId'], bin2hex(random_bytes(16))]);
+    $db->execute("INSERT INTO finance_request_payments (id, company_id, finance_request_id, finance_transaction_id, paid_on, payment_method, amount, paid_by_user_id, idempotency_key, created_at) VALUES (?, ?, ?, ?, '2026-11-01', 'qris', '125000.00', ?, ?, UTC_TIMESTAMP(6))", [bin2hex(random_bytes(16)), $c, $req, $paidTxn, $ceo['userId'], bin2hex(random_bytes(16))]);
+    $db->execute("INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (?, ?, 'paymentRequest', 'GA', 'Vendor', 'Fabricated', '999999999999999.00', 'CV Fiktif ☕', NULL, '2026-10-07', 'Rejected', 'Fabricated duplicate', 3, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))", [bin2hex(random_bytes(16)), $c, bin2hex(random_bytes(16)), $ceo['userId']]);
     return ['ceo' => $ceo, 'e1' => $e1, 'secrets' => [$sessionHash, $tokenHash]];
 };
 
@@ -178,7 +186,8 @@ return [
         assertSame(2, $connections, 'the restore connection, then a fresh one for the proof after commit');
         assertSame($original['backupId'], $evidence['backupId']);
         // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
-        assertSame([38, 38, 38], [$evidence['backupHead'], $evidence['targetHead'], $evidence['codeHead']]);
+        // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
+        assertSame([41, 41, 41], [$evidence['backupHead'], $evidence['targetHead'], $evidence['codeHead']]);
         assertSame(array_column($original['tables'], 'rows', 'name'), $evidence['tables']);
         assertSame($source, $snapshot($db), 'every backed-up row, generated columns included, is byte-identical');
         foreach (BackupTables::INCLUDED as $table) {
@@ -597,7 +606,7 @@ return [
         $id = (string) BackupStore::idOfFileName(basename($path));
         $fingerprint = substr(BackupReader::fingerprint((string) $base->db['host'], (int) $base->db['port'], (string) $base->db['name']), 0, 16);
         assertTrue(preg_match('/^restore: PASS\nbackup: ' . preg_quote($id, '/') . '\nmanifest: [0-9a-f]{64}\nkey: [0-9a-f]{16}\nsource: production [0-9a-f]{16}\ntarget: test ' . $fingerprint
-            . '\nschema: backup head 38, target head 38, code head 38\n(table: [a-z_]+ rows [0-9]+ ok\n){15}tables: 15 verified, rows [0-9]+\ndecimal totals: matched \([0-9]+ columns\)\nexcluded: 4 empty\nverified: in-transaction yes, post-commit yes\nstarted: [0-9T:-]+Z\nfinished: [0-9T:-]+Z\nduration_ms: [0-9]+\n$/D', $run['stdout']) === 1, $run['stdout']);
+            . '\nschema: backup head 41, target head 41, code head 41\n(table: [a-z_]+ rows [0-9]+ ok\n){17}tables: 17 verified, rows [0-9]+\ndecimal totals: matched \([0-9]+ columns\)\nexcluded: 4 empty\nverified: in-transaction yes, post-commit yes\nstarted: [0-9T:-]+Z\nfinished: [0-9T:-]+Z\nduration_ms: [0-9]+\n$/D', $run['stdout']) === 1, $run['stdout']);
         assertSame('', $run['stderr']);
         $again = runBackupCli(['restore', ...$args], $hostConfig);
         assertSame([1, '', "restore: target_not_empty\n"], [$again['exit'], $again['stdout'], $again['stderr']]);

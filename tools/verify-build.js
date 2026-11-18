@@ -47,6 +47,13 @@ const PHASE1_MIGRATIONS = Object.freeze(['0036_create_finance_transactions.sql',
 // section below pins them, their order and the package. Was: 88 modules and 102 package files.
 const PHASE1_MODULES = Object.freeze(['core/transaction-api.js', 'core/session-ledger.js', 'ui/session-ledger-view.js']);
 const PHASE1_FILES = PHASE1_MODULES.length;
+// UX-1 authorized revision (Owner GO "UX-1 P1 APPLICATION IMPLEMENTATION", 2026-11-17): one production
+// module, core/session-home.js (the SESSION Home data over the existing month reads), loads directly
+// after the three Ledger modules. Every earlier slice's module and package-file count is read as that
+// slice left it plus PHASE1_FILES plus these; the UX-1 section below pins the module, its order and
+// its reads. Was: 91 modules and 105 package files.
+const UX1_MODULES = Object.freeze(['core/session-home.js']);
+const UX1_FILES = UX1_MODULES.length;
 // The Phase 1 deployment package digest (the three Ledger modules; the from/to query keys; the PD-7
 // over-cap guidance in session-ledger-view.js, Owner 2026-11-13; the migration-0038 Audit vocabulary
 // and labels, PH1-QA-01, Owner 2026-11-13). Was: 1b35dbcc… (commit 094b8926); 092810b9… (commit eadf4274).
@@ -54,8 +61,39 @@ const PHASE1_PACKAGE_DIGEST = 'b865f6f2e478bc5331c53f122e72c13479dcdab48876b198e
 // UI-INT-1 authorized revision (Owner D-UI-4, 2026-11-13): js/ui/session-workspace-view.js changed (the v2.11.0-style
 // SESSION shell); no module and no file added. Prior pin was PHASE1_PACKAGE_DIGEST.
 const UIINT1_PACKAGE_DIGEST = '97658f5a0f64a109fc74caa320b5f0eb74d7429b4d8faeed17dfea5f5a3dc9df';
+// AWP-01 (ADR-016) authorized revision: migrations 0039–0041 (the finance requests, their payments and
+// the request audit vocabulary) follow Phase 1, and the three reimbursement self actions join ACTIONS
+// (21 -> 24). Every earlier slice's migration-head and ACTIONS check reads the state as Phase 1 left it
+// (the Phase 2 migrations and actions set aside); the AWP-01 section below pins the new head.
+// Was: every check read the whole migration directory and the whole ACTIONS vocabulary.
+const PHASE2_MIGRATIONS = Object.freeze(['0039_create_finance_requests.sql', '0040_create_finance_request_payments.sql', '0041_replace_audit_events_finance_requests.sql']);
+const PHASE2_ACTIONS = Object.freeze(['reimbursement.createSelfDraft', 'reimbursement.updateSelfDraft', 'reimbursement.submitSelf']);
+// The AWP-01 deployment package digest (authz.js: the three actions; transaction-api.js: the
+// approvedNotPaid report line; audit-api.js and session-audit-view.js: the migration-0041 vocabulary
+// and labels). Was: UIINT1_PACKAGE_DIGEST.
+const AWP01_PACKAGE_DIGEST = '5979199bcfce8e1cfc53f942db3481a46689c154d5308fb7bb2d88c97e5b3d0b';
+function migrationsBeforePhase2() {
+  return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !PHASE2_MIGRATIONS.includes(f));
+}
+// UX-1 authorized revision (Owner GO 2026-11-17): one module added (core/session-home.js), the additive
+// css/components.css block, and the SESSION views changed (Home, routing, display-only money grouping,
+// Payroll/Overtime TO-BE A). Prior pin was UIINT1_PACKAGE_DIGEST. UX-1 targeted correction (chip contrast
+// and focus, unused CSS removed): prior UX-1 pin was 7dfa3255…a2152c7b. G-4 correction (Next plan in this stage
+// by the shown stage; the amount preview by the transaction validator): prior pin was 7318f613…ccd40886.
+const UX1_PACKAGE_DIGEST = '67eaf6a6bf25868c8f21fcc2516dd4bdb77542c18674b0cba3b676f087957e0e';
+// UX-1 + AWP-01 integration (Owner GO I1, 2026-11-18): the deployment package holds both — UX-1's session-home.js
+// and views, AWP-01's authz.js, transaction-api.js, audit-api.js and session-audit-view.js. Prior pins were
+// UX1_PACKAGE_DIGEST (UX-1 alone) and AWP01_PACKAGE_DIGEST (AWP-01 alone).
+const INTEGRATION_PACKAGE_DIGEST = 'cac8053b2d1b41bbfd82a9455f97d787ddc702a9678cc6ce31cd836a52b55a7e';
 function migrationsBeforePhase1() {
-  return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !PHASE1_MIGRATIONS.includes(f));
+  return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
+}
+// The server and client ACTIONS as Phase 1 left them (the Phase 2 actions set aside).
+function serverActionsBeforePhase2() {
+  return (fs.readFileSync(path.join(root, 'server', 'src', 'Policy', 'Action.php'), 'utf8').match(/^\s*case \w+ = '(?!reimbursement\.)/gm) || []).length;
+}
+function clientActionsBeforePhase2() {
+  return (fs.readFileSync(path.join(root, 'js', 'core', 'authz.js'), 'utf8').match(/:\s*'(?!reimbursement\.)[a-z]+\.[a-zA-Z]+'/g) || []).length;
 }
 const LF = '\n';
 const read = (p) => fs.readFileSync(p, 'utf8');
@@ -199,7 +237,21 @@ const srcJs = jsFiles.map((f)=>read(path.join(root,'js',f))).join(LF);
 //     drawer media query is removed (the @media (max-width:768px){ block itself stays). Same
 //     token value, no new token, no scroll-padding/scroll-margin (Owner F-1b); tokens.css and
 //     every other CSS file byte-unchanged. Prior CSS golden pin was 5321928b…6a42a.
-const CSS_GOLDEN_SHA256 = '1501d7ec3d887fb1d8ca2e4c87e67042f05e2ceb90faeeff056b38a48b9c8d06';
+//   UX-1 (current) — AUTHORIZED golden revision (Owner GO "UX-1 P1 APPLICATION IMPLEMENTATION",
+//     2026-11-17, UX-OD-01: additive CSS conditionally permitted), css/components.css only,
+//     ADDITIVE only: 41 lines appended at the end of the file (git diff --numstat: 41 added,
+//     0 removed) — the .ux-* classes (money, status badge with shape + colour, Home cards,
+//     key/value lists, filter chips, decision steps, banner) and the --ink-* text colours they
+//     use, declared on :root in that block for the dark and light themes; 44px touch targets
+//     under 768px; a reduced-motion rule. No existing rule changed; no new breakpoint; no
+//     type-scale or spacing token change; tokens.css byte-unchanged (pinned below).
+//     Prior CSS golden pin was 1501d7ec…9c8d06.
+//     UX-1 targeted correction (Owner GO "UX-1 P1 TARGETED CORRECTION", 2026-11-17), same block
+//     only: the selected filter chip's text is var(--text) (was var(--interactive-ink), about
+//     1.4:1 on its rendered background); chips take the application's 2px var(--interactive)
+//     focus-visible outline; the unused .ux-num and .ux-kv-wide rules are removed (referenced
+//     nowhere). Prior UX-1 pin was bcbd25b8…353c1f7f.
+const CSS_GOLDEN_SHA256 = '9094a8e0efa8822b0d2e1d60a7365802da337d4b3fa986cec401e1f0652d6fa1';
 // UX-005C — tokens.css anti-drift pin. The design tokens are the single source of truth
 // for spacing/type/radius/color; this pin fails loudly if any token VALUE is changed,
 // so a "consistency" edit can never silently move the scale it normalizes onto.
@@ -262,7 +314,8 @@ check(pkgMan.format === pkgTool.MANIFEST_FORMAT && pkgMan.entry === 'index.html'
   'manifest format is ' + pkgTool.MANIFEST_FORMAT + ' with entry point index.html');
 check(pkgMan.appVersion === meta.version && pkgMan.appReleaseName === meta.releaseName,
   'manifest identity is derived from constants.js (APP_VERSION ' + meta.version + ', ' + meta.releaseName + ')');
-check(pkgMan.schemaVersion === 6 && pkgMan.actions === 21, 'manifest records SCHEMA_VERSION 6 and ACTIONS 21 (BF-4a2 account.manage, SDR-0004)');
+// AWP-01 (ADR-016) authorized revision: ACTIONS 24 (the three reimbursement self actions). Was: 21 (BF-4a2).
+check(pkgMan.schemaVersion === 6 && pkgMan.actions === 24, 'manifest records SCHEMA_VERSION 6 and ACTIONS 24 (BF-4a2 account.manage, SDR-0004; AWP-01 the reimbursement self actions)');
 check(pkgMan.zip.name === 'tam-os-v' + meta.version + '-package.zip' && pkgMan.zip.sha256 === crypto.createHash('sha256').update(pkgA.zip).digest('hex'),
   'package ZIP name is derived from APP_VERSION and its digest is recorded in the manifest');
 const pkgPaths = pkgMan.files.map((f) => f.path);
@@ -4737,7 +4790,7 @@ check(persistenceLayerIsUnauthorized(read(path.join(root, 'js', 'core', 'hr-pers
   && !/\bcan\(/.test(read(path.join(root, 'js', 'core', 'storage-adapter.js'))),
   'UX-006C2A: authorization is NOT wired into any persistence primitive or StorageAdapter');
 // Authz core after UX-006C2C-2: exactly 17 ACTIONS (13 + the self-Draft trio + finance.manage).
-check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+check(clientActionsBeforePhase2() === 21,
   'UX-006C2C-3: ACTIONS vocabulary is exactly 21 (17 + import.undo + data.restore + data.reset; BF-4a2 account.manage, SDR-0004)');
 // New SE-0 harness present; identity/D1 untouched; private CodeQL compat intact.
 check(fs.existsSync(path.join(root, 'tools', 'verify-mutation-enforcement-hr-runtime.js')),
@@ -5050,7 +5103,7 @@ const c2c4Leg = read(path.join(root, 'js', 'people', 'legacy-mapping.js'));
 const c2c4Set = read(path.join(root, 'js', 'ui', 'settings-about.js'));
 const c2c4Onb = read(path.join(root, 'js', 'core', 'onboarding-reset.js'));
 // ACTIONS unchanged by C2C-4 — reuse only.
-check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+check(clientActionsBeforePhase2() === 21,
   'UX-006C2C-4: ACTIONS remains exactly 21 (C2C-4 adds no action; BF-4a2 added account.manage)');
 ['recurring.manage','bank.manage','employee.merge'].forEach(function(rej){
   check(read(path.join(root, 'js', 'core', 'authz.js')).indexOf("'" + rej + "'") === -1,
@@ -5249,7 +5302,7 @@ check(C3M.MUTATION_CONTROLS.every(function(c){ return typeof c.action === 'strin
 check(!/style="display:none|hidden/.test(read(path.join(root, 'js', 'import', 'smart-import-ui.js')).match(/id="irUndo"[^>]*>/)[0]),
   'UX-006C3: a denied control is disabled, never hidden');
 // --- C3 changes no authorization semantics ---
-check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+check(clientActionsBeforePhase2() === 21,
   'UX-006C3: ACTIONS remains exactly 21 (C3 adds no action; BF-4a2 added account.manage)');
 check(fs.existsSync(path.join(root, 'tools', 'verify-authz-integration-runtime.js')),
   'UX-006C3: integration runtime harness present — tools/verify-authz-integration-runtime.js');
@@ -5329,7 +5382,7 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
       'UX-006D2: the shell/navigation module still applies no availability policy'); }
 
   // --- D2 changes no authorization vocabulary, schema or version ---
-  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+  check(clientActionsBeforePhase2() === 21,
     'UX-006D2: ACTIONS remains exactly 21 (D2 adds no capability; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D2: SCHEMA_VERSION remains 6 (no D2 migration/storage change)');
@@ -5375,7 +5428,7 @@ console.log('== UX-006D3 — CROSS-SURFACE PRESENTATION CONSISTENCY ==');
     'UX-006D3: the empty-state path persists nothing');
 
   // --- the frozen surfaces are untouched by D3 ---
-  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+  check(clientActionsBeforePhase2() === 21,
     'UX-006D3: ACTIONS remains exactly 21 (D3 adds no capability; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'UX-006D3: SCHEMA_VERSION remains 6 (no D3 migration/storage change)');
@@ -5477,7 +5530,7 @@ console.log('== READINESS-1 — EMPLOYEE READ SCOPE ==');
       'Readiness-1: the import parser is deliberately NOT scoped (it must see the whole ledger)'); }
 
   // --- Readiness-1 changed no authorization, schema or version ---
-  check((read(path.join(root, 'js', 'core', 'authz.js')).match(/:\s*'[a-z]+\.[a-zA-Z]+'/g) || []).length === 21,
+  check(clientActionsBeforePhase2() === 21,
     'Readiness-1: ACTIONS remains exactly 21 (read scope needed no new action; BF-4a2 added account.manage)');
   check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'Readiness-1: SCHEMA_VERSION remains 6 (no migration)');
@@ -5714,8 +5767,10 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   // Phase 1 authorized revision (D-INT-1, D-INT-2): core/transaction-api.js (the general transaction
   // and report reads) is the one further ApiClient caller, and core/session-ledger.js reads
   // API_RESULT_KINDS to tell a 401 apart. Was: the AFI-4g set. The property is unchanged.
-  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js', 'core/overtime-api.js', 'core/session-overtime.js', 'core/payroll-api.js', 'core/session-payroll.js', 'core/audit-api.js', 'core/session-audit.js', 'core/transaction-api.js', 'core/session-ledger.js']);
-  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-overtime.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-payroll.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-audit.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-ledger.js'] || ''),
+  const apiUsers = offenders(/\b(ApiClient|API_RESULT_KINDS)\b/, ['core/session-identity.js', 'transport/api-client.js', 'core/auth-boot.js', 'core/auth-flow.js', 'core/employee-api.js', 'core/session-employee.js', 'core/overtime-api.js', 'core/session-overtime.js', 'core/payroll-api.js', 'core/session-payroll.js', 'core/audit-api.js', 'core/session-audit.js', 'core/transaction-api.js', 'core/session-ledger.js', 'core/session-home.js']);
+  // UX-1 authorized revision (Owner GO 2026-11-17): core/session-home.js reads API_RESULT_KINDS to tell a 401
+  // and a 403 apart; it calls no ApiClient (only the existing API clients' month reads). Was: the Phase 1 set.
+  check(apiUsers.length === 0 && !/\bApiClient\b/.test(prodCode['core/session-home.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-employee.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-overtime.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-payroll.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-audit.js'] || '') && !/\bApiClient\b/.test(prodCode['core/session-ledger.js'] || ''),
     'AFI-1/AFI-2/AFI-3/AFI-4a1/AFI-4b1/AFI-4c1/AFI-4g/Phase 1: only session-identity.js, auth-boot.js, auth-flow.js, employee-api.js, overtime-api.js, payroll-api.js, audit-api.js and transaction-api.js call ApiClient' + (apiUsers.length ? ' >> VIOLATION: ' + apiUsers.join(', ') : ''));
   // AFI-4c1 authorized revision: payroll-api.js names exactly the seven BF-4c1 Payroll paths. Was:
   // no /api/ path outside the AFI-4b2 set of session modules. AFI-4c2 authorized revision: plus the
@@ -5884,8 +5939,12 @@ console.log('== AFI-3 — CREDENTIAL FLOWS ==');
     && !/\b(document\.URL|URLSearchParams|hostname|navigator\s*\.\s*onLine)\b/.test(afCode),
     'AFI-3: auth-flow.js reads only location.hash (and pathname/search to strip it); nothing else from the URL');
   check(['core/app-bootstrap.js', 'core/auth-boot.js', 'ui/auth-view.js', 'core/constants.js'].every((f) => !/\blocation\b|\bhistory\s*\.|hashchange/.test(code(rd(f))))
-    && allCode.filter((x) => /hashchange|history\s*\.\s*replaceState/.test(x.c)).map((x) => x.f).join() === 'core/auth-flow.js',
-    'AFI-3: only auth-flow.js handles the fragment, hashchange and replaceState');
+    // UX-1 authorized revision (Owner GO 2026-11-17, scope C "meaningful routes; back/forward, refresh and direct
+    // links"): the SESSION shell's address-bar routes (#/home, #/payroll, …) are the one other reader and writer.
+    // It reads and writes only the route grammar ^#\/[a-z]+$ and never a credential fragment (pinned in the UX-1
+    // section); auth-flow.js alone parses and strips #activation / #recovery. Was: auth-flow.js only.
+    && allCode.filter((x) => /hashchange|history\s*\.\s*replaceState/.test(x.c)).map((x) => x.f).join() === 'ui/session-workspace-view.js,core/auth-flow.js',
+    'AFI-3/UX-1: only auth-flow.js handles the credential fragment; the SESSION shell route (#/name) is the one other hashchange / replaceState user');
   // Mode: SESSION only, reached only from AuthBoot.start(); AUTH_MODE never derived here.
   check(/function sessionMode\(\)\{ return AUTH_MODE === AUTH_MODES\.SESSION; \}/.test(afCode)
     && /beginFromLink\(\)\{\s*if\(!sessionMode\(\)\) return false;/.test(afCode)
@@ -6193,7 +6252,7 @@ console.log('== BF-4a3 — accountManageable PROJECTION ==');
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
   check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    && serverActionsBeforePhase2() === 21,
     'BF-4a3: no migration of its own (head 0035 after BF-4f), ACTIONS stay 21, AUTH_MODE SESSION since AFI-5b');
 }
 
@@ -6240,8 +6299,14 @@ console.log('== AFI-4a3 — ACCOUNT ADMINISTRATION ==');
     && (viewC.match(/sessionWorkspaceAccountRowHTML\(/g) || []).length === 2 && (viewC.match(/sessionWorkspaceAccountHTML\(/g) || []).length === 2
     && !/Account|account/.test(selfFn),
     'AFI-4a3: the Login access row comes only from sessionAccountOperations() on the CEO detail (none while another panel is open); the Employee self view has none');
-  check(!/\blocation\b|\bhistory\b|URLSearchParams|\bhashchange\b/.test(viewC + storeC + apiC),
-    'AFI-4a3: the SESSION Employee modules never read or write the URL (no email, draft or state in a hash, query or history entry)');
+  // UX-1 authorized revision (Owner GO 2026-11-17): the SESSION shell's route functions (sessionRouteFromHash,
+  // sessionRouteSync, sessionRouteClear, sessionRouteOnHash) and their one listener / first-paint read are set aside
+  // here; they carry only a route name (pinned in the UX-1 section). Everything else still never touches the URL.
+  const ux1Router = (c) => ['sessionRouteFromHash', 'sessionRouteSync', 'sessionRouteClear', 'sessionRouteOnHash'].reduce((t, n) => t.replace(new RegExp('function ' + n + '\\([\\s\\S]*?\\n\\}'), ''), c)
+    .replace(/if\(!SessionRouter\.bound && typeof addEventListener === 'function'\)\{ SessionRouter\.bound = true; addEventListener\('hashchange', sessionRouteOnHash\); \}/, '')
+    .replace(/const want = nav && typeof location !== 'undefined' \? sessionRouteFromHash\(nav, location\.hash\) : null;/, '');
+  check(!/\blocation\b|\bhistory\b|URLSearchParams|\bhashchange\b/.test(ux1Router(viewC) + storeC + apiC),
+    'AFI-4a3: the SESSION Employee modules never read or write the URL (no email, draft or state in a hash, query or history entry); UX-1: only the shell route name');
   check(!/activation[_ ]?(token|link|url)\s*[:=]|activationToken|activationLink|clipboard|#activation=|execCommand\(|Copy (link|token)/i.test(viewC + storeC + apiC),
     'AFI-4a3: no activation token, link or copy UI exists in the SESSION workspace');
 }
@@ -6293,9 +6358,11 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // Phase 1 authorized revision: the three Phase 1 Ledger modules follow the Audit modules, before
   // employee-api.js. Was: the Audit modules directly before employee-api.js.
   const LEDGER_NEW = ['core/transaction-api.js', 'core/session-ledger.js', 'ui/session-ledger-view.js'];
-  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 14).join() === NEW.concat(PAYROLL_NEW, AUDIT_NEW, LEDGER_NEW, ['core/employee-api.js']).join()
-    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/audit-api.js"></script>\n<script src="js/core/session-audit.js"></script>\n<script src="js/ui/session-audit-view.js"></script>\n<script src="js/core/transaction-api.js"></script>\n<script src="js/core/session-ledger.js"></script>\n<script src="js/ui/session-ledger-view.js"></script>\n<script src="js/core/employee-api.js"></script>'),
-    'AFI-4b1/AFI-4c1/AFI-4g/Phase 1: the three Overtime modules load right after transport-adapter.js, then the three Payroll modules, then the three Audit modules, then the three Ledger modules, then employee-api.js (manifest and index.html)');
+  // UX-1 authorized revision: core/session-home.js follows the Ledger modules, before employee-api.js. Was: the
+  // Ledger modules directly before employee-api.js.
+  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 15).join() === NEW.concat(PAYROLL_NEW, AUDIT_NEW, LEDGER_NEW, UX1_MODULES, ['core/employee-api.js']).join()
+    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/audit-api.js"></script>\n<script src="js/core/session-audit.js"></script>\n<script src="js/ui/session-audit-view.js"></script>\n<script src="js/core/transaction-api.js"></script>\n<script src="js/core/session-ledger.js"></script>\n<script src="js/ui/session-ledger-view.js"></script>\n<script src="js/core/session-home.js"></script>\n<script src="js/core/employee-api.js"></script>'),
+    'AFI-4b1/AFI-4c1/AFI-4g/Phase 1/UX-1: the three Overtime modules load right after transport-adapter.js, then the three Payroll modules, then the three Audit modules, then the three Ledger modules, then session-home.js, then employee-api.js (manifest and index.html)');
   const apiC = code(rd('core/overtime-api.js')), storeC = code(rd('core/session-overtime.js')), viewC = code(rd('ui/session-overtime-view.js'));
   const wsC = code(rd('ui/session-workspace-view.js')), abC = code(rd('core/auth-boot.js'));
   // Firewall: the AFI-4a1 SESSION deny list (State, storage, legacy persistence, shell, "Acting as",
@@ -6455,14 +6522,21 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
     // dashboard), Overtime under "More", Payroll, Transactions (the Ledger's transactions view), Activity Log (Audit);
     // the Ledger's route follows its view. Was: Employees | Overtime | Payroll | Finance | Audit and a
     // sessionShellHTML(model, … (finance ? 'finance' : SESSION_HOME_ROUTE) …, busy, card) return.
-    && /const SESSION_ROUTES = Object\.freeze\(\[\s*Object\.freeze\(\{ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',\s*labels: Object\.freeze\(\{ ceo: 'Employees', employee: 'My profile' \}\) \}\),\s*Object\.freeze\(\{ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',\s*labels: Object\.freeze\(\{ ceo: 'Overview' \}\) \}\),\s*Object\.freeze\(\{ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',\s*labels: Object\.freeze\(\{ ceo: 'Overtime', employee: 'My overtime' \}\), more: Object\.freeze\(\['ceo'\]\) \}\),\s*Object\.freeze\(\{ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\) \}\),\s*Object\.freeze\(\{ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions',\s*labels: Object\.freeze\(\{ ceo: 'Transactions' \}\) \}\),\s*Object\.freeze\(\{ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Activity Log' \}\) \}\)\s*\]\);/.test(wsC)
-    && /const route = payroll \? 'payroll' : \(overtime \? 'overtime' : \(audit \? 'audit' : \(finance \? \(fin\.view === 'transactions' \? 'transactions' : 'finance'\) : SESSION_HOME_ROUTE\)\)\);\s*return sessionShellHTML\(model, route, busy, page\);/.test(wsC)
+    // UX-1 authorized revision (Owner GO 2026-11-17, UX-OD-08): Home is the first route and the landing page of both
+    // roles; Overtime is a primary Finance item (no "More"); every route names its address-bar fragment. The route
+    // follows the open section, else Home while Home is shown, else Employees / My profile; the address bar is
+    // synced from it (sessionRouteSync). Was: Employees | Overview | More ▸ Overtime | Payroll | Transactions |
+    // Activity Log, no fragments, the route falling back to SESSION_HOME_ROUTE = 'main'.
+    && /const SESSION_ROUTES = Object\.freeze\(\[\s*Object\.freeze\(\{ id: 'home', button: 'swSectionHome', group: 'dashboard', navItem: 'execDashboard', hash: 'home',\s*labels: Object\.freeze\(\{ ceo: 'Home', employee: 'Home' \}\) \}\),\s*Object\.freeze\(\{ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees', hash: Object\.freeze\(\{ ceo: 'employees', employee: 'profile' \}\),\s*labels: Object\.freeze\(\{ ceo: 'Employees', employee: 'My profile' \}\) \}\),\s*Object\.freeze\(\{ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview', hash: 'overview',\s*labels: Object\.freeze\(\{ ceo: 'Overview' \}\) \}\),\s*Object\.freeze\(\{ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll', hash: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\) \}\),\s*Object\.freeze\(\{ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime', hash: 'overtime',\s*labels: Object\.freeze\(\{ ceo: 'Overtime', employee: 'My overtime' \}\) \}\),\s*Object\.freeze\(\{ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions', hash: 'transactions',\s*labels: Object\.freeze\(\{ ceo: 'Transactions' \}\) \}\),\s*Object\.freeze\(\{ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity', hash: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Activity Log' \}\) \}\)\s*\]\);/.test(wsC)
+    && /const SESSION_HOME_ROUTE = 'home';/.test(wsC) && !/\bmore: Object\.freeze/.test(wsC)
+    && /const route = payroll \? 'payroll' : \(overtime \? 'overtime' : \(audit \? 'audit' : \(finance \? \(fin\.view === 'transactions' \? 'transactions' : 'finance'\) : \(home \? SESSION_HOME_ROUTE : 'main'\)\)\)\);\s*sessionRouteSync\(model, route\);[^\n]*\n\s*return sessionShellHTML\(model, route, busy, page\);/.test(wsC)
+    && /const home = \(ceo \|\| employee\) && SessionHome\.isOpen\(\) && !payroll && !overtime && !audit && !finance;/.test(wsC)
     && /const finance = ceo && fin\.open && !payroll && !overtime && !audit;/.test(wsC)
     && /const payroll = \(ceo \|\| employee\) && pr\.open;/.test(wsC)
     && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(wsC),
     // Phase 1 authorized revision: the CEO's fifth section is Finance (the Ledger: dashboard and general
     // transactions), between Payroll and Audit; an Employee has none. Was: Employees | Overtime | Payroll | Audit.
-    'AFI-4b1/AFI-4c1/AFI-4c2/AFI-4g/Phase 1/UI-INT-1: the workspace routes are Employees | Overview | More ▸ Overtime | Payroll | Transactions | Activity Log (CEO) and My profile | My overtime | My payroll (Employee); the existing one stays the default');
+    'AFI-4b1/AFI-4c1/AFI-4c2/AFI-4g/Phase 1/UI-INT-1/UX-1: the workspace routes are Home | Employees | Overview | Payroll | Overtime | Transactions | Activity Log (CEO) and Home | My profile | My overtime | My payroll (Employee), each with its fragment; Home is the landing page');
   // Invariants held by this slice.
   const migrations = migrationsBeforePhase1();
   // BF-4c2 authorized revision: the head moved to 0028 (BF-4c2). Was: 0026 after BF-4c1 (0023 after BF-4b2, 0021 before).
@@ -6470,7 +6544,7 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
   check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    && serverActionsBeforePhase2() === 21,
     'AFI-4b1: frontend only — migration head 0035 after BF-4f, ACTIONS stay 21, AUTH_MODE SESSION since AFI-5b');
   check(fs.existsSync(path.join(root, 'tools', 'verify-session-overtime-runtime.js')), 'AFI-4b1: runtime harness present — tools/verify-session-overtime-runtime.js');
 }
@@ -6520,7 +6594,7 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   const input = srv('src/Overtime/OvertimeInput.php');
   check(/self::onlyKeys\(\$json, \['id', 'expectedVersion', 'expectedAmount'\]\);/.test(input),
     'BF-4b2: approve accepts exactly id, expectedVersion and expectedAmount (no salary, hours, rate, method, status or employee)');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && !/overtime\.approve/.test(read(path.join(root, 'js', 'core', 'authz.js')) + read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
+  check(serverActionsBeforePhase2() === 21 && !/overtime\.approve/.test(read(path.join(root, 'js', 'core', 'authz.js')) + read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
     && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4b2: ACTIONS stay 21 (no overtime.approve), AUTH_MODE SESSION since AFI-5b');
   // AFI-4b2 authorized revision: the frontend counterpart now exists. Was: "backend only — the
@@ -6538,7 +6612,7 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   // AFI-4g authorized revision: AFI-4g adds exactly its three Audit modules (100 → 103 files); the 100
   // are still the 97 plus the three AFI-4c1 modules. Was: 100 files.
   const AFI4G_MODULES = ['js/core/audit-api.js', 'js/core/session-audit.js', 'js/ui/session-audit-view.js'];
-  check(Array.isArray(manifest.files) && manifest.files.length === 102 + PHASE1_FILES && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
+  check(Array.isArray(manifest.files) && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
     && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
     'BF-4b2 + AFI-4b2 + AFI-4c1 + AFI-4g: AFI-4b2 added no production module; the package now holds 103 files, 102 since AFI-5b — the 97, exactly the three AFI-4c1 Payroll modules and exactly the three AFI-4g Audit modules');
   const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
@@ -6651,7 +6725,7 @@ console.log('== AFI-4b2 — SESSION OVERTIME VALUATION + APPROVAL ==');
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
   check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+    && serverActionsBeforePhase2() === 21
     && (code(rd('transport/api-client.js')).match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4,
     'AFI-4b2: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE SESSION since AFI-5b, the one D-AFI4b1-3 body-key exception unchanged');
 }
@@ -6713,7 +6787,7 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   check(/public const FIELDS = \['id', 'employeeId', 'monthKey', 'status', 'employeeCode', 'employeeName', 'department',\s*'baseSalary', 'overtimeAmount', 'overtimeHours', 'overtimeCount', 'totalAmount', 'version'\];/.test(srv('src/Payroll/PayrollView.php'))
     && /public const OVERTIME_FIELDS = \['id', 'hours', 'amount'\];/.test(srv('src/Payroll/PayrollView.php')),
     'BF-4c1: the plan projection is exactly thirteen fields and the contributing overtime exactly { id, hours, amount }');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+  check(serverActionsBeforePhase2() === 21
     && /'payroll\.manage':\s+'payrollPlan'/.test(read(path.join(root, 'js', 'core', 'authz.js'))) && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4c1: ACTIONS stay 21 (payroll reuses payroll.manage on payrollPlan), AUTH_MODE SESSION since AFI-5b');
   const jsFiles = [];
@@ -6727,7 +6801,7 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   // AFI-4c1 authorized revision: BF-4c1 changed no package (it stayed 97 files, digest 2d826d4d…);
   // AFI-4c1 then added its three modules. Was: 97 files at digest 2d826d4d….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4c1 + AFI-4c1: BF-4c1 changed no package; the package is now the AFI-4c1 one plus AFI-4g (103 files, 102 since AFI-5b, no longer 2d826d4d…), ACTIONS 21');
   check(['Unit/PayrollCalculationTest.php', 'Unit/PayrollDomainTest.php', 'Http/PayrollRoutingTest.php', 'Db/PayrollSchemaTest.php', 'Db/PayrollWorkflowTest.php', 'Db/PayrollConcurrencyTest.php', 'Support/payroll-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))),
@@ -6806,7 +6880,9 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
   // (D-AFI4e-5 = A; pinned in the AFI-4e section). Was: never Posted at all.
   check(/Ready: 'Ready — approved, not paid'/.test(viewC) && !/'Approved'|Posted|Executed|\bPaid\b/.test(viewC.replace(/Approved overtime counted|Posted to Finance — Planned, not paid/g, '')),
     'AFI-4c1: the server status words are shown (D-AFI4c1-3 = A) — Ready reads "Ready — approved, not paid"; never the LOCAL Approved, Posted or Executed');
-  check(/escapeHtml\(p\.baseSalary\)/.test(viewC) && /escapeHtml\(p\.totalAmount\)/.test(viewC) && /id="swpOpen' \+ i \+ '"/.test(viewC) && !/escapeHtml\(p\.id\)|escapeHtml\(row\.id\)/.test(viewC),
+  // UX-1 authorized revision (UX-OD-07): the list amounts are moneyHTML(…) — the exact server string escaped
+  // into <data value>, shown with display-only grouping (pinned in the UX-1 section). Was: escapeHtml(p.…).
+  check(/moneyHTML\(p\.baseSalary\)/.test(viewC) && /moneyHTML\(p\.totalAmount\)/.test(viewC) && /id="swpOpen' \+ i \+ '"/.test(viewC) && !/escapeHtml\(p\.id\)|escapeHtml\(row\.id\)/.test(viewC),
     'AFI-4c1: amounts are the escaped server strings; rows open by position (no plan id in the page)');
   const classes = (viewC.match(/class="([^"]+)"/g) || []).map((m) => m.slice(7, -1)).join(' ').split(/\s+/).filter((c) => /^[a-z][a-z0-9-]*$/.test(c)).concat(['btn-danger', 'btn-accent']);
   const cssAll = ['base.css', 'components.css', 'shell.css', 'tokens.css', 'charts.css', 'fonts.css'].map((f) => fs.existsSync(path.join(root, 'css', f)) ? read(path.join(root, 'css', f)) : '').join('\n');
@@ -6823,7 +6899,7 @@ console.log('== AFI-4c1 — SESSION PAYROLL CEO WORKSPACE ==');
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
   check(migrations[migrations.length - 1].startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    && serverActionsBeforePhase2() === 21,
     'AFI-4c1: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE SESSION since AFI-5b');
   const docs = read(path.join(root, 'AI_CONTEXT.md')) + read(path.join(root, 'ARCHITECTURE.md'));
   check(['D-AFI4c1-1 = A', 'D-AFI4c1-2 = A', 'D-AFI4c1-3 = A', 'D-AFI4c1-4 = A'].every((d) => docs.indexOf(d) !== -1) && /AFI-4c1/.test(read(path.join(root, 'docs', 'DEPLOYMENT.md'))),
@@ -6892,9 +6968,9 @@ console.log('== BF-4c2 — PAYROLL COMMIT + EMPLOYEE SELF-READ (BACKEND ONLY) ==
   // AFI-4c2 authorized revision: BF-4c2 left the package unchanged (100 files, a0a95b13…); AFI-4c2
   // changed four modules and so its digest. Was: digest a0a95b13….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4c2 + AFI-4c2: BF-4c2 changed no package; the package is now the AFI-4c2 one plus AFI-4g (103 files, 102 since AFI-5b, no longer a0a95b13…), ACTIONS 21');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+  check(serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4c2: ACTIONS stay 21 (commit reuses payroll.manage), AUTH_MODE SESSION since AFI-5b');
   check(['Unit/PayrollCommitTest.php', 'Db/PayrollCommitTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
     && /'commit'/.test(srv('tests/Support/payroll-worker.php')) && /C8 race/.test(srv('tests/Db/PayrollConcurrencyTest.php')),
@@ -6939,7 +7015,7 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
     'AFI-4c2: the words are D-AFI4c2-3 = A — "Commit payroll", "Committing…", "Retry commit", "Committed — final, not paid"; never Paid or Post to Finance');
   check(!/\b(Number|parseFloat|parseInt)\s*\(|Math\.|\bfmtIDR|toLocaleString|toFixed|Intl\./.test(all), 'AFI-4c2: still no number conversion, Math, formatter or Intl in the Payroll modules');
   // U1 authorized revision (GR-4): the My payroll label lives in SESSION_ROUTES. Was: tab('swSectionPayroll', …).
-  check(/id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\)/.test(wsC) && /function sessionPayrollMineDetailHTML\(w\)/.test(viewC)
+  check(/id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll', hash: 'payroll',\s*labels: Object\.freeze\(\{ ceo: 'Payroll', employee: 'My payroll' \}\)/.test(wsC)   // UX-1: plus its fragment && /function sessionPayrollMineDetailHTML\(w\)/.test(viewC)
     // AFI-4f authorized revision: the one label of the BF-4f code bankTransfer (pinned in the AFI-4f
     // section) is not a bank concept of My payroll. Was: no bank word at all.
     && !/\b(pph|bpjs|thr|tax|allowance|deduction|bonus|benefit|loan|net salary|bank|payment date)\b/i.test(viewC.replace(/It is not a payment/g, '').replace(/bankTransfer: 'Bank transfer'/g, '')),
@@ -6949,7 +7025,7 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 + PHASE1_FILES && manifest.actions === 21,
+  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'AFI-4c2: no new production module — the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
@@ -7034,7 +7110,7 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
     && /public static function overtime\(array \$overtime\): array/.test(srv('src/Payroll/PayrollCalculation.php'))
     && !/\(float\)|floatval|\bround\(|bc[a-z]+\(|gmp_|TAM-OT-1|OvertimeValuation|\bpostSupplemental|Executed|\bpaid\b/i.test(serviceCode),
     'BF-4d: the one exact overtime sum (PayrollCalculation::overtime) for generate, eligibility and commit revalidation; READ COMMITTED for generate and commit only; no float, valuation, posting or paid state');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+  check(serverActionsBeforePhase2() === 21
     && /self::SupplementalManage => Rule::CeoOnly,/.test(srv('src/Policy/Action.php')) && /self::SupplementalManage => null,/.test(srv('src/Policy/Action.php'))
     && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4d: ACTIONS stay 21 — the existing supplemental.manage, CEO-only and record-free; AUTH_MODE SESSION since AFI-5b');
@@ -7050,7 +7126,7 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
   // pinned in the AFI-4d section. Was: 100 files at digest 16e06b7e… (BF-4d left the package unchanged).
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES && manifest.actions === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4d/AFI-4d: the production package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector) and ACTIONS 21 (BF-4d added no frontend; AFI-4d added no module)');
   check(['Unit/SupplementalDomainTest.php', 'Http/SupplementalRoutingTest.php', 'Db/SupplementalSchemaTest.php', 'Db/SupplementalWorkflowTest.php', 'Db/SupplementalConcurrencyTest.php', 'Support/supplemental-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /C8 race/.test(srv('tests/Db/SupplementalConcurrencyTest.php')),
@@ -7161,7 +7237,7 @@ console.log('== AFI-4d — SESSION SUPPLEMENTAL PAYROLL ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') < mods.indexOf('core/session-payroll.js') && mods.indexOf('core/session-payroll.js') < mods.indexOf('ui/session-payroll-view.js')
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 + PHASE1_FILES && pkg.actions === 21,
+    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.actions - PHASE2_ACTIONS.length === 21,
     // AFI-4e authorized revision: the package changed with AFI-4e (frontend only) and its new digest
     // is pinned in the AFI-4e section. Was: digest 7768d72b… (AFI-4d).
     'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4e section)');
@@ -7247,7 +7323,7 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
     'BF-4e: both postings run in one READ COMMITTED transaction with one post audit row, authorized by the source domain Action; Finance never calls a source store; no float, execution, paid state, company account or monthly plan');
   check(!/->\s*finance\s*\(\s*\)|FinancePosting/.test(noComments(srv('src/Payroll/PayrollService.php')) + noComments(srv('src/Supplemental/SupplementalService.php')) + noComments(srv('src/Data/Payroll/PayrollStore.php')) + noComments(srv('src/Data/Supplemental/SupplementalStore.php'))),
     'BF-4e: Commit never posts — the Payroll and Supplemental code never call Finance (an explicit command per obligation, D-FIN-3 = A)');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+  check(serverActionsBeforePhase2() === 21
     && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4e: ACTIONS stay 21 — no Finance posting Action; AUTH_MODE SESSION since AFI-5b');
   const jsFiles = [];
@@ -7260,7 +7336,7 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   // route; the package unchanged at digest 7768d72b… (BF-4e backend only).
   check(jsFiles.filter((f) => /\/api\/finance/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 102 + PHASE1_FILES && manifest.actions === 21,
+    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4e/AFI-4e: exactly one frontend module — core/payroll-api.js (AFI-4e FinancePostingApi) — names a Finance posting route; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   check(['Unit/FinancePostingDomainTest.php', 'Http/FinanceRoutingTest.php', 'Db/FinancePostingSchemaTest.php', 'Db/FinancePostingWorkflowTest.php', 'Db/FinancePostingConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /F6 race/.test(srv('tests/Db/FinancePostingConcurrencyTest.php')),
@@ -7374,12 +7450,12 @@ console.log('== AFI-4e — SESSION FINANCE POSTING (CEO) ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES && pkg.actions === 21
+  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
     'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
   check(migrationsBeforePhase1().pop().startsWith('0035_') && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21,
+    && serverActionsBeforePhase2() === 21,
     'AFI-4e: frontend only — migration head 0035 after BF-4f, ACTIONS 21, AUTH_MODE SESSION since AFI-5b');
   const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js'));
   check(['F. ', 'F1. ', 'F2. ', 'F3. ', 'F4. ', 'F5. ', 'F6. ', 'F7. ', 'F8. ', 'F9. '].every((t) => harness.indexOf("'" + t) !== -1) && /\/__stub\/fail-next-posting/.test(read(path.join(root, 'tools', 'serve-auth-stub.js'))),
@@ -7436,7 +7512,10 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   check(exeRoutes.length === 2
     && exeRoutes.includes("new Route('GET', '/api/finance-executions', $financeExecutions->month(...), ['month'], RouteAuth::Required),")
     && exeRoutes.includes("new Route('POST', '/api/finance-executions/execute', $financeExecutions->execute(...), [], RouteAuth::Required, Action::FinanceExecute),")
-    && (routes.match(/Action::FinanceExecute/g) || []).length === 1 && (routes.match(/new Route\('[A-Z]+', '\/api\/finance/g) || []).length === 5,
+    // AWP-01 (ADR-016) authorized revision: the finance request pay route also declares finance.execute and the nine
+    // finance request routes are their own family. Was: one finance.execute route; five /api/finance routes.
+    && (routes.match(/Action::FinanceExecute/g) || []).length === 2 && routes.includes("new Route('POST', '/api/finance-requests/pay', $requests->pay(...), [], RouteAuth::Required, Action::FinanceExecute),")
+    && (routes.match(/new Route\('[A-Z]+', '\/api\/finance(?!-requests?')(?!-requests\/)/g) || []).length === 5,
     'BF-4f: exactly two Finance execution routes — the CEO month read (no Action) and the one command under the existing finance.execute (D-FEX-4 = A), declared by no other route; five Finance routes in all; no batch, partial, reversal, correction or reconciliation route');
   const input = srv('src/Finance/FinanceExecutionInput.php');
   check(/self::onlyKeys\(\$json, \['financePostingId', 'expectedAmount', 'executedOn', 'paymentMethod', 'idempotencyKey'\]\);/.test(input) && (input.match(/self::onlyKeys\(\$json,/g) || []).length === 1
@@ -7469,7 +7548,7 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
     "BF-4f: the execution is audited on its posting (entity financePosting) under finance.execute with operation 'execute', no field and no value; the posting audit is unchanged");
   check(!/finance_executions|FinanceExecution/.test(noComments(srv('src/Finance/FinancePostingService.php')) + noComments(srv('src/Data/Finance/FinancePostingStore.php')) + noComments(srv('src/Payroll/PayrollService.php')) + noComments(srv('src/Supplemental/SupplementalService.php'))),
     'BF-4f: posting, Payroll and Supplemental never execute — an execution is an explicit command per posting (no automatic or batch execution)');
-  check((read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+  check(serverActionsBeforePhase2() === 21
     && /case FinanceExecute = 'finance\.execute';/.test(read(path.join(root, 'server', 'src', 'Policy', 'Action.php')))
     && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4f: ACTIONS stay 21 — the existing finance.execute, no new Action; AUTH_MODE SESSION since AFI-5b');
@@ -7485,7 +7564,7 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   check(exeFiles.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
     && jsFiles.filter((f) => /finance-executions/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 102 + PHASE1_FILES && manifest.actions === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES && manifest.actions - PHASE2_ACTIONS.length === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
     'BF-4f/AFI-4f: exactly the three SESSION Payroll modules name a Finance execution and only core/payroll-api.js its routes; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   check(['Unit/FinanceExecutionDomainTest.php', 'Http/FinanceExecutionRoutingTest.php', 'Db/FinanceExecutionSchemaTest.php', 'Db/FinanceExecutionWorkflowTest.php', 'Db/FinanceExecutionConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /X5 race/.test(srv('tests/Db/FinanceExecutionConcurrencyTest.php')) && /'execute' => '\/api\/finance-executions\/execute'/.test(srv('tests/Support/finance-worker.php')),
@@ -7622,11 +7701,11 @@ console.log('== AFI-4f — SESSION RECORD PAYMENT (CEO) ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added exactly its three Audit modules (86 → 89, 100 → 103 files) and so
   // changed the digest (its digest: the AFI-4g section). Was: 86 modules, 100 files at digest d030d544….
-  check(mods.length === new Set(mods).size && mods.length === 88 + PHASE1_FILES && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES && pkg.actions === 21
+  check(mods.length === new Set(mods).size && mods.length === 88 + PHASE1_FILES + UX1_FILES && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'AFI-4f: no new production module (module order and index.html unchanged by AFI-4f); the package kept 100 files at digest d030d544… until AFI-4g (now 103 files, 102 since AFI-5b, its digest: the AFI-4g section), ACTIONS 21');
   check(migrationsBeforePhase1().pop() === '0035_replace_audit_events_finance_execute.sql' && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /case FinanceExecute = 'finance\.execute';/.test(read(path.join(root, 'server', 'src', 'Policy', 'Action.php'))),
+    && serverActionsBeforePhase2() === 21 && /case FinanceExecute = 'finance\.execute';/.test(read(path.join(root, 'server', 'src', 'Policy', 'Action.php'))),
     'AFI-4f: frontend only — migration head 0035 (BF-4f), ACTIONS 21 (the existing finance.execute), AUTH_MODE SESSION since AFI-5b');
   const harness = read(path.join(root, 'tools', 'verify-session-payroll-runtime.js')), stub = read(path.join(root, 'tools', 'serve-auth-stub.js'));
   check(['X. ', 'X1. ', 'X2. ', 'X3. ', 'X4. ', 'X5. ', 'X6. ', 'X7. ', 'X8. ', 'X9. '].every((t) => harness.indexOf("'" + t) !== -1)
@@ -7668,7 +7747,9 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
   const list = (name) => ((new RegExp('public const ' + name + ' = \\[([\\s\\S]*?)\\];').exec(tables) || ['', ''])[1].match(/'[a-z_]+'/g) || []).map((t) => t.slice(1, -1)).join();
   // Phase 1 authorized revision: the general transactions and their voids are backed up after the
   // Finance executions (a void references its transaction). Was: through finance_executions.
-  check(list('INCLUDED') === 'companies,users,employees,memberships,auth_events,audit_events,overtime_records,payroll_plans,payroll_plan_overtime,supplemental_payrolls,supplemental_payroll_overtime,finance_postings,finance_executions,finance_transactions,finance_transaction_voids'
+  // AWP-01 (ADR-016) authorized revision: then the finance requests and their payments (a payment
+  // references its request and its general transaction). Was: through finance_transaction_voids.
+  check(list('INCLUDED') === 'companies,users,employees,memberships,auth_events,audit_events,overtime_records,payroll_plans,payroll_plan_overtime,supplemental_payrolls,supplemental_payroll_overtime,finance_postings,finance_executions,finance_transactions,finance_transaction_voids,finance_requests,finance_request_payments'
     && list('EXCLUDED') === 'account_tokens,auth_rate_limits,mail_outbox,sessions' && list('APPEND_ONLY') === 'auth_events,audit_events' && /public const HISTORY = 'schema_migrations';/.test(tables),
     'OPS-1: the backup scope is every business, identity and audit table in foreign-key order; sessions, account tokens, rate limits and the mail outbox are excluded (D-AB-7 = B); auth_events and audit_events are the append-only tables');
   const reader = srv('src/Data/Backup/BackupReader.php');
@@ -7701,10 +7782,10 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
     'OPS-1: no route, controller or kernel names a backup — no HTTP surface (restore stays operator-only, OPS-2)');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(migrationsBeforePhase1().pop() === '0035_replace_audit_events_finance_execute.sql'
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-1 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 102 + PHASE1_FILES && pkg.actions === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.actions - PHASE2_ACTIONS.length === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'OPS-1: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-1 (100 files at digest d030d544… until AFI-4g)');
   check(['Unit/BackupFormatTest.php', 'Unit/BackupFileTest.php', 'Unit/BackupCliTest.php', 'Db/BackupCreateTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
     && /continuity end to end/.test(srv('tests/Db/BackupCreateTest.php')) && /rows committed while the backup runs are not in it/.test(srv('tests/Db/BackupCreateTest.php')),
@@ -7761,12 +7842,14 @@ console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==')
   const writerSql = (noComments(writer).match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g) || []).map((x) => x.slice(1, -1)).filter((x) => /^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|SET|ALTER|DROP|CREATE)\b/.test(x));
   // Phase 1 authorized revision: 15 INSERTs and 19 locked emptiness reads (finance_transactions and
   // finance_transaction_voids). Was: 13 and 17.
-  check(writerSql.filter((x) => /^INSERT INTO /.test(x)).length === 15 && writerSql.every((x) => /^INSERT INTO [a-z_]+ \([a-z_, ]+\) VALUES \([a-z_:, ]+\)$/.test(x) || /^SELECT /.test(x))
+  // AWP-01 (ADR-016) authorized revision: 17 INSERTs and 21 locked reads (finance_requests and
+  // finance_request_payments). Was: 15 and 19.
+  check(writerSql.filter((x) => /^INSERT INTO /.test(x)).length === 17 && writerSql.every((x) => /^INSERT INTO [a-z_]+ \([a-z_, ]+\) VALUES \([a-z_:, ]+\)$/.test(x) || /^SELECT /.test(x))
     && !writerSql.some((x) => /\b(IGNORE|REPLACE|DUPLICATE|UPDATE|DELETE|TRUNCATE)\b/.test(x)) && !/foreign_key_checks|unique_checks/.test(writer)
-    && writerSql.filter((x) => / LOCK IN SHARE MODE$/.test(x)).length === 19 && !writerSql.some((x) => /^INSERT INTO (sessions|account_tokens|auth_rate_limits|mail_outbox|schema_migrations) /.test(x))
+    && writerSql.filter((x) => / LOCK IN SHARE MODE$/.test(x)).length === 21 && !writerSql.some((x) => /^INSERT INTO (sessions|account_tokens|auth_rate_limits|mail_outbox|schema_migrations) /.test(x))
     && /public const GENERATED = \[\n        'payroll_plans' => \['live_key'\],\n        'supplemental_payrolls' => \['open_key'\],\n    \];/.test(writer)
     && !/live_key|open_key/.test(writerSql.join('\n')),
-    'OPS-2: RestoreWriter holds 15 plain INSERTs (13 before Phase 1) (no IGNORE, REPLACE, upsert, UPDATE, DELETE or TRUNCATE; never an excluded table or the history; generated columns never inserted) and 17 locked emptiness reads; foreign-key and unique checks stay on');
+    'OPS-2: RestoreWriter holds 17 plain INSERTs (13 before Phase 1, 15 before AWP-01) (no IGNORE, REPLACE, upsert, UPDATE, DELETE or TRUNCATE; never an excluded table or the history; generated columns never inserted) and 17 locked emptiness reads; foreign-key and unique checks stay on');
   check(/public function replay\(string \$path, array \$verified, \\Closure \$onTable, \\Closure \$onRow\): void/.test(verifier) && /new BackupParser\(\$continuity, \$onTable, \$onRow\)/.test(verifier)
     && /BackupFormat::encode\(\$manifest\) !== BackupFormat::encode\(\$verified\)/.test(verifier) && !/BackupCipher::open|new BackupParser|readSecretKeyFile/.test(restorer)
     && !/BackupVerifier|BackupParser|BackupCipher|readSecretKeyFile/.test(noComments(writer)),
@@ -7777,10 +7860,10 @@ console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==')
     'OPS-2: no route, controller, kernel or new CLI names a restore — operator tooling only, no HTTP surface');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(migrationsBeforePhase1().length === 35
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-2 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 102 + PHASE1_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'OPS-2: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-2 (100 files at digest d030d544… until AFI-4g)');
   const dbTest = srv('tests/Db/BackupRestoreTest.php');
   check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'BackupRestoreTest.php')) && ['round trip: every backed-up row returns exactly', 'any one row in any of the 19 classified tables',
@@ -7845,9 +7928,9 @@ console.log('== BF-4g — CEO AUDIT READ API (BACKEND ONLY) ==');
   // changed with it (103 files; its digest: the AFI-4g section). BF-4g itself stays backend only. Was:
   // no frontend module names an audit route; the package unchanged at 100 files, digest d030d544….
   check(jsFiles.filter((f) => /audit-events/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/audit-api.js'
-    && pkg.files.length === 102 + PHASE1_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
     && migrationsBeforePhase1().length === 35
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
+    && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4g: backend only — its one frontend reference is AFI-4g\'s core/audit-api.js, the package changed only with AFI-4g (103 files, 102 since AFI-5b, no longer d030d544…), no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b');
   const unit = srv('tests/Unit/AuditReadTest.php'), http = srv('tests/Http/AuditRoutingTest.php'), db = srv('tests/Db/AuditReadTest.php'), hostile = srv('tests/Db/AuditHostileTest.php');
   check(['leap February: 29 days', 'December → January rollover', 'the window does not depend on the PHP default timezone', 'an unreadable stored timestamp fails the row'].every((t) => unit.includes(t))
@@ -7898,24 +7981,79 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   check(/const AUDIT_LIST_CAP = 2000;/.test(apiC) && /public const LIST_CAP = 2000;/.test(srv('src/Data/Audit/AuditEventStore.php')) && /data\.auditEvents\.length > AUDIT_LIST_CAP/.test(apiC),
     'AFI-4g: the client list cap equals AuditEventStore::LIST_CAP (2,000) — more is never accepted');
   // Phase 1 authorized revision (PH1-QA-01, Owner 2026-11-13): the client vocabulary is pinned to the
-  // newest audit migration, 0038 (finance.manage on financeTransaction: create, void), so a server
-  // vocabulary change can no longer leave the Audit section behind. Was: migration 0035 (twelve
-  // actions, six with operations; audit_events_action_v6 / audit_events_action_operation_v7).
-  const m38 = srv('migrations/0038_replace_audit_events_finance_manage.sql');
-  const actions = ((/audit_events_action_v7 CHECK \(action IN \(([^)]*)\)\)/.exec(m38) || [])[1] || '').match(/'[a-zA-Z.]+'/g) || [];
-  const clientActions = (/const AUDIT_ACTION_ENTITY = Object\.freeze\(\{([\s\S]*?)\}\);/.exec(apiC) || [])[1] || '';
-  check(actions.length === 13 && actions.map((a) => a.slice(1, -1)).sort().join() === (clientActions.match(/'([a-zA-Z.]+)':/g) || []).map((a) => a.slice(1, -2)).sort().join(),
-    'AFI-4g/Phase 1: the action vocabulary is exactly migration 0038\'s thirteen actions');
-  const opsSql = (/audit_events_action_operation_v8 CHECK \(CASE action ([\s\S]*?) ELSE operation IS NULL END\)/.exec(m38) || [])[1] || '';
-  const sqlOps = {}; (opsSql.match(/WHEN '[a-zA-Z.]+' THEN [^W]*/g) || []).forEach((w) => { sqlOps[/'([a-zA-Z.]+)'/.exec(w)[1]] = (w.split('THEN')[1].match(/'[a-z]+'/g) || []).map((x) => x.slice(1, -1)).join(); });
-  const clientOps = {}; ((/const AUDIT_ACTION_OPERATIONS = Object\.freeze\(\{([\s\S]*?)\n\}\);/.exec(apiC) || [])[1] || '').split('\n').forEach((l) => { const m = /'([a-zA-Z.]+)': Object\.freeze\(\[([^\]]*)\]\)/.exec(l); if(m) clientOps[m[1]] = (m[2].match(/'[a-z]+'/g) || []).map((x) => x.slice(1, -1)).join(); });
-  check(Object.keys(sqlOps).length === 7 && JSON.stringify(Object.keys(sqlOps).sort().map((k) => [k, sqlOps[k]])) === JSON.stringify(Object.keys(clientOps).sort().map((k) => [k, clientOps[k]])),
-    'AFI-4g/Phase 1: the operations each action requires are exactly migration 0038\'s (every other action stores none)');
+  // newest audit migration, so a server vocabulary change can no longer leave the Audit section behind.
+  // AWP-01 (ADR-016) authorized revision: the newest is 0041, whose CHECKs are a triple set — an action
+  // may name several entities and its operations depend on the entity — so the client holds one
+  // AUDIT_ACTION_TRIPLES table and the comparison is of every (action, entity, operation) triple.
+  // Was: migration 0038 (thirteen actions, one entity each; seven with operations).
+  const M41_FILE = '0041_replace_audit_events_finance_requests.sql';
+  const m41 = srv('migrations/' + M41_FILE);
+  const actionsOf = (sql) => (((/audit_events_action_v8 CHECK \(action IN \(([^)]*)\)\)/.exec(sql) || [])[1] || '').match(/'[a-zA-Z.]+'/g) || []).map((a) => a.slice(1, -1));
+  // Every (action, entity, operation) triple the 0041 CHECKs admit ('-' for no operation).
+  function sqlTriplesOf(sql){
+    const entSql = (/audit_events_entity_v7 CHECK \(entity IN \([^)]*\) AND CASE action ([\s\S]*?) ELSE FALSE END\)/.exec(sql) || [])[1] || '';
+    const opsSql = (/audit_events_action_operation_v9 CHECK \(CASE action ([\s\S]*?) ELSE operation IS NULL END\)/.exec(sql) || [])[1] || '';
+    const arms = (x) => { const out = {}; x.split(/(?=WHEN ')/).filter(Boolean).forEach((w) => { const m = /^WHEN '([a-zA-Z.]+)' THEN ([\s\S]*?)\s*$/.exec(w); if(m) out[m[1]] = m[2]; }); return out; };
+    const entArms = arms(entSql), opArms = arms(opsSql);
+    const out = [];
+    actionsOf(sql).forEach((a) => {
+      const ents = ((entArms[a] || '').match(/'[a-zA-Z]+'/g) || []).map((x) => x.slice(1, -1));
+      const arm = opArms[a];
+      ents.forEach((e) => {
+        let ops = null;
+        if(arm !== undefined){
+          const per = [...arm.matchAll(/entity = '([a-zA-Z]+)' AND operation (?:= '([a-z]+)'|IN \(([^)]*)\))/g)];
+          if(per.length) { const hit = per.find((m) => m[1] === e); ops = hit ? (hit[2] ? [hit[2]] : (hit[3].match(/'[a-z]+'/g) || []).map((x) => x.slice(1, -1))) : []; }
+          else ops = ((/operation (?:= '([a-z]+)'|IN \(([^)]*)\))/.exec(arm) || []).slice(1).filter(Boolean).join(',').match(/[a-z]+/g) || []);
+        }
+        if(ops === null) out.push(a + '|' + e + '|-'); else ops.forEach((o) => out.push(a + '|' + e + '|' + o));
+      });
+    });
+    return out;
+  }
+  // Every triple the client AUDIT_ACTION_TRIPLES admits; an unparseable line is a triple of its own (never equal).
+  function clientTriplesOf(src){
+    const block = (/const AUDIT_ACTION_TRIPLES = Object\.freeze\(\{\n([\s\S]*?)\n\}\);/.exec(src) || [])[1] || '';
+    const out = [];
+    block.split('\n').forEach((l) => {
+      const m = /^\s*'([a-zA-Z.]+)': Object\.freeze\(\{ (.*) \}\),?$/.exec(l);
+      if(!m) { out.push('UNPARSEABLE'); return; }
+      for(const e of m[2].matchAll(/([a-zA-Z]+): (null|Object\.freeze\(\[([^\]]*)\]\))/g)){
+        if(e[2] === 'null') out.push(m[1] + '|' + e[1] + '|-');
+        else (e[3].match(/'[a-z]+'/g) || []).forEach((o) => out.push(m[1] + '|' + e[1] + '|' + o.slice(1, -1)));
+      }
+    });
+    return out;
+  }
+  const triplesAgree = (sql, src) => { const a = sqlTriplesOf(sql), b = clientTriplesOf(src); return a.length === 44 && JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort()); };
+  const actions = actionsOf(m41);
+  const sqlTriples = sqlTriplesOf(m41);
+  check(actions.length === 16 && new Set(actions).size === 16 && PHASE2_ACTIONS.every((a) => actions.includes(a)) && !/AUDIT_ACTION_ENTITY|AUDIT_ACTION_OPERATIONS/.test(apiC),
+    'AFI-4g/AWP-01: the action vocabulary is exactly migration 0041\'s sixteen actions (0038\'s thirteen and the three reimbursement self actions)');
+  check(triplesAgree(m41, apiC),
+    'AFI-4g/AWP-01: the client AUDIT_ACTION_TRIPLES are exactly migration 0041\'s (action, entity, operation) triples (44; every other combination stores nothing)'
+    + (sqlTriples.length === 44 ? '' : ' >> ' + sqlTriples.length + ' parsed'));
+  // ADR-016 D5: the pin reads 0041, the newest audit migration, and seeded defects in either the client
+  // table or the migration — a dropped triple, an extra triple, a broadened operation — are each caught.
+  const newestAudit = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /_replace_audit_events_.*\.sql$/.test(f)).sort().pop();
+  const seed = (src, from, to) => { if(src.split(from).length !== 2) return null; return src.replace(from, to); };
+  const D5 = [
+    ['a dropped client triple (finance.manage cancel on a request)', m41, seed(apiC, "'submit', 'approve', 'reject', 'cancel'])", "'submit', 'approve', 'reject'])")],
+    ['an extra client triple (finance.execute pay on a transaction)', m41, seed(apiC, "financeTransaction: Object.freeze(['create']) })", "financeTransaction: Object.freeze(['create', 'pay']) })")],
+    ['an extra client entity (reimbursement.submitSelf on overtime)', m41, seed(apiC, "'reimbursement.submitSelf': Object.freeze({ financeRequest: Object.freeze(['submit']) })", "'reimbursement.submitSelf': Object.freeze({ financeRequest: Object.freeze(['submit']), overtime: Object.freeze(['submit']) })")],
+    ['a broadened client operation (a self draft that stores an operation)', m41, seed(apiC, "'reimbursement.createSelfDraft': Object.freeze({ financeRequest: null })", "'reimbursement.createSelfDraft': Object.freeze({ financeRequest: Object.freeze(['create']) })")],
+    ['a dropped migration triple (finance.execute pay)', seed(m41, " OR (entity = 'financeRequest' AND operation = 'pay')", ''), apiC],
+    ['a broadened migration operation (finance.manage void on a request)', seed(m41, "operation IN ('create', 'update', 'submit', 'approve', 'reject', 'cancel')", "operation IN ('create', 'update', 'submit', 'approve', 'reject', 'cancel', 'void')"), apiC],
+  ];
+  check(newestAudit === M41_FILE && D5.every((d) => d[1] !== null && d[2] !== null && !triplesAgree(d[1], d[2])),
+    'AFI-4g/AWP-01 (ADR-016 D5): the vocabulary pin reads the newest audit migration (0041), and every seeded defect is caught: ' + D5.map((d) => d[0]).join('; ')
+    + (D5.some((d) => d[1] === null || d[2] === null) ? ' >> fixture drift' : ''));
   const ent = srv('src/Audit/AuditInput.php');
-  check(/'employee' => '\/\^\[A-Za-z0-9_-\]\{1,64\}\$\/D'/.test(ent) && ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction'].every((e) => new RegExp("'" + e + "' => '/\\^\\[0-9a-f\\]\\{32\\}\\$/D'").test(ent))
-    && /employee: \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/,/.test(apiC) && ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction'].every((e) => new RegExp(e + ': AUDIT_HEX32_PATTERN').test(apiC))
+  const HEX_ENTITIES = ['overtime', 'payrollPlan', 'supplementalPayroll', 'financePosting', 'financeTransaction', 'financeRequest'];
+  check(/'employee' => '\/\^\[A-Za-z0-9_-\]\{1,64\}\$\/D'/.test(ent) && HEX_ENTITIES.every((e) => new RegExp("'" + e + "' => '/\\^\\[0-9a-f\\]\\{32\\}\\$/D'").test(ent))
+    && /employee: \/\^\[A-Za-z0-9_-\]\{1,64\}\$\/,/.test(apiC) && HEX_ENTITIES.every((e) => new RegExp(e + ': AUDIT_HEX32_PATTERN').test(apiC))
     && /const AUDIT_HEX32_PATTERN = \/\^\[0-9a-f\]\{32\}\$\/;/.test(apiC),
-    'AFI-4g/Phase 1: the entity id formats are exactly AuditInput::ENTITIES (financeTransaction included, PH1-QA-01)');
+    'AFI-4g/AWP-01: the entity id formats are exactly AuditInput::ENTITIES (financeTransaction, PH1-QA-01; financeRequest, migration 0041)');
   check(/const AUDIT_JAKARTA_OFFSET_MS = 25200000;/.test(apiC) && /auditJakartaTime\(e\.occurredAt\)\.slice\(0, 7\) === monthKey/.test(apiC) && /e\.entity === entity && e\.entityId === id/.test(apiC)
     && /!auditBefore\(out\[out\.length - 1\], item\)/.test(apiC) && !/getTimezoneOffset|getHours|getMonth\(|getDate\(|toLocale|Intl\./.test(all),
     'AFI-4g: the company calendar is fixed UTC+7 (never the browser\'s zone); a month answer holds only its Jakarta month, a record answer only its record, in the server\'s order');
@@ -7924,7 +8062,7 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   check(/if\(value === true && !sessionAuditIsCeo\(principalNow\(\)\)\) return;/.test(storeC) && /if\(!s\.open \|\| !sessionAuditIsCeo\(principal\)\) return;/.test(storeC)
     && /function canRead\(\)\{ return sessionAuditIsCeo\(principalNow\(\)\) && SessionAuditStore\.snapshot\(\)\.open; \}/.test(storeC)
     // U1 authorized revision (GR-4): the Audit item is the route with a CEO label only. Was: (ceo ? tab('swSectionAudit', …) : '').
-    && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(ws) && /id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Activity Log' \}\) \}\)/.test(ws),   // UI-INT-1: v2.11.0 label (was 'Audit')
+    && /const audit = ceo && SessionAuditStore\.snapshot\(\)\.open && !payroll && !overtime;/.test(ws) && /id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity', hash: 'activity',\s*labels: Object\.freeze\(\{ ceo: 'Activity Log' \}\) \}\)/.test(ws),   // UI-INT-1: v2.11.0 label (was 'Audit'); UX-1: plus its fragment
     'AFI-4g/U1: CEO only — the Audit item has a CEO label alone and every SessionAudit entry point checks the CEO again (the server decides)');
   check(/SessionAuditStore\.clear\(\);\s+\/\/ AFI-4g/.test(read(path.join(root, 'js', 'core', 'auth-boot.js'))) && /if\(!out\.ok && out\.kind === API_RESULT_KINDS\.UNAUTHENTICATED\)\{\s*AuthBoot\.sessionLost\(\);/.test(storeC)
     && /bindPrincipal\(p\)\{\s*const key = keyOf\(p\);\s*if\(key === principalKey\) return false;\s*clear\(\);/.test(storeC)
@@ -7958,12 +8096,12 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   // so the package digest changed (files, modules and ACTIONS unchanged). Was: digest 097f6b50….
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(mods.length === 88 + PHASE1_FILES && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 + PHASE1_FILES && pkg.actions === 21
+  check(mods.length === 88 + PHASE1_FILES + UX1_FILES && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4' // AFI-5b: historical (its digest: the AFI-5b section)
     && pkg.packageDigest !== 'b2dae6ed01864793c2fe05e9b7fdf355a72b22d3744fd8fa1c8cfa3820c88147', // O-2 (PR #67): historical 103-file digest
     'AFI-4g: exactly three new production modules (89 modules, 88 since AFI-5b); the package held 103 files at digest 097f6b50… (b2dae6ed… with O-2; 102 since AFI-5b, its digest pinned in the AFI-5b section), ACTIONS 21');
   check(migrationsBeforePhase1().pop() === '0035_replace_audit_events_finance_execute.sql'
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
+    && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     && !/'audit|audit\./.test((/const ACTIONS = Object\.freeze\(\{[\s\S]*?\}\);/.exec(read(path.join(root, 'js', 'core', 'authz.js'))) || [''])[0]),
     'AFI-4g: frontend only — migration head 0035, ACTIONS 21 (no audit Action or permission), AUTH_MODE SESSION since AFI-5b');
   // Test-only tooling: the harness, the stub's audit model, the loopback E2E front.
@@ -8203,12 +8341,12 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // v3.0.0 (Owner decision 2026-11-05): re-pinned for the release identity only — APP_VERSION 3.0.0, APP_RELEASE_NAME
   // "Core SESSION Foundation", the <title> and the 3.0.0 in-app Release Notes entry. Prior pin was
   // f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430 (WP-1).
-  check(jsFiles.length === 88 + PHASE1_FILES && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102 + PHASE1_FILES
+  check(jsFiles.length === 88 + PHASE1_FILES + UX1_FILES && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102 + PHASE1_FILES + UX1_FILES
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === UIINT1_PACKAGE_DIGEST,   // UI-INT-1 (was PHASE1_PACKAGE_DIGEST)
+    && pkg5.packageDigest === INTEGRATION_PACKAGE_DIGEST,   // UX-1 + AWP-01 (was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8261,8 +8399,10 @@ console.log('== U1 — SESSION GRADUATED SHELL ==');
     && /function sessionShellReset\(app\)\{\s*SessionShellDrawer\.open = false; SessionShellDrawer\.ret = null; SessionShellDrawer\.held = false;/.test(wsU),
     'U1 r4: a failed rescue holds the closed drawer focusable (never inert around focus), recovers on focusout, and is cleared when the shell is left');
   // U1 correction 2 (Owner-approved): the Employee's Finance group reads "My work" (display only).
-  check(/const SESSION_GROUP_LABELS = Object\.freeze\(\{ employee: Object\.freeze\(\{ finance: 'My work' \}\) \}\);/.test(wsU),
-    'U1: the per-role group labels are exactly { employee: { finance: "My work" } }; route and button ids unchanged');
+  // UX-1 authorized revision (Owner GO 2026-11-17): the Dashboard group (Home) reads "Home" for both roles. Was:
+  // exactly { employee: { finance: 'My work' } }.
+  check(/const SESSION_GROUP_LABELS = Object\.freeze\(\{ ceo: Object\.freeze\(\{ dashboard: 'Home' \}\), employee: Object\.freeze\(\{ dashboard: 'Home', finance: 'My work' \}\) \}\);/.test(wsU),
+    'U1/UX-1: the per-role group labels are exactly { ceo: { dashboard: "Home" }, employee: { dashboard: "Home", finance: "My work" } }; route and button ids unchanged');
   // U1 correction 3 (Owner-approved): About and Release notes are deferred to U2 — no SESSION route and no
   // SESSION code path reaches the LOCAL variants (which read State / StorageAdapter and claim browser storage).
   check(!/\b(renderAbout|renderReleaseNotes|renderSettings)\b|'about'|'releasenotes'/.test(wsU) && !/\b(renderAbout|renderReleaseNotes)\b/.test(code(rd('ui/auth-view.js')) + code(rd('core/auth-boot.js'))),
@@ -8481,13 +8621,15 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
   const code = (t) => stripComments(t).replace(/\s\/\/\s.*$/gm, '');
   const rd = (f) => { const q = path.join(root, 'js', f); return fs.existsSync(q) ? read(q) : ''; };
   const all = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
-  check(all.length === 38 && all.slice(-3).join() === PHASE1_MIGRATIONS.join() && migrationsBeforePhase1().length === 35
-    && (read(path.join(root, 'server', 'src', 'Policy', 'Action.php')).match(/^\s*case \w+ = '/gm) || []).length === 21
+  // AWP-01 (ADR-016) authorized revision: the Phase 1 head is read with the Phase 2 migrations set aside. Was: the whole directory.
+  const p1 = migrationsBeforePhase2();
+  check(p1.length === 38 && p1.slice(-3).join() === PHASE1_MIGRATIONS.join() && migrationsBeforePhase1().length === 35
+    && serverActionsBeforePhase2() === 21
     && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'Phase 1: migrations 0036–0038 are the head (38 files), ACTIONS stay 21 (the existing finance.manage), AUTH_MODE SESSION');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const iAudit = order.indexOf('ui/session-audit-view.js');
-  check(order.length === 88 + PHASE1_FILES && iAudit !== -1 && order.slice(iAudit + 1, iAudit + 4).join() === PHASE1_MODULES.join()
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES && iAudit !== -1 && order.slice(iAudit + 1, iAudit + 4).join() === PHASE1_MODULES.join()
     && order.indexOf('core/payroll-api.js') < order.indexOf('core/transaction-api.js'),
     'Phase 1: exactly three new production modules (91), directly after the Audit modules and after payroll-api.js (payrollIdempotencyKey)');
   const DENY = /\b(State|StorageAdapter|loadState|saveState|persist[A-Za-z]*|localStorage|sessionStorage|indexedDB|EmployeeRepository|TransportAdapter|ApplicationGateway|renderShell|renderView|renderViewContent|LocalIdentityProvider|openGlobalSearch|renderTransactions|renderDashboard|renderExecutiveDashboard|renderExecutionCenter|renderCashflow|renderBudget|addTransaction|saveTxn|State\.txns|KNOWN_CATEGORIES|XMLHttpRequest)\b|document\s*\.\s*cookie|\bfetch\s*\(/;
@@ -8525,11 +8667,117 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
   check(['A. ', 'B. ', 'C. ', 'D. ', 'E. ', 'F. ', 'G. '].every((s) => h.includes("'" + s)) && /require\('\.\/session-shell-chrome\.js'\)/.test(h),
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(pkg.files.length === 102 + PHASE1_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions === 21
-    && pkg.packageDigest === UIINT1_PACKAGE_DIGEST,   // UI-INT-1 (was PHASE1_PACKAGE_DIGEST)
-    'Phase 1: the package holds 105 files, the three Ledger modules included, at the UI-INT-1 digest ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… (' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
+  check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
+    && pkg.packageDigest === INTEGRATION_PACKAGE_DIGEST,   // UX-1 + AWP-01 (was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    'Phase 1/UX-1: the package holds 106 files, the three Ledger modules and session-home.js included, at the integration digest ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… (' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
+// ===== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS, BACKEND S1–S5 (ADR-016, Owner 2026-11-17) =====
+// STRUCTURE only; behaviour is proven by server/tests (RequestDomainTest without a database; the MariaDB
+// RequestWorkflowTest), tools/verify-backend-boundary.js (the request writer, routes and void link) and the
+// runtime harnesses (the Audit section Q; the Ledger report decoder). Pins: migrations 0039–0041 are the
+// head (41 files); ACTIONS 24 (the three reimbursement self actions on the existing CeoOrOwnDraft rule, no
+// rule or role added); 67 routes (nine finance request routes); no new frontend module; the package.
+console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND S1–S5) ==');
+{
+  const all = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(all.length === 41 && all.slice(-3).join() === PHASE2_MIGRATIONS.join() && migrationsBeforePhase2().length === 38,
+    'AWP-01: migrations 0039–0041 (finance_requests, finance_request_payments, the request audit vocabulary) are the head (41 files)');
+  const actionPhp = read(path.join(root, 'server', 'src', 'Policy', 'Action.php'));
+  const authz = read(path.join(root, 'js', 'core', 'authz.js'));
+  check((actionPhp.match(/^\s*case \w+ = '/gm) || []).length === 24 && serverActionsBeforePhase2() === 21 && clientActionsBeforePhase2() === 21
+    && PHASE2_ACTIONS.every((a) => actionPhp.includes("= '" + a + "';") && authz.includes("'" + a + "'"))
+    && (actionPhp.match(/self::Reimbursement\w+ => Rule::CeoOrOwnDraft,/g) || []).length === 3
+    && (read(path.join(root, 'server', 'src', 'Policy', 'Rule.php')).match(/^\s*case \w+;/gm) || []).length === 2,
+    'AWP-01: ACTIONS 24 — the 21 of Phase 1 and the three reimbursement self actions, on the existing CeoOrOwnDraft rule (still two rules, no role)');
+  const routes = read(path.join(root, 'server', 'src', 'Http', 'Routes.php'));
+  const req = routes.match(/new Route\('[A-Z]+', '\/api\/finance-requests?[^']*'/g) || [];
+  check((routes.match(/new Route\(/g) || []).length === 67 && req.length === 9 && !/finance-requests\/(delete|reopen|return|reverse|refund|partial)/.test(routes),
+    'AWP-01: 67 routes — nine finance request routes (two reads, seven writes); no delete, return-to-Draft, reversal or partial-payment route');
+  const order = require(path.join(root, 'tools', 'module-order.js'));
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES && pkg.actions === 24 && pkg.packageDigest === INTEGRATION_PACKAGE_DIGEST,
+    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES) + ' with UX-1); the package records ACTIONS 24 at the integration digest ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '…');
+}
+
+
+// UX-1 — the SESSION unified experience (Owner GO "UX-1 P1 APPLICATION IMPLEMENTATION", 2026-11-17;
+// UX-OD-01/04/05/07/08; UX-OD-02/03 batch actions deferred, UX-OD-06 grouped defaults not implemented).
+// Pins what the GO requires and forbids: Home reads only the existing authorized month APIs and shows
+// no payroll sum; money is display-only grouping over the exact server string; the address-bar route
+// grammar is closed; no batch action exists; the payroll month list stays Finance-free (D-AFI4e-4 /
+// D-AFI4f-6). The runtime behaviour is exercised by the harnesses (shell, auth-boot, payroll, overtime,
+// ledger), each against an independent oracle.
+console.log('');
+console.log('== UX-1: SESSION Home, routing, money display, Payroll/Overtime TO-BE A ==');
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? read(p) : ''; };
+  const home = code(rd('core/session-home.js'));
+  const ws = code(rd('ui/session-workspace-view.js'));
+  const pv = code(rd('ui/session-payroll-view.js'));
+  const ov = code(rd('ui/session-overtime-view.js'));
+  const order = require(path.join(root, 'tools', 'module-order.js'));
+  const list = Array.isArray(order) ? order : (order.MODULE_ORDER || order.modules || order.order || []);
+  const iH = list.indexOf('core/session-home.js');
+  check(home !== '' && iH > 0 && list[iH - 1] === 'ui/session-ledger-view.js' && list[iH + 1] === 'core/employee-api.js'
+    && (read(path.join(root, 'index.html')).match(/<script src="js\/core\/session-home\.js"><\/script>/g) || []).length === 1,
+    'UX-1: core/session-home.js loads once, directly after ui/session-ledger-view.js and before core/employee-api.js (manifest and index.html)');
+  const calls = (home.match(/\b[A-Z][A-Za-z]*Api\.[A-Za-z]+\(/g) || []).map((x) => x.slice(0, -1)).sort();
+  check(JSON.stringify([...new Set(calls)]) === JSON.stringify(['AuditApi.month', 'OvertimeApi.month', 'PayrollApi.month', 'PayrollApi.myMonth', 'TransactionApi.report']),
+    'UX-1 (UX-OD-04): SessionHome reads only the existing month APIs — AuditApi.month, OvertimeApi.month, PayrollApi.month, PayrollApi.myMonth, TransactionApi.report >> ' + [...new Set(calls)].join(', '));
+  check(!/\bFinance(Posting|Execution)|financePost|financeExec|ApiClient|\bfetch\b|localStorage|sessionStorage|\bState\b|\b(create|update|delete|approve|review|commit|post|record|submit|reject|void)[A-Z]?[A-Za-z]*\(/.test(home.replace(/AuthBoot\.(snapshot|sessionLost)\(/g, '')),
+    'UX-1: SessionHome makes no write, no Finance posting/execution read, no direct network or storage access, and never touches State');
+  check(/status: 'loading'/.test(home) && /status: out\.kind === API_RESULT_KINDS\.DENIED \? 'denied' : 'error'/.test(home) && /AuthBoot\.sessionLost\(\)/.test(home)
+    && /if\(t !== token\) return/.test(home),
+    'UX-1: every Home tile is loading / ready / denied / error (a failed read is never zero); a 401 ends the session; a stale answer is dropped');
+  check(!/totalAmount|baseSalary|overtimeAmount|\.payroll\.paid|\bMath\.|\bNumber\(|parseFloat|parseInt|BigInt|reduce\(/.test(home)
+    && !/\.payroll\.paid/.test(ws) && (ws.match(/totalAmount/g) || []).length === 1
+    && /function sessionHomeEmployeeLatestHTML\([\s\S]*?moneyHTML\(p\.totalAmount\)[\s\S]*?\n\}/.test(ws)
+    && /Counts of plans only — TAM OS shows no payroll total\./.test(ws),
+    'UX-1 (UX-OD-04): Home shows no payroll sum — the CEO sees plan counts only, never a plan amount or the report payroll figure; the one amount is the Employee\'s own latest Committed plan');
+  // Money display (UX-OD-07): run the helpers and compare against literal expectations.
+  const vm = require('vm');
+  const box = { };
+  vm.createContext(box);
+  vm.runInContext(rd('core/utils.js') + '\n;this.moneyDisplay = moneyDisplay; this.moneyHTML = moneyHTML; this.statusBadgeHTML = statusBadgeHTML;', box);
+  const cases = [['0', '0'], ['0.00', '0,00'], ['999', '999'], ['1000', '1.000'], ['1000.5', '1.000,5'], ['8000000.50', '8.000.000,50'],
+    ['-2500000.00', '-2.500.000,00'], ['123456789012345678901234.99', '123.456.789.012.345.678.901.234,99'], ['-0.01', '-0,01'],
+    ['01000', '01000'], ['1e6', '1e6'], ['1,000.00', '1,000.00'], ['1.000.000', '1.000.000'], [' 1000', ' 1000'], ['+1000', '+1000'], ['', ''], ['abc', 'abc']];
+  const bad = cases.filter((c) => box.moneyDisplay(c[0]) !== c[1]);
+  check(bad.length === 0 && box.moneyDisplay(null) === '' && box.moneyDisplay(undefined) === '',
+    'UX-1 (UX-OD-07): moneyDisplay groups only a canonical decimal string (dots for thousands, comma for decimals), keeps every digit and the sign, and returns anything else unchanged' + (bad.length ? ' >> ' + bad.map((c) => c[0] + '→' + box.moneyDisplay(c[0])).join('; ') : ''));
+  check(box.moneyHTML('8000000.50') === '<data class="ux-money" value="8000000.50">8.000.000,50</data>' && box.moneyHTML('') === '—' && box.moneyHTML(null) === '—'
+    && box.moneyHTML('<b>1</b>') === '<data class="ux-money" value="&lt;b&gt;1&lt;/b&gt;">&lt;b&gt;1&lt;/b&gt;</data>',
+    'UX-1 (UX-OD-07): moneyHTML keeps the exact server string in <data value>, escapes both, and shows a dash (never 0) for no value');
+  check(!/\bMath\.|\bNumber\(|parseFloat|parseInt|toLocaleString|Intl\./.test(code(rd('core/utils.js')).split('const MONEY_DISPLAY_PATTERN')[1] || 'Math.'),
+    'UX-1 (UX-OD-07): the money helpers never convert to a number (no float, no locale API)');
+  check(box.statusBadgeHTML('Ready — approved, not paid', 'attention') === '<span class="ux-badge ux-tone-attention"><span class="ux-badge-mark" aria-hidden="true">◆</span>Ready — approved, not paid</span>'
+    && box.statusBadgeHTML('<x>', 'nope') === '<span class="ux-badge ux-tone-neutral"><span class="ux-badge-mark" aria-hidden="true">○</span>&lt;x&gt;</span>',
+    'UX-1: a status badge is text + shape + colour, escaped; an unknown tone is neutral');
+  // Routing (UX-OD-08).
+  check(/const SESSION_ROUTE_HASH = \/\^#\\\/\(\[a-z\]\+\)\$\/;/.test(ws) && /history\.pushState\(/.test(ws) && /history\.replaceState\(/.test(ws)
+    && !/location\.(href|assign|replace)\s*[=(]|location\.hash\s*=/.test(ws) && /addEventListener\('hashchange'/.test(ws),
+    'UX-1 (UX-OD-08): the address-bar route grammar is exactly #/<lowercase word>; it is written only through history push/replaceState and read on hashchange');
+  check(/function sessionGoTo\(/.test(ws) && /function sessionShellReset\(app\)\{[\s\S]*?if\(SessionRouter\.applied\) sessionRouteClear\(\);[\s\S]*?SessionRouter\.applied = false/.test(ws),
+    'UX-1: every route change goes through sessionGoTo (the model, the role and the idle rule decide); sign-out and leaving the shell clear the route state');
+  // No batch actions (UX-OD-02 / UX-OD-03 deferred); D-AFI4e-4 / D-AFI4f-6 kept.
+  check(!/type="checkbox"|Select all|\bbulk\b|\bbatch\b/i.test(pv + ov + ws),
+    'UX-1 (UX-OD-02/03 deferred): no checkbox, select-all, bulk or batch action in Payroll, Overtime or the workspace');
+  const list2 = pv.split('function sessionPayrollPlansHTML(')[1].split('\nfunction ')[0] + pv.split('function sessionPayrollChipsHTML(')[1].split('\nfunction ')[0];
+  check(/function sessionPayrollStageOf\(w, p\)\{ return p\.status; \}/.test(pv) && !/Finance|sessionFinance|payment/i.test(list2),
+    'UX-1: the payroll month list, its stage chips and its Next step column use the stored status only — no Finance or payment status (D-AFI4e-4 = A, D-AFI4f-6 = A)');
+  // G-4 correction (2026-11-17): "Next plan in this stage" moves within the stage the detail shows, and the
+  // amount preview reads back only what the transaction validator accepts. Runtime: payroll and ledger harnesses.
+  check(/function sessionPayrollNextInStage\(w, p\)\{[\s\S]*?const stage = sessionPayrollDetailStage\(w, p\);[\s\S]*?stage === SESSION_PAYROLL_DETAIL_STAGES\.checking\) return null;[\s\S]*?sessionPayrollDetailStage\(w, q\) === stage\) return q\.id;/.test(pv),
+    'UX-1 G-4: Next plan in this stage compares the Finance-aware detail stage (posted, payment recorded and unposted are distinct; never while Finance is being read)');
+  const lv = code(rd('ui/session-ledger-view.js'));
+  check(/function sessionLedgerAmountPreview\(value\)\{[\s\S]*?if\(transactionIsAmount\(v\)\) return 'Reads as Rp ' \+ moneyDisplay\(v\)/.test(lv),
+    'UX-1 G-4: the amount preview reads a value back only when transactionIsAmount() (the transaction validator) accepts it');
+  check(/Marking a record reviewed is not approval\. Only Approve freezes the valuation and makes the record final\./.test(ov) && /'Mark reviewed'/.test(ov),
+    'UX-1 (Overtime TO-BE A): review is clearly not approval — the review button reads "Mark reviewed" and the decision hint says so');
+}
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }
 console.log('VERIFICATION FAILED -- ' + passes + ' passed, ' + fails.length + ' failed:');

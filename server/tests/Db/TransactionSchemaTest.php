@@ -65,11 +65,12 @@ return [
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         $labels = array_map(static fn ($m): string => $m->label(), $applied);
-        assertSame(38, count($labels), 'thirty-eight migrations');
-        assertSame(['0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_slice($labels, -3));
+        // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
+        assertSame(41, count($labels), 'forty-one migrations');
+        assertSame(['0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_slice($labels, 35, 3));
         $numbers = array_map(static fn (string $l): int => (int) substr($l, 0, 4), $labels);
-        assertSame(range(1, 38), $numbers, 'in order, without a gap');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0038, current');
+        assertSame(range(1, 41), $numbers, 'in order, without a gap');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0041, current (AWP-01)');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM finance_transactions')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM finance_transaction_voids')[0]['n']]);
     },
     'columns: identifiers ascii_bin, an exact DECIMAL amount, a DATE, the creator and DATETIME(6), InnoDB utf8mb4 — no stored status, no update column' => static function () use ($columns): void {
@@ -182,8 +183,8 @@ return [
             $db->select('SELECT * FROM employees ORDER BY id'), $db->select('SELECT * FROM audit_events ORDER BY id')];
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_map(static fn ($x): string => $x->label(), $applied), 'only the Phase 1 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0038, current');
+        assertSame(['0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage', '0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests'], array_map(static fn ($x): string => $x->label(), $applied), 'only the Phase 1 migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0041, current (AWP-01)');
         assertSame($before, $snapshot(), 'every payroll, posting, execution, employee and audit row is unchanged');
         assertSame([0, 0], [(int) $db->select('SELECT COUNT(*) AS n FROM finance_transactions')[0]['n'], (int) $db->select('SELECT COUNT(*) AS n FROM finance_transaction_voids')[0]['n']], 'nothing is seeded');
         $db->execute("INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (?, UTC_TIMESTAMP(6), ?, ?, 'finance.manage', 'financeTransaction', ?, 'create', NULL, ?, NULL)", [$c, $u, $m, str_repeat('b', 32), str_repeat('a', 32)]);

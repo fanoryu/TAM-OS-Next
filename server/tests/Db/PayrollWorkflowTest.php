@@ -381,7 +381,8 @@ return [
         // BF-4f authorized revision: the Finance execution table exists too, and this flow never writes it
         // (its count is compared above). Was: finance_postings the one finance table.
         // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
-        assertSame([], array_values(array_filter(array_keys($after), static fn (string $t): bool => !in_array($t, ['finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids'], true) && (bool) preg_match('/finance|transaction|ledger|journal|payment|payslip/', $t))), 'no other finance table exists');
+        // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
+        assertSame([], array_values(array_filter(array_keys($after), static fn (string $t): bool => !in_array($t, ['finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids', 'finance_requests', 'finance_request_payments'], true) && (bool) preg_match('/finance|transaction|ledger|journal|payment|payslip/', $t))), 'no other finance table exists');
         assertSame('Ready', $p['status'], 'Ready is an approved obligation, not a payment');
     },
 ];

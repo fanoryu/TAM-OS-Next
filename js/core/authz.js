@@ -78,7 +78,13 @@ const ACTIONS = Object.freeze({
   // account administration (provision, reissue activation, disable, enable), decided by
   // the server Policy against an Employee record. Vocabulary/parity only: no client
   // feature consumes it yet (AFI-4a), and client authorization stays UX affordance.
-  ACCOUNT_MANAGE:     'account.manage'
+  ACCOUNT_MANAGE:     'account.manage',
+  // AWP-01 — ADR-016 §3 (Phase 2, ACTIONS 21 -> 24). Employee self-service on OWN Draft
+  // reimbursements, on the existing CeoOrOwnDraft rule (selfDraftOnly); no role or rule is
+  // added. The server Policy decides; this is UX affordance only.
+  REIMBURSEMENT_CREATE_SELF_DRAFT:'reimbursement.createSelfDraft',
+  REIMBURSEMENT_UPDATE_SELF_DRAFT:'reimbursement.updateSelfDraft',
+  REIMBURSEMENT_SUBMIT_SELF:'reimbursement.submitSelf'
 });
 // The set of valid action strings, for fail-closed validation of unknown actions.
 const ACTION_SET = Object.freeze(Object.keys(ACTIONS).map(function(k){ return ACTIONS[k]; }));
@@ -109,7 +115,10 @@ const ACTION_RESOURCE_ENTITY = Object.freeze({
   'import.undo':         null,          // batch-scoped system op; no per-record scope path
   'data.restore':        null,          // whole-dataset replacement; Executive-only
   'data.reset':          null,          // whole-dataset destruction; Executive-only
-  'account.manage':      'employee'     // administers the login bound to an Employee record
+  'account.manage':      'employee',    // administers the login bound to an Employee record
+  'reimbursement.createSelfDraft': 'financeRequest', // candidate record; AZ-1 verifies own scope
+  'reimbursement.updateSelfDraft': 'financeRequest',
+  'reimbursement.submitSelf': 'financeRequest'
 });
 
 /* ---------- POLICY — centralized action -> predicate registry ----------
@@ -156,6 +165,10 @@ const POLICY = Object.freeze({
   'data.reset':          ceoOnly,
   // BF-4a2 — SDR-0004: Employee account administration is CEO-only.
   'account.manage':      ceoOnly,
+  // AWP-01 — ADR-016 §3: own Draft reimbursements, the overtime self-draft predicate.
+  'reimbursement.createSelfDraft': selfDraftOnly,
+  'reimbursement.updateSelfDraft': selfDraftOnly,
+  'reimbursement.submitSelf': selfDraftOnly,
   // The single approved employee self-service mutation (UX-006C1). CEO also
   // passes (company overtime management is CEO-side). Employee is allowed ONLY
   // to transition an own in-scope Overtime record from Draft -> Submitted.

@@ -21,6 +21,12 @@ use TamOs\Policy\Scope;
  * status can never contradict the void history. The database holds at most one void per
  * transaction and each idempotency key once per company per table.
  *
+ * Phase 2 (ADR-016 §5, §7): paying a finance request records its general expense here too — the same
+ * one INSERT, authorized by the record-free finance.execute instead of finance.manage, with a
+ * server-generated idempotency key — and a transaction linked to a request payment
+ * (finance_request_payments, UNIQUE finance_transaction_id) can never be voided: the void reads the
+ * link under its transaction lock (LINK_SQL) and refuses it. No Phase 1 statement changes.
+ *
  * Both writes are authorized by the existing record-free finance.manage (CeoOnly; ACTIONS stay 21).
  * A void locks its transaction by primary key, so two voids of one transaction serialize. The money
  * is stored as the exact "N.00" string the CEO entered: no SQL arithmetic.
@@ -42,6 +48,8 @@ final class TransactionStore
     // The one lock — the transaction a void names, by primary key — and its void, read under it.
     public const LOCK_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_transactions WHERE id = :id AND company_id = :company_id FOR UPDATE';
     public const TRANSACTION_VOID_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_transaction_voids WHERE company_id = :company_id AND finance_transaction_id = :id';
+    // Phase 2 (ADR-016 §7): the request payment a transaction is linked to, read under its lock.
+    public const LINK_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_request_payments WHERE company_id = :company_id AND finance_transaction_id = :id';
 
     // The two writes.
     public const INSERT_SQL = 'INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (:id, :company_id, :kind, :financial_post, :category, :description, :amount, :transaction_date, :created_by_user_id, :idempotency_key, UTC_TIMESTAMP(6))';
@@ -100,6 +108,38 @@ final class TransactionStore
             'created_by_user_id' => self::hex($actorUserId),
             'idempotency_key' => self::hex($in['idempotencyKey']),
         ]);
+    }
+
+    /**
+     * Phase 2 (ADR-016 §5 step 4): inserts the general expense of a finance request payment — the
+     * same INSERT as a CEO-recorded transaction, authorized by the record-free finance.execute. The
+     * values come from the locked request; the key is the server's own.
+     *
+     * @param array{kind: string, financialPost: string, category: string, description: string, amount: string, transactionDate: string, idempotencyKey: string} $in
+     */
+    public function insertPaidExpense(Authorization $auth, string $id, array $in, string $actorUserId): void
+    {
+        if ($auth->action !== Action::FinanceExecute || $auth->record !== null || $auth->scope->isSelf() || $in['kind'] !== 'expense') {
+            throw new \LogicException('a request payment expense needs finance.execute, in company scope, and is an expense');
+        }
+        $this->db->execute($auth, self::INSERT_SQL, [
+            'id' => self::hex($id),
+            'kind' => $in['kind'],
+            'financial_post' => $in['financialPost'],
+            'category' => $in['category'],
+            'description' => $in['description'],
+            'amount' => $in['amount'],
+            'transaction_date' => self::date($in['transactionDate']),
+            'created_by_user_id' => self::hex($actorUserId),
+            'idempotency_key' => self::hex($in['idempotencyKey']),
+        ]);
+    }
+
+    /** Phase 2 (ADR-016 §7): the id of the request payment transaction $id is linked to, or null — read under its lock. */
+    public function linkedPayment(Authorization $auth, string $id): ?string
+    {
+        $rows = $this->db->select(self::authorized($auth)->scope, self::LINK_SQL, ['id' => self::hex($id)]);
+        return isset($rows[0]) ? (string) $rows[0]['id'] : null;
     }
 
     /**

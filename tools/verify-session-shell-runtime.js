@@ -151,6 +151,8 @@ function loadRuntime(routes, mutate, drawerMode){
     + ' SessionOvertimeStore: SessionOvertimeStore, SessionPayrollStore: SessionPayrollStore, SessionAuditStore: SessionAuditStore,'
     + ' SessionShellDrawer: SessionShellDrawer };';
   const noop = function(){};
+  const histLog = [];
+  const setHash = (u) => { const i = String(u).indexOf('#'); sandbox.location.hash = i === -1 ? '' : String(u).slice(i); };
   const access = { local: [], session: [] };
   const storageOf = (log) => ({ getItem: (k) => { log.push('get:' + k); return null; }, setItem: (k) => { log.push('set:' + k); },
     removeItem: (k) => { log.push('remove:' + k); }, key: () => null, get length(){ return 0; }, clear: () => { log.push('clear'); } });
@@ -180,8 +182,10 @@ function loadRuntime(routes, mutate, drawerMode){
     AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session),
     addEventListener: noop, removeEventListener: noop, confirm: () => true,
-    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
-    history: { replaceState: noop, pushState: noop },
+    // UX-1: the address bar — a history write sets location.hash from its URL (the route oracle reads it back);
+    // loadRuntime.hash is the fragment the page was opened with (a deep link). Was: no-op history, empty hash.
+    location: { hash: loadRuntime.hash || '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
+    history: { replaceState: (st, t, u) => { histLog.push('replace:' + u); setHash(u); }, pushState: (st, t, u) => { histLog.push('push:' + u); setHash(u); } },
     matchMedia: mql,
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: { addEventListener: (t, fn) => { (dom.docListeners[t] = dom.docListeners[t] || []).push(fn); }, removeEventListener:noop,
@@ -194,7 +198,7 @@ function loadRuntime(routes, mutate, drawerMode){
   vm.runInContext(src, vm.createContext(sandbox), { filename: 'tam-u1-runtime.js' });
   const rt = sandbox.__TAM__;
   rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr;
-  rt.app = els.app; rt.appHTML = () => els.app.innerHTML; rt.dom = dom;
+  rt.app = els.app; rt.appHTML = () => els.app.innerHTML; rt.dom = dom; rt.loc = sandbox.location; rt.histLog = histLog;
   rt.state = () => rt.AuthBoot.snapshot().state;
   rt.resize = (mobile) => { if(media.matches === !!mobile) return; media.matches = !!mobile; media.listeners.slice().forEach((fn) => fn({ matches: media.matches })); };
   // UI-DEV-03 — a simulated mobile -> desktop change, in one of three orders (none is asserted to be
@@ -225,8 +229,10 @@ async function boot(me, mutate, extra, drawerMode){
 // Phase 1 authorized revision: the CEO's Finance group ends with Finance (the Ledger). Was: Overtime | Payroll.
 const EXPECT = {
   // UI-INT-1 (Owner D-UI-1): v2.11.0 wording and order; Overtime sits under "More". Was: overtime | payroll | finance:Finance / audit:Audit.
-  ceo: [['people', ['main:Employees']], ['finance', ['finance:Overview', 'overtime:Overtime', 'payroll:Payroll', 'transactions:Transactions']], ['system', ['audit:Activity Log']]],
-  employee: [['people', ['main:My profile']], ['finance', ['overtime:My overtime', 'payroll:My payroll']]]
+  // UX-1 authorized revision (Owner GO 2026-11-17, UX-OD-08): Home first (the role landing page), Overtime a primary
+  // item after Payroll. Was: no Home; the CEO's Overtime under More, before Payroll; the Employee's My overtime first.
+  ceo: [['dashboard', ['home:Home']], ['people', ['main:Employees']], ['finance', ['finance:Overview', 'payroll:Payroll', 'overtime:Overtime', 'transactions:Transactions']], ['system', ['audit:Activity Log']]],
+  employee: [['dashboard', ['home:Home']], ['people', ['main:My profile']], ['finance', ['payroll:My payroll', 'overtime:My overtime']]]
 };
 const modelShape = (m) => m ? m.groups.map((g) => [g.id, g.items.map((i) => i.id + ':' + i.label)]) : null;
 const storesEmpty = (rt) => rt.SessionEmployeeStore.snapshot().list === null && rt.SessionOvertimeStore.snapshot().open === false
@@ -243,17 +249,19 @@ async function suite(mutate){
     const role = me.role;
     const rt = await boot(me, mutate);
     const shell = parseSessionShell(rt.appHTML());
-    t(rt.state() === 'AUTHENTICATED' && rt.AuthBoot.allowsWorkspace() === true && !!shell && shell.role === role && shell.active === 'main' && shell.disabled === false,
+    t(rt.state() === 'AUTHENTICATED' && rt.AuthBoot.allowsWorkspace() === true && !!shell && shell.role === role && shell.active === 'home' && shell.disabled === false,   // UX-1: Home is the landing page. Was: 'main'
       'R-1 ' + role + ': AUTHENTICATED renders the exact ' + role + ' SESSION shell, home item active, items enabled');
     t(JSON.stringify(modelShape(rt.sessionNavModel(rt.AuthBoot.snapshot().principal))) === JSON.stringify(EXPECT[role]),
       'R-1 ' + role + ': sessionNavModel(principal) is exactly ' + EXPECT[role].map((g) => g[1].join(' | ')).join(' / '));
     // U1 correction 2: the Employee's Finance group reads "My work"; the CEO's stays "Finance".
     const labels = rt.sessionNavModel(rt.AuthBoot.snapshot().principal).groups.map((g) => g.label).join();
-    t(labels === (role === 'ceo' ? 'People,Finance,System' : 'People,My work') && (role === 'ceo' || !/>Finance</.test(rt.appHTML())),
-      'R-1 ' + role + ': group labels are ' + (role === 'ceo' ? 'People, Finance, System' : 'People, My work (no "Finance" heading for an Employee)'));
+    // UX-1 authorized revision: the Dashboard group reads Home for both roles. Was: no Home group.
+    t(labels === (role === 'ceo' ? 'Home,People,Finance,System' : 'Home,People,My work') && (role === 'ceo' || !/>Finance</.test(rt.appHTML())),
+      'R-1 ' + role + ': group labels are ' + (role === 'ceo' ? 'Home, People, Finance, System' : 'Home, People, My work (no "Finance" heading for an Employee)'));
     t(new RegExp('Signed in as <strong>' + (role === 'ceo' ? 'CEO' : 'Employee') + '</strong>').test(shell ? shell.content : '') && /id="authSignOutBtn"/.test(shell ? shell.content : ''),
       'R-6 ' + role + ': the card names the /me role beside Sign out');
-    t(role === 'employee' ? /<h1[^>]*>My profile<\/h1>/.test(rt.appHTML()) : (!/My profile/.test(rt.appHTML()) && /<h1[^>]*>Employees<\/h1>/.test(rt.appHTML())),
+    // UX-1 authorized revision: both roles land on Home; My profile is an Employee nav item only. Was: the landing h1.
+    t(/<h1[^>]*>Home<\/h1>/.test(rt.appHTML()) && (role === 'employee' ? /My profile/.test(rt.appHTML()) : !/My profile/.test(rt.appHTML())),
       'R-7 ' + role + ': "My profile" appears only for an Employee (U-1A guard)');
     t(rt.spy.length === 0 && rt.access.local.length === 0 && rt.access.session.length === 0,
       'R-1 ' + role + ': no LOCAL renderer and no browser storage' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
@@ -265,7 +273,7 @@ async function suite(mutate){
     ids.forEach((id) => {
       rt.State.view = id; rt.render();
       const s = parseSessionShell(rt.appHTML());
-      if(!s || s.role !== role || s.active !== 'main' || rt.spy.length) leaks.push(id);
+      if(!s || s.role !== role || s.active !== 'home' || rt.spy.length) leaks.push(id);   // UX-1: the landing is Home. Was: 'main'
     });
     t(leaks.length === 0 && rt.net.calls.length === calls, 'R-2 ' + role + ': all ' + ids.length + ' LOCAL view ids set on State.view render the same SESSION section, no LOCAL renderer, no API call' + (leaks.length ? ' >> ' + leaks.join(', ') : ''));
 
@@ -281,6 +289,8 @@ async function suite(mutate){
     await rt.AuthBoot.signOut(); await flush();
     t(rt.state() === 'SIGNED_OUT' && noShellAfter(rt) && /id="authSignInForm"/.test(rt.appHTML()) && storesEmpty(rt),
       'R-3 ' + role + ': sign-out removes the shell and every section; the sign-in form; stores cleared');
+    t(rt.loc.hash === '' && rt.histLog[rt.histLog.length - 1] === 'replace:/',
+      'UX-1 ' + role + ': sign-out drops the route from the address bar (the next user never inherits it) >> ' + rt.histLog.join(','));
   }
 
   // R-3 — a business 401 and UNAVAILABLE.
@@ -288,6 +298,18 @@ async function suite(mutate){
     const rt = await boot(ME_CEO, mutate);
     rt.AuthBoot.sessionLost(); await flush();
     t(rt.state() === 'SIGNED_OUT' && noShellAfter(rt) && storesEmpty(rt), 'R-3 a business 401 (sessionLost) ends the shell; stores cleared');
+    t(rt.loc.hash === '', 'UX-1: a session loss drops the route from the address bar too');
+  }
+  // UX-1 (UX-OD-08) — a deep link survives the boot session check and opens its route; a route the role cannot
+  // see opens Home instead (the model decides; the server still decides every read).
+  for(const [me, hash, route] of [[ME_CEO, '#/activity', 'audit'], [ME_EMP, '#/activity', 'home'], [ME_EMP, '#/payroll', 'payroll'], [ME_CEO, '#/nonsense', 'home']]){
+    loadRuntime.hash = hash;
+    const rt = await boot(me, mutate);   // a section read with no route fails; the route and the shell are what is checked
+    loadRuntime.hash = '';
+    await flush();
+    const sh = parseSessionShell(rt.appHTML()) || {};
+    t(sh.role === me.role && sh.active === route && (route === 'home' ? rt.loc.hash === '#/home' : rt.loc.hash === hash),
+      'UX-1 ' + me.role + ': opened at ' + hash + ' -> ' + route + ' is shown and the address bar reads ' + (route === 'home' ? '#/home' : hash) + ' >> ' + sh.active + ' ' + rt.loc.hash);
   }
   {
     const rt = await boot(ME_EMP, mutate);
@@ -461,9 +483,10 @@ async function suite(mutate){
       const set = rt.SessionShellDrawer.hamLast === true;
       const from = rt.dom.log.length;
       rt.toDesktop(mode, noChange); await frame();
-      const item = el('swSectionMain');
+      // UX-1 authorized revision: the current nav item at landing is Home (swSectionHome). Was: swSectionMain.
+      const item = el('swSectionHome');
       t(set && rt.dom.doc.activeElement === item && rt.app.querySelector('#sidebar [aria-current="page"]') === item
-        && JSON.stringify(focusLog(rt, from)) === '["focus:swSectionMain"]' && rt.SessionShellDrawer.hamLast === false && !('inert' in el('sidebar').attrs),
+        && JSON.stringify(focusLog(rt, from)) === '["focus:swSectionHome"]' && rt.SessionShellDrawer.hamLast === false && !('inert' in el('sidebar').attrs),
         'WR ' + label + ' ' + role + ': the hidden menu button\'s focus moves once to the current nav item; the sidebar is not inert' + ' >> ' + focusLog(rt, from).join(','));
     }
   }
@@ -476,25 +499,25 @@ async function suite(mutate){
     rt.toDesktop('B', true); await frame();
     const early = rt.dom.doc.activeElement === el('main');
     rt.change(); await frame();
-    t(early && rt.dom.doc.activeElement === el('main') && JSON.stringify(focusLog(rt, from)) === '["focus-refused-inert:swSectionMain","focus:main"]' && !('inert' in el('sidebar').attrs),
+    t(early && rt.dom.doc.activeElement === el('main') && JSON.stringify(focusLog(rt, from)) === '["focus-refused-inert:swSectionHome","focus:main"]' && !('inert' in el('sidebar').attrs),
       'WR R2b ' + me.role + ' (B, the focusout re-check before change): #main takes focus (the nav item is still inert); the later change moves nothing >> ' + focusLog(rt, from).join(','));
   }
   {
     // R4 — the current item refuses focus: #main (tabindex -1) takes it.
     const { rt, el } = await atMobile(ME_CEO);
-    el('navHamburger').focus(); rt.dom.noFocus.add('swSectionMain');
+    el('navHamburger').focus(); rt.dom.noFocus.add('swSectionHome');
     const from = rt.dom.log.length;
     rt.toDesktop('S'); await frame();
-    t(rt.dom.doc.activeElement === el('main') && JSON.stringify(focusLog(rt, from)) === '["focus-refused:swSectionMain","focus:main"]',
+    t(rt.dom.doc.activeElement === el('main') && JSON.stringify(focusLog(rt, from)) === '["focus-refused:swSectionHome","focus:main"]',
       'WR R4: the current nav item refuses focus -> the actual activeElement is checked and #main takes focus >> ' + focusLog(rt, from).join(','));
   }
   {
     // R5 — both refuse: focus untouched, two attempts only, no throw, no loop.
     const { rt, el } = await atMobile(ME_CEO);
-    const ham = el('navHamburger'); ham.focus(); rt.dom.noFocus.add('swSectionMain'); rt.dom.noFocus.add('main');
+    const ham = el('navHamburger'); ham.focus(); rt.dom.noFocus.add('swSectionHome'); rt.dom.noFocus.add('main');
     const from = rt.dom.log.length;
     let threw = null; try { rt.toDesktop('A'); await frame(); } catch(e){ threw = e; }
-    t(!threw && rt.dom.doc.activeElement === ham && JSON.stringify(focusLog(rt, from)) === '["focus-refused:swSectionMain","focus-refused:main"]',
+    t(!threw && rt.dom.doc.activeElement === ham && JSON.stringify(focusLog(rt, from)) === '["focus-refused:swSectionHome","focus-refused:main"]',
       'WR R5: both targets refuse -> focus left as it is, exactly two attempts, no throw, no loop >> ' + focusLog(rt, from).join(','));
   }
   for(const me of [ME_CEO, ME_EMP]){
@@ -583,7 +606,7 @@ async function suite(mutate){
     rt.toDesktop('B'); await frame(); await frame();
     rt.change(); await frame();                                       // a duplicate 'change' with focus now visible
     const items = focusLog(rt, from);
-    t(JSON.stringify(items) === '["focus:swSectionMain"]' && rt.dom.doc.activeElement === el('swSectionMain'),
+    t(JSON.stringify(items) === '["focus:swSectionHome"]' && rt.dom.doc.activeElement === el('swSectionHome'),
       'WR R12: both triggers and a duplicate change -> exactly one focus move >> ' + items.join(','));
   }
 
@@ -595,10 +618,10 @@ async function suite(mutate){
       && m({ principalType: 'owner', role: 'ceo' }) === null,
       'fail closed: sessionNavModel is null for no principal, a string, an unknown or mis-cased role');
     const a = m({ principalType: 'ceo' }), b = m({ principalType: 'ceo' });
-    t(a !== b && Object.isFrozen(a) && Object.isFrozen(a.groups) && a.groups.every((g) => Object.isFrozen(g) && Object.isFrozen(g.items) && g.items.every(Object.isFrozen)) && a.home === 'main',
-      'the model is a new deeply frozen value each call, home "main"');
-    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 6 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
-      'SESSION_ROUTES is frozen: exactly the six SESSION routes (UI-INT-1 split Finance into Overview and Transactions; was five)');
+    t(a !== b && Object.isFrozen(a) && Object.isFrozen(a.groups) && a.groups.every((g) => Object.isFrozen(g) && Object.isFrozen(g.items) && g.items.every(Object.isFrozen)) && a.home === 'home',
+      'the model is a new deeply frozen value each call, home "home" (UX-1; was "main")');
+    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 7 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
+      'SESSION_ROUTES is frozen: exactly the seven SESSION routes (UX-1 added Home; UI-INT-1 split Finance into Overview and Transactions; was six)');
   }
   return out;
 }

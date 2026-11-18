@@ -11,6 +11,7 @@ use TamOs\Data\Finance\FinancePostingStore;
 use TamOs\Data\Overtime\OvertimeStore;
 use TamOs\Data\Payroll\PayrollStore;
 use TamOs\Data\Report\FinancialReportStore;
+use TamOs\Data\Request\RequestStore;
 use TamOs\Data\Scope\ScopedDatabase;
 use TamOs\Data\Supplemental\SupplementalStore;
 use TamOs\Data\Transaction\TransactionStore;
@@ -34,6 +35,7 @@ final class BusinessData
     private ?FinanceExecutionStore $financeExecutions = null;
     private ?TransactionStore $transactions = null;
     private ?FinancialReportStore $report = null;
+    private ?RequestStore $requests = null;
     private ?AuditLog $audit = null;
     private ?AuditEventStore $auditEvents = null;
 
@@ -94,6 +96,12 @@ final class BusinessData
     public function report(): FinancialReportStore
     {
         return $this->report ??= new FinancialReportStore($this->scoped());
+    }
+
+    /** Phase 2 (ADR-016): finance requests — the one writer of finance_requests and finance_request_payments. */
+    public function requests(): RequestStore
+    {
+        return $this->requests ??= new RequestStore($this->scoped());
     }
 
     public function audit(): AuditLog

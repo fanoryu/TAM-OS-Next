@@ -110,12 +110,15 @@ const COMPANY_ACTIONS = ['employee.create','employee.update','employee.delete','
   /* ---------- 1. ACTIONS vocabulary — mutation-only, no reads ---------- */
   const a = fresh();
   const actionValues = a.ACTION_SET;
-  check(actionValues.length === 21, 'ACTIONS: exactly the 21 mutation actions (13 + C2B self-Draft trio + C2C-2 finance.manage + C2C-3 import.undo/data.restore/data.reset + BF-4a2 account.manage)');
+  // AWP-01 (ADR-016 §3) authorized revision: the three reimbursement self actions join (21 -> 24). Was: 21.
+  check(actionValues.length === 24, 'ACTIONS: exactly the 24 mutation actions (13 + C2B self-Draft trio + C2C-2 finance.manage + C2C-3 import.undo/data.restore/data.reset + BF-4a2 account.manage + AWP-01 reimbursement self trio)');
   check(!actionValues.some(function(x){ return /\.read(\.|$)/.test(x); }), 'ACTIONS: contains NO *.read / *.read.self action');
   ['employee.create','employee.update','employee.delete','contract.create','contract.update','contract.delete',
    'payroll.manage','overtime.submitSelf','overtime.createSelfDraft','overtime.updateSelfDraft','overtime.deleteSelfDraft',
    'overtime.manage','finance.execute','finance.manage','import.commit','supplemental.manage',
-   'settings.manage','import.undo','data.restore','data.reset'].forEach(function(act){
+   'settings.manage','import.undo','data.restore','data.reset',
+   // AWP-01 (ADR-016 §3): Employee self-service on own Draft reimbursements.
+   'reimbursement.createSelfDraft','reimbursement.updateSelfDraft','reimbursement.submitSelf'].forEach(function(act){
      check(actionValues.indexOf(act) !== -1, 'ACTIONS: includes ' + act);
    });
 

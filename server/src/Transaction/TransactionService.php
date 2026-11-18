@@ -35,6 +35,10 @@ use TamOs\Policy\Scope;
  *           held by a void of this transaction with this reason → replayed; held by any other void
  *           → 409 idempotency_mismatch → already voided → 409 transaction_voided → insert the void
  *           → audit 'void'. A refused or failed write stores nothing and consumes no key.
+ *
+ * Phase 2 (ADR-016 §7): a void of a transaction linked to a finance request payment is 409
+ * finance_linked — checked right after the transaction lock, inside the same transaction, through
+ * finance_request_payments' UNIQUE (finance_transaction_id). Unlinked transactions void as before.
  */
 final class TransactionService
 {
@@ -96,6 +100,9 @@ final class TransactionService
         $this->data->atomically(function () use ($auth, $actor, $store, $in, $requestId): void {
             // The one lock: the transaction, by primary key → (plain reads) → void → audit.
             $store->lock($auth, $in['financeTransactionId']) ?? throw new ApiError(ErrorCode::NotFound);
+            if ($store->linkedPayment($auth, $in['financeTransactionId']) !== null) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'finance_linked');
+            }
             $holder = $store->voidKeyHolder($auth, $in['idempotencyKey']);
             if ($holder !== null) {
                 if ($holder['finance_transaction_id'] === $in['financeTransactionId'] && (string) $holder['reason'] === $in['reason']) {

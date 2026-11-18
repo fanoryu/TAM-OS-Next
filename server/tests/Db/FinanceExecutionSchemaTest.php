@@ -198,8 +198,9 @@ return [
         assertSame(1, count($before[0]), 'a Planned posting before the upgrade');
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
-        assertSame(['0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4f and Phase 1 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0038, current (Phase 1)');
+        // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
+        assertSame(['0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage', '0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests'], array_map(static fn ($m): string => $m->label(), $applied), 'only the BF-4f and Phase 1 migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0041, current (AWP-01)');
         assertSame($before, $snapshot(), 'every posting, payroll, Supplemental, overtime and audit row is unchanged');
         assertSame('Planned', (string) $db->select('SELECT status FROM finance_postings')[0]['status'], 'the posting is still Planned');
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM finance_executions')[0]['n'], 'no execution is seeded');
