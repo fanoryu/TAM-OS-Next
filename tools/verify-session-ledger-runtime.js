@@ -291,8 +291,9 @@ function firewall(rt, label){
       && /id="sfConsolidated"[\s\S]*<td>12000000\.00<\/td><td>6000000\.00<\/td><td>6000000\.00<\/td>/.test(html) && /Voided in this range: 1 \(Rp 2500000\.00\)/.test(html),
       'B. the consolidated total and the voided transactions are shown exactly as the server sent them');
     const m = money(rt);
-    check(m.ok && m.count === 21 && /<data class="ux-money" value="-2500000\.00">-2\.500\.000,00<\/data>/.test(shellContent(rt)),
-      'B. UX-1 (UX-OD-07): every dashboard amount is the exact server string in <data value>, shown with display-only grouping (21 amounts; the negative net keeps its sign)');
+    // I4 authorized revision (ADR-016 §6): the Approved-not-paid table adds 5 amounts (four posts and all). Was: 21.
+    check(m.ok && m.count === 26 && /<data class="ux-money" value="-2500000\.00">-2\.500\.000,00<\/data>/.test(shellContent(rt)),
+      'B. UX-1 (UX-OD-07): every dashboard amount is the exact server string in <data value>, shown with display-only grouping (26 amounts, 21 before I4; the negative net keeps its sign)');
     firewall(rt, 'B');
   }
 

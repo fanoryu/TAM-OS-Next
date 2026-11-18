@@ -231,8 +231,10 @@ const EXPECT = {
   // UI-INT-1 (Owner D-UI-1): v2.11.0 wording and order; Overtime sits under "More". Was: overtime | payroll | finance:Finance / audit:Audit.
   // UX-1 authorized revision (Owner GO 2026-11-17, UX-OD-08): Home first (the role landing page), Overtime a primary
   // item after Payroll. Was: no Home; the CEO's Overtime under More, before Payroll; the Employee's My overtime first.
-  ceo: [['dashboard', ['home:Home']], ['people', ['main:Employees']], ['finance', ['finance:Overview', 'payroll:Payroll', 'overtime:Overtime', 'transactions:Transactions']], ['system', ['audit:Activity Log']]],
-  employee: [['dashboard', ['home:Home']], ['people', ['main:My profile']], ['finance', ['payroll:My payroll', 'overtime:My overtime']]]
+  // I4 authorized revision (Owner GO 2026-11-18, ADR-016): the last Finance item — CEO Finance Requests, Employee My
+  // reimbursements. Was: transactions:Transactions last for the CEO; overtime:My overtime last for the Employee.
+  ceo: [['dashboard', ['home:Home']], ['people', ['main:Employees']], ['finance', ['finance:Overview', 'payroll:Payroll', 'overtime:Overtime', 'transactions:Transactions', 'requests:Finance Requests']], ['system', ['audit:Activity Log']]],
+  employee: [['dashboard', ['home:Home']], ['people', ['main:My profile']], ['finance', ['payroll:My payroll', 'overtime:My overtime', 'requests:My reimbursements']]]
 };
 const modelShape = (m) => m ? m.groups.map((g) => [g.id, g.items.map((i) => i.id + ':' + i.label)]) : null;
 const storesEmpty = (rt) => rt.SessionEmployeeStore.snapshot().list === null && rt.SessionOvertimeStore.snapshot().open === false
@@ -620,8 +622,8 @@ async function suite(mutate){
     const a = m({ principalType: 'ceo' }), b = m({ principalType: 'ceo' });
     t(a !== b && Object.isFrozen(a) && Object.isFrozen(a.groups) && a.groups.every((g) => Object.isFrozen(g) && Object.isFrozen(g.items) && g.items.every(Object.isFrozen)) && a.home === 'home',
       'the model is a new deeply frozen value each call, home "home" (UX-1; was "main")');
-    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 7 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
-      'SESSION_ROUTES is frozen: exactly the seven SESSION routes (UX-1 added Home; UI-INT-1 split Finance into Overview and Transactions; was six)');
+    t(Object.isFrozen(rt.SESSION_ROUTES) && rt.SESSION_ROUTES.length === 8 && rt.SESSION_ROUTES.every((r) => Object.isFrozen(r) && Object.isFrozen(r.labels)),
+      'SESSION_ROUTES is frozen: exactly the eight SESSION routes (I4 added Finance Requests; was seven: UX-1 added Home; UI-INT-1 split Finance into Overview and Transactions; was six)');
   }
   return out;
 }
