@@ -48,6 +48,8 @@ final class RestoreWriter
         'finance_executions' => ['id', 'company_id', 'finance_posting_id', 'employee_id', 'month_key', 'amount', 'executed_on', 'payment_method', 'idempotency_key', 'recorded_at'],
         'finance_transactions' => ['id', 'company_id', 'kind', 'financial_post', 'category', 'description', 'amount', 'transaction_date', 'created_by_user_id', 'idempotency_key', 'created_at'],
         'finance_transaction_voids' => ['id', 'company_id', 'finance_transaction_id', 'reason', 'voided_by_user_id', 'idempotency_key', 'voided_at'],
+        'finance_requests' => ['id', 'company_id', 'kind', 'financial_post', 'category', 'description', 'amount', 'payee', 'owner_employee_id', 'document_date', 'status', 'status_reason', 'version', 'idempotency_key', 'created_by_user_id', 'created_at', 'updated_at'],
+        'finance_request_payments' => ['id', 'company_id', 'finance_request_id', 'finance_transaction_id', 'paid_on', 'payment_method', 'amount', 'paid_by_user_id', 'idempotency_key', 'created_at'],
     ];
 
     /** Stored generated columns, in table order: backed up, never inserted. */
@@ -72,6 +74,8 @@ final class RestoreWriter
         'finance_executions' => 'INSERT INTO finance_executions (id, company_id, finance_posting_id, employee_id, month_key, amount, executed_on, payment_method, idempotency_key, recorded_at) VALUES (:id, :company_id, :finance_posting_id, :employee_id, :month_key, :amount, :executed_on, :payment_method, :idempotency_key, :recorded_at)',
         'finance_transactions' => 'INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (:id, :company_id, :kind, :financial_post, :category, :description, :amount, :transaction_date, :created_by_user_id, :idempotency_key, :created_at)',
         'finance_transaction_voids' => 'INSERT INTO finance_transaction_voids (id, company_id, finance_transaction_id, reason, voided_by_user_id, idempotency_key, voided_at) VALUES (:id, :company_id, :finance_transaction_id, :reason, :voided_by_user_id, :idempotency_key, :voided_at)',
+        'finance_requests' => 'INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (:id, :company_id, :kind, :financial_post, :category, :description, :amount, :payee, :owner_employee_id, :document_date, :status, :status_reason, :version, :idempotency_key, :created_by_user_id, :created_at, :updated_at)',
+        'finance_request_payments' => 'INSERT INTO finance_request_payments (id, company_id, finance_request_id, finance_transaction_id, paid_on, payment_method, amount, paid_by_user_id, idempotency_key, created_at) VALUES (:id, :company_id, :finance_request_id, :finance_transaction_id, :paid_on, :payment_method, :amount, :paid_by_user_id, :idempotency_key, :created_at)',
     ];
 
     private const LOCK_EMPTY_SQL = [
@@ -90,6 +94,8 @@ final class RestoreWriter
         'finance_executions' => 'SELECT 1 AS present FROM finance_executions LIMIT 1 LOCK IN SHARE MODE',
         'finance_transactions' => 'SELECT 1 AS present FROM finance_transactions LIMIT 1 LOCK IN SHARE MODE',
         'finance_transaction_voids' => 'SELECT 1 AS present FROM finance_transaction_voids LIMIT 1 LOCK IN SHARE MODE',
+        'finance_requests' => 'SELECT 1 AS present FROM finance_requests LIMIT 1 LOCK IN SHARE MODE',
+        'finance_request_payments' => 'SELECT 1 AS present FROM finance_request_payments LIMIT 1 LOCK IN SHARE MODE',
         'account_tokens' => 'SELECT 1 AS present FROM account_tokens LIMIT 1 LOCK IN SHARE MODE',
         'auth_rate_limits' => 'SELECT 1 AS present FROM auth_rate_limits LIMIT 1 LOCK IN SHARE MODE',
         'mail_outbox' => 'SELECT 1 AS present FROM mail_outbox LIMIT 1 LOCK IN SHARE MODE',

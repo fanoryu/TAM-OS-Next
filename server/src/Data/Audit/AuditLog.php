@@ -65,6 +65,15 @@ use TamOs\Policy\Scope;
  * finance.manage on entity financeTransaction, operation 'create' or 'void'. It names no field and
  * carries no value — never the amount, the category, the description or the void reason; the
  * transaction and void rows are the evidence. CEO company scope only. A replay writes none.
+ *
+ * Phase 2 (ADR-016 §8, migration 0041): a finance request row names the Action Policy authorized, on
+ * entity financeRequest — finance.manage with create, update, submit, approve, reject or cancel;
+ * finance.execute with pay; reimbursement.submitSelf with submit; reimbursement.createSelfDraft and
+ * reimbursement.updateSelfDraft with no operation (as overtime's self drafts). A create or update
+ * names its changed field names, a transition none; never a value. Paying writes exactly two rows in
+ * its transaction: the request's 'pay' and, under the same finance.execute, 'create' on the linked
+ * financeTransaction — the authority that created it, never finance.manage. Under a self scope a row
+ * is written only for the actor's own reimbursement. A replay or a refused write writes none.
  */
 final class AuditLog
 {
@@ -86,6 +95,16 @@ final class AuditLog
     public const EXECUTION_OPERATION = 'execute';
     /** Phase 1: the finance.manage operations appendTransaction() audits, on financeTransaction (migration 0038's CHECK). */
     public const TRANSACTION_OPERATIONS = ['create', 'void'];
+    /** Phase 2: the operations appendRequest() audits, per Action (migration 0041's triple set); null = no operation. */
+    public const REQUEST_OPERATIONS = [
+        'finance.manage' => ['create', 'update', 'submit', 'approve', 'reject', 'cancel'],
+        'finance.execute' => ['pay'],
+        'reimbursement.createSelfDraft' => [null],
+        'reimbursement.updateSelfDraft' => [null],
+        'reimbursement.submitSelf' => ['submit'],
+    ];
+    /** Phase 2: the request operations that name changed fields (all others name none). */
+    public const REQUEST_FIELD_OPERATIONS = ['create', 'update'];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
@@ -97,6 +116,9 @@ final class AuditLog
     public const APPEND_POSTING_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_EXECUTION_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
     public const APPEND_TRANSACTION_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, NULL)';
+    public const APPEND_REQUEST_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields)';
+    /** Phase 2: an Employee's reimbursement row, written only for the actor's own record. */
+    public const APPEND_REQUEST_SELF_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) SELECT :company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, NULL, :request_id, :fields FROM DUAL WHERE :owner_employee_id = :self_employee_id';
     public const APPEND_ACCOUNT_SQL ='INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, :operation, :target_user_id, :request_id, NULL)';
 
     public function __construct(private readonly ScopedDatabase $db)
@@ -326,6 +348,80 @@ final class AuditLog
             'entity' => 'financeTransaction',
             'id' => $transactionId,
             'operation' => $operation,
+            'request_id' => $requestId,
+        ]);
+    }
+
+    /**
+     * Phase 2: appends one row for the finance request $financeRequestId under the Action Policy
+     * authorized. $kindOperation is the lifecycle operation (create, update, submit, approve, reject,
+     * cancel, pay); the row's operation follows migration 0041 (none for the reimbursement self
+     * drafts). A create or update names its changed field names, a transition none. Must run inside
+     * the transaction of the change.
+     *
+     * @param list<string> $fields changed field names (camelCase), never values
+     */
+    public function appendRequest(Authorization $auth, Principal $actor, string $kindOperation, string $financeRequestId, array $fields, string $requestId): void
+    {
+        $allowed = self::REQUEST_OPERATIONS[$auth->action->value] ?? null;
+        if ($allowed === null || preg_match('/^[0-9a-f]{32}$/', $financeRequestId) !== 1) {
+            throw new \LogicException('a finance request audit row is written only under an ADR-016 Action, for its request');
+        }
+        $operation = $allowed === [null] ? null : $kindOperation;
+        if ($operation !== null && !in_array($operation, $allowed, true)) {
+            throw new \LogicException('this finance request operation is not audited under this Action');
+        }
+        if ($allowed === [null] && !in_array($kindOperation, self::REQUEST_FIELD_OPERATIONS, true)) {
+            throw new \LogicException('a reimbursement self draft row records a create or an update');
+        }
+        if (!in_array($kindOperation, self::REQUEST_FIELD_OPERATIONS, true) && $fields !== []) {
+            throw new \LogicException('a finance request transition names no field');
+        }
+        $record = $auth->record;
+        if ($record !== null && ($record->entity !== 'financeRequest' || $record->id !== $financeRequestId)) {
+            throw new \LogicException('a record-bearing finance request row names its authorized record');
+        }
+        if (in_array($auth->action, [Action::FinanceManage, Action::FinanceExecute], true) ? ($record !== null || $auth->scope->isSelf()) : $record === null) {
+            throw new \LogicException('finance.manage and finance.execute rows are record-free in company scope; a reimbursement self row names its record');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $params = [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => 'financeRequest',
+            'id' => $financeRequestId,
+            'operation' => $operation,
+            'request_id' => $requestId,
+            'fields' => self::fieldList($fields),
+        ];
+        if (!$auth->scope->isSelf()) {
+            $this->db->execute($auth, self::APPEND_REQUEST_SQL, $params);
+            return;
+        }
+        if ($this->db->execute($auth, self::APPEND_REQUEST_SELF_SQL, $params + ['owner_employee_id' => (string) $record->ownerEmployeeId]) !== 1) {
+            throw new \LogicException('an Employee finance request audit row is written only for their own reimbursement');
+        }
+    }
+
+    /**
+     * Phase 2 (ADR-016 §8): appends the finance.execute 'create' row of the general expense a request
+     * payment created — on entity financeTransaction, no field. Must run inside the pay transaction.
+     */
+    public function appendPaidExpense(Authorization $auth, Principal $actor, string $transactionId, string $requestId): void
+    {
+        if ($auth->action !== Action::FinanceExecute || $auth->record !== null || $auth->scope->isSelf()
+            || preg_match('/^[0-9a-f]{32}$/', $transactionId) !== 1) {
+            throw new \LogicException('a paid expense audit row is written only under finance.execute, for its transaction, in company scope');
+        }
+        self::requireActor($auth, $actor, $requestId);
+        $this->db->execute($auth, self::APPEND_TRANSACTION_SQL, [
+            'actor_user_id' => $actor->userId,
+            'actor_membership_id' => $actor->membershipId,
+            'action' => $auth->action->value,
+            'entity' => 'financeTransaction',
+            'id' => $transactionId,
+            'operation' => 'create',
             'request_id' => $requestId,
         ]);
     }

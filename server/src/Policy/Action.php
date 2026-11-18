@@ -4,8 +4,8 @@ declare(strict_types=1);
 namespace TamOs\Policy;
 
 /**
- * The server ACTION vocabulary: exactly the 21 values of js/core/authz.js ACTIONS (SDR-0002 §7;
- * SDR-0004 added account.manage), with each action's rule (authz.js POLICY) and the entity its
+ * The server ACTION vocabulary: exactly the 24 values of js/core/authz.js ACTIONS (SDR-0002 §7;
+ * SDR-0004 added account.manage; ADR-016 §3 added the three reimbursement self actions), with each action's rule (authz.js POLICY) and the entity its
  * record belongs to (authz.js ACTION_RESOURCE_ENTITY; null = the action takes no record).
  *
  * A string that is not one of these values has no Action (Action::tryFrom → null), and Policy
@@ -38,6 +38,9 @@ enum Action: string
     case DataRestore = 'data.restore';
     case DataReset = 'data.reset';
     case AccountManage = 'account.manage';
+    case ReimbursementCreateSelfDraft = 'reimbursement.createSelfDraft';
+    case ReimbursementUpdateSelfDraft = 'reimbursement.updateSelfDraft';
+    case ReimbursementSubmitSelf = 'reimbursement.submitSelf';
 
     public function rule(): Rule
     {
@@ -63,6 +66,9 @@ enum Action: string
             self::DataRestore => Rule::CeoOnly,
             self::DataReset => Rule::CeoOnly,
             self::AccountManage => Rule::CeoOnly,
+            self::ReimbursementCreateSelfDraft => Rule::CeoOrOwnDraft,
+            self::ReimbursementUpdateSelfDraft => Rule::CeoOrOwnDraft,
+            self::ReimbursementSubmitSelf => Rule::CeoOrOwnDraft,
         };
     }
 
@@ -90,6 +96,9 @@ enum Action: string
             self::DataRestore => null,
             self::DataReset => null,
             self::AccountManage => 'employee',
+            self::ReimbursementCreateSelfDraft => 'financeRequest',
+            self::ReimbursementUpdateSelfDraft => 'financeRequest',
+            self::ReimbursementSubmitSelf => 'financeRequest',
         };
     }
 }

@@ -140,6 +140,7 @@ function productionRoutes(Config $config, ?string $migrationsDir = null, ?\TamOs
         new \TamOs\Controller\AuditController(new \TamOs\Audit\AuditService($business)),
         new \TamOs\Controller\TransactionController(new \TamOs\Transaction\TransactionService($business)),
         new \TamOs\Controller\FinancialReportController(new \TamOs\Report\FinancialReportService($business)),
+        new \TamOs\Controller\RequestController(new \TamOs\Request\RequestService($business)),
     );
 }
 

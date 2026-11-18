@@ -185,8 +185,9 @@ return [
         assertThrows(\LogicException::class, static fn () => $store->keyHolder($supplemental, 'x'), 'a malformed key');
         assertThrows(\LogicException::class, static fn () => $store->lockSupplemental($supplemental, 'emp_1'), 'a malformed id');
     },
-    'Policy: a posting is authorized by its source domain — payroll.manage against the plan, the record-free supplemental.manage; both CEO-only; ACTIONS stay 21; an Employee is 403 before any lookup' => static function () use ($principal, $unreachable, $plan, $key): void {
-        assertSame(21, count(Action::cases()), 'ACTIONS stay 21 — no Finance posting Action');
+    'Policy: a posting is authorized by its source domain — payroll.manage against the plan, the record-free supplemental.manage; both CEO-only; ACTIONS unchanged by it (24 after AWP-01); an Employee is 403 before any lookup' => static function () use ($principal, $unreachable, $plan, $key): void {
+        // ADR-016 (AWP-01) authorized revision: the three reimbursement self actions (ACTIONS 21 -> 24). Was: 21.
+        assertSame(24, count(Action::cases()), 'no Finance posting Action: ACTIONS are the 24 of ADR-016');
         assertSame(['payrollPlan', null], [Action::PayrollManage->entity(), Action::SupplementalManage->entity()]);
         $ceo = $principal('ceo', null);
         $emp = $principal('employee', 'emp_1');

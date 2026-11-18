@@ -95,6 +95,14 @@ return [
             'POST /api/finance-executions/execute' => Action::FinanceExecute,
             'POST /api/general-transactions/create' => Action::FinanceManage,
             'POST /api/general-transactions/void' => Action::FinanceManage,
+            // ADR-016 (AWP-01) authorized revision: the seven finance request writes join. Was: none.
+            'POST /api/finance-requests/create' => Action::ReimbursementCreateSelfDraft,
+            'POST /api/finance-requests/update' => Action::ReimbursementUpdateSelfDraft,
+            'POST /api/finance-requests/submit' => Action::ReimbursementSubmitSelf,
+            'POST /api/finance-requests/approve' => Action::FinanceManage,
+            'POST /api/finance-requests/reject' => Action::FinanceManage,
+            'POST /api/finance-requests/cancel' => Action::FinanceManage,
+            'POST /api/finance-requests/pay' => Action::FinanceExecute,
         ], $business);
     },
     'a business mutation without an Action fails the table' => static function () use ($h, $selfService): void {

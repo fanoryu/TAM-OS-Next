@@ -106,5 +106,55 @@ jobs:
             exit 1
           }
 
+      # AWP-01 B-3: the B1 observer reads information_schema.INNODB_TRX, which needs the global
+      # PROCESS privilege. It is granted only inside this job's throw-away service container and
+      # disappears with it. Root authenticates with the container's own MARIADB_ROOT_PASSWORD,
+      # read inside the container (never on a command line or in this log); no new credential.
+      - name: Grant the B1 observer PROCESS inside the throw-away MariaDB container (test-only)
+        shell: bash
+        env:
+          SERVICE_ID: ${{ job.services.mariadb.id }}
+        run: |
+          set -euo pipefail
+          root_sql() { docker exec -i "$SERVICE_ID" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot --batch --skip-column-names'; }
+          hosts=$(echo "SELECT host FROM mysql.user WHERE user = '$TAMOS_TEST_DB_USER' ORDER BY host;" | root_sql)
+          if [ "$hosts" != "%" ]; then
+            echo "::error::Expected exactly one test account $TAMOS_TEST_DB_USER@%, found: [$hosts]. Not granting."
+            exit 1
+          fi
+          echo "GRANT PROCESS ON *.* TO '$TAMOS_TEST_DB_USER'@'%';" | root_sql
+          echo "SHOW GRANTS FOR '$TAMOS_TEST_DB_USER'@'%';" | root_sql | sed -E 's/PASSWORD .*/PASSWORD <hash>/'
+
+      - name: Verify the test account itself can read INNODB_TRX (the B1 observer connection)
+        run: |
+          php -r '
+            $pdo = new PDO("mysql:host=" . getenv("TAMOS_TEST_DB_HOST") . ";port=" . getenv("TAMOS_TEST_DB_PORT") . ";dbname=" . getenv("TAMOS_TEST_DB_NAME"),
+                getenv("TAMOS_TEST_DB_USER"), getenv("TAMOS_TEST_DB_PASS"), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+            $grants = implode("\n", $pdo->query("SHOW GRANTS FOR CURRENT_USER()")->fetchAll(PDO::FETCH_COLUMN));
+            $pdo->query("SELECT COUNT(*) FROM information_schema.INNODB_TRX")->fetchColumn();
+            if (!str_contains($grants, "GRANT PROCESS ON *.*")) { fwrite(STDERR, "PROCESS not granted\n"); exit(1); }
+            echo "observer: ", $pdo->query("SELECT CURRENT_USER()")->fetchColumn(), " has PROCESS; INNODB_TRX readable\n";
+          '
+
       - name: Backend tests including the database suite
-        run: php server/tests/run.php --require-db
+        shell: bash
+        env:
+          # AWP-01 B1: the commit-fault proxy retains its result.json here (outside the checkout).
+          TAMOS_B1_EVIDENCE_DIR: ${{ runner.temp }}/b1-evidence
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/backend-db"
+          php server/tests/run.php --require-db 2>&1 | tee "$RUNNER_TEMP/backend-db/backend-tests.log"
+
+      # On failure only: the test log, every retained B1 result.json and its .sha256 sidecar.
+      # Fabricated fixtures only; the CI passwords above are disposable and not secrets.
+      - name: Upload backend-db failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-db-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/backend-db/backend-tests.log
+            ${{ runner.temp }}/b1-evidence/
+          if-no-files-found: warn
+          retention-days: 14

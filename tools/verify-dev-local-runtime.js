@@ -77,6 +77,28 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const gitBlob = (buf) => crypto.createHash('sha1').update('blob ' + buf.length + '\0').update(buf).digest('hex');
 const modeAssigns = (src) => src.match(/const AUTH_MODE = [^;\n]+;/g) || [];
 const readTree = (rel) => fs.readFileSync(path.join(root, rel));
+// AWP-01 (ADR-016 §3) authorized revision: js/core/authz.js gained exactly the three reimbursement self
+// actions (ACTIONS, ACTION_RESOURCE_ENTITY, POLICY). The pins stay frozen: V7 now requires that removing
+// exactly these three additive blocks (each present exactly once) reproduces the pinned baseline bytes,
+// so any other change to authz.js still fails provenance. Was: the candidate authz.js byte-identical.
+const AWP01_AUTHZ_DELTA = Object.freeze([
+  ["  ACCOUNT_MANAGE:     'account.manage',\n  // AWP-01 — ADR-016 §3 (Phase 2, ACTIONS 21 -> 24). Employee self-service on OWN Draft\n  // reimbursements, on the existing CeoOrOwnDraft rule (selfDraftOnly); no role or rule is\n  // added. The server Policy decides; this is UX affordance only.\n  REIMBURSEMENT_CREATE_SELF_DRAFT:'reimbursement.createSelfDraft',\n  REIMBURSEMENT_UPDATE_SELF_DRAFT:'reimbursement.updateSelfDraft',\n  REIMBURSEMENT_SUBMIT_SELF:'reimbursement.submitSelf'\n",
+   "  ACCOUNT_MANAGE:     'account.manage'\n"],
+  ["  'account.manage':      'employee',    // administers the login bound to an Employee record\n  'reimbursement.createSelfDraft': 'financeRequest', // candidate record; AZ-1 verifies own scope\n  'reimbursement.updateSelfDraft': 'financeRequest',\n  'reimbursement.submitSelf': 'financeRequest'\n",
+   "  'account.manage':      'employee'     // administers the login bound to an Employee record\n"],
+  ["  // AWP-01 — ADR-016 §3: own Draft reimbursements, the overtime self-draft predicate.\n  'reimbursement.createSelfDraft': selfDraftOnly,\n  'reimbursement.updateSelfDraft': selfDraftOnly,\n  'reimbursement.submitSelf': selfDraftOnly,\n",
+   ""]
+]);
+const AWP01_ACTIONS = Object.freeze(['reimbursement.createSelfDraft', 'reimbursement.updateSelfDraft', 'reimbursement.submitSelf']);
+// The candidate authz.js with the AWP-01 delta removed, or null when the delta is not there exactly once each.
+function awp01Baseline(buf){
+  let s = buf.toString('utf8');
+  for(const [added, was] of AWP01_AUTHZ_DELTA){
+    if(s.split(added).length !== 2) return null;
+    s = s.replace(added, () => was);
+  }
+  return Buffer.from(s, 'utf8');
+}
 
 /* ---------- inputs: the oracle, and the candidate tree ---------- */
 function treeInputs(){
@@ -119,8 +141,9 @@ function provenance(oracleBuf, tree, chk){
   });
   v(modeAssigns(ref.constants || '').length === 1 && modeAssigns(ref.constants || '')[0] === 'const AUTH_MODE = AUTH_MODES.LOCAL;',
     'V6. the reference constants.js holds exactly one AUTH_MODE assignment, LOCAL (loaded unchanged)');
-  v(sha256(tree.workspace) === PINS.modules['js/core/workspace.js'].sha256 && sha256(tree.authz) === PINS.modules['js/core/authz.js'].sha256,
-    'V7. the candidate workspace.js and authz.js are byte-identical (raw SHA-256) to the pinned baseline');
+  const authzBase = awp01Baseline(tree.authz);
+  v(sha256(tree.workspace) === PINS.modules['js/core/workspace.js'].sha256 && authzBase !== null && sha256(authzBase) === PINS.modules['js/core/authz.js'].sha256,
+    'V7. the candidate workspace.js is byte-identical (raw SHA-256) to the pinned baseline, and authz.js is the pinned baseline plus exactly the AWP-01 reimbursement delta');
   const cc = tree.constants.toString('utf8');
   v(modeAssigns(cc).length === 1 && modeAssigns(cc)[0] === 'const AUTH_MODE = AUTH_MODES.SESSION;',
     'V8. the candidate constants.js holds exactly one AUTH_MODE assignment, SESSION (the shipped default)');
@@ -282,7 +305,9 @@ function suite(o, chk){
       return recs.every(function(r){ return json(d.getScopedRecordById(t, r.id)) === json(b.getScopedRecordById(t, r.id)); });
     });
     chk(byIdOk, tag + '. ' + name + ': getScopedRecordById() identical for every record and entity type');
-    chk(b.ACTION_SET.length === 21 && json(d.ACTION_SET) === json(b.ACTION_SET), tag + '. ' + name + ': the same 21 ACTIONS');
+    // AWP-01 authorized revision: the candidate holds the baseline 21 in order, then exactly the three
+    // reimbursement self actions; can() parity below runs over the baseline 21. Was: the same 21 ACTIONS.
+    chk(b.ACTION_SET.length === 21 && json(d.ACTION_SET) === json(b.ACTION_SET.concat(AWP01_ACTIONS)), tag + '. ' + name + ': the same 21 ACTIONS, then the three AWP-01 reimbursement actions');
     const resources = [undefined].concat(recs);
     const resourcesD = [undefined].concat(allRecords(d.S));
     // Non-vacuity: the parity below compares real decisions, not two empty answers.

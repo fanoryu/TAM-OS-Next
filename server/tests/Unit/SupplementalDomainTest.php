@@ -230,7 +230,8 @@ return [
     'Policy: supplemental.manage is record-free and CEO-only; an Employee is 403 on every write and the eligibility read before any lookup (M27, M30, M37)' => static function () use ($principal, $unreachable): void {
         assertSame(null, Action::SupplementalManage->entity(), 'record-free in both vocabularies');
         assertSame(\TamOs\Policy\Rule::CeoOnly, Action::SupplementalManage->rule());
-        assertSame(21, count(Action::cases()), 'ACTIONS stay 21');
+        // ADR-016 (AWP-01) authorized revision: the three reimbursement self actions (ACTIONS 21 -> 24). Was: 21.
+        assertSame(24, count(Action::cases()), 'ACTIONS are the 24 of ADR-016');
         $ceo = $principal('ceo', null);
         $emp = $principal('employee', 'emp_1');
         assertTrue(Policy::allows($ceo, Action::SupplementalManage), 'CEO');

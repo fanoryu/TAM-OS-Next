@@ -3,13 +3,13 @@
   "appVersion": "3.0.0",
   "appReleaseName": "Core SESSION Foundation",
   "schemaVersion": 6,
-  "actions": 21,
+  "actions": 24,
   "entry": "index.html",
-  "packageDigest": "97658f5a0f64a109fc74caa320b5f0eb74d7429b4d8faeed17dfea5f5a3dc9df",
+  "packageDigest": "5979199bcfce8e1cfc53f942db3481a46689c154d5308fb7bb2d88c97e5b3d0b",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3190662,
-    "sha256": "a63627655fc8cb51736c56e6b4227d82ca6cbbf890c77d41350c1e31b7fd8545"
+    "bytes": 3194825,
+    "sha256": "b40f3b6607abc1ca48236fd0cfb3cc195fe8137a2ec2a43002ec1bd5518e98d7"
   },
   "files": [
     {
@@ -109,8 +109,8 @@
     },
     {
       "path": "js/core/audit-api.js",
-      "bytes": 11939,
-      "sha256": "d69db6fd2ab2070b6367d95c55ceb4744c78de047d2b0ec49e7e9f6df47d4646"
+      "bytes": 12775,
+      "sha256": "0e74ceb4cb0965ca64cd586977183ff9e99b1bf7fd6c1f976d9a5848fa2cc1fa"
     },
     {
       "path": "js/core/auth-boot.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "js/core/authz.js",
-      "bytes": 12848,
-      "sha256": "fa449d17a34fc4863fb67155cce14f4db54fb116b80225bb3138c4324ba1ec05"
+      "bytes": 13722,
+      "sha256": "a52f34bad90cc2507304a3fca5997b055fde718382f7ba96d5b5eda589252c67"
     },
     {
       "path": "js/core/constants.js",
@@ -229,8 +229,8 @@
     },
     {
       "path": "js/core/transaction-api.js",
-      "bytes": 16743,
-      "sha256": "664e6211d0dd15c6719cdf23e12f2ea94a33e9ca708510d5a41c2cd5bfc2e754"
+      "bytes": 18483,
+      "sha256": "abbbb1fa99d7af7ccefe17bbadebee58d1c647d7067fd12413c508d9abe225af"
     },
     {
       "path": "js/core/utils.js",
@@ -494,8 +494,8 @@
     },
     {
       "path": "js/ui/session-audit-view.js",
-      "bytes": 13900,
-      "sha256": "59b8bd6f2b8cac30e0afffe3ca3f576dc0cc27a75d7175bd40398c79a084c31b"
+      "bytes": 14613,
+      "sha256": "156e3911d391452f4f9b5065d3e3479cb743af4b1eb76c74104a4df949f2a425"
     },
     {
       "path": "js/ui/session-ledger-view.js",
