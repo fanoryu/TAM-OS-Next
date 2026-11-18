@@ -60,7 +60,10 @@ const REPORT = { financialReport: { from: '2031-04-01', to: '2031-04-30',
   posts: [post('GA', 'GA', '0.00', '2500000.00', '-2500000.00', 1), post('NPIP', 'NP & IP', '0.00', '0.00', '0.00', 0), post('TJB', 'TJB', '0.00', '0.00', '0.00', 0), post('DRONE', 'Drone', '12000000.00', '0.00', '12000000.00', 1)],
   general: { income: '12000000.00', expense: '2500000.00', net: '9500000.00', count: 2 }, voided: { count: 1, amount: '2500000.00' },
   payroll: { posted: { amount: '7021875.00', count: 3, fromMonth: '2031-04', toMonth: '2031-04' }, paid: { amount: '3500000.00', count: 1 } },
-  consolidated: { income: '12000000.00', expense: '6000000.00', net: '6000000.00' } } };
+  consolidated: { income: '12000000.00', expense: '6000000.00', net: '6000000.00' },
+  // AWP-01 (ADR-016 §6) authorized revision: the Approved-not-paid line, outside every total. Was: absent.
+  approvedNotPaid: { posts: [{ code: 'GA', amount: '750000.00', count: 2 }, { code: 'NPIP', amount: '0.00', count: 0 }, { code: 'TJB', amount: '0.00', count: 0 }, { code: 'DRONE', amount: '1000000.00', count: 1 }],
+    amount: '1750000.00', count: 3 } } };
 const RANGE = (f, t) => '/api/general-transactions?from=' + f + '&to=' + t;
 const REP = (f, t) => '/api/reports/financial?from=' + f + '&to=' + t;
 const APRIL = ['2031-04-01', '2031-04-30'];
@@ -279,7 +282,14 @@ function firewall(rt, label){
       'a float amount': Object.assign({}, bad, { general: Object.assign({}, bad.general, { income: '12000000.5' }) }),
       'an extra key': Object.assign({}, bad, { companyId: 'x' }),
       'another range': Object.assign({}, bad, { to: '2031-04-29' }),
-      'a payroll inside the posts': Object.assign({}, bad, { posts: bad.posts.map((p, i) => i === 0 ? Object.assign({}, p, { payroll: '1.00' }) : p) })
+      'a payroll inside the posts': Object.assign({}, bad, { posts: bad.posts.map((p, i) => i === 0 ? Object.assign({}, p, { payroll: '1.00' }) : p) }),
+      // AWP-01 (ADR-016 §6): the Approved-not-paid line is required and strictly shaped.
+      'no approvedNotPaid line': (() => { const r = Object.assign({}, bad); delete r.approvedNotPaid; return r; })(),
+      'approvedNotPaid posts out of order': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { posts: [bad.approvedNotPaid.posts[3], bad.approvedNotPaid.posts[1], bad.approvedNotPaid.posts[2], bad.approvedNotPaid.posts[0]] }) }),
+      'approvedNotPaid counts that do not add up': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { count: 4 }) }),
+      'an approvedNotPaid amount with a zero count': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { posts: bad.approvedNotPaid.posts.map((p, i) => i === 1 ? Object.assign({}, p, { amount: '5.00' }) : p) }) }),
+      'a float approvedNotPaid amount': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { amount: '1750000.5' }) }),
+      'an extra approvedNotPaid key': Object.assign({}, bad, { approvedNotPaid: Object.assign({}, bad.approvedNotPaid, { requests: [] }) })
     };
     for(const [label, r] of Object.entries(variants)){
       const rt = await open({ [REP(...APRIL)]: [ok({ financialReport: r })] });

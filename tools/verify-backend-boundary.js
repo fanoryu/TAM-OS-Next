@@ -252,9 +252,33 @@ const FINANCIAL_POST_FILE = 'server/src/Transaction/FinancialPost.php';
 const FINANCIAL_POST_MIGRATION = 'server/migrations/0036_create_finance_transactions.sql';
 const FRONTEND_TRANSACTION_API = 'js/core/transaction-api.js';
 const TRANSACTION_INPUT = 'server/src/Transaction/TransactionInput.php';
+// Phase 2 (ADR-016 §1): finance_requests carries the same closed Financial Post list as 0036.
+const REQUEST_POST_MIGRATION = 'server/migrations/0039_create_finance_requests.sql';
 const TRANSACTION_ROUTES = ['/api/general-transactions/create', '/api/general-transactions/void'];
 const TRANSACTION_READ_ROUTES = { 'GET /api/general-transactions': "['from', 'to']", 'GET /api/reports/financial': "['from', 'to']" };
-const ACTION_COUNT = 21;
+// ADR-016 (AWP-01) authorized revision: the three reimbursement self actions join (21 -> 24). Was: 21.
+const ACTION_COUNT = 24;
+// Phase 2 (ADR-016 §3–§7): finance requests (payment requests and reimbursements). Two tables, one
+// writer: finance_requests is never deleted (a terminal status is its end), finance_request_payments
+// is insert-only. The writer locks only a request or its owner employee, by primary key, and never
+// computes money in SQL. Exactly seven writes, each declaring exactly its Action; two reads with no
+// Action; no delete, return-to-Draft, partial payment, reversal or correction route. A general
+// transaction linked to a request payment cannot be voided (TransactionService reads the link).
+const REQUEST_STORE = 'server/src/Data/Request/RequestStore.php';
+const REQUEST_INPUT = 'server/src/Request/RequestInput.php';
+const TRANSACTION_SERVICE = 'server/src/Transaction/TransactionService.php';
+const REQUEST_SERVICE = 'server/src/Request/RequestService.php';
+const REQUEST_ROUTES = {
+  '/api/finance-requests/create': 'ReimbursementCreateSelfDraft',
+  '/api/finance-requests/update': 'ReimbursementUpdateSelfDraft',
+  '/api/finance-requests/submit': 'ReimbursementSubmitSelf',
+  '/api/finance-requests/approve': 'FinanceManage',
+  '/api/finance-requests/reject': 'FinanceManage',
+  '/api/finance-requests/cancel': 'FinanceManage',
+  '/api/finance-requests/pay': 'FinanceExecute',
+};
+const REQUEST_READ_ROUTES = { 'GET /api/finance-requests': "['from', 'to', 'status', 'kind']", 'GET /api/finance-request': "['id']" };
+const REQUEST_PATH = /^\/api\/finance-requests?(\/|$)/;
 // OPS-1 (D-AB-1..16 = recommended): encrypted database backups are operator tooling, never an HTTP
 // surface. The one cross-company reader (read-only), the backup classes and their CLI form a closed
 // set; only the cipher uses libsodium, only the store deletes or renames files (its own names), and
@@ -444,6 +468,11 @@ const STRING_RULES = [
   // Phase 1: finance_transactions and finance_transaction_voids have one writer, which only inserts.
   { id: 'transaction-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_transaction(s|_voids)\b/i, msg: 'finance_transactions and finance_transaction_voids are written only by ' + TRANSACTION_STORE, allow: (f) => f === TRANSACTION_STORE || f === RESTORE_WRITER },
   { id: 'transaction-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_transaction(s|_voids)\b/i, msg: 'a general transaction and its void are immutable: no UPDATE, DELETE, REPLACE or TRUNCATE (a void is the only correction)' },
+  // Phase 2 (ADR-016): finance_requests and finance_request_payments have one writer; a request is never
+  // deleted and a payment is insert-only (no reversal, no correction).
+  { id: 'request-writes', re: /^\s*(INSERT\s+(IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+`?finance_request(s|_payments)\b/i, msg: 'finance_requests and finance_request_payments are written only by ' + REQUEST_STORE, allow: (f) => f === REQUEST_STORE || f === RESTORE_WRITER },
+  { id: 'request-no-delete', re: /^\s*(DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_requests\b/i, msg: 'a finance request is never deleted or replaced: no DELETE, REPLACE or TRUNCATE of finance_requests' },
+  { id: 'request-payment-immutable', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?finance_request_payments\b/i, msg: 'a finance request payment is immutable: no UPDATE, DELETE, REPLACE or TRUNCATE of finance_request_payments' },
   { id: 'audit-append-only', re: /^\s*(UPDATE|DELETE\s+FROM|REPLACE\s+INTO|TRUNCATE(\s+TABLE)?)\s+`?audit_events\b/i, msg: 'audit_events is append-only: no UPDATE, DELETE, REPLACE or TRUNCATE' },
   { id: 'audit-writes', re: /^\s*INSERT\s+(IGNORE\s+)?INTO\s+`?audit_events\b/i, msg: 'audit_events is written only by ' + AUDIT_LOG, allow: (f) => f === AUDIT_LOG || f === RESTORE_WRITER },
   { id: 'provider-endpoint', re: /api\.resend\.com/i, msg: 'the provider endpoint appears only in ' + MAIL_ADAPTER, allow: (f) => f === MAIL_ADAPTER },
@@ -489,7 +518,7 @@ function checkMigrationSql(src, file) {
 // tables reference with composite (company_id, …) FKs. A shape check, not a proof of isolation.
 const SYSTEM_TABLES = new Set(['companies', 'users', 'memberships', 'sessions', 'auth_rate_limits', 'auth_events', 'account_tokens', 'schema_migrations', 'mail_outbox']);
 // Phase 1 authorized revision: the general transactions and their voids are company tables. Was: through finance_executions.
-const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids']);
+const COMPANY_TABLES = new Set(['employees', 'audit_events', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids', 'finance_requests', 'finance_request_payments']);
 function checkMigrationTenantKey(src) {
   const created = /^\s*CREATE\s+TABLE\s+`?(\w+)`?/i.exec(src);
   if (!created) return [];
@@ -585,10 +614,12 @@ function checkRouteActions(src) {
   else if (!/RouteAuth::Required, Action::FinanceExecute\),$/.test(execLine.trim())) out.push('Routes.php: Finance execution route POST ' + FINANCE_EXECUTION_ROUTE + ' must declare exactly Action::FinanceExecute');
   if (!src.split('\n').some((l) => l.includes("new Route('GET', '/api/finance-executions', ") && /\['month'\], RouteAuth::Required\),$/.test(l.trim()))) out.push('Routes.php: the Finance execution month read GET /api/finance-executions (?month=, a session, no Action) is missing');
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
-    if (/\bAction::FinanceExecute\b/.test(m[3]) && !(m[1] === 'POST' && m[2] === FINANCE_EXECUTION_ROUTE)) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not the Finance execution and must not declare Action::FinanceExecute');
+    // ADR-016 (AWP-01) authorized revision: the finance request pay route declares finance.execute too. Was: the execution only.
+    if (/\bAction::FinanceExecute\b/.test(m[3]) && !(m[1] === 'POST' && (m[2] === FINANCE_EXECUTION_ROUTE || REQUEST_ROUTES[m[2]] === 'FinanceExecute'))) out.push('Routes.php: ' + m[1] + ' ' + m[2] + ' is not the Finance execution and must not declare Action::FinanceExecute');
   }
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
-    if (!/^\/api\/finance/.test(m[2])) continue;
+    // ADR-016 (AWP-01) authorized revision: the finance request routes are governed below. Was: every /api/finance path here.
+    if (!/^\/api\/finance/.test(m[2]) || REQUEST_PATH.test(m[2])) continue;
     const key = m[1] + ' ' + m[2];
     // BF-4f authorized revision: the one execution command and its month read join the Finance
     // routes. Was: the two postings and the posting month read only.
@@ -611,8 +642,28 @@ function checkRouteActions(src) {
   }
   for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
     const key = m[1] + ' ' + m[2];
-    if (/\bAction::FinanceManage\b/.test(m[3]) && !(m[1] === 'POST' && TRANSACTION_ROUTES.includes(m[2]))) out.push('Routes.php: ' + key + ' is not a general transaction write and must not declare Action::FinanceManage');
+    // ADR-016 (AWP-01) authorized revision: the request approve, reject and cancel routes declare finance.manage too. Was: the two transaction writes only.
+    if (/\bAction::FinanceManage\b/.test(m[3]) && !(m[1] === 'POST' && (TRANSACTION_ROUTES.includes(m[2]) || REQUEST_ROUTES[m[2]] === 'FinanceManage'))) out.push('Routes.php: ' + key + ' is not a general transaction write and must not declare Action::FinanceManage');
     if (/^\/api\/(general-transactions|reports)\b/.test(m[2]) && !TRANSACTION_READ_ROUTES[key] && !(m[1] === 'POST' && TRANSACTION_ROUTES.includes(m[2]))) out.push('Routes.php: ' + key + ' — the only general transaction and report routes are create, void and the two reads (no update, delete, payment or export route)');
+  }
+  // Phase 2 (ADR-016): exactly the seven finance request writes, each declaring exactly its Action, the
+  // two reads with their exact keys and no Action, and no other finance request route; the three
+  // reimbursement self actions are declared by no other route.
+  for (const [p, action] of Object.entries(REQUEST_ROUTES)) {
+    const line = src.split('\n').find((l) => l.includes("new Route('POST', '" + p + "'"));
+    if (!line) out.push('Routes.php: finance request route POST ' + p + ' is missing');
+    else if (!new RegExp(', \\[\\], RouteAuth::Required, Action::' + action + '\\),$').test(line.trim())) out.push('Routes.php: finance request route POST ' + p + ' must declare exactly Action::' + action);
+  }
+  for (const [key, keys] of Object.entries(REQUEST_READ_ROUTES)) {
+    const [method, p] = key.split(' ');
+    const line = src.split('\n').find((l) => l.includes("new Route('" + method + "', '" + p + "', "));
+    if (!line) out.push('Routes.php: the finance request read ' + key + ' is missing');
+    else if (!line.trim().endsWith(', ' + keys + ', RouteAuth::Required),')) out.push('Routes.php: the finance request read ' + key + ' takes exactly ' + keys + ', requires a session and declares no Action');
+  }
+  for (const m of src.matchAll(/new Route\('([A-Z]+)', '([^']+)'([^\n]*)/g)) {
+    const key = m[1] + ' ' + m[2];
+    if (REQUEST_PATH.test(m[2]) && !REQUEST_READ_ROUTES[key] && !(m[1] === 'POST' && REQUEST_ROUTES[m[2]])) out.push('Routes.php: ' + key + ' — the only finance request routes are the seven writes and the two reads (no delete, return-to-Draft, partial payment, reversal or correction route)');
+    if (/\bAction::Reimbursement\w+/.test(m[3]) && !(m[1] === 'POST' && REQUEST_ROUTES[m[2]] && /^Reimbursement/.test(REQUEST_ROUTES[m[2]]))) out.push('Routes.php: ' + key + ' is not a finance request create, update or submit and must not declare a reimbursement Action');
   }
   // BF-4g: exactly the two CEO audit reads — GET, their exact query keys, a session and no Action —
   // and no other audit or authentication-log route.
@@ -775,6 +826,7 @@ function checkPhp(file, src) {
   if (file === FINANCE_EXECUTION_INPUT) for (const v of checkFinanceExecutionInput(lex)) out.push(v);
   for (const v of checkAuditReadStatements(file, lex)) out.push(v);
   for (const v of checkTransactionStatements(file, lex)) out.push(v);
+  for (const v of checkRequestStatements(file, lex)) out.push(v);
   if (file.startsWith(AUDIT_DIR) || file === AUDIT_CONTROLLER || file === AUDIT_EVENT_STORE) for (const v of checkAuditReadFirewall(lex)) out.push(v);
   if (file === AUDIT_INPUT) for (const v of checkAuditInput(lex)) out.push(v);
   return out;
@@ -1012,6 +1064,72 @@ function checkTransactionStatements(file, lex) {
   return out;
 }
 
+// Phase 2 (ADR-016 §5): the finance request writer. Its statements are plainly inserted (never IGNORE or
+// ON DUPLICATE KEY UPDATE), compute no money in SQL, lock only one request or its owner employee by
+// primary key (never a range, a join or a payment row), every UPDATE is a compare-and-swap on the
+// expected version and status, every Employee (:self_employee_id) write names its owner, and the list
+// reads end LIMIT 2001 (LIST_CAP + 1) so the cap fails closed. Exactly three INSERTs.
+const REQUEST_LOCK = /^SELECT [^;]* FROM (finance_requests WHERE id = :id|employees WHERE id = :employee_id) AND company_id = :company_id( AND (owner_employee_id|id) = :self_employee_id)? FOR UPDATE$/;
+function checkRequestStatements(file, lex) {
+  if (file !== REQUEST_STORE) return [];
+  const out = [];
+  let inserts = 0;
+  for (const s of lex.strings) {
+    if (!SQL_VERB.test(s)) continue;
+    if (SQL_MONEY_ARITHMETIC.test(s) || /\bamount\s*[-+*\/]|[-+*\/]\s*:?amount\b/i.test(s)) out.push('finance requests never compute money in SQL');
+    if (/^\s*INSERT\b/i.test(s)) {
+      inserts++;
+      if (/\bIGNORE\b|\bON\s+DUPLICATE\s+KEY\b/i.test(s)) out.push('a finance request or payment is inserted plainly — never IGNORE or ON DUPLICATE KEY UPDATE');
+    }
+    if (/\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s) && (!REQUEST_LOCK.test(s) || /\bJOIN\b|\bOR\b/i.test(s))) out.push('a finance request write locks only its request or its owner employee, by primary key — never a range, a join or a payment');
+    if (/^\s*UPDATE\b/i.test(s) && (!/ AND version = :expected_version AND status = ('Draft'|:from_status)$/.test(s) || /\bOR\b/i.test(s))) out.push('every finance request UPDATE is a compare-and-swap ending AND version = :expected_version AND status = <expected>');
+    if (/^\s*(INSERT|UPDATE)\b/i.test(s) && /:self_employee_id\b/.test(s) && !/(owner_employee_id = :self_employee_id|, :self_employee_id, )/.test(s)) out.push('an Employee finance request write names its owner (:self_employee_id)');
+    if (/^SELECT /.test(s) && /document_date >= :from_date/.test(s) && !/ ORDER BY r\.document_date, r\.created_at, r\.id LIMIT 2001$/.test(s)) out.push('the finance request list ends ORDER BY r.document_date, r.created_at, r.id LIMIT 2001 (LIST_CAP + 1) so the cap fails closed');
+  }
+  if (inserts !== 3) out.push('RequestStore has exactly three INSERT statements (a payment request or reimbursement, an Employee reimbursement, a payment); found ' + inserts);
+  return out;
+}
+
+// Phase 2 (ADR-016 §7): a void reads the request payment link under its lock and refuses a linked transaction;
+// the request input validates the Financial Post against the one enum.
+function checkRequestLinks(storeSrc, serviceSrc, inputSrc) {
+  const out = [];
+  if (!/LINK_SQL = 'SELECT [^']* FROM finance_request_payments WHERE company_id = :company_id AND finance_transaction_id = :id'/.test(storeSrc)) out.push(TRANSACTION_STORE + ': LINK_SQL must read finance_request_payments by company and finance_transaction_id');
+  const voidAt = serviceSrc.indexOf('public function void(');
+  const body = voidAt < 0 ? '' : serviceSrc.slice(voidAt);
+  const lockAt = body.indexOf('->lock(');
+  const linkAt = body.indexOf('->linkedPayment(');
+  const insertAt = body.indexOf('->insertVoid(');
+  if (lockAt < 0 || linkAt < 0 || insertAt < 0 || !(lockAt < linkAt && linkAt < insertAt)) out.push(TRANSACTION_SERVICE + ': a void must read linkedPayment() after its lock and before insertVoid() — a transaction linked to a request payment is never voided');
+  if (!/FinancialPost::tryFrom\(/.test(inputSrc)) out.push(REQUEST_INPUT + ': financialPost is validated with FinancialPost::tryFrom (the one closed list)');
+  return out;
+}
+
+// AWP-01 B1 (option B-ii, Owner GO 2026-11-18): the pre-COMMIT failure is injected by the test-only COMMIT-boundary
+// fault proxy in server/tests/Support, outside the application, so RequestService carries no test seam. Checked
+// exactly instead of by construction analysis: its constructor takes the BusinessData only, it declares no other
+// property, and no production file names the removed hook, the proxy or server/tests/Support. Replaces the
+// Correction 1–3 probe rules (literal, structural and alias-aware construction checks), which defended a hook that
+// no longer exists.
+const REQUEST_SERVICE_CONSTRUCTOR = 'public function __construct(private readonly BusinessData $data)\n    {\n    }';
+const TEST_SEAM_NAME = /beforePayCommit|CommitFault|commit-fault-proxy|tests[\\/]+Support/i;
+/** A class property declaration (with any modifiers and an optional type) — not a constant, not a method. */
+const PROPERTY_DECLARATION = /^[ \t]*(?:(?:public|protected|private|var|readonly|static)\s+)+(?:\??[\\\w|]+\s+)?\$\w+/m;
+function checkRequestServiceSeam(serviceSrc, otherSrcs) {
+  const out = [];
+  if ((serviceSrc.match(/\bfunction\s+__construct\s*\(/gi) || []).length !== 1 || !serviceSrc.includes(REQUEST_SERVICE_CONSTRUCTOR)) out.push(REQUEST_SERVICE + ': the constructor takes the BusinessData only — public function __construct(private readonly BusinessData $data) (B1 option B-ii: no test seam)');
+  if (PROPERTY_DECLARATION.test(serviceSrc)) out.push(REQUEST_SERVICE + ': declares no property besides the constructor\'s BusinessData — no setter or other test seam');
+  for (const [name, src] of [[REQUEST_SERVICE, serviceSrc], ...otherSrcs]) if (TEST_SEAM_NAME.test(src)) out.push(name + ': production code never names the removed beforePayCommit hook, the test-only COMMIT-boundary proxy or server/tests/Support');
+  return out;
+}
+/** Every production PHP file under server/ (all but server/tests) except RequestService, as [path, source]. */
+function otherServerSources() {
+  const out = [];
+  const walk = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (e.name.endsWith('.php')) { const rel = path.relative(root, p).split(path.sep).join('/'); if (rel !== REQUEST_SERVICE) out.push([rel, fs.readFileSync(p, 'utf8')]); } } };
+  for (const d of fs.readdirSync(path.join(root, 'server'), { withFileTypes: true })) if (d.isDirectory() && d.name !== 'tests') walk(path.join(root, 'server', d.name));
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
 // Every migration except 0036, as [path, sql] (PD-3: none may touch financial_post).
 function otherPostMigrations() {
   const dir = path.join(root, 'server', 'migrations');
@@ -1037,6 +1155,16 @@ function checkFinancialPostParity(enumSrc, migrationSrc, frontendSrc, inputSrc, 
   if (!String(inputSrc || '').includes("if (!is_string($json['financialPost'] ?? null) || FinancialPost::tryFrom($json['financialPost']) === null) {")) out.push(TRANSACTION_INPUT + ': the server validates financialPost as a string against FinancialPost::tryFrom');
   if (!String(frontendSrc || '').includes("function transactionIsPost(v){ return typeof v === 'string' && FINANCIAL_POSTS.some(function(p){ return p.code === v; }); }")) out.push(FRONTEND_TRANSACTION_API + ': the frontend checks a post only against FINANCIAL_POSTS (transactionIsPost)');
   for (const [name, sql] of otherMigrations || []) {
+    // Phase 2 authorized revision (ADR-016 §1): migration 0039 defines finance_requests.financial_post with
+    // exactly the 0036 column and CHECK. Was: only 0036 names financial_post.
+    if (name === REQUEST_POST_MIGRATION) {
+      const rc = /finance_requests_financial_post CHECK \(financial_post IN \(([^)]*)\)\)/.exec(sql);
+      const rCodes = rc ? [...rc[1].matchAll(/'([A-Z]+)'/g)].map((m) => m[1]) : [];
+      if (rCodes.join(',') !== enumCodes.join(',')) out.push(name + ': the finance_requests financial_post CHECK must equal ' + FINANCIAL_POST_FILE);
+      if (!/^  financial_post VARCHAR\(8\) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,$/m.test(sql)) out.push(name + ': financial_post stays VARCHAR(8) ascii_bin NOT NULL (a case-sensitive exact match)');
+      if ((sql.match(/\bfinancial_post\b/g) || []).length !== 2) out.push(name + ': names financial_post only as its column and its one CHECK');
+      continue;
+    }
     if (/financial_post/i.test(sql)) out.push(name + ': only ' + FINANCIAL_POST_MIGRATION + ' may define financial_post — a later change to the Financial Posts must update this parity check with it');
   }
   return out;
@@ -1579,8 +1707,9 @@ function checkActionParity(phpSrc, jsSrc) {
   const out = [...front.errors, ...server.errors];
   if (!front.actions || !server.actions) return out.length ? out : ['ACTION parity could not be established'];
   // SDR-0004 (BF-4a2, owner decision C1 = A): account.manage joined the shared vocabulary, 20 → 21.
-  if (front.actions.size !== 21) out.push('frontend ACTIONS has ' + front.actions.size + ' actions, not 21');
-  if (server.actions.size !== 21) out.push('server Action has ' + server.actions.size + ' actions, not 21');
+  // ADR-016 (AWP-01) authorized revision: the three reimbursement self actions joined, 21 → 24. Was: 21.
+  if (front.actions.size !== ACTION_COUNT) out.push('frontend ACTIONS has ' + front.actions.size + ' actions, not ' + ACTION_COUNT);
+  if (server.actions.size !== ACTION_COUNT) out.push('server Action has ' + server.actions.size + ' actions, not ' + ACTION_COUNT);
   for (const [value, f] of front.actions) {
     const s = server.actions.get(value);
     if (!s) { out.push('server Action is missing ' + value); continue; }
@@ -1672,6 +1801,13 @@ function run() {
   if (!fs.existsSync(postFile) || !fs.existsSync(postMigration)) failures.push(FINANCIAL_POST_FILE + ' / ' + FINANCIAL_POST_MIGRATION + ': missing — Financial Post parity cannot be established');
   else for (const v of checkFinancialPostParity(fs.readFileSync(postFile, 'utf8'), fs.readFileSync(postMigration, 'utf8'), fs.existsSync(postFrontend) ? fs.readFileSync(postFrontend, 'utf8') : '',
     fs.existsSync(path.join(root, TRANSACTION_INPUT)) ? fs.readFileSync(path.join(root, TRANSACTION_INPUT), 'utf8') : '', otherPostMigrations())) failures.push(v);
+  // Phase 2 (ADR-016 §7): the void path refuses a transaction linked to a request payment.
+  const linkFiles = [TRANSACTION_STORE, TRANSACTION_SERVICE, REQUEST_INPUT].map((f) => path.join(root, f));
+  if (!linkFiles.every((f) => fs.existsSync(f))) failures.push(TRANSACTION_STORE + ' / ' + TRANSACTION_SERVICE + ' / ' + REQUEST_INPUT + ': missing — the request payment link cannot be checked');
+  else for (const v of checkRequestLinks(...linkFiles.map((f) => fs.readFileSync(f, 'utf8')))) failures.push(v);
+  // AWP-01 B1 (option B-ii): RequestService has no test seam and production never names the test-only proxy.
+  if (!fs.existsSync(path.join(root, REQUEST_SERVICE))) failures.push(REQUEST_SERVICE + ': missing — the B1 seam rule cannot be checked');
+  else for (const v of checkRequestServiceSeam(fs.readFileSync(path.join(root, REQUEST_SERVICE), 'utf8'), otherServerSources())) failures.push(v);
   // BF-4c1: payroll adds no Action — the vocabulary stays exactly ACTION_COUNT.
   if (fs.existsSync(actionFile) && (fs.readFileSync(actionFile, 'utf8').match(/^\s*case \w+ = '/gm) || []).length !== ACTION_COUNT) failures.push(ACTION_FILE + ': the server ACTIONS must stay ' + ACTION_COUNT);
   const ignored = gitIgnored(onDisk);
@@ -1684,7 +1820,7 @@ function run() {
     for (const v of dedup) console.error('  - ' + v);
     process.exit(1);
   }
-  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (21 actions, rules, entities); every migrated table is classified for backup.');
+  console.log('BACKEND BOUNDARY PASSED -- ' + files.length + ' files (' + php + ' PHP) checked; API header mirror matches tools/package-headers.js; server ACTIONS equal ' + FRONTEND_AUTHZ + ' (' + ACTION_COUNT + ' actions, rules, entities); every migrated table is classified for backup.');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2378,16 +2514,72 @@ function selftest() {
   parity('grouped match arms are caught (unparseable)', swap(swap(realAction, '            self::EmployeeUpdate => Rule::CeoOnly,\n', ''), 'self::EmployeeCreate => Rule::CeoOnly,', 'self::EmployeeCreate, self::EmployeeUpdate => Rule::CeoOnly,'), realAuthz, 'parseable');
   parity('a duplicated case is caught (unparseable)', swap(realAction, "    case DataReset = 'data.reset';\n", "    case DataReset = 'data.reset';\n    case DataReset = 'data.reset';\n"), realAuthz, 'parseable');
   parity('an unparseable Action.php is caught', S + "enum Action: string { case A = 'a'; }\n", realAuthz, 'parseable');
-  parity('a frontend action the server lacks is caught', realAction, swap(realAuthz, "  ACCOUNT_MANAGE:     'account.manage'\n", "  ACCOUNT_MANAGE:     'account.manage',\n  EMPLOYEE_MERGE:     'employee.merge'\n"), 'employee.merge');
+  // ADR-016 (AWP-01) authorized revision: the reimbursement actions now end ACTIONS. Was: anchored on account.manage last.
+  parity('a frontend action the server lacks is caught', realAction, swap(realAuthz, "  REIMBURSEMENT_SUBMIT_SELF:'reimbursement.submitSelf'\n", "  REIMBURSEMENT_SUBMIT_SELF:'reimbursement.submitSelf',\n  EMPLOYEE_MERGE:     'employee.merge'\n"), 'employee.merge');
   // BF-4a2: account.manage is shared, CEO-only and record-bearing on the Employee record.
   parity('account.manage missing on the server is caught', swap(swap(swap(realAction, "    case AccountManage = 'account.manage';\n", ''), '            self::AccountManage => Rule::CeoOnly,\n', ''), "            self::AccountManage => 'employee',\n", ''), realAuthz, 'missing account.manage');
-  parity('account.manage missing on the frontend is caught', realAction, swap(swap(swap(swap(realAuthz, "  DATA_RESET:         'data.reset',\n", "  DATA_RESET:         'data.reset'\n"), "  ACCOUNT_MANAGE:     'account.manage'\n", ''), "  'account.manage':      'employee'     // administers the login bound to an Employee record\n", ''), "  'account.manage':      ceoOnly,\n", ''), 'frontend lacks: account.manage');
+  // ADR-016 (AWP-01) authorized revision: account.manage is no longer the last entry. Was: the DATA_RESET comma swap.
+  parity('account.manage missing on the frontend is caught', realAction, swap(swap(swap(realAuthz, "  ACCOUNT_MANAGE:     'account.manage',\n", ''), "  'account.manage':      'employee',    // administers the login bound to an Employee record\n", ''), "  'account.manage':      ceoOnly,\n", ''), 'frontend lacks: account.manage');
+  // ADR-016 §3: the reimbursement self actions are shared, CeoOrOwnDraft and record-bearing on financeRequest.
+  parity('a reimbursement action missing on the frontend is caught', realAction, swap(swap(swap(realAuthz, "  REIMBURSEMENT_SUBMIT_SELF:'reimbursement.submitSelf'\n", ''), "  REIMBURSEMENT_UPDATE_SELF_DRAFT:'reimbursement.updateSelfDraft',\n", "  REIMBURSEMENT_UPDATE_SELF_DRAFT:'reimbursement.updateSelfDraft'\n"), "  'reimbursement.submitSelf': selfDraftOnly,\n", ''), 'frontend lacks: reimbursement.submitSelf');
+  parity('a narrowed server reimbursement rule is caught', swap(realAction, 'self::ReimbursementSubmitSelf => Rule::CeoOrOwnDraft,', 'self::ReimbursementSubmitSelf => Rule::CeoOnly,'), realAuthz, 'rule drift for reimbursement.submitSelf');
+  parity('a record-free server reimbursement action is caught', swap(realAction, "self::ReimbursementCreateSelfDraft => 'financeRequest',", 'self::ReimbursementCreateSelfDraft => null,'), realAuthz, 'entity drift for reimbursement.createSelfDraft');
   parity('a broadened server account.manage rule is caught', swap(realAction, 'self::AccountManage => Rule::CeoOnly,', 'self::AccountManage => Rule::CeoOrOwnDraft,'), realAuthz, 'rule drift for account.manage');
   parity('a record-free server account.manage is caught', swap(realAction, "self::AccountManage => 'employee',", 'self::AccountManage => null,'), realAuthz, 'entity drift for account.manage');
   parity('a broadened frontend Employee rule is caught', realAction, swap(realAuthz, "  'employee.create':     ceoOnly,", "  'employee.create':     selfDraftOnly,"), 'rule drift for employee.create');
   parity('an allow-all frontend rule is caught', realAction, swap(realAuthz, "  'data.reset':          ceoOnly,", "  'data.reset':          function(){ return true; },"), 'neither CeoOnly nor CeoOrOwnDraft');
   parity('a changed frontend entity is caught', realAction, swap(realAuthz, "  'overtime.manage':     'overtime',", "  'overtime.manage':     'payrollPlan',"), 'entity drift for overtime.manage');
   parity('an authz.js that cannot be evaluated fails closed', realAction, 'const ACTIONS = ;', 'could not be evaluated');
+  // Phase 2 (ADR-016): the finance request writer, its routes and the void link.
+  const realReq = fs.readFileSync(path.join(root, REQUEST_STORE), 'utf8');
+  const inReq = (extra) => realReq.replace('    public const ENTITY', '    ' + extra + '\n    public const ENTITY');
+  const reqSwap = (from, to) => { if (!realReq.includes(from)) throw new Error('selftest fixture drift: ' + from); return realReq.replace(from, to); };
+  clean('the real RequestStore passes', REQUEST_STORE, realReq);
+  dirty('a finance request DELETE is caught', REQUEST_STORE, inReq("public const D_SQL = 'DELETE FROM finance_requests WHERE id = :id AND company_id = :company_id';"), 'never deleted');
+  dirty('a request payment UPDATE is caught (no reversal)', REQUEST_STORE, inReq("public const U_SQL = \"UPDATE finance_request_payments SET amount = '0.00' WHERE id = :id AND company_id = :company_id\";"), 'payment is immutable');
+  dirty('a request write outside RequestStore is caught', PAYROLL_STORE, fs.readFileSync(path.join(root, PAYROLL_STORE), 'utf8').replace('final class PayrollStore\n{\n', "final class PayrollStore\n{\n    public const R_SQL = 'INSERT INTO finance_request_payments (id, company_id) VALUES (:id, :company_id)';\n"), 'written only by ' + REQUEST_STORE);
+  dirty('a fourth request INSERT is caught', REQUEST_STORE, inReq("public const X_SQL = 'INSERT INTO finance_request_payments (id, company_id) VALUES (:id, :company_id)';"), 'exactly three INSERT statements');
+  dirty('an INSERT IGNORE of a request is caught', REQUEST_STORE, reqSwap('"INSERT INTO finance_requests (id, company_id, kind,', '"INSERT IGNORE INTO finance_requests (id, company_id, kind,'), 'inserted plainly');
+  dirty('a range lock of requests is caught (deadlock)', REQUEST_STORE, inReq("public const R_SQL = \"SELECT id, company_id, owner_employee_id FROM finance_requests WHERE company_id = :company_id AND status = 'Approved' FOR UPDATE\";"), 'by primary key');
+  dirty('a lock of a payment row is caught', REQUEST_STORE, inReq("public const P_SQL = 'SELECT id, company_id, NULL AS owner_employee_id FROM finance_request_payments WHERE id = :id AND company_id = :company_id FOR UPDATE';"), 'by primary key');
+  dirty('an UPDATE without the version compare-and-swap is caught', REQUEST_STORE, reqSwap(" AND version = :expected_version AND status = :from_status';", " AND status = :from_status';"), 'compare-and-swap');
+  dirty('money arithmetic in SQL is caught', REQUEST_STORE, reqSwap('amount = :amount, payee = :payee', 'amount = amount + :amount, payee = :payee'), 'never compute money');
+  dirty('an Employee write that drops its owner is caught', REQUEST_STORE, reqSwap(' AND owner_employee_id = :self_employee_id AND version = :expected_version AND status = :from_status', ' AND :self_employee_id IS NOT NULL AND version = :expected_version AND status = :from_status'), 'names its owner');
+  dirty('a request list without its cap row is caught', REQUEST_STORE, reqSwap('ORDER BY r.document_date, r.created_at, r.id LIMIT 2001\';\n    public const LIST_SELF_SQL', 'ORDER BY r.document_date, r.created_at, r.id\';\n    public const LIST_SELF_SQL'), 'LIMIT 2001');
+  const reqRoutes = fs.readFileSync(path.join(root, ROUTES_FILE), 'utf8');
+  const routeSwap = (from, to) => { if (!reqRoutes.includes(from)) throw new Error('selftest fixture drift: ' + from); return reqRoutes.replace(from, to); };
+  cases.push({ name: 'the real finance request routes pass', run: () => checkRouteActions(reqRoutes).filter((v) => /finance request|reimbursement/.test(v)), expect: 0 });
+  cases.push({ name: 'a finance request delete route is caught', run: () => checkRouteActions(routeSwap("            new Route('POST', '/api/finance-requests/pay',", "            new Route('POST', '/api/finance-requests/delete', $requests->cancel(...), [], RouteAuth::Required, Action::FinanceManage),\n            new Route('POST', '/api/finance-requests/pay',")), expect: 'the only finance request routes' });
+  cases.push({ name: 'a return-to-Draft route is caught', run: () => checkRouteActions(routeSwap("            new Route('POST', '/api/finance-requests/pay',", "            new Route('POST', '/api/finance-requests/reopen', $requests->submit(...), [], RouteAuth::Required, Action::ReimbursementSubmitSelf),\n            new Route('POST', '/api/finance-requests/pay',")), expect: 'the only finance request routes' });
+  cases.push({ name: 'pay under finance.manage is caught', run: () => checkRouteActions(routeSwap("$requests->pay(...), [], RouteAuth::Required, Action::FinanceExecute)", "$requests->pay(...), [], RouteAuth::Required, Action::FinanceManage)")), expect: 'must declare exactly Action::FinanceExecute' });
+  cases.push({ name: 'approve under a reimbursement self action is caught', run: () => checkRouteActions(routeSwap("$requests->approve(...), [], RouteAuth::Required, Action::FinanceManage)", "$requests->approve(...), [], RouteAuth::Required, Action::ReimbursementSubmitSelf)")), expect: 'must declare exactly Action::FinanceManage' });
+  cases.push({ name: 'a reimbursement Action on another route is caught', run: () => checkRouteActions(routeSwap("$overtime->reject(...), [], RouteAuth::Required, Action::OvertimeManage)", "$overtime->reject(...), [], RouteAuth::Required, Action::ReimbursementSubmitSelf)")), expect: 'must not declare a reimbursement Action' });
+  cases.push({ name: 'an Action on the finance request read is caught', run: () => checkRouteActions(routeSwap("$requests->find(...), ['id'], RouteAuth::Required)", "$requests->find(...), ['id'], RouteAuth::Required, Action::FinanceManage)")), expect: 'declares no Action' });
+  cases.push({ name: 'a missing pay route is caught', run: () => checkRouteActions(routeSwap("            new Route('POST', '/api/finance-requests/pay', $requests->pay(...), [], RouteAuth::Required, Action::FinanceExecute),\n", '')), expect: 'POST /api/finance-requests/pay is missing' });
+  const linkSrcs = [TRANSACTION_STORE, TRANSACTION_SERVICE, REQUEST_INPUT].map((f) => fs.readFileSync(path.join(root, f), 'utf8'));
+  cases.push({ name: 'the real void path reads the request payment link', run: () => checkRequestLinks(...linkSrcs), expect: 0 });
+  cases.push({ name: 'a void that skips the link is caught', run: () => checkRequestLinks(linkSrcs[0], linkSrcs[1].replace('->linkedPayment(', '->voidOf('), linkSrcs[2]), expect: 'linkedPayment()' });
+  cases.push({ name: 'a LINK_SQL that does not read the payment table is caught', run: () => checkRequestLinks(linkSrcs[0].replace('FROM finance_request_payments WHERE company_id', 'FROM finance_transaction_voids WHERE company_id'), linkSrcs[1], linkSrcs[2]), expect: 'LINK_SQL' });
+  cases.push({ name: 'a request input without the Financial Post enum is caught', run: () => checkRequestLinks(linkSrcs[0], linkSrcs[1], linkSrcs[2].split('FinancialPost::tryFrom(').join('strlen(')), expect: 'FinancialPost::tryFrom' });
+  // AWP-01 B1 (option B-ii): the seam rule. Replaces the 74 Correction 2–3 probe cases with the new invariant.
+  const seamSrc = fs.readFileSync(path.join(root, REQUEST_SERVICE), 'utf8');
+  const seamOthers = otherServerSources();
+  const seamCtor = 'public function __construct(private readonly BusinessData $data)';
+  const seamSwap = (to) => { const out = seamSrc.replace(seamCtor, () => to); if (out === seamSrc) throw new Error('selftest fixture drift: RequestService constructor'); return out; };
+  const seamAdd = (file, src) => [...seamOthers, [file, src]];
+  const SEAM = 'no test seam';
+  cases.push({ name: 'B1 B-ii: the real RequestService has no test seam and production never names the proxy', run: () => checkRequestServiceSeam(seamSrc, seamOthers), expect: 0 });
+  cases.push({ name: 'B1 B-ii: the beforePayCommit hook re-added as a second constructor parameter is caught', run: () => checkRequestServiceSeam(seamSwap('public function __construct(private readonly BusinessData $data, private readonly ?\\Closure $beforePayCommit = null)'), seamOthers), expect: SEAM });
+  cases.push({ name: 'B1 B-ii: any second constructor parameter is caught, whatever its name', run: () => checkRequestServiceSeam(seamSwap('public function __construct(private readonly BusinessData $data, private readonly ?object $x = null)'), seamOthers), expect: SEAM });
+  cases.push({ name: 'B1 B-ii: a constructor on one line with another body is caught', run: () => checkRequestServiceSeam(seamSrc.replace(seamCtor + '\n    {\n    }', () => seamCtor + ' { $this->x = 1; }'), seamOthers), expect: SEAM });
+  cases.push({ name: 'B1 B-ii: a separately declared property (a setter seam) is caught', run: () => checkRequestServiceSeam(seamSrc.replace('    private const DUPLICATE_KEY', () => '    private ?\\Closure $onPay = null;\n    private const DUPLICATE_KEY'), seamOthers), expect: 'declares no property' });
+  cases.push({ name: 'B1 B-ii: a static or untyped property is caught too', run: () => checkRequestServiceSeam(seamSrc.replace('    private const DUPLICATE_KEY', () => '    public static $hook;\n    private const DUPLICATE_KEY'), seamOthers), expect: 'declares no property' });
+  cases.push({ name: 'B1 B-ii: a private static method and a constant are not properties', run: () => checkRequestServiceSeam(seamSrc, seamOthers).filter((v) => v.includes('declares no property')), expect: 0 });
+  cases.push({ name: 'B1 B-ii: the removed hook named in another production file is caught', run: () => checkRequestServiceSeam(seamSrc, seamAdd('server/src/Controller/X.php', S + '$beforePayCommit = null;\n')), expect: 'never names' });
+  cases.push({ name: 'B1 B-ii: production naming the proxy class is caught', run: () => checkRequestServiceSeam(seamSrc, seamAdd('server/src/bootstrap2.php', S + 'use TamOs\\Tests\\Support\\CommitFaultRelay;\n')), expect: 'never names' });
+  cases.push({ name: 'B1 B-ii: production requiring server/tests/Support is caught (either slash)', run: () => checkRequestServiceSeam(seamSrc, seamAdd('server/public/x.php', S + "require dirname(__DIR__) . '/tests\\\\Support/x.php';\n")), expect: 'never names' });
+  cases.push({ name: 'B1 B-ii: production starting the proxy script is caught', run: () => checkRequestServiceSeam(seamSrc, seamAdd('server/bin/x.php', S + "$p = 'commit-fault-proxy.php';\n")), expect: 'never names' });
+  cases.push({ name: 'B1 B-ii: an unrelated class with two constructor parameters passes', run: () => checkRequestServiceSeam(seamSrc, seamAdd('server/src/Other/X.php', S + 'final class X { public function __construct(private int $a, private ?\\Closure $b = null) {} }\n')), expect: 0 });
   dirty('a variable include outside the allow-list is caught', 'server/src/Http/X.php', S + 'require $file;\n', 'include');
   clean('prose that reads like SELECT…FROM is not SQL', 'server/src/X.php', S + "\$m = 'Select a principal from the list above';\n");
   treeCase('composer.json is caught', ['server/composer.json'], 'Composer');

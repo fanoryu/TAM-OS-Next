@@ -742,6 +742,104 @@ function firewall(rt, label){
     firewall(open2, 'P. Finance events');
   }
 
+  /* ---------- Q. AWP-01 finance request events (migration 0041; ADR-016 D1–D4) ---------- */
+  // AWP-01 (ADR-016) authorized revision: migration 0041 makes the audit vocabulary a triple set —
+  // finance.execute and finance.manage name a finance request too, and the three reimbursement self
+  // actions join. Every new triple must decode and be labelled (D1), a month mixing Phase 1, payroll
+  // and Phase 2 events must decode whole (D2), a request's history and its linked expense's history
+  // must read back (D3), and every out-of-set triple or malformed id must fail the whole answer (D4).
+  // Was: the 0038 vocabulary (section P).
+  {
+    const RQ = 'fedcba9876543210'.repeat(2);
+    const TX2 = 'abcdefabcdefabcd'.repeat(2);
+    const at = (d) => '2031-04-' + d + 'T03:00:00.000000Z';
+    const NEW = [
+      ['reimbursement.createSelfDraft', 'financeRequest', RQ, null, ['amount', 'category', 'description', 'documentDate', 'financialPost'], 'Reimbursement draft created'],
+      ['reimbursement.updateSelfDraft', 'financeRequest', RQ, null, ['amount'], 'Reimbursement draft updated'],
+      ['reimbursement.submitSelf', 'financeRequest', RQ, 'submit', [], 'Reimbursement submitted — Submit'],
+      ['finance.manage', 'financeRequest', RQ, 'create', ['amount', 'payee'], 'Finance request — Create'],
+      ['finance.manage', 'financeRequest', RQ, 'update', ['amount'], 'Finance request — Update'],
+      ['finance.manage', 'financeRequest', RQ, 'submit', [], 'Finance request — Submit'],
+      ['finance.manage', 'financeRequest', RQ, 'approve', [], 'Finance request — Approve'],
+      ['finance.manage', 'financeRequest', RQ, 'reject', [], 'Finance request — Reject'],
+      ['finance.manage', 'financeRequest', RQ, 'cancel', [], 'Finance request — Cancel'],
+      ['finance.execute', 'financeRequest', RQ, 'pay', [], 'Finance request paid — Pay'],
+      ['finance.execute', 'financeTransaction', TX2, 'create', [], 'Payment recorded — Create']
+    ];
+    const QE = NEW.map((n, i) => ev(30 + i, at(String(13 + i)), { action: n[0], entity: n[1], entityId: n[2], operation: n[3], fields: n[4] }));
+    const rt = await boot(ME_CEO);
+    const page = (o) => rt.parse(JSON.stringify(o));
+    const dec = (events) => rt.AuditDecoders.monthResponse(page({ auditEvents: events }), MONTH);
+    const rec = (events, e, id) => rt.AuditDecoders.recordResponse(page({ auditEvents: events }), e, id);
+    QE.forEach(function(e, i){
+      const d = dec([e]);
+      check(d !== null && d.length === 1 && d[0].action === NEW[i][0] && d[0].entity === NEW[i][1] && d[0].entityId === NEW[i][2] && d[0].operation === NEW[i][3]
+        && d[0].fields.join() === NEW[i][4].join() && Object.isFrozen(d[0]),
+        'Q. D1: the new triple (' + NEW[i][0] + ', ' + NEW[i][1] + ', ' + NEW[i][3] + ') decodes exactly');
+    });
+    check(rt.auditIsRecord('financeRequest', RQ) && !rt.auditIsRecord('financeRequest', 'req_1') && !rt.auditIsRecord('financeRequest', RQ.toUpperCase()),
+      'Q. D1: a finance request is a stored audit record with a 32-hex id');
+    const openQ = await open({ [LIST(MONTH)]: [ok({ auditEvents: QE })] });
+    let html = openQ.appHTML();
+    check(!/id="swauError"/.test(html) && /11 events, oldest first./.test(html)
+      && NEW.every((n) => html.includes('<td>' + n[5] + '</td><td>' + (n[1] === 'financeRequest' ? 'Finance request ' : 'Finance transaction ') + n[2] + '</td>')),
+      'Q. D1: every new triple is shown with its fixed label and record label (Finance request / Finance transaction)');
+    firewall(openQ, 'Q. D1 labels');
+    // D2: a month mixing the earlier events, a Phase 1 Finance transaction and the Phase 2 events.
+    const FC2 = ev(29, at('12'), { action: 'finance.manage', entity: 'financeTransaction', entityId: TX2, operation: 'create', fields: [] });
+    const MIXED = [A1, A2, A3, FC2].concat(QE, [A4]);
+    const mixed = dec(MIXED);
+    check(mixed !== null && mixed.length === 16 && mixed.map((e) => e.id).join() === MIXED.map((e) => e.id).join(),
+      'Q. D2: a month mixing earlier, payroll, Phase 1 Finance and Phase 2 events decodes whole, in the server\'s order');
+    // D3: the request's history and the linked expense's history.
+    const LIFE = QE.filter((e, i) => NEW[i][1] === 'financeRequest');
+    const life = rec(LIFE, 'financeRequest', RQ);
+    check(life !== null && life.length === 10 && life.every((e) => e.entity === 'financeRequest' && e.entityId === RQ)
+      && rec([FC2, QE[10]], 'financeTransaction', TX2) !== null && rec([FC2, QE[10]], 'financeTransaction', TX2).some((e) => e.action === 'finance.execute' && e.operation === 'create')
+      && rec(LIFE.concat([QE[10]]), 'financeRequest', RQ) === null,
+      'Q. D3: a request\'s record history decodes its full lifecycle; its linked expense\'s history holds the finance.execute / create row; a foreign event fails the answer');
+    const openR = await open({ [LIST(MONTH)]: [ok({ auditEvents: LIFE })], [REC('financeRequest', RQ)]: [ok({ auditEvents: LIFE })] });
+    openR.app.row(9); await flush();
+    openR.app.fire('swauRecordBtn', 'click'); await flush();
+    html = openR.appHTML();
+    check(countOf(openR, REC('financeRequest', RQ)) === 1 && /History of Finance request fedcba9876543210fedcba9876543210/.test(html) && (html.match(/data-swau-open/g) || []).length === 10,
+      'Q. D3: the request\'s record history reads GET /api/audit-events/record?entity=financeRequest&id=… once and lists its ten events');
+    firewall(openR, 'Q. D3 history');
+    // D4: every out-of-set triple and malformed id fails the whole answer, alone and beside valid events.
+    const B = QE[6]; // finance.manage / financeRequest / approve
+    const BAD = [
+      ['finance.manage paying a request', Object.assign({}, B, { operation: 'pay' })],
+      ['finance.manage voiding a request', Object.assign({}, B, { operation: 'void' })],
+      ['finance.manage on a request without an operation', Object.assign({}, B, { operation: null })],
+      ['finance.manage executing a request', Object.assign({}, B, { operation: 'execute' })],
+      ['finance.execute approving a request', Object.assign({}, B, { action: 'finance.execute' })],
+      ['finance.execute creating a request', Object.assign({}, B, { action: 'finance.execute', operation: 'create' })],
+      ['finance.execute executing a request', Object.assign({}, B, { action: 'finance.execute', operation: 'execute' })],
+      ['finance.execute voiding a transaction', Object.assign({}, QE[10], { operation: 'void' })],
+      ['finance.execute on a transaction without an operation', Object.assign({}, QE[10], { operation: null })],
+      ['finance.execute paying a posting', Object.assign({}, QE[10], { entity: 'financePosting', operation: 'pay' })],
+      ['reimbursement.submitSelf approving', Object.assign({}, QE[2], { operation: 'approve' })],
+      ['reimbursement.submitSelf without an operation', Object.assign({}, QE[2], { operation: null })],
+      ['reimbursement.createSelfDraft with an operation', Object.assign({}, QE[0], { operation: 'create' })],
+      ['reimbursement.updateSelfDraft with an operation', Object.assign({}, QE[1], { operation: 'update' })],
+      ['a reimbursement action on an overtime record', Object.assign({}, QE[0], { entity: 'overtime' })],
+      ['a reimbursement action on a transaction', Object.assign({}, QE[2], { entity: 'financeTransaction' })],
+      ['finance.manage on a posting', Object.assign({}, B, { entity: 'financePosting' })],
+      ['payroll.manage on a request', Object.assign({}, B, { action: 'payroll.manage', operation: 'approve' })],
+      ['overtime.manage on a request', Object.assign({}, B, { action: 'overtime.manage' })],
+      ['an unknown reimbursement action', Object.assign({}, B, { action: 'reimbursement.approve' })],
+      ['an unknown request entity', Object.assign({}, B, { entity: 'paymentRequest' })],
+      ['a request id in the employee format', Object.assign({}, B, { entityId: 'req_1' })],
+      ['an upper-case request id', Object.assign({}, B, { entityId: RQ.toUpperCase() })],
+      ['a 31-hex request id', Object.assign({}, B, { entityId: RQ.slice(1) })],
+      ['a 33-hex request id', Object.assign({}, B, { entityId: RQ + 'a' })]
+    ];
+    BAD.forEach(function(b){ check(dec([b[1]]) === null && dec([A1, b[1]]) === null && dec(QE.concat([Object.assign({}, b[1], { id: '99', occurredAt: at('29') })])) === null,
+      'Q. D4: refused alone and beside valid events: ' + b[0]); });
+    check(rt.AuditDecoders.recordResponse(page({ auditEvents: [Object.assign({}, B, { entityId: 'req_1' })] }), 'financeRequest', 'req_1') === null,
+      'Q. D4: a record answer for a malformed request id is refused');
+  }
+
   console.log('');
   if(failures.length){
     console.log('AFI-4g SESSION AUDIT RUNTIME VERIFICATION FAILED -- ' + failures.length + ' failing:');

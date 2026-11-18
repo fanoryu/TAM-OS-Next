@@ -181,7 +181,9 @@ return [
         // posting) follows it too (pinned in FinanceExecutionDomainTest). Was: exactly 6.
         // Phase 1 authorized revision: the general transaction create and void (one commit-class
         // transaction each) follow it too (pinned in TransactionDomainTest). Was: exactly 7.
-        assertSame(9, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow; BF-4d: Supplemental generate and commit; BF-4e: the two Finance postings; BF-4f: the Finance execution; Phase 1: general transaction create and void)');
+        // ADR-016 (AWP-01) authorized revision: the four finance request write transactions (create,
+        // update, transition, pay) follow it too (ADR-016 §5). Was: exactly 9.
+        assertSame(13, substr_count($all, 'readCommitted: true'), 'nothing else in the backend runs at READ COMMITTED (D-BF4c2-3 narrow; BF-4d: Supplemental generate and commit; BF-4e: the two Finance postings; BF-4f: the Finance execution; Phase 2: the finance request writes; Phase 1: general transaction create and void)');
         assertSame(2, substr_count((string) file_get_contents(dirname(__DIR__, 2) . '/src/Supplemental/SupplementalService.php'), 'readCommitted: true'), 'the other two are the Supplemental generate and commit');
         assertSame(['employee_code_snapshot', 'employee_name_snapshot', 'department_snapshot', 'base_salary', 'overtime_amount', 'overtime_hours', 'overtime_count', 'total_amount'], PayrollStore::VALUES);
     },

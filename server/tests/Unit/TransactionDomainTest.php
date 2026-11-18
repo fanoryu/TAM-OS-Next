@@ -195,8 +195,9 @@ return [
         }
         assertSame('financial report reads are company scope only',assertThrows(\LogicException::class, static fn () => (new FinancialReportStore($db()))->transactions(Scope::of($emp), '2026-10-01', '2026-10-31'))->getMessage());
     },
-    'Policy and audit: both writes are the existing record-free finance.manage (CeoOnly; ACTIONS stay 21); an Employee is 403 before any lookup; audit names create or void on financeTransaction, no field' => static function () use ($principal, $unreachable, $body, $db): void {
-        assertSame(21, count(Action::cases()), 'ACTIONS stay 21');
+    'Policy and audit: both writes are the existing record-free finance.manage (CeoOnly; ACTIONS unchanged by it (24 after AWP-01)); an Employee is 403 before any lookup; audit names create or void on financeTransaction, no field' => static function () use ($principal, $unreachable, $body, $db): void {
+        // ADR-016 (AWP-01) authorized revision: the three reimbursement self actions (ACTIONS 21 -> 24). Was: 21.
+        assertSame(24, count(Action::cases()), 'ACTIONS are the 24 of ADR-016');
         assertSame([null, 'finance.manage'], [Action::FinanceManage->entity(), Action::FinanceManage->value]);
         $ceo = $principal('ceo', null);
         $emp = $principal('employee', 'emp_1');

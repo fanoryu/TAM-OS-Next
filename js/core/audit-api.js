@@ -16,10 +16,10 @@
    STRICT DECODING: an event has exactly AuditEventView::FIELDS (server/src/Audit/AuditEventView.php)
    — never a company — with the server's grammars: a positive decimal id, occurredAt the stored
    UTC instant "YYYY-MM-DDTHH:MM:SS.ffffffZ", 32-hex actor, membership and request ids, an action
-   of the closed vocabulary of migration 0038 (Phase 1, PH1-QA-01: 0035's plus finance.manage on
-   financeTransaction; was 0035's), the one entity that action names, an entity id in
-   that entity's format (AuditInput::ENTITIES), the operation that action allows (null when it
-   allows none), a null or 32-hex target user and a list of field NAMES. A list holds at most
+   of the closed vocabulary of migration 0041 (AWP-01, ADR-016: 0038's plus the finance request
+   triples; was 0038's, Phase 1 PH1-QA-01), an entity that action may name, an entity id in
+   that entity's format (AuditInput::ENTITIES), an operation that action allows on that entity
+   (null when it allows none), a null or 32-hex target user and a list of field NAMES. A list holds at most
    AUDIT_LIST_CAP events, each id once, strictly in the server's order (occurredAt, id); a month
    answer holds only events of that Asia/Jakarta month, a record answer only events of that
    entity and id. Anything else is INVALID_RESPONSE and nothing of it is returned.
@@ -48,36 +48,39 @@ const AUDIT_EVENT_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const AUDIT_OCCURRED_PATTERN = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.([0-9]{6})Z$/;
 const AUDIT_FIELD_PATTERN = /^[a-z][A-Za-z]{0,31}$/;
 // AuditInput::ENTITIES — the stored audit entities and each one's id format (Phase 1: plus
-// financeTransaction, PH1-QA-01).
+// financeTransaction, PH1-QA-01; AWP-01: plus financeRequest, migration 0041).
 const AUDIT_ENTITY_ID_PATTERNS = Object.freeze({
   employee: /^[A-Za-z0-9_-]{1,64}$/,
   overtime: AUDIT_HEX32_PATTERN,
   payrollPlan: AUDIT_HEX32_PATTERN,
   supplementalPayroll: AUDIT_HEX32_PATTERN,
   financePosting: AUDIT_HEX32_PATTERN,
-  financeTransaction: AUDIT_HEX32_PATTERN
+  financeTransaction: AUDIT_HEX32_PATTERN,
+  financeRequest: AUDIT_HEX32_PATTERN
 });
-// Migration 0038 audit_events_action_v7 / audit_events_entity_v6: each action and the one entity
-// it names. Phase 1 authorized revision (PH1-QA-01): plus finance.manage → financeTransaction.
-// Was: migration 0035's v6 / v5.
-const AUDIT_ACTION_ENTITY = Object.freeze({
-  'employee.create': 'employee', 'employee.update': 'employee', 'employee.delete': 'employee', 'account.manage': 'employee',
-  'overtime.createSelfDraft': 'overtime', 'overtime.updateSelfDraft': 'overtime', 'overtime.deleteSelfDraft': 'overtime',
-  'overtime.submitSelf': 'overtime', 'overtime.manage': 'overtime',
-  'payroll.manage': 'payrollPlan', 'supplemental.manage': 'supplementalPayroll', 'finance.execute': 'financePosting',
-  'finance.manage': 'financeTransaction'
-});
-// Migration 0038 audit_events_action_operation_v8: the operations an action requires; an action
-// not named here stores none. Phase 1 authorized revision (PH1-QA-01): plus finance.manage's create
-// and void. Was: migration 0035's v7.
-const AUDIT_ACTION_OPERATIONS = Object.freeze({
-  'account.manage': Object.freeze(['provision', 'reissue', 'disable', 'enable']),
-  'overtime.submitSelf': Object.freeze(['submit']),
-  'overtime.manage': Object.freeze(['review', 'reject', 'approve']),
-  'payroll.manage': Object.freeze(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post']),
-  'supplemental.manage': Object.freeze(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post']),
-  'finance.execute': Object.freeze(['execute']),
-  'finance.manage': Object.freeze(['create', 'void'])
+// Migration 0041 audit_events_action_v8 / audit_events_entity_v7 / audit_events_action_operation_v9:
+// every stored (action, entity, operation) triple — each action, the entities it may name, and per
+// entity the operations it requires (null: it stores none). AWP-01 (ADR-016) authorized revision:
+// finance.execute and finance.manage name more than one entity, so the one action -> entity map and
+// the per-action operation list became this triple table; plus the finance request triples and the
+// three reimbursement self actions. Was: migration 0038's AUDIT_ACTION_ENTITY and AUDIT_ACTION_OPERATIONS.
+const AUDIT_ACTION_TRIPLES = Object.freeze({
+  'employee.create': Object.freeze({ employee: null }),
+  'employee.update': Object.freeze({ employee: null }),
+  'employee.delete': Object.freeze({ employee: null }),
+  'account.manage': Object.freeze({ employee: Object.freeze(['provision', 'reissue', 'disable', 'enable']) }),
+  'overtime.createSelfDraft': Object.freeze({ overtime: null }),
+  'overtime.updateSelfDraft': Object.freeze({ overtime: null }),
+  'overtime.deleteSelfDraft': Object.freeze({ overtime: null }),
+  'overtime.submitSelf': Object.freeze({ overtime: Object.freeze(['submit']) }),
+  'overtime.manage': Object.freeze({ overtime: Object.freeze(['review', 'reject', 'approve']) }),
+  'payroll.manage': Object.freeze({ payrollPlan: Object.freeze(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post']) }),
+  'supplemental.manage': Object.freeze({ supplementalPayroll: Object.freeze(['create', 'recalculate', 'review', 'approve', 'return', 'cancel', 'commit', 'post']) }),
+  'finance.execute': Object.freeze({ financePosting: Object.freeze(['execute']), financeRequest: Object.freeze(['pay']), financeTransaction: Object.freeze(['create']) }),
+  'finance.manage': Object.freeze({ financeTransaction: Object.freeze(['create', 'void']), financeRequest: Object.freeze(['create', 'update', 'submit', 'approve', 'reject', 'cancel']) }),
+  'reimbursement.createSelfDraft': Object.freeze({ financeRequest: null }),
+  'reimbursement.updateSelfDraft': Object.freeze({ financeRequest: null }),
+  'reimbursement.submitSelf': Object.freeze({ financeRequest: Object.freeze(['submit']) })
 });
 const AUDIT_ROUTES = Object.freeze({ month: '/api/audit-events', record: '/api/audit-events/record' });
 
@@ -135,9 +138,11 @@ const AuditDecoders = (function(){
     if(!isPlain(o) || !exactKeys(o, AUDIT_EVENT_KEYS)) return null;
     if(typeof o.id !== 'string' || !AUDIT_EVENT_ID_PATTERN.test(o.id) || !auditInstant(o.occurredAt)) return null;
     if(![o.actorUserId, o.actorMembershipId, o.requestId].every((v) => typeof v === 'string' && AUDIT_HEX32_PATTERN.test(v))) return null;
-    // An action outside the vocabulary names no entity, so it fails the entity check.
-    if(typeof o.action !== 'string' || o.entity !== AUDIT_ACTION_ENTITY[o.action] || !auditIsRecord(o.entity, o.entityId)) return null;
-    const ops = Object.prototype.hasOwnProperty.call(AUDIT_ACTION_OPERATIONS, o.action) ? AUDIT_ACTION_OPERATIONS[o.action] : null;
+    // An action outside the vocabulary, or an entity that action never names, fails here.
+    const own = Object.prototype.hasOwnProperty;
+    const byEntity = typeof o.action === 'string' && own.call(AUDIT_ACTION_TRIPLES, o.action) ? AUDIT_ACTION_TRIPLES[o.action] : null;
+    if(!byEntity || typeof o.entity !== 'string' || !own.call(byEntity, o.entity) || !auditIsRecord(o.entity, o.entityId)) return null;
+    const ops = byEntity[o.entity];
     if(ops ? ops.indexOf(o.operation) === -1 : o.operation !== null) return null;
     if(o.targetUserId !== null && !(typeof o.targetUserId === 'string' && AUDIT_HEX32_PATTERN.test(o.targetUserId))) return null;
     if(!Array.isArray(o.fields) || !o.fields.every((f) => typeof f === 'string' && AUDIT_FIELD_PATTERN.test(f))) return null;

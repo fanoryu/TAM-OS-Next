@@ -171,10 +171,12 @@ return [
             . "applied: 0032_create_finance_postings\napplied: 0033_replace_audit_events_finance_post\n"
             . "applied: 0034_create_finance_executions\napplied: 0035_replace_audit_events_finance_execute\n"
             // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
+            // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
             . "applied: 0036_create_finance_transactions\napplied: 0037_create_finance_transaction_voids\napplied: 0038_replace_audit_events_finance_manage\n"
+            . "applied: 0039_create_finance_requests\napplied: 0040_create_finance_request_payments\napplied: 0041_replace_audit_events_finance_requests\n"
             . "migrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
-        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'finance_transactions', 'finance_transaction_voids', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
+        assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'finance_requests', 'finance_request_payments', 'finance_transactions', 'finance_transaction_voids', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
         $again = runMigrateCli(['status'], $file);
         assertSame([0, "migrations: current\n"], [$again['exit'], $again['stdout']]);
         $noop = runMigrateCli(['apply'], $file);

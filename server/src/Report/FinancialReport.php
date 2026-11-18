@@ -23,6 +23,10 @@ use TamOs\Transaction\TransactionInput;
  *   consolidated  income = general income; expense = general expense + payroll PAID (each
  *                 obligation counted once, when its cash leaves); net = income − expense. Payroll
  *                 posted is a commitment shown beside it, never added to it.
+ *   approvedNotPaid  Phase 2 (ADR-016 §6): the Approved finance requests not yet paid, whose
+ *                 documentDate is in the range — count and amount per Financial Post and in all.
+ *                 Shown, NEVER added to income, expense, net or the consolidated total; a paid
+ *                 request is counted once, through its linked general expense on paidOn.
  *
  * Amounts are reported as "N.00" (net may be "-N.00"). A sum beyond PHP_INT_MAX Rupiah is refused
  * as a defect (never a wrapped number).
@@ -34,9 +38,10 @@ final class FinancialReport
      * @param list<array<string, mixed>> $transactions FinancialReportStore::TRANSACTIONS_SQL rows
      * @param list<array<string, mixed>> $postings     FinancialReportStore::POSTINGS_SQL rows
      * @param list<array<string, mixed>> $executions   FinancialReportStore::EXECUTIONS_SQL rows
+     * @param list<array<string, mixed>> $approved     FinancialReportStore::APPROVED_SQL rows (Phase 2)
      * @return array<string, mixed>
      */
-    public static function build(array $range, array $transactions, array $postings, array $executions): array
+    public static function build(array $range, array $transactions, array $postings, array $executions, array $approved = []): array
     {
         $lines = [];
         foreach (FinancialPost::cases() as $post) {
@@ -94,6 +99,27 @@ final class FinancialReport
             $paid = self::add($paid, self::rupiah($row['amount']));
         }
         $consolidatedExpense = self::add($expense, $paid);
+        // Phase 2: the Approved-not-paid line — outside every total above.
+        $pending = [];
+        foreach (FinancialPost::cases() as $post) {
+            $pending[$post->value] = ['amount' => 0, 'count' => 0];
+        }
+        $pendingAmount = 0;
+        foreach ($approved as $row) {
+            $date = (string) $row['document_date'];
+            $code = (string) $row['financial_post'];
+            if (strcmp($date, $range['from']) < 0 || strcmp($date, $range['to']) > 0 || !isset($pending[$code])) {
+                throw new \LogicException('an Approved-not-paid request needs a known Financial Post and a documentDate in the range');
+            }
+            $amount = self::rupiah($row['amount']);
+            $pending[$code]['amount'] = self::add($pending[$code]['amount'], $amount);
+            $pending[$code]['count']++;
+            $pendingAmount = self::add($pendingAmount, $amount);
+        }
+        $pendingPosts = [];
+        foreach (FinancialPost::cases() as $post) {
+            $pendingPosts[] = ['code' => $post->value, 'amount' => self::money($pending[$post->value]['amount']), 'count' => $pending[$post->value]['count']];
+        }
 
         return [
             'from' => $range['from'],
@@ -106,6 +132,7 @@ final class FinancialReport
                 'paid' => ['amount' => self::money($paid), 'count' => count($executions)],
             ],
             'consolidated' => ['income' => self::money($income), 'expense' => self::money($consolidatedExpense), 'net' => self::money($income - $consolidatedExpense)],
+            'approvedNotPaid' => ['posts' => $pendingPosts, 'amount' => self::money($pendingAmount), 'count' => count($approved)],
         ];
     }
 

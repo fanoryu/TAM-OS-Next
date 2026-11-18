@@ -78,12 +78,14 @@ return [
             '0022_add_overtime_records_valuation', '0023_replace_audit_events_overtime_approve',
             '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit',
             // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
-            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage'],
+            // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
+            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage', '0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests'],
             array_map(static fn ($m): string => $m->label(), $applied), 'the BF-4a1 migrations, in order, then BF-4a2, BF-4b1, BF-4b2, BF-4c1, BF-4c2, BF-4d, BF-4e and BF-4f');
         // BF-4d authorized revision: markers through 0031. Was: range(1, 28).
         // BF-4e authorized revision: markers through 0033. Was: range(1, 31).
         // BF-4f authorized revision: markers through 0035. Was: range(1, 33).
-        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 38)), $history($db), 'every marker complete — none stranded');
+        // AWP-01 (ADR-016) authorized revision: markers through 0041. Was: range(1, 38).
+        assertSame(array_map(static fn (int $v): string => $v . ':1', range(1, 41)), $history($db), 'every marker complete — none stranded');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'status: current');
         assertSame([], (new Migrator($db, productionMigrationsDir()))->apply(), 'a second apply is a no-op');
 

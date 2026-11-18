@@ -55,6 +55,8 @@ final class BackupReader
         'finance_executions' => 'SELECT * FROM finance_executions WHERE id > :after ORDER BY id LIMIT 500',
         'finance_transactions' => 'SELECT * FROM finance_transactions WHERE id > :after ORDER BY id LIMIT 500',
         'finance_transaction_voids' => 'SELECT * FROM finance_transaction_voids WHERE id > :after ORDER BY id LIMIT 500',
+        'finance_requests' => 'SELECT * FROM finance_requests WHERE id > :after ORDER BY id LIMIT 500',
+        'finance_request_payments' => 'SELECT * FROM finance_request_payments WHERE id > :after ORDER BY id LIMIT 500',
     ];
 
     /** A table's row count inside the same snapshot — an independent check of the rows streamed. */
@@ -74,6 +76,8 @@ final class BackupReader
         'finance_executions' => 'SELECT COUNT(*) AS n FROM finance_executions',
         'finance_transactions' => 'SELECT COUNT(*) AS n FROM finance_transactions',
         'finance_transaction_voids' => 'SELECT COUNT(*) AS n FROM finance_transaction_voids',
+        'finance_requests' => 'SELECT COUNT(*) AS n FROM finance_requests',
+        'finance_request_payments' => 'SELECT COUNT(*) AS n FROM finance_request_payments',
     ];
 
     private readonly MigrationHistory $history;

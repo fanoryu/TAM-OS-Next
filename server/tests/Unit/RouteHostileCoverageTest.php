@@ -75,6 +75,16 @@ $coverage = [
     'POST /api/general-transactions/create' => ['Db/TransactionHostileTest'],
     'POST /api/general-transactions/void' => ['Db/TransactionHostileTest'],
     'GET /api/reports/financial' => ['Db/TransactionHostileTest'],
+    // ADR-016 (AWP-01) authorized revision: the nine finance request routes. Was: through the report read.
+    'GET /api/finance-requests' => ['Db/RequestWorkflowTest'],
+    'GET /api/finance-request' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/create' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/update' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/submit' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/approve' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/reject' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/cancel' => ['Db/RequestWorkflowTest'],
+    'POST /api/finance-requests/pay' => ['Db/RequestWorkflowTest'],
 ];
 
 return [
@@ -88,7 +98,8 @@ return [
         sort($listed);
         assertSame($listed, $routes, 'the coverage table equals the production route table');
         // Phase 1 authorized revision: 58 (the four general transaction and report routes). Was: 54.
-        assertSame(58, count($routes), 'the E11 baseline counts 58 routes (Phase 1)');
+        // ADR-016 (AWP-01) authorized revision: 67 (the nine finance request routes). Was: 58.
+        assertSame(67, count($routes), 'the E11 baseline counts 67 routes (Phase 2)');
     },
     // Phase 1 authorized revision: 51 required (the four general transaction and report routes). Was: 47.
     'the authentication classes match the E11 baseline: 6 public, 1 optional, 51 required' => static function (): void {
@@ -99,7 +110,8 @@ return [
         sort($by['None']);
         assertSame(['GET /api/health', 'GET /api/ready', 'POST /api/auth/activate', 'POST /api/auth/forgot-password', 'POST /api/auth/login', 'POST /api/auth/reset-password'], $by['None']);
         assertSame(['POST /api/auth/logout'], $by['Optional']);
-        assertSame(51, count($by['Required']));
+        // ADR-016 (AWP-01) authorized revision: 60 required (the nine finance request routes). Was: 51.
+        assertSame(60, count($by['Required']));
     },
     'every listed suite exists and names the route it covers' => static function () use ($coverage): void {
         $root = dirname(__DIR__);
