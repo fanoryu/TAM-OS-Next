@@ -80,3 +80,31 @@ function debounce(fn, wait){
   wrapped.cancel = function(){ clearTimeout(t); t=null; };
   return wrapped;
 }
+// UX-1 (Owner UX-OD-07, 2026-11-17): DISPLAY-ONLY grouping of an exact decimal money string from
+// the server, as a pure string transform — no number parsing, no rounding, no recalculation.
+// Indonesian convention: "." groups thousands, "," marks decimals ('12500000.00' -> '12.500.000,00').
+// Anything that is not a plain decimal string is returned unchanged, so nothing is reinterpreted.
+// moneyHTML keeps the exact server string in the <data value> attribute and never truncates.
+const MONEY_DISPLAY_PATTERN = /^(-?)(0|[1-9][0-9]*)(?:\.([0-9]+))?$/;
+function moneyDisplay(v){
+  if(v === null || v === undefined) return '';
+  const s = String(v);
+  const m = MONEY_DISPLAY_PATTERN.exec(s);
+  if(!m) return s;
+  let int = m[2], grouped = '';
+  while(int.length > 3){ grouped = '.' + int.slice(-3) + grouped; int = int.slice(0, -3); }
+  return m[1] + int + grouped + (m[3] === undefined ? '' : ',' + m[3]);
+}
+function moneyHTML(v){
+  const exact = (v === null || v === undefined) ? '' : String(v);
+  if(exact === '') return '—';
+  return '<data class="ux-money" value="' + escapeHtml(exact) + '">' + escapeHtml(moneyDisplay(exact)) + '</data>';
+}
+
+// UX-1: a status badge — text + shape + colour, never colour alone (WCAG 1.4.1). `text` is the
+// caller's fixed status wording; `tone` one of UX_TONES (anything else is neutral).
+const UX_TONES = Object.freeze({ neutral: '○', info: '◐', attention: '◆', final: '■', planned: '▲', done: '✓', stop: '✕' });
+function statusBadgeHTML(text, tone){
+  const t = Object.prototype.hasOwnProperty.call(UX_TONES, tone) ? tone : 'neutral';
+  return '<span class="ux-badge ux-tone-' + t + '"><span class="ux-badge-mark" aria-hidden="true">' + UX_TONES[t] + '</span>' + escapeHtml(text) + '</span>';
+}

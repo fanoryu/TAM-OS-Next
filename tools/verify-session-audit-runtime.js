@@ -216,8 +216,13 @@ function loadRuntime(routes){
     AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session), storage: undefined,
     addEventListener: noop, removeEventListener: noop, confirm: () => { access.url.push('confirm()'); return true; },
-    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
-    history: { replaceState: (a, b, u) => { access.url.push(String(u)); }, pushState: (a, b, u) => { access.url.push(String(u)); } },
+    // UX-1 authorized revision (Owner GO 2026-11-17): the SESSION shell writes its route (#/name) to the address
+    // bar, so this recording history also moves location.hash, as a browser does. The harness boots through the
+    // direct link #/employees (the People page; My profile for an Employee) — the section it exercises — so the
+    // landing Home and its reads stay out of these flows (Home is verified in verify-session-shell-runtime.js).
+    // Was: an empty hash; any write failed.
+    location: { hash: '#/employees', search: '', pathname: '/', href: 'http://127.0.0.1/#/employees' },
+    history: { replaceState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; }, pushState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; } },   // UX-1: a bare-path write clears the hash
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: document
@@ -265,7 +270,11 @@ function firewall(rt, label){
   check(rt.spy.length === 0 && rt.spyErr.length === 0, label + ': no LOCAL boot, shell, "Acting as", activity log, local data tool or other domain was called' + (rt.spy.length ? ' >> ' + rt.spy.join(', ') : ''));
   check(rt.selectorBeforeSpies === SELECTOR_ABSENT && rt.selectorNow() === SELECTOR_ABSENT,
     label + ': AFI-5b — the selector functions do not exist (lexically or on window/globalThis), before the spies and now');
-  check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query)');
+  // UX-1 authorized revision: only the SESSION shell route (#/name) may be written — never an email, draft, id,
+  // state or query. Was: nothing written at all.
+  // UX-1 authorized revision: leaving the shell (sign-out, session loss) clears the route with one write of the bare
+  // path ('/', no hash, no query) — never another value. Was: route fragments only.
+  check(rt.access.url.every((u) => /^#\/[a-z]+$/.test(u) || u === '/') && /^(#\/[a-z]+)?$/.test(rt.loc.hash) && rt.loc.search === '', label + ': nothing is written to the address bar (no history entry, hash or query) — only the shell route name (#/name), or its clear (/) when the shell is left');
   // U1 authorized revision (GR-4, D-GS-1): AUTHENTICATED renders the card inside the exact SESSION shell;
   // the content checks run on the card alone, and no other state has a shell. Was: no sidebar at all and
   // allowsWorkspace() false.

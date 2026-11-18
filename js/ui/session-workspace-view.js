@@ -472,6 +472,7 @@ function sessionWorkspaceHTML(auth, w){
   const audit = ceo && SessionAuditStore.snapshot().open && !payroll && !overtime;   // AFI-4g: the CEO's Audit
   const fin = SessionLedgerStore.snapshot();
   const finance = ceo && fin.open && !payroll && !overtime && !audit;                // Phase 1: the CEO's Finance
+  const home = (ceo || employee) && SessionHome.isOpen() && !payroll && !overtime && !audit && !finance;   // UX-1: the role's Home
   const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING || ot.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING
     || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING || fin.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING;
   let title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
@@ -480,6 +481,7 @@ function sessionWorkspaceHTML(auth, w){
   else if(overtime){ title = renderSessionOvertimeTitle(principal, ot); body = renderSessionOvertimeHTML(principal, ot); }
   else if(audit){ const au = SessionAuditStore.snapshot(); title = renderSessionAuditTitle(au); body = renderSessionAuditHTML(au); }
   else if(finance){ title = renderSessionLedgerTitle(fin); body = renderSessionLedgerHTML(fin); }
+  else if(home){ title = 'Home'; body = sessionHomeHTML(principal); }
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
   else body = '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_WORKSPACE_ERRORS.UNAVAILABLE) + '</p>';
@@ -494,7 +496,8 @@ function sessionWorkspaceHTML(auth, w){
   // UI-INT-1: in the shell the page head sits above the cards, as on every v2.11.0 page; Account
   // security is its own card under it.
   const page = head + sessionAccountSecurityHTML(auth.account) + '<section class="card" aria-labelledby="authTitle">' + body + '</section>';
-  const route = payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? (fin.view === 'transactions' ? 'transactions' : 'finance') : SESSION_HOME_ROUTE)));
+  const route = payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? (fin.view === 'transactions' ? 'transactions' : 'finance') : (home ? SESSION_HOME_ROUTE : 'main'))));
+  sessionRouteSync(model, route);                              // UX-1: the address bar follows the page
   return sessionShellHTML(model, route, busy, page);
 }
 
@@ -502,38 +505,19 @@ function bindSessionWorkspace(app){
   const on = function(id, fn){ const el = app.querySelector('#' + id); if(el) el.addEventListener('click', fn); };
   on('authSignOutBtn', function(){ AuthBoot.signOut(); });
   bindSessionAccountSecurity(app);                             // WP-1: in every section
-  // AFI-4b1: the section switch — never while an Employee write is in flight. AFI-4c1: nor while
-  // an Overtime or Payroll write is; SessionPayroll.show decides who may open it (the CEO's Payroll,
-  // AFI-4c2 an Employee's My payroll). AFI-4g: every other section closes Audit; SessionAudit.show
-  // opens it for the CEO only.
-  const idle = function(){
-    return SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING
-      && SessionOvertimeStore.snapshot().mutation.status !== SESSION_OVERTIME_MUTATION_STATUS.PENDING
-      && SessionPayrollStore.snapshot().mutation.status !== SESSION_PAYROLL_MUTATION_STATUS.PENDING
-      && SessionLedgerStore.snapshot().mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING;
-  };
-  const sectionTo = function(overtime){
-    return function(){ if(!idle()) return; SessionPayroll.show(false); SessionAudit.show(false); SessionLedger.show(false); SessionOvertime.show(overtime); };
-  };
-  on('swSectionMain', sectionTo(false));
-  on('swSectionOvertime', sectionTo(true));
-  on('swSectionPayroll', function(){ if(!idle()) return; SessionOvertime.show(false); SessionAudit.show(false); SessionLedger.show(false); SessionPayroll.show(true); });
-  on('swSectionAudit', function(){ if(!idle()) return; SessionOvertime.show(false); SessionPayroll.show(false); SessionLedger.show(false); SessionAudit.show(true); });
-  // UI-INT-1: Overview and Transactions are the Finance section's two views, as two sidebar pages.
-  const ledgerTo = function(view){
-    return function(){
-      if(!idle()) return;
-      SessionOvertime.show(false); SessionPayroll.show(false); SessionAudit.show(false);
-      if(!SessionLedgerStore.snapshot().open) SessionLedger.show(true);
-      if(SessionLedgerStore.snapshot().open && SessionLedgerStore.snapshot().view !== view) SessionLedger.setView(view);
-    };
-  };
-  on('swSectionFinance', ledgerTo('dashboard'));
-  on('swSectionTransactions', ledgerTo('transactions'));
+  // AFI-4b1: the section switch — never while a write of any section is in flight. UX-1: every
+  // sidebar item and Home shortcut opens its route through sessionGoTo() (the same idle rule and
+  // nav model), as a user navigation (a new history entry). Was: one closure per section here.
+  const go = function(id){ return function(){ SessionRouter.push = true; if(!sessionGoTo(id)) SessionRouter.push = false; }; };
+  SESSION_ROUTES.forEach(function(r){ on(r.button, go(r.id)); });
+  const shortcuts = app.querySelectorAll('[data-sw-go]');
+  for(let i = 0; i < shortcuts.length; i++) shortcuts[i].addEventListener('click', go(shortcuts[i].getAttribute('data-sw-go')));
   if(SessionPayrollStore.snapshot().open){ bindSessionPayroll(app); return; }
   if(SessionOvertimeStore.snapshot().open){ bindSessionOvertime(app); return; }
   if(SessionAuditStore.snapshot().open){ bindSessionAudit(app); return; }
   if(SessionLedgerStore.snapshot().open){ bindSessionLedger(app); return; }
+  const au = AuthBoot.snapshot();
+  if(SessionHome.isOpen() && au.principal){ bindSessionHome(app); return; }
   on('swActiveTab', function(){ SessionWorkspace.showArchived(false); });
   on('swArchivedTab', function(){ SessionWorkspace.showArchived(true); });
   on('swBackBtn', function(){ SessionWorkspace.back(); });
@@ -617,6 +601,16 @@ function renderSessionWorkspace(app, auth){
   SessionPayroll.ensureLoaded(auth.principal);                 // AFI-4c1: and the Payroll data (AFI-4c2: My payroll too)
   SessionAudit.ensureLoaded(auth.principal);                   // AFI-4g: and the CEO's Audit data
   SessionLedger.ensureLoaded(auth.principal);                 // Phase 1: and the CEO's Finance data
+  // UX-1: once per sign-in, a direct link / refresh opens the route in the address bar (through
+  // sessionGoTo, which repaints); otherwise the role's Home. The listener is bound once.
+  if(!SessionRouter.bound && typeof addEventListener === 'function'){ SessionRouter.bound = true; addEventListener('hashchange', sessionRouteOnHash); }
+  if(!SessionRouter.applied){
+    SessionRouter.applied = true;
+    const nav = AuthBoot.allowsWorkspace() ? sessionNavModel(auth.principal) : null;
+    const want = nav && typeof location !== 'undefined' ? sessionRouteFromHash(nav, location.hash) : null;
+    if(want && want !== SESSION_HOME_ROUTE && sessionGoTo(want)) return;
+  }
+  SessionHome.ensureLoaded();                                  // UX-1: and the Home data, while Home is shown
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
@@ -656,6 +650,259 @@ function renderSessionWorkspace(app, auth){
 }
 
 /* ------------------------------------------------------------
+   UX-1 — HOME (Owner GO 2026-11-17, UX-OD-04 / UX-OD-08)
+   ------------------------------------------------------------
+   The role's landing page in SESSION: a read-only summary built ONLY from the existing,
+   authorized month reads — no new API, no new metric, no payroll total, no write.
+
+     CEO       payroll plans of the current month counted by stage (counts only, never money);
+               overtime records waiting for a decision (Submitted, Reviewed); the month's
+               Financial report income, expenses and net exactly as the server returned them (its
+               payroll figures are left to the Finance Overview: Home shows no payroll sum); the month's last
+               five Activity Log events; shortcuts.
+     Employee  the latest Committed plan of the last three months (PayrollApi.myMonth, own
+               plans only); own overtime records of the current month by status; shortcuts.
+
+   The data and its reads are SessionHome (core/session-home.js); this part renders it. Every
+   tile has its own loading / ready / denied / error state, and a failed read is never shown as
+   zero. Every value is escaped; money is shown with moneyHTML (display grouping, exact value
+   kept). Finance posting and payment status are shown on the Payroll page only.
+   ------------------------------------------------------------ */
+
+const SESSION_HOME_TEXT = Object.freeze({
+  loading: 'Loading…',
+  denied: 'You do not have access to this information.',
+  error: 'Could not be loaded. Nothing is shown rather than a wrong number.',
+  retry: 'Retry'
+});
+const SESSION_HOME_PAYROLL_STAGES = Object.freeze([
+  ['Draft', 'Draft', 'neutral'], ['Reviewed', 'Reviewed', 'info'], ['Ready', 'Ready — approved, not paid', 'attention'],
+  ['Committed', 'Committed — final, not paid', 'final'], ['Cancelled', 'Cancelled', 'stop']
+]);
+const SESSION_HOME_OVERTIME_STATUSES = Object.freeze([
+  ['Draft', 'neutral'], ['Submitted', 'info'], ['Reviewed', 'info'], ['Approved', 'final'], ['Rejected', 'stop']
+]);
+
+// The state line of a tile that is not ready, or '' when it is.
+function sessionHomeStateHTML(tile, retryId){
+  if(!tile || tile.status === 'loading') return '<p class="ux-muted" role="status" aria-busy="true">' + escapeHtml(SESSION_HOME_TEXT.loading) + '</p>';
+  if(tile.status === 'denied') return '<p class="ux-muted" role="status">' + escapeHtml(SESSION_HOME_TEXT.denied) + '</p>';
+  if(tile.status === 'error') return '<p class="auth-message auth-message-warn" role="alert">' + escapeHtml(SESSION_HOME_TEXT.error) + '</p>'
+    + '<div class="ux-card-actions"><button class="btn" type="button" data-swh-retry="' + retryId + '">' + escapeHtml(SESSION_HOME_TEXT.retry) + '</button></div>';
+  return '';
+}
+function sessionHomeCardHTML(id, title, body, actions){
+  return '<section class="card ux-card" aria-labelledby="' + id + 'Title"><h2 class="section-title" id="' + id + 'Title">' + escapeHtml(title) + '</h2>' + body
+    + (actions ? '<div class="ux-card-actions">' + actions + '</div>' : '') + '</section>';
+}
+function sessionHomeGoHTML(route, label, accent){
+  return '<button class="btn' + (accent ? ' btn-accent' : '') + '" type="button" data-sw-go="' + route + '">' + escapeHtml(label) + '</button>';
+}
+function sessionHomeCountsHTML(rows){
+  return '<dl class="ux-kv">' + rows.map(function(r){ return '<dt>' + r[0] + '</dt><dd>' + escapeHtml(String(r[1])) + '</dd>'; }).join('') + '</dl>';
+}
+
+// CEO: the month's plans counted by status (never money).
+function sessionHomeCeoPayrollHTML(t, month){   // counts by status; Finance status is on the Payroll page
+  const p = t.payroll;
+  let body = sessionHomeStateHTML(p, 'swhRetry');
+  if(!body){
+    const plans = p.data || [];
+    if(!plans.length) body = '<p class="ux-muted">No payroll plans for ' + escapeHtml(sessionPayrollMonthLabel(month)) + ' yet.</p>';
+    else {
+      const counts = {};
+      plans.forEach(function(x){ counts[x.status] = (counts[x.status] || 0) + 1; });
+      const rows = SESSION_HOME_PAYROLL_STAGES.filter(function(s){ return counts[s[0]]; }).map(function(s){ return [statusBadgeHTML(s[1], s[2]), counts[s[0]]]; });
+      body = sessionHomeCountsHTML(rows);
+      body += '<p class="ux-muted">Counts of plans only — TAM OS shows no payroll total.</p>';
+    }
+  }
+  return sessionHomeCardHTML('swhPayroll', 'Payroll — ' + sessionPayrollMonthLabel(month), body, sessionHomeGoHTML('payroll', 'Open Payroll', true));
+}
+
+function sessionHomeCeoOvertimeHTML(t, month){
+  const o = t.overtime;
+  let body = sessionHomeStateHTML(o, 'swhRetry');
+  if(!body){
+    const list = o.data || [];
+    const waiting = list.filter(function(r){ return r.status === 'Submitted' || r.status === 'Reviewed'; });
+    const sub = list.filter(function(r){ return r.status === 'Submitted'; }).length;
+    body = '<div class="ux-card-value">' + escapeHtml(String(waiting.length)) + '</div>'
+      + '<p class="ux-muted">' + (waiting.length ? 'records waiting for a decision (' + escapeHtml(String(sub)) + ' submitted, ' + escapeHtml(String(waiting.length - sub)) + ' reviewed)' : 'Nothing waiting for a decision.') + '</p>';
+  }
+  return sessionHomeCardHTML('swhOvertime', 'Overtime — ' + sessionPayrollMonthLabel(month), body, sessionHomeGoHTML('overtime', 'Open Overtime', true));
+}
+
+function sessionHomeCeoFinanceHTML(t, month){
+  const r = t.report;
+  let body = sessionHomeStateHTML(r, 'swhRetry');
+  if(!body){
+    const d = r.data;
+    body = '<dl class="ux-kv"><dt>Income (Rp)</dt><dd>' + moneyHTML(d.general.income) + '</dd><dt>Expenses (Rp)</dt><dd>' + moneyHTML(d.general.expense) + '</dd>'
+      + '<dt>Net (Rp)</dt><dd>' + moneyHTML(d.general.net) + '</dd></dl>'
+      + '<p class="ux-muted">Financial Posts for ' + escapeHtml(sessionPayrollMonthLabel(month)) + ', as reported by TAM OS.</p>';
+  }
+  return sessionHomeCardHTML('swhFinance', 'Finance — ' + sessionPayrollMonthLabel(month), body,
+    sessionHomeGoHTML('finance', 'Open Overview', false) + sessionHomeGoHTML('transactions', 'Transactions', false));
+}
+
+function sessionHomeCeoActivityHTML(t){
+  const a = t.audit;
+  let body = sessionHomeStateHTML(a, 'swhRetry');
+  if(!body){
+    const rows = (a.data || []).slice(-5).reverse();
+    body = rows.length
+      ? '<ul class="ux-list">' + rows.map(function(e){ return '<li><span>' + escapeHtml(sessionAuditActionLabel(e)) + '</span><span class="mono">' + sessionAuditTimeHTML(e) + '</span></li>'; }).join('') + '</ul>'
+      : '<p class="ux-muted">No activity recorded this month.</p>';
+  }
+  return sessionHomeCardHTML('swhActivity', 'Recent activity', body, sessionHomeGoHTML('audit', 'Open Activity Log', false));
+}
+
+function sessionHomeEmployeeLatestHTML(t){
+  const s = t.latestPay;
+  let body = sessionHomeStateHTML(s, 'swhRetry');
+  if(!body){
+    const p = s.data;
+    body = p
+      ? '<p class="ux-muted">' + escapeHtml(sessionPayrollMonthLabel(p.monthKey)) + ' · ' + statusBadgeHTML('Committed — final, not paid', 'final') + '</p>'
+        + '<div class="ux-card-value">Rp ' + moneyHTML(p.totalAmount) + '</div>'
+        + '<dl class="ux-kv"><dt>Base salary (Rp)</dt><dd>' + moneyHTML(p.baseSalary) + '</dd><dt>Overtime (Rp)</dt><dd>' + moneyHTML(p.overtimeAmount) + '</dd></dl>'
+      : '<p class="ux-muted">No committed payroll in the last three months.</p>';
+  }
+  return sessionHomeCardHTML('swhLatestPay', 'Latest committed payroll', body, sessionHomeGoHTML('payroll', 'Open My payroll', false));
+}
+
+function sessionHomeEmployeeOvertimeHTML(t, month){
+  const o = t.overtime;
+  let body = sessionHomeStateHTML(o, 'swhRetry');
+  if(!body){
+    const list = o.data || [];
+    const counts = {};
+    list.forEach(function(r){ counts[r.status] = (counts[r.status] || 0) + 1; });
+    const rows = SESSION_HOME_OVERTIME_STATUSES.filter(function(s){ return counts[s[0]]; }).map(function(s){ return [statusBadgeHTML(s[0], s[1]), counts[s[0]]]; });
+    body = rows.length ? sessionHomeCountsHTML(rows) : '<p class="ux-muted">No overtime recorded for ' + escapeHtml(sessionPayrollMonthLabel(month)) + '.</p>';
+  }
+  return sessionHomeCardHTML('swhOvertime', 'My overtime — ' + sessionPayrollMonthLabel(month), body, sessionHomeGoHTML('overtime', 'Log or view overtime', true));
+}
+
+function sessionHomeHTML(principal){
+  const h = SessionHome.snapshot();
+  const t = h.tiles, month = h.month || sessionPayrollCurrentMonth();
+  if(principal.principalType === PRINCIPAL_TYPES.CEO){
+    return '<p class="hint">What needs your attention this month. Every number is read from TAM OS; open a section to act.</p><div class="ux-home-grid">'
+      + sessionHomeCeoOvertimeHTML(t, month) + sessionHomeCeoPayrollHTML(t, month) + sessionHomeCeoFinanceHTML(t, month) + sessionHomeCeoActivityHTML(t) + '</div>';
+  }
+  return '<div class="ux-home-grid">' + sessionHomeEmployeeLatestHTML(t) + sessionHomeEmployeeOvertimeHTML(t, month)
+    + sessionHomeCardHTML('swhProfile', 'My profile', '<p class="ux-muted">Your employee record as held by TAM OS.</p>', sessionHomeGoHTML('main', 'Open My profile', false)) + '</div>';
+}
+
+function bindSessionHome(app){
+  const retry = app.querySelectorAll('[data-swh-retry]');
+  for(let i = 0; i < retry.length; i++) retry[i].addEventListener('click', function(){ SessionHome.load(); if(typeof render === 'function') render(); });
+}
+
+/* ------------------------------------------------------------
+   UX-1 — ROUTES IN THE ADDRESS BAR
+   ------------------------------------------------------------
+   Each SESSION destination has a fragment route (#/home, #/payroll, …) so back / forward,
+   refresh and direct links work. A user navigation adds a history entry; anything else
+   replaces it. The fragment is only a request: sessionGoTo() admits it through the same nav
+   model and "no switch while a write is in flight" rule as a sidebar click, and an unknown,
+   hidden or busy route falls back to the current page. Credential links (#activation…,
+   #recovery…) are never read or written here — auth-flow owns them. Memory only.
+   ------------------------------------------------------------ */
+
+const SessionRouter = { applied: false, bound: false, push: false, current: null, switching: false };
+const SESSION_ROUTE_HASH = /^#\/([a-z]+)$/;
+
+function sessionRouteHash(route, role){
+  return typeof route.hash === 'string' ? route.hash : route.hash[role];
+}
+// Every fragment of a route (both roles' names), so a link shared across roles opens the same page.
+function sessionRouteHashes(route){
+  return typeof route.hash === 'string' ? [route.hash] : Object.keys(route.hash).map(function(k){ return route.hash[k]; });
+}
+// The route id the fragment names for this model, or null.
+function sessionRouteFromHash(model, hash){
+  const m = SESSION_ROUTE_HASH.exec(typeof hash === 'string' ? hash : '');
+  if(!model || !m) return null;
+  let hit = null;
+  model.groups.forEach(function(g){ g.items.forEach(function(i){ if(i.hashes.indexOf(m[1]) !== -1) hit = i.id; }); });
+  return hit;
+}
+function sessionRouteHashOf(model, id){
+  let hit = null;
+  model.groups.forEach(function(g){ g.items.forEach(function(i){ if(i.id === id) hit = i.hash; }); });
+  return hit;
+}
+// Writes the current route to the address bar (never over a credential link).
+function sessionRouteSync(model, id){
+  if(SessionRouter.switching) return;                          // a sessionGoTo() repaint in between
+  SessionRouter.current = id;
+  const push = SessionRouter.push; SessionRouter.push = false;
+  if(typeof history === 'undefined' || typeof location === 'undefined' || typeof history.replaceState !== 'function') return;
+  const h = sessionRouteHashOf(model, id);
+  if(!h) return;
+  const cur = location.hash || '';
+  if(cur !== '' && cur !== '#' && cur.indexOf('#/') !== 0) return;
+  const want = '#/' + h;
+  if(cur === want) return;
+  if(push && typeof history.pushState === 'function') history.pushState(null, '', want); else history.replaceState(null, '', want);
+}
+function sessionRouteClear(){
+  if(typeof history === 'undefined' || typeof location === 'undefined' || typeof history.replaceState !== 'function') return;
+  if((location.hash || '').indexOf('#/') === 0) history.replaceState(null, '', location.pathname + location.search);
+}
+
+function sessionWorkspaceIdle(){
+  return SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING
+    && SessionOvertimeStore.snapshot().mutation.status !== SESSION_OVERTIME_MUTATION_STATUS.PENDING
+    && SessionPayrollStore.snapshot().mutation.status !== SESSION_PAYROLL_MUTATION_STATUS.PENDING
+    && SessionLedgerStore.snapshot().mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING;
+}
+
+// Opens a SESSION destination: true when it was opened. Only a route of the principal's nav
+// model, and never while a write of any section is in flight (the U1 / AFI-4b1 rule).
+function sessionGoTo(id){
+  const a = AuthBoot.snapshot();
+  const model = a.state === AUTH_STATES.AUTHENTICATED && AuthBoot.allowsWorkspace() ? sessionNavModel(a.principal) : null;
+  if(!model || !sessionRouteAllowed(model, id) || !sessionWorkspaceIdle()) return false;
+  SessionRouter.switching = true;
+  try {
+    SessionHome.setOpen(id === 'home');
+    if(id !== 'overtime') SessionOvertime.show(false);
+    if(id !== 'payroll') SessionPayroll.show(false);
+    if(id !== 'audit') SessionAudit.show(false);
+    if(id !== 'finance' && id !== 'transactions') SessionLedger.show(false);
+    if(id === 'home') SessionHome.load();
+    else if(id === 'overtime') SessionOvertime.show(true);
+    else if(id === 'payroll') SessionPayroll.show(true);
+    else if(id === 'audit') SessionAudit.show(true);
+    else if(id === 'finance' || id === 'transactions'){
+      const view = id === 'transactions' ? 'transactions' : 'dashboard';
+      if(!SessionLedgerStore.snapshot().open) SessionLedger.show(true);
+      if(SessionLedgerStore.snapshot().open && SessionLedgerStore.snapshot().view !== view) SessionLedger.setView(view);
+    }
+  } finally { SessionRouter.switching = false; }
+  if(typeof render === 'function') render();
+  return true;
+}
+
+// Back / forward or an edited fragment: open the route it names, else restore the current one.
+function sessionRouteOnHash(){
+  const a = AuthBoot.snapshot();
+  if(a.state !== AUTH_STATES.AUTHENTICATED || !AuthBoot.allowsWorkspace()) return;
+  const model = sessionNavModel(a.principal);
+  if(!model || !SESSION_ROUTE_HASH.test(location.hash || '')) return;
+  const id = sessionRouteFromHash(model, location.hash);
+  if(id && id === SessionRouter.current) return;
+  if(!id || !sessionGoTo(id)){
+    const h = SessionRouter.current ? sessionRouteHashOf(model, SessionRouter.current) : null;
+    if(h) history.replaceState(null, '', '#/' + h);
+  }
+}
+
+/* ------------------------------------------------------------
    U1 — SESSION GRADUATED SHELL (Option B)
    ------------------------------------------------------------
    The v2.11.0 shell chrome (sidebar, brand lockup, grouped navigation, mobile
@@ -692,24 +939,30 @@ function renderSessionWorkspace(app, auth){
 // Finance: Overview (the Phase 1 dashboard), Payroll, Transactions, More ▸ Overtime; System:
 // Activity Log (the Audit section). `more` lists the roles that see the route under "More".
 // Areas with no server API are not listed (D-UI-2). Was (U1/Phase 1): Overtime, Payroll, Finance, Audit.
+// UX-1 (Owner GO 2026-11-17, UX-OD-08): Home is the first route and the landing page of both roles;
+// Overtime is a primary Finance item (no longer under "More"); every route names its address-bar
+// fragment (`hash`, per role where the label differs). Was (UI-INT-1): Employees / My profile
+// first and the landing page, Overtime under "More" for the CEO, no fragments.
 const SESSION_ROUTES = Object.freeze([
-  Object.freeze({ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees',
+  Object.freeze({ id: 'home', button: 'swSectionHome', group: 'dashboard', navItem: 'execDashboard', hash: 'home',
+    labels: Object.freeze({ ceo: 'Home', employee: 'Home' }) }),
+  Object.freeze({ id: 'main', button: 'swSectionMain', group: 'people', navItem: 'employees', hash: Object.freeze({ ceo: 'employees', employee: 'profile' }),
     labels: Object.freeze({ ceo: 'Employees', employee: 'My profile' }) }),
-  Object.freeze({ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview',
+  Object.freeze({ id: 'finance', button: 'swSectionFinance', group: 'finance', navItem: 'financeOverview', hash: 'overview',
     labels: Object.freeze({ ceo: 'Overview' }) }),
-  Object.freeze({ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime',
-    labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }), more: Object.freeze(['ceo']) }),
-  Object.freeze({ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll',
+  Object.freeze({ id: 'payroll', button: 'swSectionPayroll', group: 'finance', navItem: 'payroll', hash: 'payroll',
     labels: Object.freeze({ ceo: 'Payroll', employee: 'My payroll' }) }),
-  Object.freeze({ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions',
+  Object.freeze({ id: 'overtime', button: 'swSectionOvertime', group: 'finance', navItem: 'overtime', hash: 'overtime',
+    labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }) }),
+  Object.freeze({ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions', hash: 'transactions',
     labels: Object.freeze({ ceo: 'Transactions' }) }),
-  Object.freeze({ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity',
+  Object.freeze({ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity', hash: 'activity',
     labels: Object.freeze({ ceo: 'Activity Log' }) })
 ]);
 // Per-role group labels over NAV_GROUPS (display only): an Employee has no Finance access, so
-// their own overtime and payroll sit under "My work".
-const SESSION_GROUP_LABELS = Object.freeze({ employee: Object.freeze({ finance: 'My work' }) });
-const SESSION_HOME_ROUTE = 'main';
+// their own overtime and payroll sit under "My work". UX-1: the Dashboard group reads "Home".
+const SESSION_GROUP_LABELS = Object.freeze({ ceo: Object.freeze({ dashboard: 'Home' }), employee: Object.freeze({ dashboard: 'Home', finance: 'My work' }) });
+const SESSION_HOME_ROUTE = 'home';
 const SESSION_SHELL_FOOT = 'Data stored on the TAM OS server.';
 
 // The principal's navigation, or null (no shell). Reads only principal.principalType,
@@ -729,7 +982,7 @@ function sessionNavModel(principal){
       const own = Object.prototype.hasOwnProperty.call(SESSION_GROUP_LABELS, role) && Object.prototype.hasOwnProperty.call(SESSION_GROUP_LABELS[role], g.id);
       out = { id: g.id, label: own ? SESSION_GROUP_LABELS[role][g.id] : g.label, items: [] }; groups.push(out);
     }
-    out.items.push(Object.freeze({ id: r.id, button: r.button, label: r.labels[role], ic: n.ic, more: !!r.more && r.more.indexOf(role) !== -1 }));
+    out.items.push(Object.freeze({ id: r.id, button: r.button, label: r.labels[role], ic: n.ic, hash: sessionRouteHash(r, role), hashes: Object.freeze(sessionRouteHashes(r)), more: !!r.more && r.more.indexOf(role) !== -1 }));
   });
   if(!groups.some(function(g){ return g.items.some(function(i){ return i.id === SESSION_HOME_ROUTE; }); })) return null;
   return Object.freeze({ role: role, home: SESSION_HOME_ROUTE,
@@ -775,6 +1028,7 @@ function sessionBreadcrumbHTML(model, current){
   const g = model.groups.find(function(x){ return x.items.some(function(i){ return i.id === current; }); });
   const item = g ? g.items.find(function(i){ return i.id === current; }) : null;
   if(!g || !item) return '';
+  if(g.label === item.label) return '<nav class="breadcrumb" aria-label="Breadcrumb"><ol class="crumb-list"><li class="crumb"><span class="crumb-text" aria-current="page">' + escapeHtml(item.label) + '</span></li></ol></nav>';
   return '<nav class="breadcrumb" aria-label="Breadcrumb"><ol class="crumb-list"><li class="crumb"><span class="crumb-text">' + escapeHtml(g.label) + '</span></li>'
     + '<span class="crumb-sep" aria-hidden="true">/</span><li class="crumb"><span class="crumb-text" aria-current="page">' + escapeHtml(item.label) + '</span></li></ol></nav>';
 }
@@ -993,5 +1247,9 @@ function bindSessionShell(app, model){
 function sessionShellReset(app){
   SessionShellDrawer.open = false; SessionShellDrawer.ret = null; SessionShellDrawer.held = false; SessionShellDrawer.hamLast = false;
   SessionShellNav.collapsed = false; SessionShellNav.groups = {}; SessionShellNav.more = true;   // UI-INT-1: the next user starts expanded
+  // UX-1: once the shell has been shown, leaving it (sign-out, session loss) drops its route from the
+  // address bar; before that (the boot check) a deep link is kept for the coming sign-in.
+  if(SessionRouter.applied) sessionRouteClear();
+  SessionHome.reset(); SessionPayrollFilter.stage = 'all'; SessionOvertimeFilter.decision = false; SessionRouter.applied = false; SessionRouter.push = false; SessionRouter.current = null;   // UX-1: the next sign-in lands on Home (or its link)
   if(app.classList) app.classList.remove('drawer-open');
 }

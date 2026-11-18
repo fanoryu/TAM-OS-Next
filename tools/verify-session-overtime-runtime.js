@@ -31,6 +31,15 @@
    computed an amount itself could not show — or send — the server's string. Sections S–Z.
    ============================================================ */
 
+// UX-1: the one thing the address bar may carry — the SESSION shell route (#/name).
+const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
+// UX-1 (Owner GO 2026-11-17, Overtime TO-BE A): a status is text + shape + colour — the exact badge below, written
+// out here from the spec (not computed by the production code). The CEO's decision path (ux-steps) and its one
+// hint say Approve explicitly, by design: review is not approval. Was: the bare status word in the cell.
+const OT_TONES = { Draft: ['neutral', '○'], Submitted: ['info', '◐'], Reviewed: ['info', '◐'], Approved: ['final', '■'], Rejected: ['stop', '✕'] };
+const otBadge = (st) => '<span class="ux-badge ux-tone-' + OT_TONES[st][0] + '"><span class="ux-badge-mark" aria-hidden="true">' + OT_TONES[st][1] + '</span>' + st + '</span>';
+const otCell = (st) => '<td>' + otBadge(st) + '</td>';
+const OT_DECISION_HINT = '<p class="hint">Marking a record reviewed is not approval. Only Approve freezes the valuation and makes the record final.</p>';
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -260,8 +269,13 @@ function loadRuntime(routes){
     AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session), storage: undefined,
     addEventListener: noop, removeEventListener: noop, confirm: () => { access.url.push('confirm()'); return true; },
-    location: { hash: '', search: '', pathname: '/', href: 'http://127.0.0.1/' },
-    history: { replaceState: (a, b, u) => { access.url.push(String(u)); }, pushState: (a, b, u) => { access.url.push(String(u)); } },
+    // UX-1 authorized revision (Owner GO 2026-11-17): the SESSION shell writes its route (#/name) to the address
+    // bar, so this recording history also moves location.hash, as a browser does. The harness boots through the
+    // direct link #/employees (the People page; My profile for an Employee), so the landing Home and its reads
+    // stay out of these flows (Home is verified in verify-session-shell-runtime.js). Only a route name may be
+    // written (ROUTE_ONLY below); confirm() is still recorded and still fails. Was: an empty hash; any write failed.
+    location: { hash: '#/employees', search: '', pathname: '/', href: 'http://127.0.0.1/#/employees' },
+    history: { replaceState: (a, b, u) => { access.url.push(String(u)); if(/^#/.test(String(u))) sandbox.location.hash = String(u); }, pushState: (a, b, u) => { access.url.push(String(u)); if(/^#/.test(String(u))) sandbox.location.hash = String(u); } },
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     document: document
@@ -351,7 +365,9 @@ function firewall(rt, label){
     .replace(/<p [^>]*id="swoMutationMessage"[^>]*>[\s\S]*?<\/p>/, '');
   const MONEY = /\b(Rp|salary|rate|amount|wage|estimat|hourly|multiplier)/i;
   check(!MONEY.test(disclosed ? outside : html), label + ': no money, rate, salary, amount or pay estimate in the DOM outside the BF-4b2 valuation disclosure' + (disclosed ? '' : ' (none here: nothing is disclosed)'));
-  check(!/Approv/i.test(outside.replace(/<td>Approved<\/td>/g, '').replace(/<button class="btn btn-accent" type="button" id="swoApproveBtn"[^>]*>Approve<\/button>/, '')),
+  // UX-1 authorized revision: also set aside the Approved badge, the CEO's decision steps and their one hint. Was: <td>Approved</td> only.
+  check(!/Approv/i.test(outside.split(otCell('Approved')).join('').replace(/<ol class="ux-steps" aria-label="Decision steps">[\s\S]*?<\/ol>/, '').split(OT_DECISION_HINT).join('')
+      .replace(/<button class="btn btn-accent" type="button" id="swoApproveBtn"[^>]*>Approve<\/button>/, '')),
     label + ': "Approv…" appears only as the Approved status, the Approve control or inside the approval disclosure');
   const ceoReviewed = !!p && p.principalType === 'ceo' && !!w.detail && w.detail.status === 'Reviewed' && !!w.detailId;
   check((html.indexOf('id="swoApproveBtn"') === -1 || ceoReviewed) && (!/Approve this overtime\?/.test(html) || ceoReviewed),
@@ -359,7 +375,7 @@ function firewall(rt, label){
   check(!/[0-9a-f]{32}|"e_[0-9a-z]+"|emp_srv_/.test(html.replace(RID, '')), label + ': no opaque record or Employee id in the page');
   check(rt.State.employees.length === 0 && rt.State.storageReady === false && rt.spy.indexOf('renderShell') === -1,
     label + ': legacy State stays empty and the LOCAL business shell is never mounted');
-  check(rt.access.url.length === 0 && rt.loc.hash === '' && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
+  check(rt.access.url.every(ROUTE_ONLY) && ROUTE_ONLY(rt.loc.hash) && rt.loc.search === '', label + ': nothing written to the address bar or history; no browser confirm()');
   const bad = posts(rt).filter((c) => /"(role|companyId|company_id|employee_id|actor|status|version|amount|rate|salary|payroll|contract|reason)"\s*:/.test(c.init.body)
     || (c.url !== W.create && /"employeeId"/.test(c.init.body)) || c.init.headers['X-CSRF-Token'] === undefined);
   check(bad.length === 0, label + ': every Overtime write is a CSRF POST; only create carries employeeId; none carries company, role, actor, status, version or money');
@@ -482,7 +498,7 @@ function firewall(rt, label){
       && html.indexOf('<td>Fabricated Gamma (EMP-003) (archived)</td>') !== -1 && html.indexOf('<td>Unknown employee</td>') !== -1,
       'D. owner labels: "fullName (code)", escaped; "(archived)" for archived; "Unknown employee" for an id not in the list');
     check(/<th scope="col">Date<\/th><th scope="col">Employee<\/th><th scope="col">Hours<\/th><th scope="col">Status<\/th>/.test(html)
-      && html.indexOf('<td>2031-04-03</td>') !== -1 && html.indexOf('<td>7.50</td>') !== -1 && html.indexOf('<td>2.25</td>') !== -1 && html.indexOf('<td>Rejected</td>') !== -1,
+      && html.indexOf('<td>2031-04-03</td>') !== -1 && html.indexOf('<td>7.50</td>') !== -1 && html.indexOf('<td>2.25</td>') !== -1 && html.indexOf(otCell('Rejected')) !== -1,   // UX-1: the status badge
       'D. the list shows date, owner, hours (exactly as sent) and status');
     check(rt.sessionOvertimeOwnerLabel(rt.AuthBoot.snapshot().principal, 'ready', PEOPLE.employees, 'e_1x') === 'Unknown employee'
       && rt.sessionOvertimeOwnerLabel(rt.AuthBoot.snapshot().principal, 'ready', [E1, Object.assign({}, E2, { id: 'e_1' })], 'e_1') === 'Unknown employee'
@@ -656,7 +672,7 @@ function firewall(rt, label){
     rt.app.fire('swoDeleteBtn', 'click'); await flush();
     const html = rt.appHTML();
     check(/id="swoPanelTitle" tabindex="-1">Delete this Draft\?</.test(html) && lastFocus(rt) === 'swoPanelTitle' && posts(rt).length === 0
-      && html.indexOf('Fabricated &lt;Alpha&gt; (EMP-001) — April 2031, 2031-04-03 — 7.50 hours (Draft).') !== -1 && rt.access.url.length === 0,
+      && html.indexOf('Fabricated &lt;Alpha&gt; (EMP-001) — April 2031, 2031-04-03 — 7.50 hours (Draft).') !== -1 && rt.access.url.every(ROUTE_ONLY),
       'J. Delete opens an inline panel (no browser confirm()) naming owner, month, date and hours, escaped; focus on it; nothing sent');
     rt.app.fire('swoPanelCancel', 'click'); await flush();
     check(rt.ot().panel === null && posts(rt).length === 0, 'J. Cancel closes the panel; nothing sent');
@@ -1252,7 +1268,7 @@ function firewall(rt, label){
       'Y. Employee + own Approved: their frozen valuation (salary basis 900000.00 at approval — not the current 1000000.00); no controls');
     firewall(rt, 'Y. Employee own Approved');
     rt.app.fire('swoBackBtn', 'click'); await flush();
-    check(!/54321|900000/.test(rt.appHTML()) && (rt.appHTML().match(/<td>Approved<\/td>/g) || []).length === 1, 'Y. the Employee month list shows the Approved status and no money');
+    check(!/54321|900000/.test(rt.appHTML()) && rt.appHTML().split(otCell('Approved')).length === 2   /* UX-1: the status badge */, 'Y. the Employee month list shows the Approved status and no money');
     firewall(rt, 'Y. Employee list');
   }
   {

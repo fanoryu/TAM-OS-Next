@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "5979199bcfce8e1cfc53f942db3481a46689c154d5308fb7bb2d88c97e5b3d0b",
+  "packageDigest": "cac8053b2d1b41bbfd82a9455f97d787ddc702a9678cc6ce31cd836a52b55a7e",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3194825,
-    "sha256": "b40f3b6607abc1ca48236fd0cfb3cc195fe8137a2ec2a43002ec1bd5518e98d7"
+    "bytes": 3234055,
+    "sha256": "3b4c661b74668b6174536beaa1e533c3e9e21bb2eec448f9e2f1a59a98323d01"
   },
   "files": [
     {
@@ -44,8 +44,8 @@
     },
     {
       "path": "css/components.css",
-      "bytes": 17927,
-      "sha256": "57dd89708ca6e40604f21d27ba82de020d605da38b9dfcaf2cd6e8104b729aac"
+      "bytes": 22111,
+      "sha256": "4ce4f86e296749ff0f0166997bf933d8091d51e3ee72832506096c06ab6214f9"
     },
     {
       "path": "css/fonts.css",
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 10171,
-      "sha256": "5baabe7077f9eb2232ad0de53c35d052675d066f0ba77292f1e50f5c4396c2eb"
+      "bytes": 10219,
+      "sha256": "2ea750c49cae3de606f84a5f7fe1bd7262e39e13881eda58a1b6413d8fcb007d"
     },
     {
       "path": "js/analytics/compare.js",
@@ -188,6 +188,11 @@
       "sha256": "c5916659507188ab52d52fd63de23baba3d75644e87539024ac0d1c9436e487e"
     },
     {
+      "path": "js/core/session-home.js",
+      "bytes": 4806,
+      "sha256": "0082a12cdfae4b09281cf2693ef90bc0bd7edc15d45f9c347d913db819539ec2"
+    },
+    {
       "path": "js/core/session-identity.js",
       "bytes": 6221,
       "sha256": "c9af2fa0bb9fb5dbe5c3032114029a29bbb482b232e00d39e9213797aca0a554"
@@ -234,8 +239,8 @@
     },
     {
       "path": "js/core/utils.js",
-      "bytes": 4040,
-      "sha256": "f255e08267731314a17b15b4118d5f1ec62714c8c87c2d825a1f752452110c81"
+      "bytes": 5803,
+      "sha256": "d3e8ac4f34d461b30aaee853c0158686ac20678454e640b84c0194df01516add"
     },
     {
       "path": "js/core/workspace.js",
@@ -499,23 +504,23 @@
     },
     {
       "path": "js/ui/session-ledger-view.js",
-      "bytes": 22475,
-      "sha256": "7280f49b5522c303a5f0c1377f003bf4630a4f400d247f5f31dadd7be32699ff"
+      "bytes": 23161,
+      "sha256": "fe4522da7272994244ee3525f9b8a92c81d5d9ae803899c73ba9f0c0a02bc1a1"
     },
     {
       "path": "js/ui/session-overtime-view.js",
-      "bytes": 34308,
-      "sha256": "dfed93923b81912bb9dcc658a9756665e4888595d9cc8f0e73982db8601c2390"
+      "bytes": 38867,
+      "sha256": "825866667c159b3059d897ec95e16fcba8e2883e1a4d78aabf916e9f2200d23f"
     },
     {
       "path": "js/ui/session-payroll-view.js",
-      "bytes": 84039,
-      "sha256": "668ed07bc75d75146194361edf665b68dc53691e43eade0dee92f2dfbfdd4e18"
+      "bytes": 90855,
+      "sha256": "26fe975730080e622c9a57d813da2d40740cd674e3b18e4b9a09547702784fe1"
     },
     {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 69486,
-      "sha256": "d1310b4b15056118231db263332b5dd3d54446bdf4f37ee0920e42a23c935383"
+      "bytes": 85732,
+      "sha256": "6acff6cf3387abb775be59052c7c6f0669c9bf7114983d03fae19db18df8ad31"
     },
     {
       "path": "js/ui/settings-about.js",
