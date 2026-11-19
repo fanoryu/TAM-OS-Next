@@ -59,13 +59,13 @@ $code = static function (callable $fn): array {
 $txnRow = static fn (array $over = []): array => $over + ['id' => str_repeat('b', 32), 'kind' => 'income', 'financial_post' => 'GA', 'amount' => '100.00', 'transaction_date' => '2026-10-07', 'void_id' => null];
 
 return [
-    'the four fixed Financial Posts: GA, NP & IP, TJB, Drone — the same closed list as migration 0036, separate from the category' => static function (): void {
+    'the four fixed Financial Posts: GA, NP & IP, TJB, RnD — Research & Development (code DRONE) — the same closed list as migration 0036, separate from the category' => static function (): void {
         assertSame(['GA', 'NPIP', 'TJB', 'DRONE'], FinancialPost::codes());
-        assertSame(['GA', 'NP & IP', 'TJB', 'Drone'], array_map(static fn (FinancialPost $p): string => $p->displayName(), FinancialPost::cases()));
+        assertSame(['GA', 'NP & IP', 'TJB', 'RnD — Research & Development'], array_map(static fn (FinancialPost $p): string => $p->displayName(), FinancialPost::cases()));
         $m36 = (string) file_get_contents(dirname(__DIR__, 2) . '/migrations/0036_create_finance_transactions.sql');
         assertTrue(str_contains($m36, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE'))"), 'the database enforces the same list');
         assertTrue(str_contains($m36, 'category VARCHAR(64) NOT NULL') && str_contains($m36, 'financial_post VARCHAR(8)'), 'the category is its own column');
-        foreach (['ga', 'NP & IP', 'Drone', 'HR', '', 'GA '] as $bad) {
+        foreach (['ga', 'NP & IP', 'Drone', 'RND', 'RnD', 'RnD — Research & Development', 'HR', '', 'GA '] as $bad) {
             assertSame(null, FinancialPost::tryFrom($bad), var_export($bad, true));
         }
     },
@@ -135,7 +135,7 @@ return [
             ['code' => 'GA', 'name' => 'GA', 'income' => '1000000.00', 'expense' => '250000.00', 'net' => '750000.00', 'count' => 2],
             ['code' => 'NPIP', 'name' => 'NP & IP', 'income' => '0.00', 'expense' => '0.00', 'net' => '0.00', 'count' => 0],
             ['code' => 'TJB', 'name' => 'TJB', 'income' => '0.00', 'expense' => '0.00', 'net' => '0.00', 'count' => 0],
-            ['code' => 'DRONE', 'name' => 'Drone', 'income' => '0.00', 'expense' => '400000.00', 'net' => '-400000.00', 'count' => 1],
+            ['code' => 'DRONE', 'name' => 'RnD — Research & Development', 'income' => '0.00', 'expense' => '400000.00', 'net' => '-400000.00', 'count' => 1],
         ], $r['posts'], 'every post, in order, even with no rows; a voided row counts nowhere');
         assertSame(['income' => '1000000.00', 'expense' => '650000.00', 'net' => '350000.00', 'count' => 3], $r['general']);
         assertSame(['count' => 1, 'amount' => '999.00'], $r['voided']);

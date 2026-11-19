@@ -96,6 +96,10 @@ const I4_PACKAGE_DIGEST = 'ae827b48c5e8c151d06292b6ae1323323e75b69b1da59ebbd788b
 // their own errors and each Retry naming its read (session-requests.js, session-requests-view.js); no module or
 // file added. Prior pin was I4_PACKAGE_DIGEST (kept as the pre-correction baseline).
 const I4F01_PACKAGE_DIGEST = 'b0b011a28fc256f5a733fd59e9843c461ed99ca5579af616e667ac6d71f4923b';
+// CR-02 (Owner GO 2026-11-19): the I4-F01 package with the DRONE Financial Post displayed as
+// "RnD — Research & Development" (transaction-api.js FINANCIAL_POSTS name; the session-ledger-view.js comment).
+// The code DRONE is unchanged; no module or file added. Prior pin was I4F01_PACKAGE_DIGEST (kept as the baseline).
+const CR02_PACKAGE_DIGEST = '270af38dbf257693449654a078536b248516837b1f85a516e41cbb0953ff4706';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -8381,7 +8385,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === I4F01_PACKAGE_DIGEST,   // I4-F01 (was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === CR02_PACKAGE_DIGEST,   // CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8682,9 +8686,9 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
   const api = code(rd('core/transaction-api.js'));
   const posts = (/const FINANCIAL_POSTS = Object\.freeze\(\[([^\]]*)\]\)/.exec(api) || ['', ''])[1];
   const enumSrc = read(path.join(root, 'server', 'src', 'Transaction', 'FinancialPost.php'));
-  check([...posts.matchAll(/code: '([A-Z]+)', name: '([^']+)'/g)].map((m) => m[1] + '=' + m[2]).join() === 'GA=GA,NPIP=NP & IP,TJB=TJB,DRONE=Drone'
-    && [...enumSrc.matchAll(/self::\w+ => '([^']+)',/g)].map((m) => m[1]).join() === 'GA,NP & IP,TJB,Drone',
-    'Phase 1: the four Financial Posts and their display names equal server/src/Transaction/FinancialPost.php (GA, NP & IP, TJB, Drone)');
+  check([...posts.matchAll(/code: '([A-Z]+)', name: '([^']+)'/g)].map((m) => m[1] + '=' + m[2]).join() === 'GA=GA,NPIP=NP & IP,TJB=TJB,DRONE=RnD — Research & Development'
+    && [...enumSrc.matchAll(/self::\w+ => '([^']+)',/g)].map((m) => m[1]).join() === 'GA,NP & IP,TJB,RnD — Research & Development',
+    'Phase 1: the four Financial Posts and their display names equal server/src/Transaction/FinancialPost.php (GA, NP & IP, TJB, RnD — Research & Development; CR-02: code DRONE unchanged)');
   check(/const TRANSACTION_PAYROLL_CATEGORIES = Object\.freeze\(\['gaji', 'payroll', 'salary'\]\);/.test(api)
     && /public const PAYROLL_CATEGORIES = \['gaji', 'payroll', 'salary'\];/.test(read(path.join(root, 'server', 'src', 'Transaction', 'TransactionInput.php'))),
     'Phase 1: the payroll categories refused in the browser equal the server\'s (payroll is reported separately, never a general transaction)');
@@ -8703,8 +8707,8 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === I4F01_PACKAGE_DIGEST,   // I4-F01 (was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
-    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the I4-F01 digest ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… (' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
+    && pkg.packageDigest === CR02_PACKAGE_DIGEST,   // CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-02 digest ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… (' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
 // ===== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS, BACKEND S1–S5 (ADR-016, Owner 2026-11-17) =====
@@ -8732,8 +8736,8 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === I4F01_PACKAGE_DIGEST,   // I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
-    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the I4-F01 digest ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…');
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === CR02_PACKAGE_DIGEST,   // CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-02 digest ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… (I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
 }
 
 

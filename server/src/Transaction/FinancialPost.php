@@ -26,7 +26,7 @@ enum FinancialPost: string
             self::Ga => 'GA',
             self::Npip => 'NP & IP',
             self::Tjb => 'TJB',
-            self::Drone => 'Drone',
+            self::Drone => 'RnD — Research & Development',
         };
     }
 
