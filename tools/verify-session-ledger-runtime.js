@@ -64,7 +64,7 @@ const T3 = tx('3'.repeat(32), '2031-04-11', { status: 'Voided', void: { reason: 
 const LIST = { generalTransactions: [T1, T2, T3] };
 const post = (code, name, income, expense, net, count) => ({ code: code, name: name, income: income, expense: expense, net: net, count: count });
 const REPORT = { financialReport: { from: '2031-04-01', to: '2031-04-30',
-  posts: [post('GA', 'GA', '0.00', '2500000.00', '-2500000.00', 1), post('NPIP', 'NP & IP', '0.00', '0.00', '0.00', 0), post('TJB', 'TJB', '0.00', '0.00', '0.00', 0), post('DRONE', 'Drone', '12000000.00', '0.00', '12000000.00', 1)],
+  posts: [post('GA', 'GA', '0.00', '2500000.00', '-2500000.00', 1), post('NPIP', 'NP & IP', '0.00', '0.00', '0.00', 0), post('TJB', 'TJB', '0.00', '0.00', '0.00', 0), post('DRONE', 'RnD — Research & Development', '12000000.00', '0.00', '12000000.00', 1)],
   general: { income: '12000000.00', expense: '2500000.00', net: '9500000.00', count: 2 }, voided: { count: 1, amount: '2500000.00' },
   payroll: { posted: { amount: '7021875.00', count: 3, fromMonth: '2031-04', toMonth: '2031-04' }, paid: { amount: '3500000.00', count: 1 } },
   consolidated: { income: '12000000.00', expense: '6000000.00', net: '6000000.00' },
@@ -280,9 +280,9 @@ function firewall(rt, label){
       'B. the Overview item is current, the heading is "Finance Overview" (v2.11.0 title, UI-INT-1; was "Finance") and focus moves to it');
     const rows = (html.match(/<tr><th scope="row">[^<]*<\/th><td>[^<]*<\/td><td>[^<]*<\/td><td>[^<]*<\/td><td>[^<]*<\/td><\/tr>/g) || []);
     check(rows.length === 5 && /<th scope="row">GA<\/th><td>0\.00<\/td><td>2500000\.00<\/td><td>-2500000\.00<\/td><td>1<\/td>/.test(rows[0])
-      && /<th scope="row">NP &amp; IP<\/th>/.test(rows[1]) && /<th scope="row">TJB<\/th>/.test(rows[2]) && /<th scope="row">Drone<\/th><td>12000000\.00<\/td>/.test(rows[3])
+      && /<th scope="row">NP &amp; IP<\/th>/.test(rows[1]) && /<th scope="row">TJB<\/th>/.test(rows[2]) && /<th scope="row">RnD — Research &amp; Development<\/th><td>12000000\.00<\/td>/.test(rows[3])
       && /<th scope="row">All Financial Posts<\/th><td>12000000\.00<\/td><td>2500000\.00<\/td><td>9500000\.00<\/td><td>2<\/td>/.test(rows[4]),
-      'B. the four Financial Posts in order (GA, NP & IP, TJB, Drone) and their total, every amount the exact server string');
+      'B. the four Financial Posts in order (GA, NP & IP, TJB, RnD — Research & Development) and their total, every amount the exact server string');
     check(/id="sfPayroll"[\s\S]*Posted for 2031-04<\/th><td>7021875\.00<\/td><td>3<\/td>[\s\S]*Paid in this range<\/th><td>3500000\.00<\/td><td>1<\/td>/.test(html)
       && !/<th scope="row">Payroll<\/th>/.test(html.split('id="sfPayroll"')[0]),
       'B. Payroll is its own table — posted and paid — never a Financial Post row');
@@ -338,7 +338,7 @@ function firewall(rt, label){
     const html = card(rt);
     check(rt.net.calls.filter((c) => c.url === RANGE(...APRIL)).length === 1 && /<h1 class="auth-title" id="authTitle" tabindex="-1">Transactions<\/h1>/.test(html) && /3 transactions, oldest first\./.test(html),
       'D. Transactions reads exactly the range of the month once and lists it oldest first');
-    check(/Fabricated &lt;b&gt;rent&lt;\/b&gt;/.test(html) && !/<b>rent<\/b>/.test(html) && /<td>Drone<\/td>/.test(html) && /<td><span class="ux-badge ux-tone-stop"><span class="ux-badge-mark" aria-hidden="true">✕<\/span>Voided<\/span> Fabricated duplicate<\/td><td><\/td>/.test(html)
+    check(/Fabricated &lt;b&gt;rent&lt;\/b&gt;/.test(html) && !/<b>rent<\/b>/.test(html) && /<td>RnD — Research &amp; Development<\/td>/.test(html) && /<td><span class="ux-badge ux-tone-stop"><span class="ux-badge-mark" aria-hidden="true">✕<\/span>Voided<\/span> Fabricated duplicate<\/td><td><\/td>/.test(html)
       && (html.match(/data-sf-void="\d+"/g) || []).join() === 'data-sf-void="0",data-sf-void="1"',
       'D. server text is escaped; the post shows its display name; a voided row shows its reason and has no Void button');
     const before = ledgerCalls(rt).length;
@@ -381,6 +381,26 @@ function firewall(rt, label){
       'E. a deliberate resubmit replays the SAME request key (recorded at most once) and succeeds');
     check(rt.net.calls.filter((c) => c.url === RANGE(...APRIL)).length === 2, 'E. after a recorded transaction the history is read again from the server (nothing optimistic)');
     firewall(rt, 'E');
+  }
+
+  /* ---------- E3. CR-02: the RnD option is the DRONE code (display rename only, 2026-11-19) ---------- */
+  {
+    const CREATE = '/api/general-transactions/create';
+    const made = tx('5'.repeat(32), '2031-04-16', { kind: 'expense', financialPost: 'DRONE', category: 'Riset', description: 'Fabricated research', amount: '500000.00' });
+    const rt = await open({ [CREATE]: [ok({ generalTransaction: made })] });
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    rt.app.fire('sfAddBtn', 'click'); await flush();
+    const sel = (/<select[^>]*id="sff-financialPost"[^>]*>([\s\S]*?)<\/select>/.exec(card(rt)) || ['', ''])[1];
+    const opts = [...sel.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map((m) => m[1] + '=' + m[2]);
+    check(opts.join('|') === '=Choose a Financial Post|GA=GA|NPIP=NP &amp; IP|TJB=TJB|DRONE=RnD — Research &amp; Development',
+      'E3. CR-02: the Financial Post menu shows "RnD — Research & Development" for the DRONE code; no RND code is offered >> ' + opts.join('|'));
+    for(const [k, v] of Object.entries({ kind: 'expense', financialPost: 'DRONE', category: 'Riset', description: 'Fabricated research', amount: '500000.00', transactionDate: '2031-04-16' })) rt.app.type('sff-' + k, v);
+    rt.app.fire('sfForm', 'submit'); await flush();
+    const sent = posts(rt, CREATE);
+    const body = sent.length ? JSON.parse(sent[0].init.body) : {};
+    check(sent.length === 1 && body.financialPost === 'DRONE' && body.amount === '500000.00' && /Transaction recorded\./.test(card(rt)),
+      'E3. CR-02: choosing RnD sends the unchanged code DRONE >> ' + JSON.stringify(body.financialPost));
+    firewall(rt, 'E3');
   }
 
   /* ---------- E2. the amount preview (UX-1 G-4 correction, 2026-11-17) ---------- */

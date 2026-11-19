@@ -3025,7 +3025,8 @@ pre-merge corrections), followed by the CI and documentation changes. It is **me
 no storage key, no `SCHEMA_VERSION` change and no CSS. Payment requests, reimbursements, Finance/HR roles, browser-data
 import and category reporting are out of scope.
 
-**Financial Posts (PD-3).** Exactly four, in this order: `GA` (GA), `NPIP` (NP & IP), `TJB` (TJB), `DRONE` (Drone). The
+**Financial Posts (PD-3).** Exactly four, in this order: `GA` (GA), `NPIP` (NP & IP), `TJB` (TJB), `DRONE` (displayed as
+"RnD — Research & Development" since CR-02; originally "Drone", and the code stays `DRONE`). The
 same closed list is migration `0036`'s CHECK `finance_transactions_financial_post` (a case-sensitive `ascii_bin` column),
 the enum `TamOs\Transaction\FinancialPost` and `FINANCIAL_POSTS` in `js/core/transaction-api.js`;
 `tools/verify-backend-boundary.js` fails unless all three agree in order, both validators still use the list, the category

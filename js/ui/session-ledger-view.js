@@ -8,7 +8,7 @@
    no Finance section.
 
      Date range    From / To (inclusive, company calendar dates) and Apply — shared by both views
-     Dashboard     income, expenses and net per Financial Post (GA, NP & IP, TJB, Drone), the
+     Dashboard     income, expenses and net per Financial Post (GA, NP & IP, TJB, RnD), the
                    general total, the voided transactions (shown, never counted), the separate
                    Payroll line (posted for the payroll months the range touches; paid in the
                    range) — never split across the Financial Posts — and the consolidated total,

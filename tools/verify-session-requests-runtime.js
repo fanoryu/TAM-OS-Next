@@ -90,7 +90,7 @@ const W = {
 };
 const post = (code, name, income, expense, net, count) => ({ code: code, name: name, income: income, expense: expense, net: net, count: count });
 const REPORT = (anp) => ({ financialReport: { from: '2031-04-01', to: '2031-04-30',
-  posts: [post('GA', 'GA', '0.00', '2500000.00', '-2500000.00', 1), post('NPIP', 'NP & IP', '0.00', '0.00', '0.00', 0), post('TJB', 'TJB', '0.00', '0.00', '0.00', 0), post('DRONE', 'Drone', '12000000.00', '0.00', '12000000.00', 1)],
+  posts: [post('GA', 'GA', '0.00', '2500000.00', '-2500000.00', 1), post('NPIP', 'NP & IP', '0.00', '0.00', '0.00', 0), post('TJB', 'TJB', '0.00', '0.00', '0.00', 0), post('DRONE', 'RnD — Research & Development', '12000000.00', '0.00', '12000000.00', 1)],
   general: { income: '12000000.00', expense: '2500000.00', net: '9500000.00', count: 2 }, voided: { count: 0, amount: '0.00' },
   payroll: { posted: { amount: '0.00', count: 0, fromMonth: '2031-04', toMonth: '2031-04' }, paid: { amount: '0.00', count: 0 } },
   consolidated: { income: '12000000.00', expense: '2500000.00', net: '9500000.00' }, approvedNotPaid: anp } });
@@ -311,7 +311,7 @@ function firewall(rt, label){
       'B. the item is current, the address bar reads #/requests, the heading is "Finance Requests" and focus moves to it');
     const rows = html.match(/<tr><td>\d{4}-\d{2}-\d{2}<\/td>[\s\S]*?<\/tr>/g) || [];
     check(rows.length === 6 && /<td>2031-03-01<\/td><td>Payment request<\/td><td>Fabricated &lt;Vendor&gt; &amp; Co<\/td><td>GA<\/td><td>Operasional<\/td><td>1500000\.00<\/td>/.test(rows[0])
-      && /<td>Drone<\/td>/.test(rows[1]) && /Approved — not paid/.test(rows[2]) && /<td>Reimbursement<\/td><td>Fabricated &lt;Self&gt;<\/td>/.test(rows[3]) && /Paid/.test(rows[3]),
+      && /<td>RnD — Research &amp; Development<\/td>/.test(rows[1]) && /Approved — not paid/.test(rows[2]) && /<td>Reimbursement<\/td><td>Fabricated &lt;Self&gt;<\/td>/.test(rows[3]) && /Paid/.test(rows[3]),
       'B. six rows in date order: date, type, the escaped payee or the employee\'s name, post, category, the exact amount, the status ("Approved — not paid")');
     check(/data-fr-open="0"/.test(html) && /data-fr-open="5"/.test(html) && !/<b>/.test(html), 'B. a row is opened by its position; no server value reaches the page as markup');
     const m = unmoney(shellContent(rt));

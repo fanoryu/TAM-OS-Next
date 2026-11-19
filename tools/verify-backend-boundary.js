@@ -2782,7 +2782,7 @@ function selftest() {
     const sub = (s, a, b) => { if (s.split(a).length !== 2) throw new Error('selftest fixture drifted: ' + a); return s.replace(a, () => b); };
     const post = (name, o, needle) => cases.push({ name: 'Financial Post parity: ' + name, run: () => checkFinancialPostParity(o.e ?? pe, o.m ?? pm, o.f ?? pf, o.i ?? pi, o.o ?? po), expect: needle });
     const CHK = "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE'))";
-    const FE_DRONE = ",\n  Object.freeze({ code: 'DRONE', name: 'Drone' })";
+    const FE_DRONE = ",\n  Object.freeze({ code: 'DRONE', name: 'RnD — Research & Development' })";
     post('the real enum, migration, input and frontend pass', {}, 0);
     post('a fifth code in the database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE', 'HR'))") }, 'CHECK must equal');
     post('a code omitted from the database CHECK is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPIP', 'TJB'))") }, 'CHECK must equal');

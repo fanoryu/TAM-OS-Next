@@ -40,6 +40,12 @@ published release, and none is on a production host. Hostinger stays NO-GO; Gate
   unchanged.
 
 ### Changed
+- **CR-02 — the DRONE Financial Post is displayed as "RnD — Research & Development".** Display rename only: the code
+  stays `DRONE` in the database CHECK, the server enum,
+  the API and every stored transaction, finance request and audit row; no migration and no data rewrite. The new name
+  comes from `FinancialPost::displayName()` (the financial report) and `FINANCIAL_POSTS` in `js/core/transaction-api.js`
+  (menus, ledger rows, request rows), which must stay equal: the report decoder refuses a post name that differs.
+  Earlier entries that name "Drone" are historical and unchanged.
 - **Release immutability hardening — Approach C, defense in depth (PR #92; not released, not deployed).**
   `.github/workflows/release.yml` no longer has the `gh release upload --clobber` path. Publication now runs through
   the new `tools/release-publish.js`: a read-only `verify` job checks eligibility (tag push in this repository, the

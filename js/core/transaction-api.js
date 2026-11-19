@@ -43,7 +43,7 @@ const FINANCIAL_POSTS = Object.freeze([
   Object.freeze({ code: 'GA', name: 'GA' }),
   Object.freeze({ code: 'NPIP', name: 'NP & IP' }),
   Object.freeze({ code: 'TJB', name: 'TJB' }),
-  Object.freeze({ code: 'DRONE', name: 'Drone' })
+  Object.freeze({ code: 'DRONE', name: 'RnD — Research & Development' })
 ]);
 // TransactionView::FIELDS and VOID_FIELDS (sorted); TransactionInput limits; TransactionStore::LIST_CAP.
 const TRANSACTION_KEYS = Object.freeze(['amount', 'category', 'createdAt', 'createdByUserId', 'description', 'financialPost', 'id', 'kind', 'status', 'transactionDate', 'void']);

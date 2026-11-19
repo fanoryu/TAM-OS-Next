@@ -53,7 +53,8 @@ disposable local PHP + MariaDB backend — never a production backend or real da
       shown as such; an Employee has no Audit section; a 401 signs out; zero console errors other than the browser's own
       network-status lines for deliberately failed requests, and zero CSP violations
 - [ ] **Finance (Phase 1):** only the CEO has a Finance section (between Payroll and Audit); it opens on the Dashboard for
-      the current Asia/Jakarta month with the four Financial Posts in order (GA, NP & IP, TJB, Drone), Payroll posted and paid
+      the current Asia/Jakarta month with the four Financial Posts in order (GA, NP & IP, TJB, RnD — Research & Development,
+      the `DRONE` code; CR-02), Payroll posted and paid
       as its own table and the consolidated figure labelled cash basis; a recorded transaction and a void with a reason both
       reconcile with the dashboard; Gaji, Payroll or Salary as a category and a range above 366 days are refused before
       sending, and a future date is refused by the server (400) with nothing recorded; a failed read (including a range above its cap) shows no partial figures and tells the CEO to choose a
