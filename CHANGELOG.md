@@ -6,6 +6,15 @@ Not deployed and not released: entries here are merged into `main` (or proposed 
 published release, and none is on a production host. Hostinger stays NO-GO; Gate D, Gate R and v3.0.0 stay on HOLD.
 
 ### Added
+- **Finance Phase 2 — payment requests and employee reimbursements, and UX-1 (PRs #94–#96; merged only after
+  Owner approval; not deployed, not released).** Under [ADR-016](docs/03-adr/ADR-016-Finance-Payment-Requests-and-Reimbursements.md)
+  (Accepted 2026-11-17) the CEO reviews payment requests and employee reimbursements and pays each in one
+  atomic step that also records the matching expense transaction. AWP-01 adds the backend (migrations 0039–0041, head
+  0041; 67 routes; ACTIONS 24; PR #94, `f17cc77`), I4 adds the SESSION Finance Requests UI (PR #95, `150f81e`) and
+  I4-F01 keeps the list, detail and history read errors separate (PR #96, `f206f6b`). UX-1, merged with AWP-01 in
+  PR #94, adds a read-only role Home page in SESSION built from existing reads and unifies money and status
+  presentation in the SESSION payroll, overtime and ledger views. Receipt attachments, Finance/HR roles and
+  category-level reporting stay out of scope.
 - **Phase 1 — General transactions by Financial Post and the SESSION financial dashboard (PR #85; merged only after
   Owner approval; not deployed, not released).** The CEO records general income and expense transactions against one
   of four fixed Financial Posts — GA, NP & IP, TJB, Drone — in a new CEO-only **Finance** section of the SESSION
