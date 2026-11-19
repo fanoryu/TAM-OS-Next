@@ -31,7 +31,9 @@
      action                     null, or the confirmation panel { op, reason, paidOn,
                                 paymentMethod, key } — the pay key is made once when it opens
      mutation                   { kind, status, error, fields }
-     error, notice, focus       the last failed read, a fixed message key, a focus hint
+     errors                     { list, detail, history }: each read's own last failure, or null —
+                                one read's failure never overwrites or clears another's (I4-F01)
+     notice, focus              a fixed message key, a focus hint
 
    A read takes a token { gen, kind, seq } and is applied only while it is the latest of its kind
    in the current generation. A write takes { gen } and is dropped when the principal changed.
@@ -85,13 +87,13 @@ const SessionRequestsStore = (function(){
   let history = null, historySeq = 0, historyStatus = SESSION_REQUESTS_STATUS.IDLE;
   let employees = null, employeesSeq = 0;
   let form = null, action = null, mutation = IDLE_MUTATION;
-  let error = null, notice = null, focus = null;
+  let errors = { list: null, detail: null, history: null }, notice = null, focus = null;
 
   function keyOf(p){ return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null; }
   function seqOf(kind){ return kind === 'list' ? listSeq : kind === 'detail' ? detailSeq : kind === 'history' ? historySeq : kind === 'employees' ? employeesSeq : -1; }
   function isCurrent(token){ return !!token && token.gen === generation && token.seq === seqOf(token.kind); }
   function isLive(token){ return !!token && token.gen === generation; }
-  function clearError(scope){ if(error && error.scope === scope) error = null; }
+  function clearError(scope){ errors[scope] = null; }
   function dropList(){ listSeq++; list = null; listStatus = SESSION_REQUESTS_STATUS.IDLE; clearError('list'); }
   function dropDetail(){
     detailSeq++; detail = null; detailStatus = SESSION_REQUESTS_STATUS.IDLE; clearError('detail');
@@ -101,7 +103,7 @@ const SessionRequestsStore = (function(){
     open = false; range = null; rangeDraft = null; filter = '';
     dropList(); detailId = null; dropDetail(); employeesSeq++; employees = null;
     form = null; action = null; mutation = IDLE_MUTATION;
-    error = null; notice = null; focus = null;
+    errors = { list: null, detail: null, history: null }; notice = null; focus = null;
     principalKey = null;
     generation++;
   }
@@ -147,9 +149,9 @@ const SessionRequestsStore = (function(){
     isLive: isLive,
     applyRead(token, data){
       if(!isCurrent(token)) return false;
-      if(token.kind === 'list'){ list = data; listStatus = SESSION_REQUESTS_STATUS.READY; }
-      else if(token.kind === 'detail'){ if(token.id !== detailId) return false; detail = data; detailStatus = SESSION_REQUESTS_STATUS.READY; }
-      else if(token.kind === 'history'){ if(token.id !== detailId) return false; history = data; historyStatus = SESSION_REQUESTS_STATUS.READY; }
+      if(token.kind === 'list'){ list = data; listStatus = SESSION_REQUESTS_STATUS.READY; clearError('list'); }
+      else if(token.kind === 'detail'){ if(token.id !== detailId) return false; detail = data; detailStatus = SESSION_REQUESTS_STATUS.READY; clearError('detail'); }
+      else if(token.kind === 'history'){ if(token.id !== detailId) return false; history = data; historyStatus = SESSION_REQUESTS_STATUS.READY; clearError('history'); }
       else if(token.kind === 'employees'){ employees = data; }
       return true;
     },
@@ -157,9 +159,9 @@ const SessionRequestsStore = (function(){
       if(!isCurrent(token)) return false;
       if(token.kind === 'employees') return false;                 // names are display only: the ids stay
       if(token.kind === 'list'){ list = null; listStatus = SESSION_REQUESTS_STATUS.ERROR; }
-      else if(token.kind === 'detail'){ detail = null; detailStatus = SESSION_REQUESTS_STATUS.ERROR; }
-      else { history = null; historyStatus = SESSION_REQUESTS_STATUS.ERROR; }
-      error = Object.freeze(Object.assign({ scope: token.kind }, failure(failed)));
+      else if(token.kind === 'detail'){ if(token.id !== detailId) return false; detail = null; detailStatus = SESSION_REQUESTS_STATUS.ERROR; }
+      else { if(token.id !== detailId) return false; history = null; historyStatus = SESSION_REQUESTS_STATUS.ERROR; }
+      errors[token.kind] = Object.freeze(Object.assign({ scope: token.kind }, failure(failed)));   // its own slot only (I4-F01)
       return true;
     },
     openForm(mode, kind, values, key){ form = { mode: mode, kind: kind, values: Object.assign({}, values), key: key }; action = null; notice = null; mutation = IDLE_MUTATION; },
@@ -206,7 +208,7 @@ const SessionRequestsStore = (function(){
         history: history, historyStatus: historyStatus, employees: employees,
         form: form ? Object.freeze({ mode: form.mode, kind: form.kind, values: Object.freeze(Object.assign({}, form.values)), key: form.key }) : null,
         action: action ? Object.freeze(Object.assign({}, action)) : null,
-        mutation: mutation, error: error, notice: notice
+        mutation: mutation, errors: Object.freeze({ list: errors.list, detail: errors.detail, history: errors.history }), notice: notice
       });
     }
   });
@@ -320,11 +322,11 @@ const SessionRequests = (function(){
       return loading;
     },
     setFilter(v){ if(!canRead()) return; SessionRequestsStore.setFilter(v); paint(); },
-    retry(){
-      if(!canAct()) return;
-      const s = SessionRequestsStore.snapshot();
-      if(!s.error) return;
-      const loading = read(s.error.scope);
+    // Retry the read named by the Retry shown with its error (I4-F01): that read only, and only while it failed.
+    retry(scope){
+      if(!canAct() || ['list', 'detail', 'history'].indexOf(scope) === -1) return;
+      if(!SessionRequestsStore.snapshot().errors[scope]) return;
+      const loading = read(scope);
       paint();
       return loading;
     },

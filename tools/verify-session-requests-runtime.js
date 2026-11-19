@@ -25,6 +25,11 @@
    a success; the Employee's own reimbursements with no CEO control (forged calls send nothing);
    the Approved-not-paid figures on Home, apart from income / expense / net; no storage, URL or
    LOCAL reach.
+
+   I4-F01 (Owner GO, 2026-11-19): the concurrent detail and history reads keep their own errors in
+   every completion order (gated, released in the order named); each Retry reads only the read whose
+   error it is shown with; closing or leaving a request, the session ending and another principal
+   drop late failures and every kept error.
    ============================================================ */
 
 const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
@@ -680,6 +685,151 @@ function firewall(rt, label){
     check(rt.rq().generation > gen && rt.rq().list === null && rt.rq().detail === null && rt.rq().employees === null && !/Fabricated/.test(rt.appHTML()),
       'J. losing the session destroys the Finance Requests data and nothing of it stays on the page');
     firewall(rt, 'J');
+  }
+
+  /* ---------- K. I4-F01: the detail and history reads keep their own errors ---------- */
+  // Each read is held by a gate and released in the order named, so the completion order is proven,
+  // not assumed. A read error is retried only by the Retry shown with it, and a retry is a read.
+  const gate = () => { let release; const p = new Promise((r) => { release = r; }); return { route: () => p, release: (v) => release(v) }; };
+  // Unavailable, without a request reference (a 32-hex reference would trip the firewall's opaque-id rule).
+  const DOWN = () => resp(503, { ok: false, error: { code: 'unavailable', message: 'server text' } });
+  const errs = (rt) => rt.rq().errors || {};
+  const calls = (rt, u) => rt.net.calls.filter((c) => c.url === u).length;
+  const retryOf = (rt) => { const m = /<button[^>]*id="frRetryBtn"[^>]*>/.exec(card(rt)); return m ? ((/data-fr-retry="([a-z]+)"/.exec(m[0]) || [])[1] || 'unnamed') : null; };
+  const LOADING_DETAIL = /Loading the request…/;
+  // The CEO opens PR_SUB (row 1) with its detail and history reads held.
+  async function openHeld(){
+    const rt = await openCeo();
+    const d = gate(), h = gate();
+    rt.net.routes[ONE(PR_SUB.id)] = [d.route]; rt.net.routes[HIST(PR_SUB.id)] = [h.route];
+    rt.app.openRow(1); await flush();
+    return { rt: rt, d: d, h: h };
+  }
+  {
+    const { rt, d, h } = await openHeld();
+    check(rt.rq().detailStatus === 'loading' && rt.rq().historyStatus === 'loading' && LOADING_DETAIL.test(card(rt)), 'K. F01-A: both reads are in flight together');
+    d.release(DOWN()); await flush();
+    h.release(DOWN()); await flush();
+    const s = rt.rq();
+    const html = card(rt);
+    check(s.detailStatus === 'error' && s.historyStatus === 'error' && s.errors && (s.errors || {}).detail && (s.errors || {}).detail.kind === 'UNAVAILABLE' && (s.errors || {}).history && (s.errors || {}).history.kind === 'UNAVAILABLE',
+      'K. F01-A: detail fails, then history fails — both stay ERROR and each keeps its own error');
+    check(/id="frReadError"[^>]*>The finance requests could not be loaded\. Check your connection/.test(html) && !LOADING_DETAIL.test(html) && /id="frRetryBtn"/.test(html)
+      && !/id="frOps"|id="frDetail"/.test(html) && /id="frBackBtn"/.test(html),
+      'K. F01-A: the detail error is shown with a Retry and Back to the list — never a permanent "Loading the request…", no operation offered');
+    check(retryOf(rt) === 'detail', 'K. F01-A: the Retry shown names the detail read');
+    const one0 = calls(rt, ONE(PR_SUB.id)), hist0 = calls(rt, HIST(PR_SUB.id));
+    rt.net.routes[ONE(PR_SUB.id)] = [one(PR_SUB)]; rt.net.routes[HIST(PR_SUB.id)] = [DOWN()];
+    rt.app.fire('frRetryBtn', 'click'); await flush();
+    check(calls(rt, ONE(PR_SUB.id)) === one0 + 1 && calls(rt, HIST(PR_SUB.id)) === hist0 && rt.rq().detailStatus === 'ready' && /id="frDetail"/.test(card(rt)),
+      'K. F01-A: Retry reads the detail — once — and not the history');
+    firewall(rt, 'K. F01-A');
+  }
+  {
+    const { rt, d, h } = await openHeld();
+    h.release(DOWN()); await flush();
+    d.release(err(500, 'server_error')); await flush();
+    const s = rt.rq();
+    const html = card(rt);
+    check(s.detailStatus === 'error' && s.errors && (s.errors || {}).detail && (s.errors || {}).detail.kind === 'SERVER_ERROR' && (s.errors || {}).history && (s.errors || {}).history.kind === 'UNAVAILABLE',
+      'K. F01-B: history fails, then detail fails — neither error overwrites the other');
+    check(/id="frReadError"/.test(html) && !LOADING_DETAIL.test(html) && !/id="frOps"/.test(html) && retryOf(rt) === 'detail',
+      'K. F01-B: the detail error and its Retry are shown, never a false loading state');
+  }
+  {
+    const { rt, d, h } = await openHeld();
+    d.release(one(PR_SUB)); await flush();
+    h.release(DOWN()); await flush();
+    const detail = rt.rq().detail;
+    let html = card(rt);
+    check(rt.rq().detailStatus === 'ready' && rt.rq().errors && errs(rt).detail === null && errs(rt).history && /id="frDetail"/.test(html) && /id="frApproveBtn"/.test(html)
+      && /id="frHistoryError"/.test(html) && !/id="frReadError"/.test(html) && retryOf(rt) === 'history',
+      'K. F01-C: detail succeeds, history fails — the detail stays with its operations; the history error has its own Retry');
+    const one0 = calls(rt, ONE(PR_SUB.id)), hist0 = calls(rt, HIST(PR_SUB.id)), list0 = calls(rt, YEAR);
+    rt.net.routes[HIST(PR_SUB.id)] = [ok(HISTORY)];
+    rt.app.fire('frRetryBtn', 'click'); await flush();
+    html = card(rt);
+    check(calls(rt, HIST(PR_SUB.id)) === hist0 + 1 && calls(rt, ONE(PR_SUB.id)) === one0 && calls(rt, YEAR) === list0 && rt.rq().detail === detail
+      && /id="frHistory"/.test(html) && !/id="frHistoryError"/.test(html) && errs(rt).history === null && writes(rt).length === 0,
+      'K. F01-C: the history Retry reads only the history; the detail shown is kept as it was');
+  }
+  {
+    const { rt, d, h } = await openHeld();
+    d.release(DOWN()); await flush();
+    h.release(ok(HISTORY)); await flush();
+    const html = card(rt);
+    check(rt.rq().detailStatus === 'error' && rt.rq().historyStatus === 'ready' && rt.rq().errors && errs(rt).detail && errs(rt).history === null
+      && /id="frReadError"/.test(html) && retryOf(rt) === 'detail' && !LOADING_DETAIL.test(html) && !/id="frOps"|id="frApproveBtn"|id="frPayBtn"/.test(html),
+      'K. F01-D: detail fails, history succeeds — the history does not hide the detail failure; detail Retry, no operation');
+  }
+  {
+    const { rt, d, h } = await openHeld();
+    d.release(DOWN()); await flush();
+    h.release(DOWN()); await flush();
+    rt.net.routes[ONE(PR_SUB.id)] = [one(PR_SUB)];
+    rt.app.fire('frRetryBtn', 'click'); await flush();
+    let html = card(rt);
+    check(rt.rq().detailStatus === 'ready' && /id="frDetail"/.test(html) && rt.rq().historyStatus === 'error' && errs(rt).history && /id="frHistoryError"/.test(html) && retryOf(rt) === 'history',
+      'K. F01-E: after both fail, a detail Retry shows the request while the history failure stays, with its own Retry');
+    rt.net.routes[HIST(PR_SUB.id)] = [ok(HISTORY)];
+    rt.app.fire('frRetryBtn', 'click'); await flush();
+    html = card(rt);
+    check(/id="frHistory"/.test(html) && !/id="frHistoryError"|id="frReadError"/.test(html) && errs(rt).detail === null && errs(rt).history === null && writes(rt).length === 0,
+      'K. F01-E: the history Retry then succeeds; no error is left and nothing was written');
+    firewall(rt, 'K. F01-E');
+  }
+  {
+    // Closing the request while its reads are in flight: their late failures are dropped.
+    const { rt, d, h } = await openHeld();
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    d.release(DOWN()); h.release(DOWN()); await flush();
+    let s = rt.rq();
+    check(s.detailId === null && s.detailStatus === 'idle' && s.errors && (s.errors || {}).detail === null && (s.errors || {}).history === null && (s.errors || {}).list === null && /id="frList"/.test(card(rt)),
+      'K. F01-F: late failures of a closed request are dropped — the list shows, no error kept');
+    // A failed request, then another opened: the old errors do not follow.
+    const d2 = gate(), h2 = gate();
+    rt.net.routes[ONE(PR_SUB.id)] = [d2.route]; rt.net.routes[HIST(PR_SUB.id)] = [h2.route];
+    rt.app.openRow(1); await flush();
+    d2.release(DOWN()); h2.release(DOWN()); await flush();
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    check(errs(rt).detail === null && errs(rt).history === null, 'K. F01-F: Back discards the closed request\'s errors');
+    await openRow(rt, 2, PR_APP);
+    s = rt.rq();
+    check(s.detailId === PR_APP.id && s.detailStatus === 'ready' && (s.errors || {}).detail === null && (s.errors || {}).history === null && /id="frDetail"/.test(card(rt)) && !/id="frReadError"|id="frHistoryError"/.test(card(rt)),
+      'K. F01-F: the next request opened shows no error of the one before');
+    // Another request opened while the first one's reads are in flight: their late answers are dropped.
+    const d3 = gate(), h3 = gate();
+    rt.app.fire('frBackBtn', 'click');
+    rt.net.routes[ONE(PR_SUB.id)] = [d3.route]; rt.net.routes[HIST(PR_SUB.id)] = [h3.route];
+    rt.app.openRow(1); await flush();
+    rt.app.fire('frBackBtn', 'click');
+    await openRow(rt, 2, PR_APP);
+    d3.release(DOWN()); h3.release(DOWN()); await flush();
+    s = rt.rq();
+    check(s.detailId === PR_APP.id && s.detailStatus === 'ready' && s.historyStatus === 'ready' && (s.errors || {}).detail === null && (s.errors || {}).history === null && !/id="frReadError"|id="frHistoryError"/.test(card(rt)),
+      'K. F01-F: late failures of a request left for another are dropped');
+  }
+  {
+    // The session ends while the reads are in flight.
+    const { rt, d, h } = await openHeld();
+    const gen = rt.rq().generation;
+    rt.AuthBoot.sessionLost(); await flush();
+    d.release(DOWN()); h.release(DOWN()); await flush();
+    const s = rt.rq();
+    check(s.generation > gen && s.detailId === null && s.errors && (s.errors || {}).detail === null && (s.errors || {}).history === null && (s.errors || {}).list === null && !/Fabricated|frReadError|frHistoryError/.test(rt.appHTML()),
+      'K. F01-F: after the session ends, late failures are dropped and no request error is kept');
+  }
+  {
+    // Another principal: the data and every error are destroyed; late answers of the first are dropped.
+    const { rt, d, h } = await openHeld();
+    d.release(DOWN()); await flush();
+    const gen = rt.rq().generation;
+    const other = Object.assign({}, rt.AuthBoot.snapshot().principal, { id: 'u_other_9' });
+    check(rt.SessionRequestsStore.bindPrincipal(other) === true, 'K. F01-F: a different principal rebinds the store');
+    h.release(DOWN()); await flush();
+    const s = rt.rq();
+    check(s.generation > gen && s.detailId === null && s.list === null && s.errors && (s.errors || {}).detail === null && (s.errors || {}).history === null && (s.errors || {}).list === null,
+      'K. F01-F: a principal change clears every request error; a late failure of the first principal is dropped');
   }
 
   console.log('');
