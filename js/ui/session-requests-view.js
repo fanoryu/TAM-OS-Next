@@ -100,14 +100,15 @@ function sessionRequestsForText(w, principal, r){
 }
 function sessionRequestsRangeLabel(r){ return r ? (r.from === r.to ? r.from : r.from + ' to ' + r.to) : '—'; }
 
-function sessionRequestsErrorHTML(error, id){
+// A read's error with, unless it is final, the Retry of that read (`scope`: list, detail or history; I4-F01).
+function sessionRequestsErrorHTML(error, id, scope){
   let msg = SESSION_REQUESTS_ERRORS[error.kind] || SESSION_REQUESTS_ERRORS.UNAVAILABLE;
   if(error.kind === 'NOT_FOUND') msg = 'This request was not found. It may be outside your access.';
   if(error.kind === 'RATE_LIMITED' && typeof authWaitText === 'function') msg += authWaitText(error.retryAfter);
   if(error.requestId) msg += ' Reference: ' + error.requestId + '.';
   const final = error.kind === 'DENIED' || error.kind === 'VALIDATION' || error.kind === 'CLIENT_FAULT' || error.kind === 'NOT_FOUND';
   return '<p class="auth-message auth-message-warn" id="' + id + '" role="alert" tabindex="-1">' + escapeHtml(msg) + '</p>'
-    + (final ? '' : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="frRetryBtn">Retry</button></div>');
+    + (final ? '' : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="frRetryBtn" data-fr-retry="' + scope + '">Retry</button></div>');
 }
 
 // The write message: pending, ambiguous, refused — or the success notice.
@@ -176,7 +177,7 @@ function sessionRequestsListHTML(w, principal){
     + FINANCE_REQUEST_STATUSES.map(function(s){ return statusOption(s, SESSION_REQUESTS_STATUS_TEXT[s]); }).join('') + '</select></form>'
     + '<div class="auth-actions"><button class="btn btn-accent" type="button" id="frNewBtn"' + dis + '>' + (kind === 'paymentRequest' ? 'New payment request' : 'New reimbursement') + '</button></div>';
   const head = '<h2 class="section-title" id="frListTitle" tabindex="-1">Requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '</h2>';
-  if(w.listStatus === SESSION_REQUESTS_STATUS.ERROR && w.error && w.error.scope === 'list') return controls + head + sessionRequestsErrorHTML(w.error, 'frReadError');
+  if(w.listStatus === SESSION_REQUESTS_STATUS.ERROR && w.errors.list) return controls + head + sessionRequestsErrorHTML(w.errors.list, 'frReadError', 'list');
   if(w.listStatus !== SESSION_REQUESTS_STATUS.READY || !w.list) return controls + head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_REQUESTS_TEXT.loadingList) + '</p>';
   const rows = w.list.filter(function(r){ return !w.filter || r.status === w.filter; });
   if(!rows.length) return controls + head + '<div class="empty" role="status">' + (w.list.length ? 'No ' + escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) + ' requests in this range.' : 'No requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '.') + '</div>';
@@ -222,7 +223,7 @@ function sessionRequestsActionHTML(w, r){
 
 function sessionRequestsHistoryHTML(w){
   let body;
-  if(w.historyStatus === SESSION_REQUESTS_STATUS.ERROR && w.error && w.error.scope === 'history') body = sessionRequestsErrorHTML(w.error, 'frHistoryError');
+  if(w.historyStatus === SESSION_REQUESTS_STATUS.ERROR && w.errors.history) body = sessionRequestsErrorHTML(w.errors.history, 'frHistoryError', 'history');
   else if(w.historyStatus !== SESSION_REQUESTS_STATUS.READY || !w.history) body = '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_REQUESTS_TEXT.loadingHistory) + '</p>';
   else if(!w.history.length) body = '<p class="hint">No activity recorded for this request.</p>';
   else body = '<ul class="ux-list" id="frHistory">' + w.history.map(function(e){ return '<li><span>' + escapeHtml(sessionAuditActionLabel(e)) + '</span><span class="mono">' + sessionAuditTimeHTML(e) + '</span></li>'; }).join('') + '</ul>';
@@ -233,7 +234,7 @@ function sessionRequestsDetailHTML(w, principal){
   const busy = w.mutation.status === SESSION_REQUESTS_MUTATION_STATUS.PENDING;
   const dis = busy || w.action ? ' disabled' : '';
   const back = '<div class="auth-actions"><button class="btn" type="button" id="frBackBtn"' + (busy ? ' disabled' : '') + '>Back to the list</button></div>';
-  if(w.detailStatus === SESSION_REQUESTS_STATUS.ERROR && w.error && w.error.scope === 'detail') return back + sessionRequestsMessageHTML(w) + sessionRequestsErrorHTML(w.error, 'frReadError');
+  if(w.detailStatus === SESSION_REQUESTS_STATUS.ERROR && w.errors.detail) return back + sessionRequestsMessageHTML(w) + sessionRequestsErrorHTML(w.errors.detail, 'frReadError', 'detail');
   if(!w.detail) return back + sessionRequestsMessageHTML(w) + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_REQUESTS_TEXT.loadingDetail) + '</p>';
   const r = w.detail;
   const rows = [
@@ -288,7 +289,7 @@ function bindSessionRequests(app){
     SessionRequests.applyRange();
   });
   on('frFilter', 'change', function(){ SessionRequests.setFilter(this.value); });
-  on('frRetryBtn', 'click', function(){ SessionRequests.retry(); });
+  on('frRetryBtn', 'click', function(){ SessionRequests.retry(this.getAttribute('data-fr-retry')); });   // the read whose error it is shown with
   on('frNewBtn', 'click', function(){ SessionRequests.openCreate(); });
   on('frBackBtn', 'click', function(){ SessionRequests.back(); });
   on('frEditBtn', 'click', function(){ SessionRequests.openEdit(); });
