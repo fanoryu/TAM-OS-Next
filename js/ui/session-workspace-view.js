@@ -47,6 +47,12 @@
    record id never appears in the page: a row is opened by its position in the list
    that was rendered, and the record version stays in memory.
 
+   I4 (Owner GO 2026-11-18, ADR-016): one more section, Finance Requests (CEO) / My
+   reimbursements (Employee), rendered by js/ui/session-requests-view.js from
+   SessionRequests / SessionRequestsStore (js/core/session-requests.js), after Transactions in
+   the Finance group. CEO Home shows the report's Approved-not-paid amount and count apart
+   from income, expenses and net; Employee Home has a My reimbursements card.
+
    Classic shared global scope; existing CSS classes only.
    ============================================================ */
 
@@ -472,15 +478,19 @@ function sessionWorkspaceHTML(auth, w){
   const audit = ceo && SessionAuditStore.snapshot().open && !payroll && !overtime;   // AFI-4g: the CEO's Audit
   const fin = SessionLedgerStore.snapshot();
   const finance = ceo && fin.open && !payroll && !overtime && !audit;                // Phase 1: the CEO's Finance
-  const home = (ceo || employee) && SessionHome.isOpen() && !payroll && !overtime && !audit && !finance;   // UX-1: the role's Home
+  const rq = SessionRequestsStore.snapshot();
+  const requests = (ceo || employee) && rq.open && !payroll && !overtime && !audit && !finance;   // I4: Finance Requests / My reimbursements
+  const home = (ceo || employee) && SessionHome.isOpen() && !payroll && !overtime && !audit && !finance && !requests;   // UX-1: the role's Home
   const busy = w.mutation.status === SESSION_MUTATION_STATUS.PENDING || ot.mutation.status === SESSION_OVERTIME_MUTATION_STATUS.PENDING
-    || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING || fin.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING;
+    || pr.mutation.status === SESSION_PAYROLL_MUTATION_STATUS.PENDING || fin.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING
+    || rq.mutation.status === SESSION_REQUESTS_MUTATION_STATUS.PENDING;
   let title = ceo ? (w.detailId ? (w.form ? 'Edit employee record' : 'Employee record') : 'Employees') : (employee ? 'My profile' : 'TAM OS');
   let body;
   if(payroll){ title = renderSessionPayrollTitle(pr, principal); body = renderSessionPayrollHTML(principal, pr); }
   else if(overtime){ title = renderSessionOvertimeTitle(principal, ot); body = renderSessionOvertimeHTML(principal, ot); }
   else if(audit){ const au = SessionAuditStore.snapshot(); title = renderSessionAuditTitle(au); body = renderSessionAuditHTML(au); }
   else if(finance){ title = renderSessionLedgerTitle(fin); body = renderSessionLedgerHTML(fin); }
+  else if(requests){ title = renderSessionRequestsTitle(principal, rq); body = renderSessionRequestsHTML(principal, rq); }
   else if(home){ title = 'Home'; body = sessionHomeHTML(principal); }
   else if(ceo) body = w.detailId ? sessionWorkspaceDetailHTML(w) : sessionWorkspaceListHTML(w);
   else if(employee) body = sessionWorkspaceSelfHTML(w);
@@ -496,7 +506,7 @@ function sessionWorkspaceHTML(auth, w){
   // UI-INT-1: in the shell the page head sits above the cards, as on every v2.11.0 page; Account
   // security is its own card under it.
   const page = head + sessionAccountSecurityHTML(auth.account) + '<section class="card" aria-labelledby="authTitle">' + body + '</section>';
-  const route = payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? (fin.view === 'transactions' ? 'transactions' : 'finance') : (home ? SESSION_HOME_ROUTE : 'main'))));
+  const route = payroll ? 'payroll' : (overtime ? 'overtime' : (audit ? 'audit' : (finance ? (fin.view === 'transactions' ? 'transactions' : 'finance') : (requests ? 'requests' : (home ? SESSION_HOME_ROUTE : 'main')))));
   sessionRouteSync(model, route);                              // UX-1: the address bar follows the page
   return sessionShellHTML(model, route, busy, page);
 }
@@ -516,6 +526,7 @@ function bindSessionWorkspace(app){
   if(SessionOvertimeStore.snapshot().open){ bindSessionOvertime(app); return; }
   if(SessionAuditStore.snapshot().open){ bindSessionAudit(app); return; }
   if(SessionLedgerStore.snapshot().open){ bindSessionLedger(app); return; }
+  if(SessionRequestsStore.snapshot().open){ bindSessionRequests(app); return; }   // I4
   const au = AuthBoot.snapshot();
   if(SessionHome.isOpen() && au.principal){ bindSessionHome(app); return; }
   on('swActiveTab', function(){ SessionWorkspace.showArchived(false); });
@@ -601,6 +612,7 @@ function renderSessionWorkspace(app, auth){
   SessionPayroll.ensureLoaded(auth.principal);                 // AFI-4c1: and the Payroll data (AFI-4c2: My payroll too)
   SessionAudit.ensureLoaded(auth.principal);                   // AFI-4g: and the CEO's Audit data
   SessionLedger.ensureLoaded(auth.principal);                 // Phase 1: and the CEO's Finance data
+  SessionRequests.ensureLoaded(auth.principal);               // I4: and the Finance Requests data
   // UX-1: once per sign-in, a direct link / refresh opens the route in the address bar (through
   // sessionGoTo, which repaints); otherwise the role's Home. The listener is bound once.
   if(!SessionRouter.bound && typeof addEventListener === 'function'){ SessionRouter.bound = true; addEventListener('hashchange', sessionRouteOnHash); }
@@ -623,6 +635,7 @@ function renderSessionWorkspace(app, auth){
   const prHint = SessionPayrollStore.takeFocus();
   const auHint = SessionAuditStore.takeFocus();
   const fiHint = SessionLedgerStore.takeFocus();
+  const rqHint = SessionRequestsStore.takeFocus();
   // WP-1: an Account security request (open, failure, outcome, close) wins for this paint.
   const acEl = sessionAccountFocusTarget(app, AuthBoot.takeAccountFocus());
   if(acEl && typeof acEl.focus === 'function'){ acEl.focus(); return; }
@@ -645,6 +658,11 @@ function renderSessionWorkspace(app, auth){
     const el = sessionLedgerFocusTarget(app, fiHint);
     if(el && typeof el.focus === 'function'){ el.focus(); return; }
     return sessionWorkspaceFocus(app, fiHint ? 'heading' : null, kept);
+  }
+  if(SessionRequestsStore.snapshot().open){
+    const el = sessionRequestsFocusTarget(app, rqHint);
+    if(el && typeof el.focus === 'function'){ el.focus(); return; }
+    return sessionWorkspaceFocus(app, rqHint ? 'heading' : null, kept);
   }
   sessionWorkspaceFocus(app, hint, kept);
 }
@@ -738,12 +756,16 @@ function sessionHomeCeoFinanceHTML(t, month){
   let body = sessionHomeStateHTML(r, 'swhRetry');
   if(!body){
     const d = r.data;
+    // I4 (ADR-016 §6): the Approved-not-paid line, below and apart from the paid totals — never added to them.
+    const a = d.approvedNotPaid;
     body = '<dl class="ux-kv"><dt>Income (Rp)</dt><dd>' + moneyHTML(d.general.income) + '</dd><dt>Expenses (Rp)</dt><dd>' + moneyHTML(d.general.expense) + '</dd>'
       + '<dt>Net (Rp)</dt><dd>' + moneyHTML(d.general.net) + '</dd></dl>'
-      + '<p class="ux-muted">Financial Posts for ' + escapeHtml(sessionPayrollMonthLabel(month)) + ', as reported by TAM OS.</p>';
+      + '<p class="ux-muted">Financial Posts for ' + escapeHtml(sessionPayrollMonthLabel(month)) + ', as reported by TAM OS.</p>'
+      + '<dl class="ux-kv" id="swhApprovedNotPaid"><dt>Approved, not paid (Rp)</dt><dd>' + moneyHTML(a.amount) + '</dd><dt>Requests waiting for payment</dt><dd>' + escapeHtml(String(a.count)) + '</dd></dl>'
+      + '<p class="ux-muted">' + (a.count ? 'Approved finance requests dated this month. Committed, not yet paid: not counted in the expenses or the net above.' : 'No approved request is waiting for payment this month.') + '</p>';
   }
   return sessionHomeCardHTML('swhFinance', 'Finance — ' + sessionPayrollMonthLabel(month), body,
-    sessionHomeGoHTML('finance', 'Open Overview', false) + sessionHomeGoHTML('transactions', 'Transactions', false));
+    sessionHomeGoHTML('finance', 'Open Overview', false) + sessionHomeGoHTML('transactions', 'Transactions', false) + sessionHomeGoHTML('requests', 'Finance Requests', false));
 }
 
 function sessionHomeCeoActivityHTML(t){
@@ -793,7 +815,9 @@ function sessionHomeHTML(principal){
       + sessionHomeCeoOvertimeHTML(t, month) + sessionHomeCeoPayrollHTML(t, month) + sessionHomeCeoFinanceHTML(t, month) + sessionHomeCeoActivityHTML(t) + '</div>';
   }
   return '<div class="ux-home-grid">' + sessionHomeEmployeeLatestHTML(t) + sessionHomeEmployeeOvertimeHTML(t, month)
-    + sessionHomeCardHTML('swhProfile', 'My profile', '<p class="ux-muted">Your employee record as held by TAM OS.</p>', sessionHomeGoHTML('main', 'Open My profile', false)) + '</div>';
+    + sessionHomeCardHTML('swhProfile', 'My profile', '<p class="ux-muted">Your employee record as held by TAM OS.</p>', sessionHomeGoHTML('main', 'Open My profile', false))
+    // I4: a shortcut only — no read here; the section reads the employee's own reimbursements.
+    + sessionHomeCardHTML('swhReimbursements', 'My reimbursements', '<p class="ux-muted">Claim back an expense you paid for the company, and follow its approval and payment.</p>', sessionHomeGoHTML('requests', 'Open My reimbursements', false)) + '</div>';
 }
 
 function bindSessionHome(app){
@@ -858,7 +882,8 @@ function sessionWorkspaceIdle(){
   return SessionEmployeeStore.snapshot().mutation.status !== SESSION_MUTATION_STATUS.PENDING
     && SessionOvertimeStore.snapshot().mutation.status !== SESSION_OVERTIME_MUTATION_STATUS.PENDING
     && SessionPayrollStore.snapshot().mutation.status !== SESSION_PAYROLL_MUTATION_STATUS.PENDING
-    && SessionLedgerStore.snapshot().mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING;
+    && SessionLedgerStore.snapshot().mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING
+    && SessionRequestsStore.snapshot().mutation.status !== SESSION_REQUESTS_MUTATION_STATUS.PENDING;   // I4
 }
 
 // Opens a SESSION destination: true when it was opened. Only a route of the principal's nav
@@ -874,7 +899,9 @@ function sessionGoTo(id){
     if(id !== 'payroll') SessionPayroll.show(false);
     if(id !== 'audit') SessionAudit.show(false);
     if(id !== 'finance' && id !== 'transactions') SessionLedger.show(false);
+    if(id !== 'requests') SessionRequests.show(false);      // I4
     if(id === 'home') SessionHome.load();
+    else if(id === 'requests'){ if(!SessionRequestsStore.snapshot().open) SessionRequests.show(true); }
     else if(id === 'overtime') SessionOvertime.show(true);
     else if(id === 'payroll') SessionPayroll.show(true);
     else if(id === 'audit') SessionAudit.show(true);
@@ -956,6 +983,10 @@ const SESSION_ROUTES = Object.freeze([
     labels: Object.freeze({ ceo: 'Overtime', employee: 'My overtime' }) }),
   Object.freeze({ id: 'transactions', button: 'swSectionTransactions', group: 'finance', navItem: 'transactions', hash: 'transactions',
     labels: Object.freeze({ ceo: 'Transactions' }) }),
+  // I4 (ADR-016): Finance Requests (CEO) / My reimbursements (Employee), after Transactions. NAV_GROUPS
+  // has no request item, so the item borrows the Finance group's Execution icon (navItem only; the label is ours).
+  Object.freeze({ id: 'requests', button: 'swSectionRequests', group: 'finance', navItem: 'executioncenter', hash: Object.freeze({ ceo: 'requests', employee: 'reimbursements' }),
+    labels: Object.freeze({ ceo: 'Finance Requests', employee: 'My reimbursements' }) }),
   Object.freeze({ id: 'audit', button: 'swSectionAudit', group: 'system', navItem: 'activity', hash: 'activity',
     labels: Object.freeze({ ceo: 'Activity Log' }) })
 ]);

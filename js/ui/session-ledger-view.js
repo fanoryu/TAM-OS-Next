@@ -53,6 +53,8 @@ const SESSION_LEDGER_TEXT = Object.freeze({
   loadingList: 'Loading transactions…',
   payrollNote: 'Payroll is not allocated to a Financial Post. Posted is the payroll recorded for the months this range touches; paid is the payroll paid on dates in this range. Only paid payroll counts in the consolidated total, so nothing is counted twice.',
   voidedNote: 'Voided transactions are shown in the history and never counted.',
+  // I4: the Approved-not-paid line of the report.
+  approvedNote: 'An approved request is a commitment, not a payment. It becomes an expense only when its payment is recorded, on the payment date, and is then counted once in the expenses above.',
   noEdit: 'A recorded transaction cannot be edited or deleted. To correct one, void it with a reason and record it again.',
   voidLead: 'Voiding keeps the transaction in the history, marked Voided, and removes it from every total. It cannot be undone.'
 });
@@ -111,7 +113,14 @@ function sessionLedgerDashboardHTML(w){
   const c = r.consolidated;
   const consolidated = '<h3 class="section-title">Consolidated (cash basis)</h3><div class="table-wrap" id="sfConsolidated"><table><caption>Consolidated total, cash basis: general income and expenses plus payroll paid in this range</caption><thead><tr><th scope="col">Total</th><th scope="col">Income (Rp)</th><th scope="col">Expenses (Rp)</th><th scope="col">Net (Rp)</th></tr></thead><tbody>'
     + '<tr><th scope="row">Financial Posts and payroll paid (cash basis)</th><td>' + moneyHTML(c.income) + '</td><td>' + moneyHTML(c.expense) + '</td><td>' + moneyHTML(c.net) + '</td></tr></tbody></table></div>';
-  return head + posts + payroll + consolidated;
+  // I4 (ADR-016 §6): the Approved-not-paid finance requests, per Financial Post — shown apart, never counted in a total above.
+  const a = r.approvedNotPaid;
+  const pending = '<h3 class="section-title">Approved, not paid</h3><div class="table-wrap" id="sfApprovedNotPaid"><table><caption>Approved finance requests dated in this range, waiting for payment — not counted in any total above</caption>'
+    + '<thead><tr><th scope="col">Financial Post</th><th scope="col">Amount (Rp)</th><th scope="col">Requests</th></tr></thead><tbody>'
+    + a.posts.map(function(p){ return '<tr><th scope="row">' + escapeHtml(transactionPostName(p.code)) + '</th><td>' + moneyHTML(p.amount) + '</td><td>' + escapeHtml(String(p.count)) + '</td></tr>'; }).join('')
+    + '<tr><th scope="row">All Financial Posts</th><td>' + moneyHTML(a.amount) + '</td><td>' + escapeHtml(String(a.count)) + '</td></tr></tbody></table></div>'
+    + '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.approvedNote) + '</p>';
+  return head + posts + payroll + consolidated + pending;
 }
 
 // UX-1 (UX-OD-07): what the typed amount reads as, display only — the field value is sent exactly as

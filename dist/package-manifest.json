@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "cac8053b2d1b41bbfd82a9455f97d787ddc702a9678cc6ce31cd836a52b55a7e",
+  "packageDigest": "ae827b48c5e8c151d06292b6ae1323323e75b69b1da59ebbd788b4959c4905b7",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3234055,
-    "sha256": "3b4c661b74668b6174536beaa1e533c3e9e21bb2eec448f9e2f1a59a98323d01"
+    "bytes": 3313211,
+    "sha256": "6d7ee3fa0ed2e1fd168524dba40e2b34c0905c91ee60a8f17a937c3f7fc61f89"
   },
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 10219,
-      "sha256": "2ea750c49cae3de606f84a5f7fe1bd7262e39e13881eda58a1b6413d8fcb007d"
+      "bytes": 10373,
+      "sha256": "5bbdacaea6e6efca65a348417d159d0f77b3492c30c94d28bffd5c0aa8ac7345"
     },
     {
       "path": "js/analytics/compare.js",
@@ -114,8 +114,8 @@
     },
     {
       "path": "js/core/auth-boot.js",
-      "bytes": 20815,
-      "sha256": "9beae975db27d747ef829ac053d9c556b6f76b4f2c8f75a3b247596047f516e8"
+      "bytes": 20904,
+      "sha256": "230b3c614f22f0c101270f576ec186abf0dc7c1b95339b6040f9509872c29a1a"
     },
     {
       "path": "js/core/auth-flow.js",
@@ -178,6 +178,11 @@
       "sha256": "355dbfa7fa9a4837627830c61ce60cf7b898d49b9c62ab3283699da94a172a9f"
     },
     {
+      "path": "js/core/request-api.js",
+      "bytes": 19486,
+      "sha256": "d20a8e59c52c223e79a3af49c49a1c1fa659291771813be8787c4e4a67a7fcbb"
+    },
+    {
       "path": "js/core/session-audit.js",
       "bytes": 13125,
       "sha256": "05b3fbf44668594a445866cf7e600c64ca6e807e0e893b4d73cdbebc298f51fc"
@@ -211,6 +216,11 @@
       "path": "js/core/session-payroll.js",
       "bytes": 86645,
       "sha256": "65ec3fb3567f005a2fa4331be708bb165916b290809318cd2fa0cc34ada4a3e2"
+    },
+    {
+      "path": "js/core/session-requests.js",
+      "bytes": 24670,
+      "sha256": "e47a60b67308a0b6a0049d515157760ce800b0a6822fb36cdd358c6dc862ed86"
     },
     {
       "path": "js/core/stabilization.js",
@@ -504,8 +514,8 @@
     },
     {
       "path": "js/ui/session-ledger-view.js",
-      "bytes": 23161,
-      "sha256": "fe4522da7272994244ee3525f9b8a92c81d5d9ae803899c73ba9f0c0a02bc1a1"
+      "bytes": 24414,
+      "sha256": "a2f2a3a1e6bdf150c8f76e6ea7b52d7ddc4cf3f5e6c24e6c5e6fe027c4e2f744"
     },
     {
       "path": "js/ui/session-overtime-view.js",
@@ -518,9 +528,14 @@
       "sha256": "26fe975730080e622c9a57d813da2d40740cd674e3b18e4b9a09547702784fe1"
     },
     {
+      "path": "js/ui/session-requests-view.js",
+      "bytes": 30034,
+      "sha256": "81697e260c61a331528e04a6b553cf6675fd97a18605bc406c9c57c68893650c"
+    },
+    {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 85732,
-      "sha256": "6acff6cf3387abb775be59052c7c6f0669c9bf7114983d03fae19db18df8ad31"
+      "bytes": 88816,
+      "sha256": "d595e26f9cb7f11019c689274ed9fe801d0f59fd17bb3cde685131d88865c0b6"
     },
     {
       "path": "js/ui/settings-about.js",

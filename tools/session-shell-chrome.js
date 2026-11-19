@@ -35,17 +35,22 @@ const APP_TAGLINE = pick('APP_TAGLINE');
 // Log. Was (Phase 1): Overtime, Payroll, Finance; Audit.
 // UX-1 (Owner GO 2026-11-17): Home (the Dashboard group, labelled "Home") comes first for both roles and is
 // the landing page; Overtime is a primary Finance item after Payroll (no "More").
+// I4 (Owner GO 2026-11-18, ADR-016): a last Finance item — CEO "Finance Requests" after Transactions, Employee
+// "My reimbursements" after My overtime — with the Finance group's Execution icon (U+26A1 U+FE0E). Was: absent.
+const REQUESTS_IC = '⚡︎';
 const NAV = Object.freeze({
   ceo: [['Home', [['home', 'swSectionHome', '◆', 'Home', false]]],
     ['People', [['main', 'swSectionMain', '☺', 'Employees', false]]],
     ['Finance', [['finance', 'swSectionFinance', '▣', 'Overview', false], ['payroll', 'swSectionPayroll', '৳', 'Payroll', false],
-      ['overtime', 'swSectionOvertime', '⏱', 'Overtime', false], ['transactions', 'swSectionTransactions', '≡', 'Transactions', false]]],
+      ['overtime', 'swSectionOvertime', '⏱', 'Overtime', false], ['transactions', 'swSectionTransactions', '≡', 'Transactions', false],
+      ['requests', 'swSectionRequests', REQUESTS_IC, 'Finance Requests', false]]],
     ['System', [['audit', 'swSectionAudit', '☰', 'Activity Log', false]]]],
   employee: [['Home', [['home', 'swSectionHome', '◆', 'Home', false]]],
     ['People', [['main', 'swSectionMain', '☺', 'My profile', false]]],
-    ['My work', [['payroll', 'swSectionPayroll', '৳', 'My payroll', false], ['overtime', 'swSectionOvertime', '⏱', 'My overtime', false]]]]
+    ['My work', [['payroll', 'swSectionPayroll', '৳', 'My payroll', false], ['overtime', 'swSectionOvertime', '⏱', 'My overtime', false],
+      ['requests', 'swSectionRequests', REQUESTS_IC, 'My reimbursements', false]]]]
 });
-const ROUTES = Object.freeze({ ceo: ['home', 'main', 'finance', 'payroll', 'overtime', 'transactions', 'audit'], employee: ['home', 'main', 'payroll', 'overtime'] });
+const ROUTES = Object.freeze({ ceo: ['home', 'main', 'finance', 'payroll', 'overtime', 'transactions', 'requests', 'audit'], employee: ['home', 'main', 'payroll', 'overtime', 'requests'] });
 const GROUP_IDS = Object.freeze({ 'Home': 'dashboard', 'People': 'people', 'Finance': 'finance', 'My work': 'finance', 'System': 'system' });
 
 // The chrome in its first-paint state: rail expanded, every group expanded, "More" open; then the breadcrumb (Group / Page) opening <main>.

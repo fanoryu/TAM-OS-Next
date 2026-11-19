@@ -119,6 +119,7 @@ const AuthBoot = (function(){
       SessionPayrollStore.clear();           // AFI-4c1: nor the SESSION Payroll data
       SessionAuditStore.clear();             // AFI-4g: nor the SESSION Audit data
       SessionLedgerStore.clear();           // Phase 1: nor the SESSION Finance data
+      SessionRequestsStore.clear();         // I4: nor the SESSION Finance Requests data
     }
     paint();
   }

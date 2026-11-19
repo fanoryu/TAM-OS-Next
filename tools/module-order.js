@@ -173,6 +173,14 @@ module.exports = [
   'core/employee-api.js',
   'core/session-employee.js',
   'ui/session-workspace-view.js',
+  // --- I4 SESSION Finance Requests (ADR-016): the strict finance request client (reads over
+  //     ApiClient, writes over authSessionMutation), the in-memory section data and its controller,
+  //     and its view (a section of the SESSION workspace: Finance Requests for the CEO, My
+  //     reimbursements for an Employee). Loads after the clients it uses (transaction-api.js,
+  //     payroll-api.js, audit-api.js, employee-api.js) and the workspace view that renders it. ---
+  'core/request-api.js',
+  'core/session-requests.js',
+  'ui/session-requests-view.js',
   // --- AFI-2 authenticated boot: the SESSION-mode state machine and its views. Both
   //     define functions/frozen objects only; app-bootstrap.js starts AuthBoot only when
   //     AUTH_MODE is SESSION (LOCAL — the shipped default — never touches them).
