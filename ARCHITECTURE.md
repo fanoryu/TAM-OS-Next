@@ -81,6 +81,10 @@ verified) add 3 unit and 24 database tests: 470 PHP tests without the database, 
 *(Phase 1, 2026-11-13 — merged into `main` via PR #85, not deployed; see "General
 transactions and the financial report — Phase 1" below: 91 modules in 105 package files, verifier 3092, fifteen CI
 harnesses, 477 PHP tests without the database and 926 with it, migration head 0038, 58 routes.)*
+*(Finance Phase 2 and UX-1, 2026-11-19 — merged into `main` via PRs #94–#96, not deployed; see
+[ADR-016](docs/03-adr/ADR-016-Finance-Payment-Requests-and-Reimbursements.md): 95 modules in 109 package files, verifier
+3116, migration head 0041, 67 routes, ACTIONS 24. New frontend modules `js/core/session-home.js` (UX-1) and
+`js/core/request-api.js`, `js/core/session-requests.js`, `js/ui/session-requests-view.js` (I4); new migrations `0039`–`0041`.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`

@@ -1,9 +1,9 @@
 # TAM OS NEXT — Current status
 
 DOC-01-R2 proposed status record, 2026-11-09 (Asia/Jakarta), incorporating Owner decision D-2.
-Baseline refreshed 2026-11-14 after UI-INT-1 merged (PR #88); the D-2 decisions are unchanged.
-Source baseline snapshot: main at ec3cf40e53a3203a59babf3e6e8c83e252a933ae, observed read-only on 2026-11-14
-(previous snapshot: 40c63216c201e0ca0a4594505f9919800e597ff1, 2026-11-13).
+Baseline refreshed 2026-11-19 after Finance Phase 2 and UX-1 merged (PRs #94–#96); the D-2 decisions are unchanged.
+Source baseline snapshot: main at f206f6b5328dab2963b3bcc05510d1ac28025433, observed read-only on 2026-11-19
+(previous snapshot: ec3cf40e53a3203a59babf3e6e8c83e252a933ae, 2026-11-14).
 This is a dated snapshot, not a permanently current commit; later commits to main do not update it.
 This file centralizes current status; it does not supersede accepted technical/security decisions
 or authorize work. Detailed historical wording stays in its original records.
@@ -73,6 +73,14 @@ not deployed and not released, and a new encrypted backup-and-restore rehearsal 
 UI-INT-1 merged after the previous snapshot (PR #88, merge commit ec3cf40): the SESSION shell uses the v2.11.0
 sidebar labels and chrome over the existing SESSION pages, with unsupported areas hidden (frontend only; no CSS,
 backend, route, migration or storage change). It is merged source in the v3.0.0 candidate: not deployed and not released.
+Finance Phase 2 merged after the previous snapshot under [ADR-016](03-adr/ADR-016-Finance-Payment-Requests-and-Reimbursements.md) (Accepted 2026-11-17):
+CEO-reviewed payment requests and employee reimbursements, each paid in one atomic step that also records
+the matching expense transaction. The backend is AWP-01 (PR #94, merge commit f17cc77; migrations 0039–0041, head
+0041; 67 routes; ACTIONS 24), the SESSION Finance Requests UI is I4 (PR #95, merge commit 150f81e), and I4-F01
+(PR #96, merge commit f206f6b) keeps the request list, detail and history read errors separate. UX-1 merged with
+AWP-01 in PR #94: a read-only role Home page in SESSION built from existing reads, and unified money and status
+presentation in the SESSION payroll, overtime and ledger views. All of it is merged source in the v3.0.0
+candidate: not deployed and not released.
 The Distribution-1 package and backend source exist. These are source implementation statements, not
 hosting acceptance. Detailed milestone, PR and verification records remain in
 [AI_CONTEXT](../AI_CONTEXT.md), [CHANGELOG](../CHANGELOG.md), [Milestones](05-milestones/Milestones.md)
@@ -84,7 +92,9 @@ SESSION is not production-ready. Dashboards, Contracts, the LOCAL Finance Overvi
 Recurring, Cash Flow, Budget, Execution, Bank Accounts, Projects, Vendors, Calendar, Reports,
 Global Search, Settings and Data Portability have not reached full SESSION parity. Neither the payroll
 posting/payment actions nor the Phase 1 Financial Post transactions and report mean the LOCAL Finance workspace
-has migrated; Phase 1 has no category-level reporting (PD-4). Refer to
+has migrated; Phase 1 has no category-level reporting (PD-4). Phase 2 has no receipt attachments (P2-D7), no
+Finance/HR roles or maker-checker (the CEO-only control of PD-1 is a deferred production risk) and no
+category-level reporting. Refer to
 [release scope](../RELEASE_NOTES.md) and the [forward roadmap](01-roadmap/Milestone_Roadmap.md).
 
 Hosting runtime/header/database/security evidence remains incomplete; repository checks and local

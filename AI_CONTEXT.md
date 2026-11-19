@@ -767,6 +767,19 @@ SESSION DOM keeps no inline style, and the U2 drawer and focus rules are unchang
 `97658f5a…`; verifier 3092; 45 runtime harnesses pass. Remaining differences from v2.11.0 are listed in the UI-INT-1
 evidence package outside the repository.
 
+**Finance Phase 2 and UX-1 (merged into `main` via PRs #94–#96, 2026-11-19; NOT released, NOT deployed).**
+[ADR-016](docs/03-adr/ADR-016-Finance-Payment-Requests-and-Reimbursements.md) was Accepted by the Owner on 2026-11-17
+(revision 1 with clarifications 1–5) and is filed in `docs/03-adr/`. **AWP-01** (backend, `fe855af` + CI `1999a04`)
+adds payment requests and employee reimbursements with CEO review and one atomic payment step that also records the
+matching expense transaction: migrations `0039`–`0041` (head **0041**), **67** routes, **ACTIONS 24** (three
+reimbursement self actions). **UX-1** (`50be4db`) adds a read-only role Home page in SESSION built from existing reads
+and unifies money and status presentation in the SESSION payroll, overtime and ledger views. Both merged together via
+PR #94 (`f17cc77`, integration `328a305`). **I4** adds the SESSION Finance Requests UI (PR #95, `150f81e`); **I4-F01**
+keeps the list, detail and history read errors separate (PR #96, `f206f6b`). Package 109 files, 95 modules, digest
+`b0b011a2…`; verifier 3116. Out of scope: receipt attachments (P2-D7), Finance/HR roles and maker-checker (PD-1; the
+CEO-only control is a deferred production risk), category-level reporting. ADR-015 stays reserved and DD-P1-08 open.
+Hostinger stays **NO-GO**, Gate D and Gate R **HOLD**, release v3.0.0 **HOLD**.
+
 **Owner direction (2026-11-05).** Core SESSION first; the first deployment is **staging only, with fabricated data**,
 conditional on a staging-specific Gate D ruling and the SDR-0006 X1–X8 evidence; phased Full Parity afterwards. The
 sequence is recorded in [`docs/01-roadmap/Milestone_Roadmap.md`](docs/01-roadmap/Milestone_Roadmap.md); it authorizes no

@@ -42,6 +42,7 @@ links forward if it is ever superseded.
 | [ADR-012](ADR-012-Contract-Overlap-Enforcement.md) | Contract Overlap Enforcement | **Proposed** | PR-5I review ([ARCH-005](../02-architecture/Architecture_Evolution_Backlog.md#arch-005--contract-overlap-enforcement)) |
 | [ADR-013](ADR-013-Repository-Layer.md) | Repository Layer (entity-named, collection-grained) | Accepted | PR-8A … PR-11A; direction ATR-008, validated ATR-009 / ATR-010 |
 | [ADR-014](ADR-014-Contract-Core-Field-Authority.md) | Contract Core Field Authority | Accepted | OQ-1 discovery ([ARCH-008](../02-architecture/Architecture_Evolution_Backlog.md#arch-008--contract-authority-reconciliation-addendum)); product decisions PD-1 / PD-2 |
+| [ADR-016](ADR-016-Finance-Payment-Requests-and-Reimbursements.md) | Finance Payment Requests and Reimbursements | Accepted | Phase 2; Owner decisions P2-D1 … P2-D8; accepted 2026-11-17 |
 
 **Proposed** ADRs (ADR-008 through ADR-012) record open questions from the PR-5G, PR-5H, and PR-5I
 Atlas Reviews. They are not Accepted, record no decision, and authorize no implementation; see the
@@ -58,3 +59,8 @@ ownership boundary for every mutable Contract field: one `ContractCoreAggregate`
 status, the date extent and renewal unchanged under their existing aggregates. It resolves **OQ-1**;
 **OQ-2 and OQ-3 remain open**. Like the Proposed ADRs above, it authorizes **no** implementation — it
 decides ownership only.
+
+[ADR-016](ADR-016-Finance-Payment-Requests-and-Reimbursements.md) is **Accepted** (2026-11-17) and records the
+Finance Phase 2 decision: CEO-reviewed payment requests and employee reimbursements, their lifecycle,
+payment and reporting, with the Owner's acceptance clarifications in its *Acceptance* section. **ADR-015 is
+reserved** for the Phase 1 decisions PD-1 … PD-11 and is not yet filed; DD-P1-08 stays open.
