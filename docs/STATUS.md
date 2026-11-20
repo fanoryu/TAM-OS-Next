@@ -96,6 +96,10 @@ has migrated; Phase 1 has no category-level reporting (PD-4). Phase 2 has no rec
 Finance/HR roles or maker-checker (the CEO-only control of PD-1 is a deferred production risk) and no
 category-level reporting. Refer to
 [release scope](../RELEASE_NOTES.md) and the [forward roadmap](01-roadmap/Milestone_Roadmap.md).
+CR-01 is decided but not implemented: [ADR-017](03-adr/ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md)
+(Accepted 2026-11-20, after this snapshot) has the CEO assign a reimbursement's Financial Post at approval.
+Until it is implemented, the source still asks for the post when a reimbursement is created. Migration 0042
+is not written; it needs its own implementation GO.
 
 Hosting runtime/header/database/security evidence remains incomplete; repository checks and local
 fabricated-data tests cannot establish production readiness. The [backend runbook](BACKEND-DEPLOYMENT-RUNBOOK.md)

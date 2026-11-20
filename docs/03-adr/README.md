@@ -42,7 +42,8 @@ links forward if it is ever superseded.
 | [ADR-012](ADR-012-Contract-Overlap-Enforcement.md) | Contract Overlap Enforcement | **Proposed** | PR-5I review ([ARCH-005](../02-architecture/Architecture_Evolution_Backlog.md#arch-005--contract-overlap-enforcement)) |
 | [ADR-013](ADR-013-Repository-Layer.md) | Repository Layer (entity-named, collection-grained) | Accepted | PR-8A … PR-11A; direction ATR-008, validated ATR-009 / ATR-010 |
 | [ADR-014](ADR-014-Contract-Core-Field-Authority.md) | Contract Core Field Authority | Accepted | OQ-1 discovery ([ARCH-008](../02-architecture/Architecture_Evolution_Backlog.md#arch-008--contract-authority-reconciliation-addendum)); product decisions PD-1 / PD-2 |
-| [ADR-016](ADR-016-Finance-Payment-Requests-and-Reimbursements.md) | Finance Payment Requests and Reimbursements | Accepted | Phase 2; Owner decisions P2-D1 … P2-D8; accepted 2026-11-17 |
+| [ADR-016](ADR-016-Finance-Payment-Requests-and-Reimbursements.md) | Finance Payment Requests and Reimbursements | Accepted (reimbursement Financial Post provisions superseded by [ADR-017](ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md)) | Phase 2; Owner decisions P2-D1 … P2-D8; accepted 2026-11-17 |
+| [ADR-017](ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md) | CEO-Assigned Financial Post for Reimbursements | Accepted | CR-01; Owner decisions CR01-D1 … CR01-D9, R-1 … R-3, G-1 … G-5, R2-2; accepted 2026-11-20 |
 
 **Proposed** ADRs (ADR-008 through ADR-012) record open questions from the PR-5G, PR-5H, and PR-5I
 Atlas Reviews. They are not Accepted, record no decision, and authorize no implementation; see the
@@ -64,3 +65,10 @@ decides ownership only.
 Finance Phase 2 decision: CEO-reviewed payment requests and employee reimbursements, their lifecycle,
 payment and reporting, with the Owner's acceptance clarifications in its *Acceptance* section. **ADR-015 is
 reserved** for the Phase 1 decisions PD-1 … PD-11 and is not yet filed; DD-P1-08 stays open.
+
+[ADR-017](ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md) is **Accepted** (2026-11-20) and records
+CR-01: an employee reimbursement has no Financial Post until the CEO assigns or confirms one when approving it,
+in the same atomic write that keeps the previous post on the record. It supersedes only ADR-016's
+reimbursement Financial Post provisions, listed in its *Superseded provisions* table; ADR-016 is unchanged and
+stays in force for everything else. It authorizes **no** implementation: a CR-01 implementation GO must name
+migration 0042 and its tests.
