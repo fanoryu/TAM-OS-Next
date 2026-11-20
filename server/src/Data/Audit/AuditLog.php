@@ -105,6 +105,8 @@ final class AuditLog
     ];
     /** Phase 2: the request operations that name changed fields (all others name none). */
     public const REQUEST_FIELD_OPERATIONS = ['create', 'update'];
+    /** ADR-017 §3 (G-4): a reimbursement approval names, at most, the Financial Post it changed — the name, never a value. */
+    public const REQUEST_APPROVE_FIELDS = ['financialPost'];
     public const FIELD_PATTERN = '/^[a-z][A-Za-z]{0,31}$/';
 
     public const APPEND_SQL = 'INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, target_user_id, request_id, fields) VALUES (:company_id, UTC_TIMESTAMP(6), :actor_user_id, :actor_membership_id, :action, :entity, :id, NULL, :request_id, :fields)';
@@ -356,7 +358,8 @@ final class AuditLog
      * Phase 2: appends one row for the finance request $financeRequestId under the Action Policy
      * authorized. $kindOperation is the lifecycle operation (create, update, submit, approve, reject,
      * cancel, pay); the row's operation follows migration 0041 (none for the reimbursement self
-     * drafts). A create or update names its changed field names, a transition none. Must run inside
+     * drafts). A create or update names its changed field names, a transition none — except a
+     * reimbursement approval that changed the Financial Post, which names financialPost (ADR-017). Must run inside
      * the transaction of the change.
      *
      * @param list<string> $fields changed field names (camelCase), never values
@@ -374,8 +377,9 @@ final class AuditLog
         if ($allowed === [null] && !in_array($kindOperation, self::REQUEST_FIELD_OPERATIONS, true)) {
             throw new \LogicException('a reimbursement self draft row records a create or an update');
         }
-        if (!in_array($kindOperation, self::REQUEST_FIELD_OPERATIONS, true) && $fields !== []) {
-            throw new \LogicException('a finance request transition names no field');
+        if (!in_array($kindOperation, self::REQUEST_FIELD_OPERATIONS, true) && $fields !== []
+            && !($kindOperation === 'approve' && $auth->action === Action::FinanceManage && $fields === self::REQUEST_APPROVE_FIELDS)) {
+            throw new \LogicException('a finance request transition names no field (an approval at most financialPost)');
         }
         $record = $auth->record;
         if ($record !== null && ($record->entity !== 'financeRequest' || $record->id !== $financeRequestId)) {

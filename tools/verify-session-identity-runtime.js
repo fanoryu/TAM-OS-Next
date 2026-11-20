@@ -17,6 +17,10 @@
    AFI-5b: the shipped AUTH_MODE is SESSION, so the canonical seam dispatches to
    SessionIdentityProvider for real (no test-seam install) and the test seam is inert:
    a provider installed through it is never consulted. There is no local fixture.
+
+   CR-01 (ADR-017 §6, Owner direction 2026-11-20), section 3c: the second, narrower
+   target selector — employeeId on exactly POST /api/finance-requests/create in a body
+   whose kind is exactly 'reimbursement' — and everything around it still refused.
    ============================================================ */
 
 const fs = require('fs');
@@ -80,6 +84,7 @@ function loadRuntime(){
     + ' mapSessionProjection: mapSessionProjection, getCurrentUser: getCurrentUser, isValidUser: isValidUser,'
     + ' getCurrentWorkspace: getCurrentWorkspace,'
     + ' setIdentityProviderForTesting: setIdentityProviderForTesting, API_BODY_KEY_EXCEPTION: API_BODY_KEY_EXCEPTION,'
+    + ' API_REIMBURSEMENT_OWNER_EXCEPTION: API_REIMBURSEMENT_OWNER_EXCEPTION,'
     // Builds a request body in the PAGE realm, as a real caller would (a plain object
     // from this Node realm has a different Object.prototype).
     + ' body: function(json){ return JSON.parse(json); } };';
@@ -278,6 +283,65 @@ const ME_CEO = { userId: 'u_ceo_1', membershipId: 'm_ceo_1', role: 'ceo', employ
     const r404 = await (async () => { rt.net.responder = () => resp(404, errEnv('not_found')); return rt.ApiClient.request(OT_CREATE, { method: 'POST', body: rt.body(okBody) }); })();
     check(r404.ok === false && r404.kind === K.NOT_FOUND && rt.net.calls.length === n + 1,
       'selector: an out-of-scope target is the server answer (404 NOT_FOUND passed through), never decided by the client');
+  }
+
+  /* ---------- 3c. CR-01: the reimbursement-owner selector (kind reimbursement only) ---------- */
+  {
+    const rt = loadRuntime(); const K = rt.API_RESULT_KINDS;
+    const X = rt.API_REIMBURSEMENT_OWNER_EXCEPTION;
+    check(!!X && Object.isFrozen(X) && Object.keys(X).sort().join() === 'key,kind,method,path'
+      && X.method === 'POST' && X.path === '/api/finance-requests/create' && X.key === 'employeeId' && X.kind === 'reimbursement'
+      && rt.w.API_REIMBURSEMENT_OWNER_EXCEPTION === undefined,
+      'CR-01 selector: one frozen exception { POST, /api/finance-requests/create, employeeId, kind reimbursement }, not on window');
+    try { X.kind = 'paymentRequest'; X.path = '/api/finance-requests/update'; } catch(_e){ /* frozen */ }
+    check(X.kind === 'reimbursement' && X.path === '/api/finance-requests/create', 'CR-01 selector: the exception cannot be rewritten at runtime');
+    const OT = rt.API_BODY_KEY_EXCEPTION;
+    check(OT.method === 'POST' && OT.path === '/api/overtime-records/create' && OT.key === 'employeeId' && Object.keys(OT).sort().join() === 'key,method,path',
+      'CR-01 selector: the D-AFI4b1-3 Overtime exception is unchanged');
+    rt.net.responder = () => resp(200, okEnv({ done: true }));
+    rt.CsrfHolder.replace(CSRF_A);
+    const FR_CREATE = '/api/finance-requests/create';
+    const okBody = '{"kind":"reimbursement","employeeId":"emp_srv_1","category":"Transport","description":"Fabricated","amount":"1.00","documentDate":"2026-10-01","idempotencyKey":"' + 'f'.repeat(32) + '"}';
+    const r0 = await rt.ApiClient.request(FR_CREATE, { method: 'POST', body: rt.body(okBody), csrf: true });
+    check(r0.ok === true && rt.net.calls.length === 1 && rt.net.calls[0].url === FR_CREATE && rt.net.calls[0].init.body === okBody && rt.net.calls[0].init.headers['X-CSRF-Token'] === CSRF_A,
+      'CR-01 selector: a reimbursement create naming employeeId is sent, body byte-exact, CSRF header attached');
+    const n = rt.net.calls.length;
+    const shapes = {
+      'kind paymentRequest': { kind: 'paymentRequest', employeeId: 'emp_srv_1' },
+      'no kind': { employeeId: 'emp_srv_1' },
+      'kind Reimbursement (case)': { kind: 'Reimbursement', employeeId: 'emp_srv_1' },
+      'kind as an array': { kind: ['reimbursement'], employeeId: 'emp_srv_1' },
+      'employee_id': { kind: 'reimbursement', employee_id: 'emp_srv_1' },
+      'employeeId beside role': { kind: 'reimbursement', employeeId: 'emp_srv_1', role: 'ceo' },
+      'employeeId beside companyId': { kind: 'reimbursement', employeeId: 'emp_srv_1', companyId: 'c_1' }
+    };
+    const leaked = [];
+    for(const [label, b] of Object.entries(shapes)){
+      const r = await rt.ApiClient.request(FR_CREATE, { method: 'POST', body: rt.body(JSON.stringify(b)) });
+      if(r.kind !== K.CLIENT_FAULT) leaked.push(label);
+    }
+    check(leaked.length === 0 && rt.net.calls.length === n, 'CR-01 selector: on the create path, ' + Object.keys(shapes).length + ' other shapes stay CLIENT_FAULT (another kind, no kind, employee_id, role, companyId) — nothing sent' + (leaked.length ? ' >> ' + leaked.join(', ') : ''));
+    const routes = ['/api/finance-requests/update', '/api/finance-requests/submit', '/api/finance-requests/approve', '/api/finance-requests/reject',
+      '/api/finance-requests/cancel', '/api/finance-requests/pay', '/api/finance-requests/create/', '/api/finance-requests/creat', '/api/Finance-requests/create',
+      '/api/general-transactions/create', '/api/employees/create'];
+    const open = [];
+    for(const route of routes){
+      const r = await rt.ApiClient.request(route, { method: 'POST', body: rt.body('{"kind":"reimbursement","employeeId":"emp_srv_1"}') });
+      if(r.kind !== K.CLIENT_FAULT) open.push(route);
+    }
+    const methods = [];
+    for(const method of ['PUT', 'PATCH', 'DELETE']){
+      const r = await rt.ApiClient.request(FR_CREATE, { method: method, body: rt.body(okBody) });
+      if(r.kind !== K.CLIENT_FAULT) methods.push(method);
+    }
+    check(open.length === 0 && methods.length === 0 && rt.net.calls.length === n,
+      'CR-01 selector: employeeId with kind reimbursement on every other route (' + routes.length + ') and with PUT / PATCH / DELETE stays CLIENT_FAULT' + (open.concat(methods).length ? ' >> ' + open.concat(methods).join(', ') : ''));
+    const ot = await rt.ApiClient.request('/api/overtime-records/create', { method: 'POST', body: rt.body('{"kind":"reimbursement","employeeId":"emp_srv_1","monthKey":"2026-10","hours":"1.00"}') });
+    check(ot.ok === true && rt.net.calls.length === n + 1, 'CR-01 selector: the Overtime create selector still passes (no regression)');
+    rt.net.responder = () => resp(400, errEnv('validation_failed'));
+    const r400 = await rt.ApiClient.request(FR_CREATE, { method: 'POST', body: rt.body(okBody) });
+    check(r400.ok === false && r400.kind === K.VALIDATION && rt.net.calls.length === n + 2,
+      'CR-01 selector: an Employee naming another employee is the server\'s answer (400 passed through) — the client never decides scope');
   }
 
   /* ---------- 4. CsrfHolder ---------- */

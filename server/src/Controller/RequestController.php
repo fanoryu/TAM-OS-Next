@@ -8,6 +8,7 @@ use TamOs\Http\ErrorCode;
 use TamOs\Http\Request;
 use TamOs\Identity\AuthSession;
 use TamOs\Identity\Principal;
+use TamOs\Policy\Scope;
 use TamOs\Request\RequestService;
 use TamOs\Request\RequestView;
 
@@ -37,7 +38,7 @@ final class RequestController
     public function list(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
         $q = self::query($request);
-        return ['financeRequests' => array_map(RequestView::request(...), $this->service->list(self::principal($session), $q['from'] ?? null, $q['to'] ?? null, $q['status'] ?? null, $q['kind'] ?? null))];
+        return ['financeRequests' => array_map(static fn (array $row): array => self::view($session, $row), $this->service->list(self::principal($session), $q['from'] ?? null, $q['to'] ?? null, $q['status'] ?? null, $q['kind'] ?? null))];
     }
 
     /**
@@ -46,49 +47,61 @@ final class RequestController
      */
     public function find(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->read(self::principal($session), self::query($request)['id'] ?? null))];
+        return ['financeRequest' => self::view($session, $this->service->read(self::principal($session), self::query($request)['id'] ?? null))];
     }
 
     /** @param array<string, mixed> $json */
     public function create(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->create(self::principal($session), $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->create(self::principal($session), $json, $requestId))];
     }
 
     /** @param array<string, mixed> $json */
     public function update(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->update(self::principal($session), $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->update(self::principal($session), $json, $requestId))];
     }
 
     /** @param array<string, mixed> $json */
     public function submit(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->transition(self::principal($session), 'submit', $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->transition(self::principal($session), 'submit', $json, $requestId))];
     }
 
     /** @param array<string, mixed> $json */
     public function approve(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->transition(self::principal($session), 'approve', $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->transition(self::principal($session), 'approve', $json, $requestId))];
     }
 
     /** @param array<string, mixed> $json */
     public function reject(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->transition(self::principal($session), 'reject', $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->transition(self::principal($session), 'reject', $json, $requestId))];
     }
 
     /** @param array<string, mixed> $json */
     public function cancel(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->transition(self::principal($session), 'cancel', $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->transition(self::principal($session), 'cancel', $json, $requestId))];
     }
 
     /** @param array<string, mixed> $json */
     public function pay(Request $request, ?AuthSession $session, array $json, string $requestId): array
     {
-        return ['financeRequest' => RequestView::request($this->service->pay(self::principal($session), $json, $requestId))];
+        return ['financeRequest' => self::view($session, $this->service->pay(self::principal($session), $json, $requestId))];
+    }
+
+    /**
+     * The request projection for the session's principal: the CEO (company scope) sees the
+     * pre-approval snapshot, an Employee (self scope) never does (ADR-017 R-3).
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function view(?AuthSession $session, array $row): array
+    {
+        return RequestView::request($row, !Scope::of(self::principal($session))->isSelf());
     }
 
     private static function principal(?AuthSession $session): Principal

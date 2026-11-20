@@ -10,6 +10,11 @@ declare(strict_types=1);
  * Employee 403s before any lookup, the store, audit and view guards, the pay order of §5 and the
  * "Approved, not paid" report line kept outside every total. Behaviour against MariaDB is
  * tests/Db/RequestWorkflowTest.php (NOT RUN until the disposable database is authorized).
+ *
+ * CR-01 (ADR-017): the reimbursement Financial Post is the CEO's — an Employee body never carries it,
+ * the CEO's create may omit it, a post is never cleared, every reimbursement approval names one, and
+ * the pre-approval snapshot is the CEO's to read (R-3). The cases marked "CR-01" prove it without a
+ * database; tests/Db/RequestSchemaTest.php and RequestWorkflowTest.php prove it against MariaDB.
  */
 
 use TamOs\Data\Audit\AuditLog;
@@ -57,7 +62,9 @@ $code = static function (callable $fn): array {
 $today = '2026-10-31';
 $payment = ['kind' => 'paymentRequest', 'financialPost' => 'GA', 'category' => 'Operasional Rutin', 'description' => 'Fabricated office rent', 'amount' => '2500000.00', 'payee' => 'Fabricated Landlord', 'documentDate' => '2026-11-15', 'idempotencyKey' => str_repeat('e', 32)];
 $reimb = ['kind' => 'reimbursement', 'employeeId' => 'emp_1', 'financialPost' => 'DRONE', 'category' => 'Perjalanan Dinas', 'description' => 'Fabricated taxi fare', 'amount' => '150000.00', 'documentDate' => '2026-10-30', 'idempotencyKey' => str_repeat('f', 32)];
-$selfReimb = array_diff_key($reimb, ['employeeId' => true]);
+// CR-01 (ADR-017) authorized revision: an Employee reimbursement body carries neither employeeId nor financialPost.
+// Was: array_diff_key($reimb, ['employeeId' => true]) — the Employee chose the post.
+$selfReimb = array_diff_key($reimb, ['employeeId' => true, 'financialPost' => true]);
 $target = ['financeRequestId' => str_repeat('b', 32), 'expectedVersion' => 1];
 $row = static fn (array $over = []): array => $over + [
     'id' => str_repeat('b', 32), 'kind' => 'reimbursement', 'owner_employee_id' => 'emp_1', 'financial_post' => 'GA', 'category' => 'Perjalanan Dinas',
@@ -65,6 +72,8 @@ $row = static fn (array $over = []): array => $over + [
     'status_reason' => null, 'version' => 1, 'created_by_user_id' => str_repeat('1', 32), 'created_at' => '2026-10-30 01:00:00.000000',
     'updated_at' => '2026-10-30 01:00:00.000000', 'finance_transaction_id' => null, 'paid_on' => null, 'payment_method' => null,
     'paid_by_user_id' => null, 'paid_at' => null,
+    // CR-01 (ADR-017, migration 0042): the pre-approval snapshot columns, "not captured" by default.
+    'pre_approval_financial_post' => null, 'pre_approval_post_captured' => 0,
 ];
 $src = static fn (string $rel): string => (string) file_get_contents(dirname(__DIR__, 2) . '/' . $rel);
 
@@ -152,8 +161,9 @@ return [
         $r = RequestInput::create($reimb, $today, false);
         assertSame(['reimbursement', 'emp_1', null], [$r['kind'], $r['employeeId'], $r['payee']]);
         $s = RequestInput::create($selfReimb, $today, true);
-        assertSame(['reimbursement', null, null], [$s['kind'], $s['employeeId'], $s['payee']], 'the owner comes from the session, never the body');
-        assertSame([ErrorCode::ValidationFailed, ['employeeId']], $code(static fn () => RequestInput::create($reimb, $today, true)), 'A3: an Employee body with an employee field is 400');
+        assertSame(['reimbursement', null, null, null], [$s['kind'], $s['employeeId'], $s['payee'], $s['financialPost']], 'the owner comes from the session, never the body; no post until the CEO assigns one (ADR-017)');
+        // CR-01 (ADR-017) authorized revision: $reimb also carries financialPost, which an Employee body may not. Was: ['employeeId'].
+        assertSame([ErrorCode::ValidationFailed, ['employeeId', 'financialPost']], $code(static fn () => RequestInput::create($reimb, $today, true)), 'A3: an Employee body with an employee field is 400');
         assertSame([ErrorCode::ValidationFailed, ['employeeId']], $code(static fn () => RequestInput::create($selfReimb + ['employeeId' => 'emp_2'], $today, true)), 'A3: naming another employee is 400 too');
         assertSame([ErrorCode::ValidationFailed, ['employeeId']], $code(static fn () => RequestInput::create($selfReimb, $today, false)), 'a CEO reimbursement names its employee');
         assertSame([ErrorCode::ValidationFailed, ['payee']], $code(static fn () => RequestInput::create($reimb + ['payee' => 'x'], $today, false)), 'a reimbursement has no payee');
@@ -193,8 +203,11 @@ return [
         assertSame([ErrorCode::ValidationFailed, ['documentDate']], $code(static fn () => RequestInput::applyUpdate('reimbursement', [], ['documentDate' => '2026-11-01'], $today)), 'an update obeys the same rule');
     },
     'update, transition, approve, reject, cancel and pay inputs: exact keys, a positive expectedVersion, a reason only on reject and cancel, a closed payment method, paidOn not after today' => static function () use ($code, $today, $target): void {
-        assertSame([ErrorCode::ValidationFailed, RequestInput::FIELDS], $code(static fn () => RequestInput::update($target)), 'an empty patch names the fields');
-        assertSame(['amount' => '1.00'], RequestInput::update($target + ['amount' => '1.00'])['patch']);
+        // CR-01 (ADR-017) authorized revision: update() takes the caller's scope. Was: RequestInput::update($target).
+        assertSame([ErrorCode::ValidationFailed, RequestInput::FIELDS], $code(static fn () => RequestInput::update($target, false)), 'an empty patch names the fields');
+        assertSame([ErrorCode::ValidationFailed, RequestInput::SELF_FIELDS], $code(static fn () => RequestInput::update($target, true)), 'an Employee\'s empty patch names their fields (no post)');
+        assertSame(['amount' => '1.00'], RequestInput::update($target + ['amount' => '1.00'], false)['patch']);
+        assertSame(['amount' => '1.00'], RequestInput::update($target + ['amount' => '1.00'], true)['patch']);
         foreach ([0, -1, '1', 1.0, null, 4294967296] as $v) {
             assertSame([ErrorCode::ValidationFailed, ['expectedVersion']], $code(static fn () => RequestInput::transition(['expectedVersion' => $v] + $target)), 'version ' . var_export($v, true));
         }
@@ -318,10 +331,12 @@ return [
         assertTrue(str_contains(AuditLog::APPEND_REQUEST_SELF_SQL, 'WHERE :owner_employee_id = :self_employee_id'), 'an Employee row is written only for their own reimbursement');
     },
     'the view: strict — a known kind, post and status, an owner exactly on a reimbursement, a payment exactly when Paid; no company, key or version source leaks' => static function () use ($row): void {
-        $v = RequestView::request($row());
+        // CR-01 (ADR-017) authorized revision: request() takes whether the reader sees the snapshot (the CEO).
+        // Was: RequestView::request($row) with one projection for every reader.
+        $v = RequestView::request($row(), false);
         assertSame(['id', 'kind', 'employeeId', 'financialPost', 'category', 'description', 'amount', 'payee', 'documentDate', 'status', 'statusReason', 'version', 'createdByUserId', 'createdAt', 'updatedAt', 'payment'], array_keys($v));
         assertSame(['emp_1', null, 1, '2026-10-30T01:00:00.000000Z'], [$v['employeeId'], $v['payment'], $v['version'], $v['createdAt']]);
-        $paid = RequestView::request($row(['status' => 'Paid', 'finance_transaction_id' => str_repeat('c', 32), 'paid_on' => '2026-10-31', 'payment_method' => 'cash', 'paid_by_user_id' => str_repeat('1', 32), 'paid_at' => '2026-10-31 02:00:00.000000']));
+        $paid = RequestView::request($row(['status' => 'Paid', 'finance_transaction_id' => str_repeat('c', 32), 'paid_on' => '2026-10-31', 'payment_method' => 'cash', 'paid_by_user_id' => str_repeat('1', 32), 'paid_at' => '2026-10-31 02:00:00.000000']), false);
         assertSame(['financeTransactionId' => str_repeat('c', 32), 'paidOn' => '2026-10-31', 'paymentMethod' => 'cash', 'paidByUserId' => str_repeat('1', 32), 'paidAt' => '2026-10-31T02:00:00.000000Z'], $paid['payment']);
         foreach ([
             'Paid without a payment' => ['status' => 'Paid'],
@@ -332,7 +347,8 @@ return [
             'an unknown status' => ['status' => 'Reviewed'],
             'a zero amount' => ['amount' => '0.00'],
         ] as $label => $over) {
-            assertThrows(\LogicException::class, static fn () => RequestView::request($row($over)), $label);
+            assertThrows(\LogicException::class, static fn () => RequestView::request($row($over), false), $label);
+            assertThrows(\LogicException::class, static fn () => RequestView::request($row($over), true), $label . ' (CEO)');
         }
     },
     'pay (ADR-016 §5): lock → key → guards → expense → payment → Paid → two audit rows, in one READ COMMITTED transaction that never touches the employee; the expense is the request\'s, dated paidOn, with a server key' => static function () use ($src): void {
@@ -427,5 +443,163 @@ return [
         assertTrue(strpos($pay, "->appendRequest(\$auth, \$actor, 'pay'") < strpos($pay, '->appendPaidExpense('), 'the request audit row precedes it');
         $boot = (string) file_get_contents(dirname(__DIR__, 2) . '/src/bootstrap.php');
         assertTrue(str_contains($boot, 'new RequestService($business)'), 'production passes the BusinessData only');
+    },
+
+    'CR-01 T-H1/T-H3/T-H5 (ADR-017 §1): an Employee reimbursement never carries a post; the CEO\'s may omit it but never sends null or an unknown code; a payment request always carries one' => static function () use ($code, $today, $payment, $reimb, $selfReimb): void {
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::create($selfReimb + ['financialPost' => 'GA'], $today, true)), 'T-H1: an Employee naming a post is 400 naming it');
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::create($selfReimb + ['financialPost' => null], $today, true)), 'T-H1: even a null post');
+        assertSame(null, RequestInput::create($selfReimb, $today, true)['financialPost'], 'T-H1: without one, the Draft has no post');
+        $ceoNoPost = array_diff_key($reimb, ['financialPost' => true]);
+        assertSame(null, RequestInput::create($ceoNoPost, $today, false)['financialPost'], 'T-H3: a CEO reimbursement without a post');
+        assertSame('DRONE', RequestInput::create($reimb, $today, false)['financialPost'], 'T-H3: a CEO reimbursement with a canonical post (DRONE, shown as RnD)');
+        foreach ([null, 'RND', 'RnD', 'drone', '', 1] as $v) {
+            assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::create(['financialPost' => $v] + $reimb, $today, false)), 'T-H3: CEO post ' . var_export($v, true));
+        }
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::create(array_diff_key($payment, ['financialPost' => true]), $today, false)), 'T-H5: a payment request needs its post');
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::create(['financialPost' => null] + $payment, $today, false)), 'T-H5: never null');
+    },
+
+    'CR-01 T-H2/T-H4 (ADR-017 §1, D9): an Employee update may not name the post; the CEO sets or replaces it, never clears it' => static function () use ($code, $target): void {
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::update($target + ['financialPost' => 'GA'], true)), 'T-H2: an Employee naming a post is 400');
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::update($target + ['financialPost' => 'GA', 'amount' => '2.00'], true)), 'T-H2: with other fields too');
+        assertSame(['description' => 'Fabricated'], RequestInput::update($target + ['description' => 'Fabricated'], true)['patch'], 'T-H2: the other fields still update');
+        assertSame(['financialPost' => 'TJB'], RequestInput::update($target + ['financialPost' => 'TJB'], false)['patch'], 'T-H4: the CEO sets or replaces the post');
+        foreach ([null, 'RND', ''] as $v) {
+            assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::update($target + ['financialPost' => $v], false)), 'T-H4: never cleared or unknown: ' . var_export($v, true));
+        }
+        assertSame(['financialPost'], RequestInput::changed(
+            ['financialPost' => null, 'category' => 'c', 'description' => 'd', 'amount' => '1.00', 'payee' => null, 'documentDate' => '2026-10-01'],
+            ['financialPost' => 'GA', 'category' => 'c', 'description' => 'd', 'amount' => '1.00', 'payee' => null, 'documentDate' => '2026-10-01'],
+        ), 'T-H4: assigning a missing post is a change of financialPost');
+        assertSame(['financialPost' => 'NPIP', 'category' => 'c'], RequestInput::applyUpdate('reimbursement', ['financialPost' => null, 'category' => 'c'], ['financialPost' => 'NPIP'], '2026-10-31'));
+    },
+
+    'CR-01 T-A1/T-A3 input side (ADR-017 D6): approve validates a sent post before any lookup; the kind decides whether it is required or refused' => static function () use ($code, $target, $principal, $unreachable): void {
+        $a = $target + ['expectedAmount' => '150000.00'];
+        assertSame(null, RequestInput::approve($a)['financialPost'], 'no post sent');
+        assertSame('DRONE', RequestInput::approve($a + ['financialPost' => 'DRONE'])['financialPost']);
+        foreach ([null, 'RND', 'ga', 7] as $v) {
+            assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::approve($a + ['financialPost' => $v])), 'post ' . var_export($v, true));
+        }
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::approvalPost('reimbursement', null)), 'T-A1: a reimbursement approval names its post');
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::approvalPost('paymentRequest', 'GA')), 'T-A3: a payment request approval names none');
+        assertSame('GA', RequestInput::approvalPost('reimbursement', 'GA'));
+        assertSame(null, RequestInput::approvalPost('paymentRequest', null));
+        $service = new RequestService($unreachable());
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => $service->transition($principal('ceo', null), 'approve', $a + ['financialPost' => 'RND'], str_repeat('d', 32))), 'an unknown post is 400 before any lookup');
+        assertSame(ErrorCode::Forbidden, assertThrows(ApiError::class, static fn () => $service->transition($principal('employee', 'emp_1'), 'approve', $a + ['financialPost' => 'GA'], str_repeat('d', 32)))->errorCode, 'T-A4: an Employee approve is 403 before any lookup');
+        foreach (['reject', 'cancel'] as $op) {
+            assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => $service->transition($principal('ceo', null), $op, $target + ['reason' => 'x', 'financialPost' => 'GA'], str_repeat('d', 32))), $op . ' takes no post');
+        }
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::transition($target + ['financialPost' => 'GA'])), 'submit takes no post');
+        assertSame([ErrorCode::ValidationFailed, ['financialPost']], $code(static fn () => RequestInput::pay($target + ['expectedAmount' => '1.00', 'paidOn' => '2026-10-01', 'paymentMethod' => 'cash', 'idempotencyKey' => str_repeat('c', 32), 'financialPost' => 'GA'], '2026-10-31')), 'pay takes no post: it uses the approved one');
+    },
+
+    'CR-01 T-A2/T-A5 source side (ADR-017 §3): the kind check precedes the transaction; the previous post is the locked row\'s; one statement writes Approved, the final post and the snapshot; the audit row names financialPost exactly when it changed' => static function () use ($src): void {
+        $s = $src('src/Request/RequestService.php');
+        $t = substr($s, (int) strpos($s, 'public function transition('), (int) strpos($s, 'public function pay(') - (int) strpos($s, 'public function transition('));
+        assertTrue(strpos($t, 'RequestInput::approvalPost($kind, $in[\'financialPost\'])') < strpos($t, '$this->data->atomically('), 'T-A1: the post rule is decided before the transaction (nothing written, no audit)');
+        assertTrue(str_contains($t, "\$previous = \$current['financial_post'] === null ? null : (string) \$current['financial_post'];"), 'T-A5: the previous post is the value read under the lock');
+        assertTrue(strpos($t, '$this->locked(') < strpos($t, '$previous = ') && strpos($t, "'finance_request_amount'") < strpos($t, '->approveReimbursement('), 'state, version and amount guards run first');
+        assertTrue(str_contains($t, "\$previous === \$final ? [] : ['financialPost']"), 'T-A2/T-A7: the audit row names financialPost iff the post changed (field name only, PD-9)');
+        assertTrue(str_contains($t, "!== 1) {\n                    throw new \\LogicException('approve: the locked Submitted reimbursement did not change');"), 'T-A5: a statement matching no row rolls the approval back');
+        $sql = RequestStore::APPROVE_REIMBURSEMENT_SQL;
+        assertTrue(str_contains($sql, "SET status = 'Approved', pre_approval_financial_post = :previous_post, pre_approval_post_captured = 1, financial_post = :financial_post, version = version + 1"), 'one statement, bound values only (no assignment reads a column)');
+        assertTrue(str_contains($sql, "AND kind = 'reimbursement' AND financial_post <=> :previous_post_check AND pre_approval_post_captured = 0 AND version = :expected_version AND status = 'Submitted'"), 'the null-safe re-check, the uncaptured row, the version and Submitted');
+        $p = $src('src/Data/Request/RequestStore.php');
+        assertSame(1, substr_count($p, 'pre_approval_post_captured = 1'), 'exactly one statement captures the snapshot');
+    },
+
+    'CR-01 T-W1 store and audit side (ADR-017 §4): the Employee statements never name the post; the store and the audit log refuse the wrong writer' => static function () use ($db, $principal): void {
+        assertTrue(!str_contains(RequestStore::CREATE_SELF_SQL, ':financial_post') && str_contains(RequestStore::CREATE_SELF_SQL, "'reimbursement', NULL, :category"), 'an Employee Draft is created with a NULL post');
+        assertTrue(!str_contains(RequestStore::UPDATE_SELF_SQL, 'financial_post'), 'T-H2 SQL level: the Employee update does not name financial_post');
+        foreach (['TRANSITION_SQL', 'TRANSITION_SELF_SQL', 'INSERT_PAYMENT_SQL', 'CREATE_SQL', 'CREATE_SELF_SQL', 'UPDATE_SQL', 'UPDATE_SELF_SQL'] as $k) {
+            assertTrue(!str_contains((string) constant(RequestStore::class . '::' . $k), 'pre_approval_'), $k . ' never writes the snapshot');
+        }
+        $store = new RequestStore($db());
+        $ceo = $principal('ceo', null);
+        $emp = $principal('employee', 'emp_1');
+        $own = new ScopedRecord(Scope::of($emp), 'financeRequest', str_repeat('b', 32), 'emp_1', 'Draft');
+        $key = str_repeat('c', 32);
+        $draft = ['kind' => 'reimbursement', 'financialPost' => 'GA', 'category' => 'c', 'description' => 'd', 'amount' => '1.00', 'payee' => null, 'documentDate' => '2026-10-01', 'idempotencyKey' => $key];
+        foreach ([
+            'an Employee Draft with a post' => static fn () => $store->create(new Authorization(Action::ReimbursementCreateSelfDraft, Scope::of($emp), $own), $key, $draft, $key),
+            'a payment request without a post' => static fn () => $store->create(new Authorization(Action::FinanceManage, Scope::of($ceo), null), $key, ['kind' => 'paymentRequest', 'financialPost' => null, 'payee' => 'p'] + $draft, $key),
+            'an approval under a self action' => static fn () => $store->approveReimbursement(new Authorization(Action::ReimbursementSubmitSelf, Scope::of($emp), $own), $key, 1, null, 'GA'),
+            'an approval under finance.execute' => static fn () => $store->approveReimbursement(new Authorization(Action::FinanceExecute, Scope::of($ceo), null), $key, 1, null, 'GA'),
+            'an approval of a malformed id' => static fn () => $store->approveReimbursement(new Authorization(Action::FinanceManage, Scope::of($ceo), null), 'req_1', 1, null, 'GA'),
+        ] as $label => $fn) {
+            assertThrows(\LogicException::class, $fn, $label);
+        }
+        $audit = new AuditLog($db());
+        $id = str_repeat('b', 32);
+        foreach ([
+            'an approval naming another field too' => [new Authorization(Action::FinanceManage, Scope::of($ceo), null), $ceo, 'approve', ['financialPost', 'amount']],
+            'an approval naming only another field' => [new Authorization(Action::FinanceManage, Scope::of($ceo), null), $ceo, 'approve', ['category']],
+            'a reject naming the post' => [new Authorization(Action::FinanceManage, Scope::of($ceo), null), $ceo, 'reject', ['financialPost']],
+            'a cancel naming the post' => [new Authorization(Action::FinanceManage, Scope::of($ceo), null), $ceo, 'cancel', ['financialPost']],
+            'a payment naming the post' => [new Authorization(Action::FinanceExecute, Scope::of($ceo), null), $ceo, 'pay', ['financialPost']],
+            'an Employee submit naming the post' => [new Authorization(Action::ReimbursementSubmitSelf, Scope::of($emp), $own), $emp, 'submit', ['financialPost']],
+        ] as $label => [$auth, $actor, $op, $fields]) {
+            assertThrows(\LogicException::class, static fn () => $audit->appendRequest($auth, $actor, $op, $id, $fields, str_repeat('d', 32)), $label);
+        }
+        assertSame(['financialPost'], AuditLog::REQUEST_APPROVE_FIELDS, 'G-4: the approval names at most the post, never a value');
+    },
+
+    'CR-01 T-V1/T-V2/T-V3 (ADR-017 §2, §6, R-3): a NULL post only on an unapproved reimbursement; the snapshot is consistent; the Employee projection has no snapshot key, the CEO\'s has both after the post' => static function () use ($row): void {
+        foreach (['Draft', 'Submitted', 'Rejected', 'Cancelled'] as $s) {
+            $over = ['financial_post' => null, 'status' => $s] + ($s === 'Rejected' || $s === 'Cancelled' ? ['status_reason' => 'Fabricated'] : []);
+            assertSame(null, RequestView::request($row($over), false)['financialPost'], 'T-V1: no post yet, ' . $s);
+            assertSame([null, null, false], (static function (array $v): array { return [$v['financialPost'], $v['preApprovalFinancialPost'], $v['preApprovalPostCaptured']]; })(RequestView::request($row($over), true)), 'T-V1 CEO, ' . $s);
+        }
+        $paidCols = ['finance_transaction_id' => str_repeat('c', 32), 'paid_on' => '2026-10-31', 'payment_method' => 'cash', 'paid_by_user_id' => str_repeat('1', 32), 'paid_at' => '2026-10-31 02:00:00.000000'];
+        $approved = ['status' => 'Approved', 'financial_post' => 'DRONE', 'pre_approval_financial_post' => 'GA', 'pre_approval_post_captured' => 1];
+        $ceo = RequestView::request($row($approved), true);
+        assertSame(RequestView::CEO_FIELDS, array_keys($ceo), 'T-V3: the CEO projection');
+        assertSame(['DRONE', 'GA', true], [$ceo['financialPost'], $ceo['preApprovalFinancialPost'], $ceo['preApprovalPostCaptured']], 'T-V3: previous and final');
+        $emp = RequestView::request($row($approved), false);
+        assertSame(RequestView::FIELDS, array_keys($emp), 'T-V2: the Employee projection');
+        assertTrue(!array_key_exists('preApprovalFinancialPost', $emp) && !array_key_exists('preApprovalPostCaptured', $emp) && $emp['financialPost'] === 'DRONE', 'T-V2/R-3: no snapshot key; the assigned post only');
+        assertSame([null, true], (static function (array $v): array { return [$v['preApprovalFinancialPost'], $v['preApprovalPostCaptured']]; })(RequestView::request($row(['status' => 'Approved', 'pre_approval_post_captured' => 1]), true)), 'captured with no previous post');
+        assertSame([null, false], (static function (array $v): array { return [$v['preApprovalFinancialPost'], $v['preApprovalPostCaptured']]; })(RequestView::request($row(['status' => 'Approved']), true)), 'T-V3: approved before 0042 — not captured');
+        RequestView::request($row(['status' => 'Cancelled', 'status_reason' => 'Fabricated', 'pre_approval_post_captured' => 1]), true);
+        RequestView::request($row(['status' => 'Paid', 'pre_approval_post_captured' => 1] + $paidCols), true);
+        foreach ([
+            'an Approved reimbursement without a post' => ['status' => 'Approved', 'financial_post' => null],
+            'a Paid reimbursement without a post' => ['status' => 'Paid', 'financial_post' => null] + $paidCols,
+            'a payment request without a post' => ['kind' => 'paymentRequest', 'owner_employee_id' => null, 'payee' => 'p', 'financial_post' => null],
+            'an unknown previous post' => ['status' => 'Approved', 'pre_approval_financial_post' => 'RND', 'pre_approval_post_captured' => 1],
+            'a previous post without the capture flag' => ['status' => 'Approved', 'pre_approval_financial_post' => 'GA'],
+            'a capture flag outside 0/1' => ['status' => 'Approved', 'pre_approval_post_captured' => 2],
+            'captured on a Draft' => ['pre_approval_post_captured' => 1],
+            'captured on a Submitted request' => ['status' => 'Submitted', 'pre_approval_post_captured' => 1],
+            'captured on a payment request' => ['kind' => 'paymentRequest', 'owner_employee_id' => null, 'payee' => 'p', 'status' => 'Approved', 'pre_approval_post_captured' => 1],
+            'captured and Cancelled without a post (M-7)' => ['status' => 'Cancelled', 'status_reason' => 'Fabricated', 'financial_post' => null, 'pre_approval_post_captured' => 1],
+        ] as $label => $over) {
+            assertThrows(\LogicException::class, static fn () => RequestView::request($row($over), true), $label);
+            assertThrows(\LogicException::class, static fn () => RequestView::request($row($over), false), $label . ' (Employee)');
+        }
+        assertSame(null, RequestView::editable($row(['financial_post' => null]))['financialPost'], 'an unassigned post is editable as null');
+    },
+
+    'CR-01 M-T7 source side: migration 0042 is one forward-only ALTER with exactly the ADR-017 rules; DRONE stays canonical' => static function () use ($src): void {
+        $m42 = $src('migrations/0042_alter_finance_requests_assigned_post.sql');
+        assertSame(1, substr_count($m42, ';'), 'one statement');
+        assertTrue(str_starts_with($m42, "ALTER TABLE finance_requests\n") && !preg_match('/\b(DROP\s+(TABLE|COLUMN)|UPDATE|DELETE|INSERT|TRUNCATE|RENAME)\b/i', $m42), 'an ALTER that drops no column and rewrites no row');
+        foreach ([
+            'DROP CONSTRAINT finance_requests_financial_post,',
+            'MODIFY financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NULL,',
+            'ADD COLUMN pre_approval_financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NULL AFTER financial_post,',
+            'ADD COLUMN pre_approval_post_captured TINYINT(1) NOT NULL DEFAULT 0 AFTER pre_approval_financial_post,',
+            "ADD CONSTRAINT finance_requests_financial_post_v2 CHECK (financial_post IS NULL OR financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE')),",
+            "ADD CONSTRAINT finance_requests_post_payment_request CHECK (kind <> 'paymentRequest' OR financial_post IS NOT NULL),",
+            "ADD CONSTRAINT finance_requests_post_approved CHECK (status NOT IN ('Approved', 'Paid') OR financial_post IS NOT NULL),",
+            "ADD CONSTRAINT finance_requests_pre_approval_post CHECK (pre_approval_financial_post IS NULL OR (pre_approval_financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE') AND pre_approval_post_captured = 1)),",
+            "ADD CONSTRAINT finance_requests_pre_approval_captured CHECK (pre_approval_post_captured = 0 OR (pre_approval_post_captured = 1 AND kind = 'reimbursement' AND status IN ('Approved', 'Paid', 'Cancelled'))),",
+            'ADD CONSTRAINT finance_requests_captured_post CHECK (pre_approval_post_captured = 0 OR financial_post IS NOT NULL);',
+        ] as $needle) {
+            assertTrue(str_contains($m42, $needle), '0042: ' . $needle);
+        }
+        assertTrue(!str_contains($m42, 'RND'), 'the code DRONE is not renamed (RnD is a display label only)');
     },
 ];

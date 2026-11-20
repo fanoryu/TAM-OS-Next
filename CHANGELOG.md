@@ -6,6 +6,23 @@ Not deployed and not released: entries here are merged into `main` (or proposed 
 published release, and none is on a production host. Hostinger stays NO-GO; Gate D, Gate R and v3.0.0 stay on HOLD.
 
 ### Added
+- **CR-01 — CEO-assigned Financial Post for employee reimbursements (proposed for merge; not deployed, not
+  released).** Under [ADR-017](docs/03-adr/ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md) (Accepted
+  2026-11-20) an Employee creates, edits and submits a reimbursement without a Financial Post and sees the post the
+  CEO assigned read-only, or "Not yet assigned by the CEO". The CEO may set the post on a Draft (never clear it) and
+  must select or confirm it on every reimbursement approval; approval and assignment are one atomic write that also
+  keeps the post before approval (`pre_approval_financial_post`, `pre_approval_post_captured`), shown to the CEO only.
+  The approve audit row names the field `financialPost`, never a value (PD-9, G-4). The CEO may also create a
+  reimbursement for a selected employee ("New reimbursement"; the post optional, an omitted post unassigned) through
+  a second, narrowly pinned `ApiClient` exception (`employeeId` on `POST /api/finance-requests/create` with
+  `kind` `reimbursement` only; D-AFI4b1-3 unchanged). Payment requests are unchanged,
+  and payment uses the final post. Migration `0042` (head `0042`) drops the NOT NULL post CHECK and adds six CHECKs;
+  codes stay `GA`, `NPIP`, `TJB`, `DRONE`; existing rows are unchanged. ACTIONS stay 24 and routes 67; a create
+  retried after a later change stays 409 `idempotency_mismatch` (R2-2 = Option A). Tests: migration M-T1 … M-T7,
+  application T-H, T-A, T-D, T-I, T-W, T-C, T-P and T-V (the PHP and MariaDB suites run in GitHub CI only, G-3);
+  `verify-session-requests-runtime.js` sections L and M, `verify-session-identity-runtime.js` section 3c.
+  `SCHEMA_VERSION` (6), storage keys, CSS and `APP_VERSION` are
+  unchanged.
 - **Finance Phase 2 — payment requests and employee reimbursements, and UX-1 (PRs #94–#96; merged only after
   Owner approval; not deployed, not released).** Under [ADR-016](docs/03-adr/ADR-016-Finance-Payment-Requests-and-Reimbursements.md)
   (Accepted 2026-11-17) the CEO reviews payment requests and employee reimbursements and pays each in one

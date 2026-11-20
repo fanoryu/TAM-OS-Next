@@ -76,8 +76,15 @@ const PHASE2_ACTIONS = Object.freeze(['reimbursement.createSelfDraft', 'reimburs
 // approvedNotPaid report line; audit-api.js and session-audit-view.js: the migration-0041 vocabulary
 // and labels). Was: UIINT1_PACKAGE_DIGEST.
 const AWP01_PACKAGE_DIGEST = '5979199bcfce8e1cfc53f942db3481a46689c154d5308fb7bb2d88c97e5b3d0b';
+// CR-01 (ADR-017) authorized revision: migration 0042 (the CEO-assigned reimbursement Financial Post and its
+// pre-approval snapshot) follows AWP-01. Every earlier migration-head check reads the state as AWP-01 left it
+// (0042 set aside); the CR-01 section pins the new head. Was: only the Phase 2 migrations were set aside.
+const CR01_MIGRATIONS = Object.freeze(['0042_alter_finance_requests_assigned_post.sql']);
+function migrationsBeforeCr01() {
+  return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !CR01_MIGRATIONS.includes(f));
+}
 function migrationsBeforePhase2() {
-  return fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort().filter((f) => !PHASE2_MIGRATIONS.includes(f));
+  return migrationsBeforeCr01().filter((f) => !PHASE2_MIGRATIONS.includes(f));
 }
 // UX-1 authorized revision (Owner GO 2026-11-17): one module added (core/session-home.js), the additive
 // css/components.css block, and the SESSION views changed (Home, routing, display-only money grouping,
@@ -100,6 +107,12 @@ const I4F01_PACKAGE_DIGEST = 'b0b011a28fc256f5a733fd59e9843c461ed99ca5579af616e6
 // "RnD — Research & Development" (transaction-api.js FINANCIAL_POSTS name; the session-ledger-view.js comment).
 // The code DRONE is unchanged; no module or file added. Prior pin was I4F01_PACKAGE_DIGEST (kept as the baseline).
 const CR02_PACKAGE_DIGEST = '270af38dbf257693449654a078536b248516837b1f85a516e41cbb0953ff4706';
+// CR-01 (Owner GO 2026-11-20, ADR-017): the CR-02 package with the CEO-assigned reimbursement Financial Post —
+// the nullable post and the CEO-only approval snapshot in the decoder (request-api.js), the approval post and
+// the projection check (session-requests.js), the Employee's read-only post and the CEO's approval selector and
+// previous / final post (session-requests-view.js); no module or file added. Prior pin was CR02_PACKAGE_DIGEST
+// (kept as the baseline).
+const CR01_PACKAGE_DIGEST = '70793d36273801c72055acea693da3ecd0b95ce6ce29a2cd79f1c27dae5c875a'; // CR-01 R1 (C-2 CEO reimbursement create); superseded first CR-01 pin db03b3c5aed005a4df62963100c27794e225f6d800732303b85427d4aeef3394
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -5721,15 +5734,22 @@ console.log('== AFI-1 — SESSION IDENTITY FOUNDATION ==');
   check((apiCode.match(/const API_BODY_KEY_EXCEPTION = /g) || []).length === 1
     && /const API_BODY_KEY_EXCEPTION = Object\.freeze\(\{ method: 'POST', path: '\/api\/overtime-records\/create', key: 'employeeId' \}\);/.test(apiCode),
     'D-AFI4b1-3: exactly one frozen body-key exception — method POST, path /api/overtime-records/create, key employeeId');
-  check(/for\(let i = 0; i < API_FORBIDDEN_BODY_KEYS\.length; i\+\+\)\{\s*const key = API_FORBIDDEN_BODY_KEYS\[i\];\s*if\(!Object\.prototype\.hasOwnProperty\.call\(body, key\)\) continue;\s*if\(method === API_BODY_KEY_EXCEPTION\.method && path === API_BODY_KEY_EXCEPTION\.path && key === API_BODY_KEY_EXCEPTION\.key\) continue;\s*return failure\(API_RESULT_KINDS\.CLIENT_FAULT\);\s*\}/.test(apiCode)
-    && (apiCode.match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4 && (apiCode.match(/API_FORBIDDEN_BODY_KEYS/g) || []).length === 3
-    && (apiCode.match(/\bcontinue;/g) || []).length === 2,
-    'D-AFI4b1-3: the forbidden-key check is central and exact — skipped only for the exception\'s exact method, exact path and exact key; every other forbidden key is CLIENT_FAULT');
+  // CR-01 (ADR-017 §6, Owner direction 2026-11-20) authorized revision: the loop also skips the second,
+  // narrower selector API_REIMBURSEMENT_OWNER_EXCEPTION (exact method, path and key, and body.kind exactly
+  // 'reimbursement'); D-AFI4b1-3's own line is unchanged. Was: one skip line and two `continue;`.
+  check(/for\(let i = 0; i < API_FORBIDDEN_BODY_KEYS\.length; i\+\+\)\{\s*const key = API_FORBIDDEN_BODY_KEYS\[i\];\s*if\(!Object\.prototype\.hasOwnProperty\.call\(body, key\)\) continue;\s*if\(method === API_BODY_KEY_EXCEPTION\.method && path === API_BODY_KEY_EXCEPTION\.path && key === API_BODY_KEY_EXCEPTION\.key\) continue;\s*if\(method === API_REIMBURSEMENT_OWNER_EXCEPTION\.method && path === API_REIMBURSEMENT_OWNER_EXCEPTION\.path && key === API_REIMBURSEMENT_OWNER_EXCEPTION\.key && body\.kind === API_REIMBURSEMENT_OWNER_EXCEPTION\.kind\) continue;\s*return failure\(API_RESULT_KINDS\.CLIENT_FAULT\);\s*\}/.test(apiCode)
+    && (apiCode.match(/API_BODY_KEY_EXCEPTION/g) || []).length === 4 && (apiCode.match(/API_REIMBURSEMENT_OWNER_EXCEPTION/g) || []).length === 5 && (apiCode.match(/API_FORBIDDEN_BODY_KEYS/g) || []).length === 3
+    && (apiCode.match(/\bcontinue;/g) || []).length === 3,
+    'D-AFI4b1-3 / CR-01: the forbidden-key check is central and exact — skipped only for each exception\'s exact method, path and key (and, for CR-01, kind reimbursement); every other forbidden key is CLIENT_FAULT');
+  check((apiCode.match(/const API_REIMBURSEMENT_OWNER_EXCEPTION = /g) || []).length === 1
+    && /const API_REIMBURSEMENT_OWNER_EXCEPTION = Object\.freeze\(\{ method: 'POST', path: '\/api\/finance-requests\/create', key: 'employeeId', kind: 'reimbursement' \}\);/.test(apiCode),
+    'CR-01: exactly one frozen reimbursement-owner exception — method POST, path /api/finance-requests/create, key employeeId, kind reimbursement');
   check(!/allowIdentity|identityKeys|skipForbidden|bypass|unsafe|trusted|opts\.(allow|skip|unsafe|trust|keys|exception)/i.test(apiCode)
     && apiCode.indexOf('API_FORBIDDEN_BODY_KEYS.length') < apiCode.indexOf("headers['Content-Type'] = 'application/json';"),
     'D-AFI4b1-3: no generic bypass, caller flag or disable switch — the check runs before any request is built');
-  check(((apiCode.match(/'\/api\/[^']*'/g) || []).join() === "'/api/overtime-records/create'") && !/employee_id'\s*\}/.test(apiCode.replace("'company_id', 'employeeId', 'employee_id']", '')),
-    'D-AFI4b1-3: ApiClient names exactly one route (the exception path); employee_id is never excepted');
+  // CR-01 authorized revision: two routes, the two exception paths. Was: exactly the overtime create path.
+  check(((apiCode.match(/'\/api\/[^']*'/g) || []).join() === "'/api/overtime-records/create','/api/finance-requests/create'") && !/employee_id'\s*\}/.test(apiCode.replace("'company_id', 'employeeId', 'employee_id']", '')),
+    'D-AFI4b1-3 / CR-01: ApiClient names exactly two routes (the two exception paths); employee_id is never excepted');
   check(!/while\s*\(|setInterval|\.request\(/.test(apiCode), 'AFI-1: ApiClient has no retry loop (no while, no interval, no re-entry)');
   check(!/Math\.random|crypto\.|Date\.now/.test(apiCode), 'AFI-1: ApiClient generates no request id (the server requestId is carried)');
   check(/case 403: return API_RESULT_KINDS\.DENIED;/.test(apiCode), 'AFI-1: 403 normalizes to DENIED');
@@ -8385,7 +8405,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === CR02_PACKAGE_DIGEST,   // CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === CR01_PACKAGE_DIGEST,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8707,8 +8727,8 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === CR02_PACKAGE_DIGEST,   // CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
-    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-02 digest ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… (' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
+    && pkg.packageDigest === CR01_PACKAGE_DIGEST,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
 // ===== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS, BACKEND S1–S5 (ADR-016, Owner 2026-11-17) =====
@@ -8719,7 +8739,8 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
 // rule or role added); 67 routes (nine finance request routes); no new frontend module; the package.
 console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND S1–S5) ==');
 {
-  const all = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  // CR-01 (ADR-017) authorized revision: the AWP-01 head is read with 0042 set aside. Was: the whole directory.
+  const all = migrationsBeforeCr01();
   check(all.length === 41 && all.slice(-3).join() === PHASE2_MIGRATIONS.join() && migrationsBeforePhase2().length === 38,
     'AWP-01: migrations 0039–0041 (finance_requests, finance_request_payments, the request audit vocabulary) are the head (41 files)');
   const actionPhp = read(path.join(root, 'server', 'src', 'Policy', 'Action.php'));
@@ -8736,8 +8757,89 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === CR02_PACKAGE_DIGEST,   // CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
-    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-02 digest ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… (I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === CR01_PACKAGE_DIGEST,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
+}
+
+
+// ===== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017, Owner GO 2026-11-20) =====
+// STRUCTURE only; behaviour is proven by server/tests (RequestDomainTest; the MariaDB RequestSchemaTest M-T1 …
+// M-T7, RequestWorkflowTest, RequestConcurrencyTest T-C1), tools/verify-backend-boundary.js (the post writers)
+// and tools/verify-session-requests-runtime.js section L. Pins: 0042 is the head (42 files) and its text is
+// exactly the ADR-017 / R2 design (codes GA, NPIP, TJB, DRONE; no RND); seeded defects of it are detected
+// (M-T7); ACTIONS 24 and 67 routes unchanged; the client never sends an Employee's post; the package.
+console.log('');
+console.log('== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017) ==');
+{
+  const CR01_0042 = [
+    'ALTER TABLE finance_requests',
+    '  DROP CONSTRAINT finance_requests_financial_post,',
+    '  MODIFY financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NULL,',
+    '  ADD COLUMN pre_approval_financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NULL AFTER financial_post,',
+    '  ADD COLUMN pre_approval_post_captured TINYINT(1) NOT NULL DEFAULT 0 AFTER pre_approval_financial_post,',
+    "  ADD CONSTRAINT finance_requests_financial_post_v2 CHECK (financial_post IS NULL OR financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE')),",
+    "  ADD CONSTRAINT finance_requests_post_payment_request CHECK (kind <> 'paymentRequest' OR financial_post IS NOT NULL),",
+    "  ADD CONSTRAINT finance_requests_post_approved CHECK (status NOT IN ('Approved', 'Paid') OR financial_post IS NOT NULL),",
+    "  ADD CONSTRAINT finance_requests_pre_approval_post CHECK (pre_approval_financial_post IS NULL OR (pre_approval_financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE') AND pre_approval_post_captured = 1)),",
+    "  ADD CONSTRAINT finance_requests_pre_approval_captured CHECK (pre_approval_post_captured = 0 OR (pre_approval_post_captured = 1 AND kind = 'reimbursement' AND status IN ('Approved', 'Paid', 'Cancelled'))),",
+    '  ADD CONSTRAINT finance_requests_captured_post CHECK (pre_approval_post_captured = 0 OR financial_post IS NOT NULL);'
+  ];
+  // The defects of a 0042 text against the pinned design: [] when it is exactly the design.
+  const defects0042 = (sql) => {
+    const out = [];
+    if(!sql.endsWith(';\n') || /\r/.test(sql)) out.push('line endings / final newline');
+    const lines = sql.replace(/\n$/, '').split('\n');
+    if(lines.length !== CR01_0042.length) out.push('line count ' + lines.length);
+    CR01_0042.forEach((l, i) => { if(lines[i] !== l) out.push('line ' + (i + 1)); });
+    if(/\bRND\b|'rnd'|--|\/\*/i.test(sql)) out.push('RND code or comment');
+    if((sql.match(/;/g) || []).length !== 1) out.push('statement count');
+    return out;
+  };
+  const all = fs.readdirSync(path.join(root, 'server', 'migrations')).filter((f) => /\.sql$/.test(f)).sort();
+  check(all.length === 42 && all[41] === CR01_MIGRATIONS[0] && migrationsBeforeCr01().length === 41 && migrationsBeforeCr01()[40] === '0041_replace_audit_events_finance_requests.sql',
+    'CR-01: migration 0042 (' + CR01_MIGRATIONS[0] + ') is the head (42 files); 0001–0041 precede it');
+  const sql = read(path.join(root, 'server', 'migrations', CR01_MIGRATIONS[0]));
+  check(defects0042(sql).length === 0,
+    'CR-01: 0042 is exactly the ADR-017 / R2 design — drop the NOT NULL post CHECK, a nullable post, the two snapshot columns and the six CHECKs (codes GA, NPIP, TJB, DRONE)' + (defects0042(sql).length ? ' >> ' + defects0042(sql).join(', ') : ''));
+  // M-T7: seeded defects of the migration text are each detected.
+  const seeded = {
+    'RND for DRONE': sql.replace("'TJB', 'DRONE')),", "'TJB', 'RND')),"),
+    'a fifth code': sql.replace("'TJB', 'DRONE')),\n  ADD CONSTRAINT finance_requests_post_payment", "'TJB', 'DRONE', 'HR')),\n  ADD CONSTRAINT finance_requests_post_payment"),
+    'no captured_post CHECK': sql.replace(",\n  ADD CONSTRAINT finance_requests_captured_post CHECK (pre_approval_post_captured = 0 OR financial_post IS NOT NULL);", ';'),
+    'the post kept NOT NULL': sql.replace('ascii_bin NULL,', 'ascii_bin NOT NULL,'),
+    'a case-insensitive collation': sql.replace('COLLATE ascii_bin NULL AFTER', 'COLLATE ascii_general_ci NULL AFTER'),
+    'a flag defaulting to 1': sql.replace('NOT NULL DEFAULT 0', 'NOT NULL DEFAULT 1'),
+    'Cancelled dropped from the captured statuses': sql.replace("('Approved', 'Paid', 'Cancelled')", "('Approved', 'Paid')"),
+    'a second statement': sql + 'UPDATE finance_requests SET financial_post = NULL;\n',
+    'a comment': '-- CR-01\n' + sql,
+    'CRLF line endings': sql.replace(/\n/g, '\r\n')
+  };
+  const missed = Object.keys(seeded).filter((k) => seeded[k] === sql || defects0042(seeded[k]).length === 0);
+  check(missed.length === 0, 'CR-01 M-T7: ' + Object.keys(seeded).length + ' seeded defects of 0042 are each detected' + (missed.length ? ' >> missed: ' + missed.join(', ') : ''));
+  const m39 = read(path.join(root, 'server', 'migrations', '0039_create_finance_requests.sql'));
+  check(/CONSTRAINT finance_requests_financial_post CHECK \(financial_post IN \('GA', 'NPIP', 'TJB', 'DRONE'\)\)/.test(m39) && !/pre_approval/.test(m39),
+    'CR-01: 0039 is unchanged (its NOT NULL post CHECK stays as written; forward-only, 0042 drops it)');
+  const actionPhp = read(path.join(root, 'server', 'src', 'Policy', 'Action.php'));
+  const routes = read(path.join(root, 'server', 'src', 'Http', 'Routes.php'));
+  check((actionPhp.match(/^\s*case \w+ = '/gm) || []).length === 24 && (routes.match(/new Route\(/g) || []).length === 67,
+    'CR-01: ACTIONS 24 and 67 routes — no Action or route added');
+  const api = read(path.join(root, 'js', 'core', 'request-api.js'));
+  const view = read(path.join(root, 'js', 'ui', 'session-requests-view.js'));
+  const store = read(path.join(root, 'js', 'core', 'session-requests.js'));
+  check(/const FINANCE_REQUEST_CEO_KEYS = Object\.freeze\(FINANCE_REQUEST_KEYS\.concat\(\['preApprovalFinancialPost', 'preApprovalPostCaptured'\]\)\.sort\(\)\);/.test(api)
+    && !/preApproval/.test(api.slice(api.indexOf('const FINANCE_REQUEST_KEYS'), api.indexOf('const FINANCE_REQUEST_PAYMENT_KEYS')))
+    && /const withPost = kind === 'paymentRequest' \|\| \(forEmployee && v\.financialPost !== '' && v\.financialPost !== null && v\.financialPost !== undefined\);/.test(api)
+    && /const forEmployee = kind === 'reimbursement' && ceo === true;/.test(api) && /if\(forEmployee\) body\.employeeId = v\.employeeId;/.test(api)
+    && /if\(withPost\) body\.financialPost = v\.financialPost;/.test(api) && /if\(reimbursement\) body\.financialPost = post;/.test(api)
+    && /function sessionRequestsShapeFits\(p, r\)/.test(store),
+    'CR-01: the client decodes the Employee projection without the snapshot and the CEO projection with it, sends a post on create for a payment request (required) or a CEO-filed reimbursement (optional) and on approval only for a reimbursement, names an employee only on the CEO\'s reimbursement, and checks the projection against the principal');
+  check(/postUnassigned: 'Not yet assigned by the CEO',/.test(view) && /postNotRecorded: 'Not recorded \(approved before CR-01\)',/.test(view) && /id="frPost"/.test(view)
+    && fs.existsSync(path.join(root, 'tools', 'verify-session-requests-runtime.js')) && /CR-01 T-V4/.test(read(path.join(root, 'tools', 'verify-session-requests-runtime.js'))),
+    'CR-01: the view shows "Not yet assigned by the CEO", "Not recorded (approved before CR-01)" and the approval post selector; the runtime harness covers section L (T-V1 … T-V4)');
+  const order = require(path.join(root, 'tools', 'module-order.js'));
+  const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === CR01_PACKAGE_DIGEST,
+    'CR-01: no frontend module or package file added; SCHEMA_VERSION 6 and ACTIONS 24; the package at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… kept as the baseline)');
 }
 
 

@@ -6,14 +6,23 @@
    shown: "Finance Requests" for the CEO, "My reimbursements" for an Employee.
 
      List      the requests whose date is in the range (From / To, Apply), a status filter, "New
-               payment request" (CEO) or "New reimbursement" (Employee), and one row per request:
+               payment request" and (CR-01) "New reimbursement" (CEO) or "New reimbursement"
+               (Employee), and one row per request:
                date, type, for (the payee, or the employee), Financial Post, category, amount, status
      Detail    every field the server returned, the status with its reason, the payment when Paid,
                the operations this principal is offered for its status (sessionRequestsOffered), an
                inline confirmation panel for each — reject and cancel ask for a reason, pay for the
                date and method — and, for the CEO, the request's activity history
-     Form      create (CEO: a payment request with its payee and needed-by date; Employee: a
-               reimbursement with its expense date) or edit a Draft
+     Form      create (CEO: a payment request with its payee and needed-by date, or (CR-01) a
+               reimbursement for an active employee with an optional post and its expense date;
+               Employee: a reimbursement with its expense date) or edit a Draft
+
+   FINANCIAL POST (CR-01, ADR-017): an Employee's form has no post; their list and detail show the
+   post the CEO assigned, read-only, or "Not yet assigned by the CEO". The CEO's edit of a
+   reimbursement Draft may set or replace the post (never clear it); the CEO's approval panel for a
+   reimbursement requires a post, preselected with the stored one; the CEO's detail shows the post
+   before approval next to the final one ("Not recorded (approved before CR-01)" when no snapshot
+   was captured). Existing labels (FINANCIAL_POSTS names) and existing classes only.
 
    Data comes only from SessionRequests / SessionRequestsStore (js/core/session-requests.js);
    nothing is written here but the DOM. MONEY is exactly the string the server sent, escaped, with
@@ -53,8 +62,14 @@ const SESSION_REQUESTS_TEXT = Object.freeze({
   loadingList: 'Loading requests…',
   loadingDetail: 'Loading the request…',
   loadingHistory: 'Loading the history…',
-  unchanged: 'Nothing was changed: edit a field first, or cancel.'
+  unchanged: 'Nothing was changed: edit a field first, or cancel.',
+  postUnassigned: 'Not yet assigned by the CEO',
+  postNotRecorded: 'Not recorded (approved before CR-01)',
+  postNoneBefore: 'None (not yet assigned by the CEO)',
+  approvePost: 'Select or confirm the Financial Post this reimbursement is paid from. The post shown is the one currently stored.'
 });
+// A request's post as shown: its name, or the neutral status while the CEO has not assigned one (CR-01).
+function sessionRequestsPostText(post){ return post === null ? SESSION_REQUESTS_TEXT.postUnassigned : transactionPostName(post); }
 const SESSION_REQUESTS_KIND_LABELS = Object.freeze({ paymentRequest: 'Payment request', reimbursement: 'Reimbursement' });
 const SESSION_REQUESTS_STATUS_TONES = Object.freeze({ Draft: 'neutral', Submitted: 'info', Approved: 'attention', Paid: 'done', Rejected: 'stop', Cancelled: 'stop' });
 const SESSION_REQUESTS_STATUS_TEXT = Object.freeze({ Draft: 'Draft', Submitted: 'Submitted', Approved: 'Approved — not paid', Paid: 'Paid', Rejected: 'Rejected', Cancelled: 'Cancelled' });
@@ -75,16 +90,25 @@ const SESSION_REQUESTS_OP_TEXT = Object.freeze({
   pay: Object.freeze({ title: 'Record payment', lead: 'Recording the payment marks the request Paid and records the expense in Transactions, dated the payment date. It cannot be undone here.', confirm: 'Record payment', busy: 'Recording payment…' })
 });
 // The form: the CEO's payment request has a payee and a needed-by date; a reimbursement an expense date.
-function sessionRequestsFormDefs(kind){
+// `employees` (CR-01): the CEO's reimbursement create names the employee — the active employees offered.
+// `post` (CR-01): 'required' (a payment request), 'optional' (the CEO's edit of a reimbursement with
+// no post yet), 'keep' (the CEO's edit of a reimbursement with a post: replace, never clear), 'none'
+// (an Employee's reimbursement: no post field).
+function sessionRequestsFormDefs(kind, post, employees){
   const date = kind === 'paymentRequest'
     ? Object.freeze({ name: 'documentDate', label: 'Needed by', type: 'date', error: 'Enter a date from 1900 up to one year from today.' })
     : Object.freeze({ name: 'documentDate', label: 'Expense date', type: 'date', error: 'Enter a date from 1900 up to today.' });
-  const defs = [
-    Object.freeze({ name: 'financialPost', label: 'Financial Post', type: 'post', error: 'Choose a Financial Post.' }),
+  const mode = post || (kind === 'paymentRequest' ? 'required' : 'none');
+  const defs = [];
+  if(employees) defs.push(Object.freeze({ name: 'employeeId', label: 'Employee', type: 'employee', options: employees, hint: 'The employee this reimbursement is for.', error: 'Choose an employee.' }));
+  if(mode === 'required') defs.push(Object.freeze({ name: 'financialPost', label: 'Financial Post', type: 'post', error: 'Choose a Financial Post.' }));
+  if(mode === 'optional') defs.push(Object.freeze({ name: 'financialPost', label: 'Financial Post', type: 'post', optional: true, blank: SESSION_REQUESTS_TEXT.postUnassigned, hint: 'Optional: you can assign it now or when approving.', error: 'Choose a Financial Post.' }));
+  if(mode === 'keep') defs.push(Object.freeze({ name: 'financialPost', label: 'Financial Post', type: 'post', noBlank: true, hint: 'You can replace the assigned post; it cannot be removed.', error: 'Choose a Financial Post.' }));
+  defs.push(
     Object.freeze({ name: 'category', label: 'Category', type: 'text', hint: 'For example Transport. Payroll (Gaji) is never a request.', error: 'Enter a category of 1–64 characters, without leading or trailing spaces. Gaji, Payroll and Salary are not allowed.' }),
     Object.freeze({ name: 'description', label: 'Description', type: 'textarea', error: 'Enter a description of 1–500 characters, without leading or trailing spaces.' }),
     Object.freeze({ name: 'amount', label: 'Amount (Rp)', type: 'text', inputmode: 'decimal', hint: 'Whole Rupiah written as 150000.00.', error: 'Enter a whole Rupiah amount above zero, written as 150000.00.' })
-  ];
+  );
   if(kind === 'paymentRequest') defs.push(Object.freeze({ name: 'payee', label: 'Payee', type: 'text', error: 'Enter the payee, 1–160 characters, without leading or trailing spaces.' }));
   defs.push(date);
   return defs;
@@ -135,29 +159,44 @@ function sessionRequestsFieldHTML(def, value, invalid, disabled){
   const hintId = def.hint ? id + '-hint' : '';
   const errorId = invalid ? id + '-error' : '';
   const described = [hintId, errorId].filter(Boolean).join(' ');
-  const attrs = ' id="' + id + '" name="' + def.name + '" required aria-required="true"' + (invalid ? ' aria-invalid="true"' : '')
+  const attrs = ' id="' + id + '" name="' + def.name + '"' + (def.optional ? '' : ' required aria-required="true"') + (invalid ? ' aria-invalid="true"' : '')
     + (described ? ' aria-describedby="' + described + '"' : '') + (disabled ? ' disabled' : '');
   const option = function(v, label){ return '<option value="' + escapeHtml(v) + '"' + (v === value ? ' selected' : '') + '>' + escapeHtml(label) + '</option>'; };
   let control;
-  if(def.type === 'post') control = '<select class="input"' + attrs + '>' + option('', 'Choose a Financial Post') + FINANCIAL_POSTS.map(function(p){ return option(p.code, p.name); }).join('') + '</select>';
+  if(def.type === 'employee') control = '<select class="input"' + attrs + '>' + option('', 'Choose an employee') + def.options.map(function(e){ return option(e.id, e.fullName); }).join('') + '</select>';
+  else if(def.type === 'post') control = '<select class="input"' + attrs + '>' + (def.noBlank ? '' : option('', def.blank || 'Choose a Financial Post')) + FINANCIAL_POSTS.map(function(p){ return option(p.code, p.name); }).join('') + '</select>';
   else if(def.type === 'textarea') control = '<textarea class="input" rows="3"' + attrs + '>' + escapeHtml(value) + '</textarea>';
   else control = '<input class="input" type="' + def.type + '"' + (def.inputmode ? ' inputmode="' + def.inputmode + '"' : '') + ' autocomplete="off"' + attrs + ' value="' + escapeHtml(value) + '">';
-  return '<div class="field"><label for="' + id + '">' + escapeHtml(def.label) + ' <span aria-hidden="true">*</span></label>' + control
+  return '<div class="field"><label for="' + id + '">' + escapeHtml(def.label) + (def.optional ? '' : ' <span aria-hidden="true">*</span>') + '</label>' + control
     + (def.hint ? '<p class="hint" id="' + hintId + '">' + escapeHtml(def.hint) + '</p>' : '')
     + (invalid ? '<p class="hint auth-message-warn" id="' + errorId + '">' + escapeHtml(def.error) + '</p>' : '')
     + (def.name === 'amount' ? '<p class="hint" id="frf-amount-preview" aria-live="polite">' + escapeHtml(sessionLedgerAmountPreview(value)) + '</p>' : '') + '</div>';
 }
 
-function sessionRequestsFormHTML(w){
+// CR-01: the post field this principal is offered on the form.
+function sessionRequestsFormPost(w, principal){
+  const f = w.form;
+  if(f.kind === 'paymentRequest') return 'required';
+  if(!sessionRequestsIsCeo(principal)) return 'none';
+  if(f.mode === 'create') return 'optional';                       // CR-01: the CEO may leave it unassigned
+  return w.detail && w.detail.financialPost !== null ? 'keep' : 'optional';
+}
+// CR-01: the employees a CEO-filed reimbursement may name (create only).
+function sessionRequestsFormEmployees(w, principal){
+  const f = w.form;
+  return f.mode === 'create' && f.kind === 'reimbursement' && sessionRequestsIsCeo(principal) ? (w.employeeOptions || []) : null;
+}
+function sessionRequestsFormHTML(w, principal){
   const f = w.form;
   const busy = w.mutation.status === SESSION_REQUESTS_MUTATION_STATUS.PENDING;
   const invalid = (w.mutation.kind === 'create' || w.mutation.kind === 'update') && w.mutation.fields ? w.mutation.fields : [];
   const title = f.mode === 'edit' ? 'Edit draft' : (f.kind === 'paymentRequest' ? 'New payment request' : 'New reimbursement');
   const lead = f.mode === 'edit' ? 'Only a Draft can be edited. Save keeps it a Draft; submit it from the request when it is ready.'
-    : 'Saving creates a Draft. Nothing is sent for approval until you submit it.';
+    : (sessionRequestsFormEmployees(w, principal) ? 'Saving creates a Draft reimbursement for the employee chosen. The Financial Post is optional now and required when it is approved.'
+      : 'Saving creates a Draft. Nothing is sent for approval until you submit it.');
   return '<form class="card" id="frForm" aria-labelledby="frFormTitle" novalidate><h2 class="section-title" id="frFormTitle" tabindex="-1">' + escapeHtml(title) + '</h2>'
     + '<p class="hint">' + escapeHtml(lead) + '</p><div class="form-grid">'
-    + sessionRequestsFormDefs(f.kind).map(function(def){ return sessionRequestsFieldHTML(def, f.values[def.name], invalid.indexOf(def.name) !== -1, busy); }).join('')
+    + sessionRequestsFormDefs(f.kind, sessionRequestsFormPost(w, principal), sessionRequestsFormEmployees(w, principal)).map(function(def){ return sessionRequestsFieldHTML(def, f.values[def.name], invalid.indexOf(def.name) !== -1, busy); }).join('')
     + '</div>' + sessionRequestsMessageHTML(w)
     + '<div class="auth-actions"><button class="btn btn-accent" type="submit" id="frFormSubmit"' + (busy ? ' disabled aria-busy="true"' : '') + '>' + (f.mode === 'edit' ? 'Save changes' : 'Save draft') + '</button>'
     + '<button class="btn" type="button" id="frFormCancel"' + (busy ? ' disabled' : '') + '>Cancel</button></div></form>';
@@ -175,7 +214,8 @@ function sessionRequestsListHTML(w, principal){
     + '<button class="btn" type="submit" id="frApplyBtn"' + dis + '>Apply</button>'
     + '<label for="frFilter">Status</label><select class="input" id="frFilter" name="status"' + dis + '>' + statusOption('', 'All statuses')
     + FINANCE_REQUEST_STATUSES.map(function(s){ return statusOption(s, SESSION_REQUESTS_STATUS_TEXT[s]); }).join('') + '</select></form>'
-    + '<div class="auth-actions"><button class="btn btn-accent" type="button" id="frNewBtn"' + dis + '>' + (kind === 'paymentRequest' ? 'New payment request' : 'New reimbursement') + '</button></div>';
+    + '<div class="auth-actions"><button class="btn btn-accent" type="button" id="frNewBtn"' + dis + '>' + (kind === 'paymentRequest' ? 'New payment request' : 'New reimbursement') + '</button>'
+    + (sessionRequestsIsCeo(principal) ? '<button class="btn" type="button" id="frNewRbBtn"' + dis + '>New reimbursement</button>' : '') + '</div>';   // CR-01: the CEO files a reimbursement for an employee
   const head = '<h2 class="section-title" id="frListTitle" tabindex="-1">Requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '</h2>';
   if(w.listStatus === SESSION_REQUESTS_STATUS.ERROR && w.errors.list) return controls + head + sessionRequestsErrorHTML(w.errors.list, 'frReadError', 'list');
   if(w.listStatus !== SESSION_REQUESTS_STATUS.READY || !w.list) return controls + head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_REQUESTS_TEXT.loadingList) + '</p>';
@@ -183,7 +223,7 @@ function sessionRequestsListHTML(w, principal){
   if(!rows.length) return controls + head + '<div class="empty" role="status">' + (w.list.length ? 'No ' + escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) + ' requests in this range.' : 'No requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '.') + '</div>';
   const body = rows.map(function(r, i){
     return '<tr><td>' + escapeHtml(r.documentDate) + '</td><td>' + escapeHtml(SESSION_REQUESTS_KIND_LABELS[r.kind]) + '</td><td>' + escapeHtml(sessionRequestsForText(w, principal, r)) + '</td>'
-      + '<td>' + escapeHtml(transactionPostName(r.financialPost)) + '</td><td>' + escapeHtml(r.category) + '</td><td>' + moneyHTML(r.amount) + '</td>'
+      + '<td>' + escapeHtml(sessionRequestsPostText(r.financialPost)) + '</td><td>' + escapeHtml(r.category) + '</td><td>' + moneyHTML(r.amount) + '</td>'
       + '<td>' + sessionRequestsStatusHTML(r) + '</td><td><button class="btn" type="button" data-fr-open="' + i + '"' + dis + '>Open</button></td></tr>';
   }).join('');
   return controls + head + '<p class="hint">' + rows.length + (rows.length === 1 ? ' request' : ' requests') + (w.filter ? ' ' + escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) : '') + ', by date.</p>'
@@ -212,6 +252,14 @@ function sessionRequestsActionHTML(w, r){
       + (bad('paymentMethod') ? ' aria-invalid="true" aria-describedby="frMethod-error"' : '') + dis + '>' + option('', 'Choose a method')
       + FINANCE_EXECUTION_PAYMENT_METHODS.map(function(m){ return option(m, SESSION_REQUESTS_METHOD_TEXT[m]); }).join('') + '</select>'
       + (bad('paymentMethod') ? '<p class="hint auth-message-warn" id="frMethod-error">Choose a payment method.</p>' : '') + '</div></div>';
+  } else if(a.op === 'approve' && r.kind === 'reimbursement'){
+    // CR-01: the post is selected or confirmed on every reimbursement approval; the stored one is preselected.
+    const option = function(v, label){ return '<option value="' + escapeHtml(v) + '"' + (v === a.financialPost ? ' selected' : '') + '>' + escapeHtml(label) + '</option>'; };
+    inputs = '<p class="hint" id="frPostCurrent">Currently: ' + escapeHtml(sessionRequestsPostText(r.financialPost)) + '</p>'
+      + '<div class="field"><label for="frPost">Financial Post <span aria-hidden="true">*</span></label><select class="input" id="frPost" name="financialPost" required aria-required="true" aria-describedby="frPost-hint' + (bad('financialPost') ? ' frPost-error" aria-invalid="true"' : '"') + dis + '>'
+      + (r.financialPost === null ? option('', 'Choose a Financial Post') : '') + FINANCIAL_POSTS.map(function(p){ return option(p.code, p.name); }).join('') + '</select>'
+      + '<p class="hint" id="frPost-hint">' + escapeHtml(SESSION_REQUESTS_TEXT.approvePost) + '</p>'
+      + (bad('financialPost') ? '<p class="hint auth-message-warn" id="frPost-error">Choose a Financial Post.</p>' : '') + '</div>';
   }
   const danger = a.op === 'reject' || a.op === 'cancel';
   return '<form class="card" id="frActionForm" aria-labelledby="frActionTitle" novalidate><h3 class="section-title" id="frActionTitle" tabindex="-1">' + escapeHtml(t.title) + '</h3>'
@@ -242,11 +290,16 @@ function sessionRequestsDetailHTML(w, principal){
     ['Status', sessionRequestsStatusHTML(r)],
     [r.kind === 'paymentRequest' ? 'Payee' : 'Employee', escapeHtml(sessionRequestsForText(w, principal, r))],
     ['Amount (Rp)', moneyHTML(r.amount)],
-    ['Financial Post', escapeHtml(transactionPostName(r.financialPost))],
+    ['Financial Post', escapeHtml(sessionRequestsPostText(r.financialPost))],
     ['Category', escapeHtml(r.category)],
     ['Description', escapeHtml(r.description)],
     [r.kind === 'paymentRequest' ? 'Needed by' : 'Expense date', escapeHtml(r.documentDate)]
   ];
+  // CR-01: the CEO sees the post before approval next to the final one (the snapshot, CEO-only).
+  if(sessionRequestsIsCeo(principal) && r.kind === 'reimbursement' && financeRequestHasSnapshot(r)){
+    if(r.preApprovalPostCaptured) rows.splice(5, 0, ['Financial Post before approval', escapeHtml(r.preApprovalFinancialPost === null ? SESSION_REQUESTS_TEXT.postNoneBefore : transactionPostName(r.preApprovalFinancialPost))]);
+    else if(r.status === 'Approved' || r.status === 'Paid') rows.splice(5, 0, ['Financial Post before approval', escapeHtml(SESSION_REQUESTS_TEXT.postNotRecorded)]);
+  }
   if(r.statusReason !== null) rows.push([r.status === 'Rejected' ? 'Reason for rejection' : 'Reason for cancellation', escapeHtml(r.statusReason)]);
   if(r.payment) rows.push(['Paid on', escapeHtml(r.payment.paidOn)], ['Payment method', escapeHtml(SESSION_REQUESTS_METHOD_TEXT[r.payment.paymentMethod])]);
   rows.push(['Created', sessionAuditTimeHTML({ occurredAt: r.createdAt })], ['Last changed', sessionAuditTimeHTML({ occurredAt: r.updatedAt })], ['Version', escapeHtml(String(r.version))]);
@@ -272,7 +325,7 @@ function renderSessionRequestsTitle(principal, w){
 }
 function renderSessionRequestsHTML(principal, w){
   const lead = '<p class="hint">' + escapeHtml(sessionRequestsIsCeo(principal) ? SESSION_REQUESTS_TEXT.leadCeo : SESSION_REQUESTS_TEXT.leadEmployee) + '</p>';
-  if(w.form) return lead + sessionRequestsFormHTML(w);
+  if(w.form) return lead + sessionRequestsFormHTML(w, principal);
   if(w.detailId) return lead + sessionRequestsDetailHTML(w, principal);
   return lead + sessionRequestsMessageHTML(w) + sessionRequestsListHTML(w, principal);
 }
@@ -291,6 +344,7 @@ function bindSessionRequests(app){
   on('frFilter', 'change', function(){ SessionRequests.setFilter(this.value); });
   on('frRetryBtn', 'click', function(){ SessionRequests.retry(this.getAttribute('data-fr-retry')); });   // the read whose error it is shown with
   on('frNewBtn', 'click', function(){ SessionRequests.openCreate(); });
+  on('frNewRbBtn', 'click', function(){ SessionRequests.openCreate('reimbursement'); });
   on('frBackBtn', 'click', function(){ SessionRequests.back(); });
   on('frEditBtn', 'click', function(){ SessionRequests.openEdit(); });
   ['submit', 'approve', 'reject', 'pay', 'cancel'].forEach(function(op){ on(SESSION_REQUESTS_OP_BUTTONS[op].id, 'click', function(){ SessionRequests.openAction(op); }); });
@@ -299,7 +353,8 @@ function bindSessionRequests(app){
   const form = app.querySelector('#frForm');
   if(form){
     const keep = function(){ SessionRequests.setDraft(this.name, this.value); };
-    FINANCE_REQUEST_FIELDS.forEach(function(n){
+    const names = ['employeeId'].concat(FINANCE_REQUEST_FIELDS);   // CR-01: the CEO's reimbursement names its employee
+    names.forEach(function(n){
       const el = form.querySelector('#frf-' + n);
       if(el){ el.addEventListener('input', keep); el.addEventListener('change', keep); }
     });
@@ -307,13 +362,13 @@ function bindSessionRequests(app){
     if(amount && preview) amount.addEventListener('input', function(){ preview.textContent = sessionLedgerAmountPreview(this.value); });
     form.addEventListener('submit', function(e){
       e.preventDefault();
-      FINANCE_REQUEST_FIELDS.forEach(function(n){ const el = form.querySelector('#frf-' + n); if(el) SessionRequests.setDraft(n, el.value); });
+      names.forEach(function(n){ const el = form.querySelector('#frf-' + n); if(el) SessionRequests.setDraft(n, el.value); });
       SessionRequests.submitForm();
     });
   }
   const action = app.querySelector('#frActionForm');
   if(action){
-    const ids = { frReason: 'reason', frPaidOn: 'paidOn', frMethod: 'paymentMethod' };
+    const ids = { frReason: 'reason', frPaidOn: 'paidOn', frMethod: 'paymentMethod', frPost: 'financialPost' };
     Object.keys(ids).forEach(function(id){
       const el = action.querySelector('#' + id);
       if(el){ const keep = function(){ SessionRequests.setActionField(ids[id], this.value); }; el.addEventListener('input', keep); el.addEventListener('change', keep); }
@@ -336,8 +391,8 @@ function sessionRequestsFocusTarget(app, hint){
   if(hint === 'section') return app.querySelector('#authTitle');
   if(hint === 'list') return app.querySelector('#frListTitle');
   if(hint === 'detail') return app.querySelector('#frDetailTitle') || app.querySelector('#frBackBtn');
-  if(hint === 'form') return app.querySelector('#frf-financialPost');
-  if(hint === 'action') return app.querySelector('#frReason') || app.querySelector('#frPaidOn') || app.querySelector('#frActionConfirm');
+  if(hint === 'form') return app.querySelector('#frf-employeeId') || app.querySelector('#frf-financialPost') || app.querySelector('#frf-category');
+  if(hint === 'action') return app.querySelector('#frReason') || app.querySelector('#frPaidOn') || app.querySelector('#frPost') || app.querySelector('#frActionConfirm');
   if(hint === 'message') return app.querySelector('#frMutationMessage') || app.querySelector('#frMessage') || app.querySelector('#frReadError');
   return null;
 }

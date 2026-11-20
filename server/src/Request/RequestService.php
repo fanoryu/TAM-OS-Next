@@ -40,9 +40,13 @@ use TamOs\Transaction\TransactionInput;
  *   submit       scoped load → finance.manage | reimbursement.submitSelf → (reimbursement: lock the
  *                employee by PK, refuse archived / not-Active, R1 = A) → lock the request → Draft and
  *                version (409) → Submitted + audit
- *   approve / reject / cancel  finance.manage before any lookup → company load (404) → lock the
- *                request → legal source, version and (approve) the exact amount (409) → the status
- *                (with its reason) + audit. Never the employee.
+ *   approve / reject / cancel  finance.manage before any lookup → company load (404) → (approve:
+ *                a reimbursement names its Financial Post, a payment request none — 400, ADR-017 D6)
+ *                → lock the request → legal source, version and (approve) the exact amount (409) →
+ *                the status (with its reason) + audit. A reimbursement approval writes the final post
+ *                and the pre-approval snapshot (the value read under the lock) in the same statement,
+ *                and its audit row names financialPost exactly when the post changed — never a value
+ *                (ADR-017 §3, PD-9). Never the employee.
  *   pay          finance.execute before any lookup → §5 steps 1–8 (see pay())
  *
  * Paid, Rejected and Cancelled accept no operation (409, nothing written).
@@ -107,7 +111,9 @@ final class RequestService
                 self::eligible($eligibility);
             }
             self::insert(static fn () => $store->create($auth, $id, $in, $actor->userId));
-            $fields = $in['kind'] === RequestStatus::KIND_PAYMENT_REQUEST ? RequestInput::FIELDS : array_values(array_diff(RequestInput::FIELDS, ['payee']));
+            // The fields the Draft was created with: a reimbursement has no payee, and no post until one is assigned (ADR-017).
+            $fields = $in['kind'] === RequestStatus::KIND_PAYMENT_REQUEST ? RequestInput::FIELDS
+                : array_values(array_diff(RequestInput::FIELDS, $in['financialPost'] === null ? ['payee', 'financialPost'] : ['payee']));
             $this->data->audit()->appendRequest($auth, $actor, 'create', $id, $fields, $requestId);
             return $id;
         }, readCommitted: true);
@@ -120,7 +126,7 @@ final class RequestService
      */
     public function update(Principal $actor, array $json, string $requestId): array
     {
-        $in = RequestInput::update($json);                      // 400 before any lookup
+        $in = RequestInput::update($json, Scope::of($actor)->isSelf()); // 400 before any lookup (an Employee: no financialPost, ADR-017)
         [$auth, $kind] = $this->authorized($actor, 'update', $in['financeRequestId']);
         $store = $this->data->requests();
         $today = self::today();
@@ -132,7 +138,7 @@ final class RequestService
             if ($changed === []) {
                 return;                                         // nothing differs: no write, no audit, same version
             }
-            /** @var array{financialPost: string, category: string, description: string, amount: string, payee: ?string, documentDate: string} $after */
+            /** @var array{financialPost: ?string, category: string, description: string, amount: string, payee: ?string, documentDate: string} $after */
             if ($store->update($auth, $in['financeRequestId'], $in['expectedVersion'], $after) !== 1) {
                 throw new \LogicException('update: the locked Draft did not change');
             }
@@ -155,12 +161,18 @@ final class RequestService
             'reject', 'cancel' => RequestInput::withReason($json) + ['expectedAmount' => null],
             default => throw new \LogicException('unknown finance request transition'),
         };                                                      // 400 before any lookup
+        $in += ['financialPost' => null];
         if ($operation === 'submit') {
             [$auth, $kind] = $this->authorized($actor, 'submit', $in['financeRequestId']);
         } else {
             $auth = Policy::authorize($actor, Action::FinanceManage);     // an Employee: 403 before any lookup
-            $this->data->requests()->find($auth->scope, $in['financeRequestId']) ?? throw new ApiError(ErrorCode::NotFound);
+            $record = $this->data->requests()->find($auth->scope, $in['financeRequestId']) ?? throw new ApiError(ErrorCode::NotFound);
             $kind = null;
+            if ($operation === 'approve') {
+                // ADR-017 D6: a reimbursement approval names its post, a payment request's none (400, nothing written).
+                $kind = self::kindOf($record);
+                RequestInput::approvalPost($kind, $in['financialPost']);
+            }
         }
         $store = $this->data->requests();
         $this->data->atomically(function () use ($auth, $actor, $store, $operation, $in, $kind, $requestId): void {
@@ -174,6 +186,19 @@ final class RequestService
             }
             $from = (string) $current['status'];
             $to = RequestStatus::target($operation, $from) ?? throw new \LogicException('transition: no target');
+            if ($operation === 'approve' && $kind === RequestStatus::KIND_REIMBURSEMENT) {
+                // ADR-017 §3: the previous post is the locked row's; final post, snapshot and status in one statement.
+                if ($current['kind'] !== RequestStatus::KIND_REIMBURSEMENT || (int) $current['pre_approval_post_captured'] !== 0) {
+                    throw new \LogicException('approve: the locked reimbursement has no captured snapshot');
+                }
+                $previous = $current['financial_post'] === null ? null : (string) $current['financial_post'];
+                $final = (string) $in['financialPost'];
+                if ($store->approveReimbursement($auth, $in['financeRequestId'], $in['expectedVersion'], $previous, $final) !== 1) {
+                    throw new \LogicException('approve: the locked Submitted reimbursement did not change');
+                }
+                $this->data->audit()->appendRequest($auth, $actor, $operation, $in['financeRequestId'], $previous === $final ? [] : ['financialPost'], $requestId);
+                return;
+            }
             if ($store->transition($auth, $in['financeRequestId'], $in['expectedVersion'], $from, $to, $in['reason']) !== 1) {
                 throw new \LogicException('transition: the locked request did not change');
             }
@@ -223,6 +248,10 @@ final class RequestService
             }
             if ((string) $current['amount'] !== $in['expectedAmount']) {
                 throw new ApiError(ErrorCode::Conflict, logReason: 'finance_request_amount');
+            }
+            if ($current['financial_post'] === null) {
+                // ADR-017 §2 (migration 0042 finance_requests_post_approved): an Approved request always has its post.
+                throw new \LogicException('pay: the Approved request has no Financial Post');
             }
             $transactionId = bin2hex(random_bytes(16));
             self::insert(static fn () => $transactions->insertPaidExpense($auth, $transactionId, [                // 4
@@ -300,6 +329,8 @@ final class RequestService
      */
     private static function sameCreate(array $holder, array $in, Authorization $auth): bool
     {
+        // ADR-017 (R2-2 = Option A): the post compares like every field — NULL with an omitted post — so a
+        // retry after the CEO assigned one differs from the stored request and is 409, never a duplicate.
         $owner = $in['kind'] === RequestStatus::KIND_REIMBURSEMENT ? $auth->record?->ownerEmployeeId : null;
         return $holder['kind'] === $in['kind'] && $holder['owner_employee_id'] === $owner
             && $holder['financial_post'] === $in['financialPost'] && (string) $holder['category'] === $in['category']

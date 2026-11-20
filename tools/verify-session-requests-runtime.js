@@ -30,6 +30,17 @@
    every completion order (gated, released in the order named); each Retry reads only the read whose
    error it is shown with; closing or leaving a request, the session ending and another principal
    drop late failures and every kept error.
+
+   CR-01 (Owner GO 2026-11-20, ADR-017), section L: the CEO-assigned reimbursement Financial Post —
+   the decoder's nullable post and the CEO-only snapshot (T-V1, R-3); the Employee's post read-only
+   or "Not yet assigned by the CEO" and no post in their bodies (T-V2); the CEO's previous and final
+   post (T-V3); the approval panel requiring, preselecting and sending the post (T-V4); the CEO's
+   Draft edit that may set or replace the post but never clear it.
+
+   CR-01 correction C-2 (Owner direction 2026-11-20), section M: the CEO creates a payment request or
+   a reimbursement for an active employee with an optional post (unassigned when omitted); the
+   Employee can never name another employee; malformed shapes are refused before sending; the
+   payment request create is unchanged.
    ============================================================ */
 
 const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
@@ -108,6 +119,21 @@ const ok = (data) => resp(200, { ok: true, data: data, requestId: RID });
 const err = (status, code) => resp(status, { ok: false, error: { code: code, message: 'server text' }, requestId: RID });
 const NETFAIL = () => new TypeError('Failed to fetch');
 const one = (r) => ok({ financeRequest: r });
+// CR-01 (ADR-017 R-3): the CEO's projection carries the approval snapshot, an Employee's never. The
+// fixtures are written in the Employee's shape; while the CEO is signed in (net.ceoProjection) every
+// finance request answer gains the snapshot fields it lacks (not captured), exactly as RequestView
+// adds them. A fixture that names them keeps its own values.
+const SNAPSHOT = { preApprovalFinancialPost: null, preApprovalPostCaptured: false };
+const ceoView = (r) => (r && typeof r === 'object' && typeof r.kind === 'string' && !Object.prototype.hasOwnProperty.call(r, 'preApprovalPostCaptured') ? Object.assign({}, r, SNAPSHOT) : r);
+function ceoProjected(res){
+  return { status: res.status, headers: res.headers, text: async () => {
+    const t = await res.text();
+    let j; try { j = JSON.parse(t); } catch(_e){ return t; }
+    if(j && j.ok && j.data && j.data.financeRequest) j.data.financeRequest = ceoView(j.data.financeRequest);
+    if(j && j.ok && j.data && Array.isArray(j.data.financeRequests)) j.data.financeRequests = j.data.financeRequests.map(ceoView);
+    return JSON.stringify(j);
+  } };
+}
 
 /* ---------- a recording #app ---------- */
 const unescapeHtml = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
@@ -191,7 +217,9 @@ function loadRuntime(routes, hash){
       Promise.resolve().then(function(){
         if(!next) return reject(new TypeError('no route'));
         const out = typeof next === 'function' ? next(init) : next;
-        if(out instanceof Error) reject(out); else resolve(out);
+        if(out instanceof Error) reject(out);
+        else if(!net.ceoProjection || !/^\/api\/finance-request/.test(url)) resolve(out);
+        else resolve(Promise.resolve(out).then((v) => (v && typeof v.text === 'function' ? ceoProjected(v) : v)));
       });
     });
   };
@@ -242,6 +270,7 @@ const HEX32 = /^[0-9a-f]{32}$/;
 async function boot(me, routes, hash){
   const base = me.role === 'ceo' ? { '/api/employees': [ok({ employees: [] })] } : { '/api/employee?id=emp_srv_1': [ok({ employee: SELF })] };
   const rt = loadRuntime(Object.assign({ '/api/auth/me': [ok(me)] }, base, routes || {}), hash);
+  rt.net.ceoProjection = me.role === 'ceo';   // CR-01: the CEO's answers carry the snapshot
   await flush();
   return rt;
 }
@@ -634,17 +663,25 @@ function firewall(rt, label){
     rt.app.fire('frNewBtn', 'click');
     let html = card(rt);
     check(rt.rq().form.kind === 'reimbursement' && !/id="frf-payee"/.test(html) && /Expense date/.test(html), 'H. "New reimbursement" has no payee field and an expense date');
-    rt.app.type('frf-financialPost', 'NPIP'); rt.app.type('frf-category', 'Transport'); rt.app.type('frf-description', 'Fabricated bus'); rt.app.type('frf-amount', '45000.00'); rt.app.type('frf-documentDate', '2031-04-16');
+    // CR-01 T-V2 (ADR-017): the Employee never chooses the post.
+    check(!/id="frf-financialPost"|Financial Post/.test(html) && rt.dom.focused[rt.dom.focused.length - 1] === 'frf-category', 'CR-01 T-V2. "New reimbursement" has no Financial Post field; focus moves to the first field (category)');
+    rt.app.type('frf-category', 'Transport'); rt.app.type('frf-description', 'Fabricated bus'); rt.app.type('frf-amount', '45000.00'); rt.app.type('frf-documentDate', '2031-04-16');
     rt.app.fire('frForm', 'submit'); await flush();
     check(writes(rt).length === 0 && rt.rq().mutation.fields.join() === 'documentDate', 'H. an expense date after today is refused before sending');
     rt.app.type('frf-documentDate', '2031-04-14');
-    const NEW = rb('8'.repeat(32), { financialPost: 'NPIP', description: 'Fabricated bus', amount: '45000.00', documentDate: '2031-04-14' });
-    rt.net.routes[W.create] = [one(NEW)]; rt.net.routes[ONE(NEW.id)] = [one(NEW)];
+    const NEW = rb('8'.repeat(32), { financialPost: null, description: 'Fabricated bus', amount: '45000.00', documentDate: '2031-04-14' });
+    // CR-01 T-I4: a Draft holding a post that was not sent does not confirm the create (ambiguous; the form and its key stay).
+    rt.net.routes[W.create] = [one(Object.assign({}, NEW, { financialPost: 'NPIP' })), one(NEW)]; rt.net.routes[ONE(NEW.id)] = [one(NEW)];
+    rt.app.fire('frForm', 'submit'); await flush();
+    const key0 = rt.rq().form && rt.rq().form.key;
+    check(rt.rq().mutation.status === 'ambiguous' && !!rt.rq().form && rt.rq().detailId === null, 'CR-01 T-I4. a Draft with a post the Employee did not send is not a success (ambiguous; the form stays)');
     rt.app.fire('frForm', 'submit'); await flush();
     const c = posts(rt, W.create);
-    check(c.length === 1 && keysOf(c[0]) === 'amount,category,description,documentDate,financialPost,idempotencyKey,kind' && bodyOf(c[0]).kind === 'reimbursement',
-      'H. the reimbursement body is exactly the seven keys — no payee, no employeeId (the server takes the owner from the session)');
+    // CR-01 (ADR-017): six keys — the post is the CEO's to assign. Was: seven, with financialPost.
+    check(c.length === 2 && c.every((x) => keysOf(x) === 'amount,category,description,documentDate,idempotencyKey,kind' && bodyOf(x).kind === 'reimbursement') && bodyOf(c[1]).idempotencyKey === key0,
+      'H. the reimbursement body is exactly the six keys — no payee, no employeeId (the server takes the owner from the session), no financialPost (CR-01); the resubmit reuses the key');
     check(/Draft saved/.test(card(rt)) && rt.rq().detailId === NEW.id, 'H. the new Draft opens');
+    check(/<dt>Financial Post<\/dt><dd>Not yet assigned by the CEO<\/dd>/.test(card(rt)), 'CR-01 T-V2. the Employee\'s Draft shows "Not yet assigned by the CEO"');
   }
   {
     const rt = await openEmp();
@@ -830,6 +867,251 @@ function firewall(rt, label){
     const s = rt.rq();
     check(s.generation > gen && s.detailId === null && s.list === null && s.errors && (s.errors || {}).detail === null && (s.errors || {}).history === null && (s.errors || {}).list === null,
       'K. F01-F: a principal change clears every request error; a late failure of the first principal is dropped');
+  }
+
+  /* ---------- L. CR-01 (ADR-017): the CEO-assigned Financial Post ---------- */
+  const RB_SUB0 = rb('c'.repeat(32), { status: 'Submitted', version: 2, documentDate: '2031-04-05', financialPost: null });
+  const RB_SUB_TJB = rb('d'.repeat(32), { status: 'Submitted', version: 2, documentDate: '2031-04-06', financialPost: 'TJB' });
+  const RB_DRAFT0 = rb('e'.repeat(32), { documentDate: '2031-04-07', financialPost: null });
+  const SNAP = (pre, captured) => ({ preApprovalFinancialPost: pre, preApprovalPostCaptured: captured });
+  const RB_LIST = { financeRequests: [RB_PAID, RB_SUB0, RB_SUB_TJB, RB_DRAFT0, RB_DRAFT] };
+  {
+    const rt = await boot(ME_CEO);
+    const R = (o) => rt.FinanceRequestDecoders.request(rt.parse(JSON.stringify(o)));
+    const D = (o) => rt.FinanceRequestDecoders.listResponse(rt.parse(JSON.stringify(o)), '2031-01-01', '2031-12-31');
+    const nul = (r, status) => Object.assign({}, r, { financialPost: null, status: status, statusReason: status === 'Rejected' || status === 'Cancelled' ? 'Fabricated' : null, payment: status === 'Paid' ? PAYMENT : null });
+    check(['Draft', 'Submitted', 'Rejected', 'Cancelled'].every((s) => R(nul(RB_DRAFT, s)) !== null && R(nul(RB_DRAFT, s)).financialPost === null)
+      && ['Approved', 'Paid'].every((s) => R(nul(RB_DRAFT, s)) === null) && R(nul(PR_DRAFT, 'Draft')) === null && R(nul(PR_SUB, 'Submitted')) === null,
+      'CR-01 T-V1. a NULL post decodes only on a reimbursement in Draft, Submitted, Rejected or Cancelled — never Approved, Paid or on a payment request');
+    const ceoOk = Object.assign({}, RB_PAID, SNAP('GA', true));
+    const bad = {
+      'captured on a Submitted': Object.assign({}, RB_SUB_TJB, SNAP(null, true)),
+      'a previous post not captured': Object.assign({}, RB_PAID, SNAP('GA', false)),
+      'a numeric flag': Object.assign({}, RB_PAID, SNAP(null, 1)),
+      'an unknown previous post': Object.assign({}, RB_PAID, SNAP('HR', true)),
+      'the lower-case RnD code': Object.assign({}, RB_PAID, SNAP('rnd', true)),
+      'captured on a payment request': Object.assign({}, PR_APP, SNAP(null, true)),
+      'captured on a Cancelled with no post': Object.assign({}, nul(RB_DRAFT, 'Cancelled'), SNAP(null, true)),
+      'one snapshot key only': Object.assign({}, RB_PAID, { preApprovalPostCaptured: false })
+    };
+    let all = true;
+    for(const [label, o] of Object.entries(bad)){ if(R(o) !== null){ all = false; console.log('    accepted: ' + label); } }
+    const decoded = R(ceoOk);
+    check(all && decoded !== null && decoded.preApprovalFinancialPost === 'GA' && decoded.preApprovalPostCaptured === true && R(Object.assign({}, PR_APP, SNAP(null, false))) !== null
+      && R(Object.assign({}, nul(RB_DRAFT, 'Cancelled'), SNAP(null, false))) !== null && R(Object.assign({}, RB_PAID, { status: 'Cancelled', payment: null, statusReason: 'Fabricated' }, SNAP('GA', true))) !== null,
+      'CR-01 T-V1. the CEO projection decodes with its snapshot (' + Object.keys(bad).length + ' inconsistent snapshots refused; a captured approval keeps its post, also when Cancelled)');
+    check(D({ financeRequests: [RB_PAID, Object.assign({}, RB_REJ, SNAP(null, false))] }) === null && D({ financeRequests: [Object.assign({}, RB_PAID, SNAP(null, false)), Object.assign({}, RB_REJ, SNAP(null, false))] }) !== null,
+      'CR-01 T-V1. a list mixing the Employee and the CEO projection is refused whole');
+    const Q = rt.FinanceRequestRequests;
+    const vals = (r, extra) => Object.assign({ financialPost: r.financialPost === null ? '' : r.financialPost, category: r.category, description: r.description, amount: r.amount, payee: '', documentDate: r.documentDate }, extra || {});
+    const selfPost = Q.update(RB_DRAFT, vals(RB_DRAFT, { financialPost: 'TJB' }), '2031-04-15', true);
+    const selfDesc = Q.update(RB_DRAFT, vals(RB_DRAFT, { financialPost: 'TJB', description: 'Fabricated changed' }), '2031-04-15', true);
+    const clear = Q.update(RB_DRAFT, vals(RB_DRAFT, { financialPost: '' }), '2031-04-15', false);
+    const keep0 = Q.update(RB_DRAFT0, vals(RB_DRAFT0), '2031-04-15', false);
+    const set0 = Q.update(RB_DRAFT0, vals(RB_DRAFT0, { financialPost: 'NPIP' }), '2031-04-15', false);
+    check(!selfPost.ok && selfPost.fields.join() === 'unchanged' && selfDesc.ok && Object.keys(selfDesc.body).sort().join() === 'description,expectedVersion,financeRequestId'
+      && !clear.ok && clear.fields.join() === 'financialPost' && !keep0.ok && keep0.fields.join() === 'unchanged' && set0.ok && set0.body.financialPost === 'NPIP',
+      'CR-01. an Employee update never names the post; the CEO may set a missing post, but an empty choice never clears one');
+    const apPr = Q.approve(PR_SUB, 'GA'), apNone = Q.approve(RB_SUB0, ''), apRb = Q.approve(RB_SUB0, 'DRONE');
+    const cr = Q.create('reimbursement', { financialPost: 'GA', category: 'Transport', description: 'Fabricated', amount: '1.00', documentDate: '2031-04-14' }, 'f'.repeat(32), '2031-04-15');
+    check(apPr.ok && Object.keys(apPr.body).sort().join() === 'expectedAmount,expectedVersion,financeRequestId' && !apNone.ok && apNone.fields.join() === 'financialPost'
+      && apRb.ok && apRb.body.financialPost === 'DRONE' && cr.ok && !Object.prototype.hasOwnProperty.call(cr.body, 'financialPost'),
+      'CR-01. a reimbursement approval must name a post (a payment request names none); an Employee reimbursement create never sends one, even if a value is held');
+  }
+  {
+    // T-V2 / R-3: the Employee sees the assigned post read-only, or the neutral status; never the snapshot.
+    const rt = await openEmp({ [YEAR]: [ok(RB_LIST)] });
+    let html = card(rt);
+    check(/<td>Not yet assigned by the CEO<\/td>/.test(html) && /<td>TJB<\/td>/.test(html) && !/preApproval|before approval/.test(html),
+      'CR-01 T-V2. the Employee\'s list shows "Not yet assigned by the CEO" or the assigned post (TJB), read-only');
+    await openRow(rt, 2, RB_SUB_TJB);
+    html = card(rt);
+    check(/<dt>Financial Post<\/dt><dd>TJB<\/dd>/.test(html) && !/<select|id="frOps"|before approval/.test(html), 'CR-01 T-V2. the Employee\'s Submitted reimbursement shows its post read-only, with no control');
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    await openRow(rt, 4, RB_DRAFT);
+    rt.app.fire('frEditBtn', 'click');
+    html = card(rt);
+    check(!!rt.rq().form && !/id="frf-financialPost"|Financial Post/.test(html), 'CR-01 T-V2. the Employee\'s Draft edit has no Financial Post field');
+    rt.app.type('frf-description', 'Fabricated changed');
+    rt.net.routes[W.update] = [one(Object.assign({}, RB_DRAFT, { description: 'Fabricated changed', version: 2 }))];
+    rt.app.fire('frForm', 'submit'); await flush();
+    const u = posts(rt, W.update);
+    check(u.length === 1 && keysOf(u[0]) === 'description,expectedVersion,financeRequestId', 'CR-01 T-V2. the Employee\'s update sends the changed field only — never financialPost');
+    firewall(rt, 'CR-01 L Employee');
+  }
+  {
+    const rt = await openEmp({ [YEAR]: [ok({ financeRequests: [Object.assign({}, RB_PAID, SNAP('GA', true))] })] });
+    check(rt.rq().listStatus === 'error' && rt.rq().errors.list.kind === 'INVALID_RESPONSE' && !/<td>/.test(card(rt)),
+      'CR-01 R-3. an Employee list carrying the CEO snapshot is refused whole (INVALID_RESPONSE), nothing of it shown');
+    const rt2 = await openEmp({ [YEAR]: [ok(RB_LIST)] });
+    await openRow(rt2, 2, Object.assign({}, RB_SUB_TJB, SNAP(null, false)));
+    check(rt2.rq().detailStatus === 'error' && rt2.rq().errors.detail.kind === 'INVALID_RESPONSE', 'CR-01 R-3. an Employee detail carrying the snapshot is refused (INVALID_RESPONSE)');
+    const rt3 = await openCeo({ [YEAR]: [ok(RB_LIST)] });
+    rt3.net.ceoProjection = false;
+    await openRow(rt3, 2, RB_SUB_TJB);
+    check(rt3.rq().detailStatus === 'error' && rt3.rq().errors.detail.kind === 'INVALID_RESPONSE', 'CR-01 R-3. a CEO detail without the snapshot is refused (INVALID_RESPONSE)');
+  }
+  {
+    // T-V4: the approval of a reimbursement with no post requires one; the chosen post is sent and confirmed.
+    const rt = await openCeo({ [YEAR]: [ok(RB_LIST)] });
+    await openRow(rt, 1, RB_SUB0);
+    let html = card(rt);
+    check(/<dt>Financial Post<\/dt><dd>Not yet assigned by the CEO<\/dd>/.test(html) && /id="frApproveBtn"/.test(html), 'CR-01 T-V3. the CEO sees "Not yet assigned by the CEO" on a Submitted reimbursement and may approve it');
+    rt.app.fire('frApproveBtn', 'click');
+    html = card(rt);
+    check(/id="frPost"[^>]*required/.test(html) && /<option value="" selected>Choose a Financial Post<\/option>/.test(html) && /Currently: Not yet assigned by the CEO/.test(html)
+      && /RnD — Research &amp; Development/.test(html) && rt.dom.focused[rt.dom.focused.length - 1] === 'frPost',
+      'CR-01 T-V4. the approval panel requires a Financial Post (none preselected when none is stored), names the current one and takes focus');
+    rt.app.fire('frActionForm', 'submit'); await flush();
+    check(posts(rt, W.approve).length === 0 && rt.rq().mutation.fields.join() === 'financialPost' && /id="frPost-error"/.test(card(rt)), 'CR-01 T-V4. approving without a post sends nothing; the field is marked invalid');
+    rt.app.type('frPost', 'DRONE');
+    const APPROVED = Object.assign({}, RB_SUB0, { status: 'Approved', version: 3, financialPost: 'DRONE' }, SNAP(null, true));
+    rt.net.routes[W.approve] = [one(Object.assign({}, APPROVED, { financialPost: 'GA' })), one(APPROVED)];
+    rt.net.routes[ONE(RB_SUB0.id)] = [one(APPROVED)];
+    rt.app.fire('frActionForm', 'submit'); await flush();
+    const a = posts(rt, W.approve);
+    check(a.length === 1 && JSON.stringify(bodyOf(a[0])) === JSON.stringify({ financeRequestId: RB_SUB0.id, expectedVersion: 2, expectedAmount: '125000.00', financialPost: 'DRONE' })
+      && rt.rq().mutation.status === 'ambiguous',
+      'CR-01 T-V4. Approve sends { financeRequestId, expectedVersion, expectedAmount, financialPost }; an answer holding another post does not confirm it (ambiguous)');
+    rt.app.fire('frActionForm', 'submit'); await flush();
+    html = card(rt);
+    check(posts(rt, W.approve).length === 2 && bodyOf(posts(rt, W.approve)[1]).financialPost === 'DRONE' && /Approved\. It is now waiting for payment/.test(html)
+      && /<dt>Financial Post<\/dt><dd>RnD — Research &amp; Development<\/dd>/.test(html) && /<dt>Financial Post before approval<\/dt><dd>None \(not yet assigned by the CEO\)<\/dd>/.test(html),
+      'CR-01 T-V3. the confirmed approval shows the final post (RnD label) and, to the CEO, the post before approval');
+    firewall(rt, 'CR-01 L approve');
+  }
+  {
+    // T-V4: a stored post is preselected (no empty choice) and confirming it sends it.
+    const rt = await openCeo({ [YEAR]: [ok(RB_LIST)] });
+    await openRow(rt, 2, RB_SUB_TJB);
+    rt.app.fire('frApproveBtn', 'click');
+    const html = card(rt);
+    check(/<option value="TJB" selected>TJB<\/option>/.test(html) && !/<select[^>]*id="frPost"[^>]*>\s*<option value="">/.test(html) && /Currently: TJB/.test(html),
+      'CR-01 T-V4. the stored post is preselected and cannot be emptied');
+    rt.net.routes[W.approve] = [one(Object.assign({}, RB_SUB_TJB, { status: 'Approved', version: 3 }, SNAP('TJB', true)))];
+    rt.app.fire('frActionForm', 'submit'); await flush();
+    check(posts(rt, W.approve).length === 1 && bodyOf(posts(rt, W.approve)[0]).financialPost === 'TJB' && rt.rq().mutation.status === 'idle',
+      'CR-01 T-V4. confirming the stored post sends it explicitly');
+    const rt2 = await openCeo();
+    await openRow(rt2, 1, PR_SUB);
+    rt2.app.fire('frApproveBtn', 'click');
+    check(!/id="frPost"/.test(card(rt2)), 'CR-01 T-V4. a payment request\'s approval asks for no post');
+  }
+  {
+    // T-V3: previous and final for the CEO; no snapshot on an approval before CR-01.
+    const rt = await openCeo({ [YEAR]: [ok(RB_LIST)] });
+    await openRow(rt, 0, RB_PAID);
+    check(/<dt>Financial Post before approval<\/dt><dd>Not recorded \(approved before CR-01\)<\/dd>/.test(card(rt)), 'CR-01 T-V3. a Paid reimbursement approved before CR-01 shows "Not recorded (approved before CR-01)"');
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    await openRow(rt, 0, Object.assign({}, RB_PAID, { financialPost: 'TJB' }, SNAP('GA', true)));
+    const html = card(rt);
+    check(/<dt>Financial Post<\/dt><dd>TJB<\/dd><dt>Financial Post before approval<\/dt><dd>GA<\/dd>/.test(html), 'CR-01 T-V3. the CEO sees the final post and, next to it, the post before approval');
+  }
+  {
+    // The CEO's Draft edit: may set a missing post (optional), may replace a stored one, never clear it.
+    const rt = await openCeo({ [YEAR]: [ok(RB_LIST)] });
+    await openRow(rt, 3, RB_DRAFT0);
+    rt.app.fire('frEditBtn', 'click');
+    let html = card(rt);
+    check(/<select class="input" id="frf-financialPost" name="financialPost" aria-describedby="frf-financialPost-hint">/.test(html) && /<option value="" selected>Not yet assigned by the CEO<\/option>/.test(html),
+      'CR-01. the CEO\'s edit of a reimbursement Draft with no post offers an optional post, empty by default');
+    rt.app.fire('frForm', 'submit'); await flush();
+    check(posts(rt, W.update).length === 0 && rt.rq().mutation.fields.join() === 'unchanged', 'CR-01. leaving the post empty is no change — nothing is sent');
+    rt.app.type('frf-financialPost', 'NPIP');
+    rt.net.routes[W.update] = [one(Object.assign({}, RB_DRAFT0, { financialPost: 'NPIP', version: 2 }))];
+    rt.app.fire('frForm', 'submit'); await flush();
+    const u = posts(rt, W.update);
+    check(u.length === 1 && JSON.stringify(bodyOf(u[0])) === JSON.stringify({ financeRequestId: RB_DRAFT0.id, expectedVersion: 1, financialPost: 'NPIP' }) && rt.rq().mutation.status === 'idle',
+      'CR-01. the CEO assigns the post in a Draft edit: only financialPost is sent');
+    const rt2 = await openCeo({ [YEAR]: [ok(RB_LIST)] });
+    await openRow(rt2, 4, RB_DRAFT);
+    rt2.app.fire('frEditBtn', 'click');
+    html = card(rt2);
+    check(/<select class="input" id="frf-financialPost" name="financialPost" required aria-required="true"[^>]*><option value="GA" selected>GA<\/option>/.test(html),
+      'CR-01. the CEO\'s edit of a Draft with a post offers every post but no empty choice (replace, never clear)');
+    firewall(rt2, 'CR-01 L edit');
+  }
+
+  /* ---------- M. CR-01 C-2: the CEO's reimbursement create ---------- */
+  const E2 = Object.assign({}, E1, { id: 'emp_srv_2', employeeCode: 'EMP-778', fullName: 'Fabricated Archived', archived: true, accountState: 'none', accountManageable: false });
+  const E3 = Object.assign({}, E1, { id: 'emp_srv_3', employeeCode: 'EMP-779', fullName: 'Fabricated Third' });
+  const E4 = Object.assign({}, E1, { id: 'emp_srv_4', employeeCode: 'EMP-780', fullName: 'Fabricated OnLeave', employmentStatus: 'On Leave' });
+  {
+    const rt = await openCeo({ [EMPS_ALL]: [ok({ employees: [E1, E2, E3, E4] })] });
+    let html = card(rt);
+    check(/id="frNewBtn"[^>]*>New payment request<\/button>/.test(html) && /id="frNewRbBtn"[^>]*>New reimbursement<\/button>/.test(html),
+      'CR-01 C-2. the CEO may choose "New payment request" or "New reimbursement"');
+    rt.app.fire('frNewRbBtn', 'click');
+    html = card(rt);
+    const f = rt.rq().form;
+    check(!!f && f.kind === 'reimbursement' && f.mode === 'create' && HEX32.test(f.key) && /id="frf-employeeId"[^>]*required/.test(html)
+      && /<option value="emp_srv_1">Fabricated &lt;Self&gt;<\/option>/.test(html) && /<option value="emp_srv_3">Fabricated Third<\/option>/.test(html) && !/emp_srv_2|Fabricated Archived|emp_srv_4|Fabricated OnLeave/.test(html)
+      && /<option value="" selected>Not yet assigned by the CEO<\/option>/.test(html) && !/id="frf-payee"/.test(html) && /Expense date/.test(html)
+      && rt.dom.focused[rt.dom.focused.length - 1] === 'frf-employeeId',
+      'CR-01 C-2. the CEO\'s "New reimbursement" names a live, Active employee (archived or not Active ones are not offered, as in Overtime; names escaped), has an optional post (empty = not yet assigned), no payee, an expense date and a 32-hex key; focus on Employee');
+    rt.app.type('frf-category', 'Transport'); rt.app.type('frf-description', 'Fabricated <fare>'); rt.app.type('frf-amount', '60000.00'); rt.app.type('frf-documentDate', '2031-04-14');
+    rt.app.fire('frForm', 'submit'); await flush();
+    check(posts(rt, W.create).length === 0 && rt.rq().mutation.fields.join() === 'employeeId' && /id="frf-employeeId-error"/.test(card(rt)),
+      'CR-01 C-2. without an employee nothing is sent; the Employee field is marked invalid');
+    rt.app.type('frf-employeeId', 'emp_srv_1');
+    const NEW = rb('9'.repeat(32), { employeeId: 'emp_srv_1', financialPost: null, description: 'Fabricated <fare>', amount: '60000.00', documentDate: '2031-04-14' });
+    rt.net.routes[W.create] = [one(Object.assign({}, NEW, { employeeId: 'emp_srv_3' })), one(NEW)]; rt.net.routes[ONE(NEW.id)] = [one(NEW)];
+    rt.app.fire('frForm', 'submit'); await flush();
+    check(rt.rq().mutation.status === 'ambiguous' && !!rt.rq().form, 'CR-01 C-2. a Draft for another employee than the one named does not confirm the create (ambiguous; the form and its key stay)');
+    rt.app.fire('frForm', 'submit'); await flush();
+    const c = posts(rt, W.create);
+    check(c.length === 2 && c.every((x) => keysOf(x) === 'amount,category,description,documentDate,employeeId,idempotencyKey,kind') && bodyOf(c[1]).employeeId === 'emp_srv_1'
+      && bodyOf(c[1]).kind === 'reimbursement' && bodyOf(c[0]).idempotencyKey === bodyOf(c[1]).idempotencyKey && c[1].init.headers['X-CSRF-Token'] === CSRF,
+      'CR-01 C-2. the body is exactly kind, employeeId, category, description, amount, documentDate and the key — no post when none is chosen, no payee; the resubmit reuses the key');
+    html = card(rt);
+    check(/Draft saved/.test(html) && rt.rq().detailId === NEW.id && /<dt>Financial Post<\/dt><dd>Not yet assigned by the CEO<\/dd>/.test(html) && /<dt>Employee<\/dt><dd>Fabricated &lt;Self&gt;<\/dd>/.test(html),
+      'CR-01 C-2. the Draft opens for the employee named, its post unassigned');
+    firewall(rt, 'CR-01 M CEO create');
+  }
+  {
+    const rt = await openCeo();
+    rt.app.fire('frNewRbBtn', 'click');
+    rt.app.type('frf-employeeId', 'emp_srv_1'); rt.app.type('frf-financialPost', 'DRONE');
+    rt.app.type('frf-category', 'Transport'); rt.app.type('frf-description', 'Fabricated drone parts'); rt.app.type('frf-amount', '70000.00'); rt.app.type('frf-documentDate', '2031-04-14');
+    const NEW = rb('8'.repeat(32), { financialPost: 'DRONE', description: 'Fabricated drone parts', amount: '70000.00', documentDate: '2031-04-14' });
+    rt.net.routes[W.create] = [one(NEW)]; rt.net.routes[ONE(NEW.id)] = [one(NEW)];
+    rt.app.fire('frForm', 'submit'); await flush();
+    const c = posts(rt, W.create);
+    check(c.length === 1 && keysOf(c[0]) === 'amount,category,description,documentDate,employeeId,financialPost,idempotencyKey,kind' && bodyOf(c[0]).financialPost === 'DRONE'
+      && /Draft saved/.test(card(rt)) && /<dt>Financial Post<\/dt><dd>RnD — Research &amp; Development<\/dd>/.test(card(rt)),
+      'CR-01 C-2. a post chosen at creation is sent (DRONE, shown as the RnD label) and confirmed');
+    const Q = rt.FinanceRequestRequests;
+    const base = { employeeId: 'emp_srv_1', financialPost: '', category: 'Transport', description: 'Fabricated', amount: '1.00', payee: 'P', documentDate: '2031-04-14' };
+    const badId = Q.create('reimbursement', Object.assign({}, base, { employeeId: 'emp/1' }), 'f'.repeat(32), '2031-04-15', true);
+    const badPost = Q.create('reimbursement', Object.assign({}, base, { financialPost: 'RND' }), 'f'.repeat(32), '2031-04-15', true);
+    const noKey = Q.create('reimbursement', base, 'nope', '2031-04-15', true);
+    const pr = Q.create('paymentRequest', Object.assign({}, base, { financialPost: 'GA' }), 'f'.repeat(32), '2031-04-15', true);
+    check(!badId.ok && badId.fields.join() === 'employeeId' && !badPost.ok && badPost.fields.join() === 'financialPost' && !noKey.ok && noKey.fields.join() === 'idempotencyKey'
+      && pr.ok && Object.keys(pr.body).sort().join() === 'amount,category,description,documentDate,financialPost,idempotencyKey,kind,payee',
+      'CR-01 C-2. malformed shapes are refused before sending (an employee id outside the grammar, an unknown post such as RND, a bad key); a payment request never names an employee — its body is unchanged');
+    const posted = posts(rt, W.create).length;
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    rt.app.fire('frNewBtn', 'click');
+    check(rt.rq().form.kind === 'paymentRequest' && !/id="frf-employeeId"/.test(card(rt)) && /id="frf-payee"/.test(card(rt)) && posts(rt, W.create).length === posted,
+      'CR-01 C-2. "New payment request" is unchanged: no Employee field, a payee');
+  }
+  {
+    // The Employee can never name another employee.
+    const rt = await openEmp();
+    check(!/id="frNewRbBtn"/.test(card(rt)), 'CR-01 C-2. the Employee has one "New reimbursement" (their own) and no CEO choice');
+    rt.SessionRequests.openCreate('paymentRequest');
+    check(!!rt.rq().form && rt.rq().form.kind === 'reimbursement' && !/id="frf-employeeId"/.test(card(rt)), 'CR-01 C-2. an Employee asking for another kind still gets their own reimbursement form, with no Employee field');
+    rt.SessionRequests.setDraft('employeeId', 'emp_other_2');
+    rt.app.type('frf-category', 'Transport'); rt.app.type('frf-description', 'Fabricated'); rt.app.type('frf-amount', '1000.00'); rt.app.type('frf-documentDate', '2031-04-14');
+    const NEW = rb('7'.repeat(32), { financialPost: null, description: 'Fabricated', amount: '1000.00', documentDate: '2031-04-14' });
+    rt.net.routes[W.create] = [one(NEW)]; rt.net.routes[ONE(NEW.id)] = [one(NEW)];
+    rt.app.fire('frForm', 'submit'); await flush();
+    const c = posts(rt, W.create);
+    check(c.length === 1 && keysOf(c[0]) === 'amount,category,description,documentDate,idempotencyKey,kind' && !/emp_other_2/.test(c[0].init.body),
+      'CR-01 C-2. a forged employeeId in an Employee\'s draft is never sent — six keys, no owner (the server takes it from the session)');
+    const forged = rt.FinanceRequestRequests.create('reimbursement', { employeeId: 'emp_other_2', financialPost: 'GA', category: 'Transport', description: 'Fabricated', amount: '1.00', documentDate: '2031-04-14' }, 'f'.repeat(32), '2031-04-15', false);
+    check(forged.ok && !('employeeId' in forged.body) && !('financialPost' in forged.body), 'CR-01 C-2. without the CEO flag a reimbursement body names neither an employee nor a post');
+    firewall(rt, 'CR-01 M Employee');
   }
 
   console.log('');
