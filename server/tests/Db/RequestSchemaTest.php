@@ -12,11 +12,25 @@ declare(strict_types=1);
  * removing a paid request or its linked expense) and the 0041 audit vocabulary admits exactly its
  * triples; M4 (the backup round trip of both tables) is carried by the BackupCreateTest and
  * BackupRestoreTest seeds. Fabricated data only.
+ *
+ * CR-01 (ADR-017, migration 0042; CR01-MIGRATION-0042-DESIGN M-T1–M-T4, M-T3b, M-T6; T-D1, T-D3, T-D4):
+ * the fresh sequence reaches 0042; a schema-0041 database with both kinds in all six statuses migrates
+ * with every row unchanged except the new columns (NULL, 0) and identical report figures; every new
+ * CHECK refuses its row and the allowed edge rows are admitted; a failing 0042 refuses cleanly (the
+ * table unchanged, the incomplete marker blocking every consumer, as for every migration).
  */
 
 use TamOs\Data\Database;
+use TamOs\Data\DatabaseError;
+use TamOs\Data\Migration\MigrationError;
 use TamOs\Data\Migration\Migrator;
+use TamOs\Data\Report\FinancialReportStore;
+use TamOs\Data\Scope\ScopedDatabase;
+use TamOs\Identity\Principal;
+use TamOs\Policy\Scope;
+use TamOs\Report\FinancialReport;
 use function TamOs\Tests\assertSame;
+use function TamOs\Tests\assertThrows;
 use function TamOs\Tests\assertTrue;
 use function TamOs\Tests\authDatabase;
 use function TamOs\Tests\employeeAnchor;
@@ -39,6 +53,12 @@ $request = static function (Database $db, array $c, array $over = []): string {
     $v = $over + ['id' => bin2hex(random_bytes(16)), 'company' => $c['id'], 'kind' => 'paymentRequest', 'post' => 'GA', 'category' => 'Vendor', 'description' => 'Fabricated',
         'amount' => '250000.00', 'payee' => 'CV Fiktif', 'owner' => null, 'date' => '2026-11-03', 'status' => 'Draft', 'reason' => null, 'version' => 1,
         'key' => bin2hex(random_bytes(16)), 'user' => $c['user']];
+    if (array_key_exists('previous', $over) || array_key_exists('captured', $over)) {
+        // CR-01 (migration 0042): the pre-approval snapshot columns, named only when a case sets them.
+        $db->execute('INSERT INTO finance_requests (id, company_id, kind, financial_post, pre_approval_financial_post, pre_approval_post_captured, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
+            [$v['id'], $v['company'], $v['kind'], $v['post'], $over['previous'] ?? null, $over['captured'] ?? 0, $v['category'], $v['description'], $v['amount'], $v['payee'], $v['owner'], $v['date'], $v['status'], $v['reason'], $v['version'], $v['key'], $v['user']]);
+        return $v['id'];
+    }
     $db->execute('INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))',
         [$v['id'], $v['company'], $v['kind'], $v['post'], $v['category'], $v['description'], $v['amount'], $v['payee'], $v['owner'], $v['date'], $v['status'], $v['reason'], $v['version'], $v['key'], $v['user']]);
     return $v['id'];
@@ -73,14 +93,15 @@ $columns = static function (Database $db, string $table): array {
 $count = static fn (Database $db, string $table): int => (int) $db->select('SELECT COUNT(*) AS n FROM `' . $table . '`')[0]['n'];
 
 return [
-    'M1: the fresh sequence 0001–0041 applies in order and is current; no request or payment is seeded' => static function () use ($count): void {
+    // CR-01 (ADR-017) authorized revision: the fresh sequence ends at 0042 (M-T1). Was: 0001–0041, forty-one migrations.
+    'M1: the fresh sequence 0001–0042 applies in order and is current; no request or payment is seeded' => static function () use ($count): void {
         $db = testDatabase();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
         $labels = array_map(static fn ($m): string => $m->label(), $applied);
-        assertSame(41, count($labels), 'forty-one migrations');
-        assertSame(['0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests'], array_slice($labels, -3));
-        assertSame(range(1, 41), array_map(static fn (string $l): int => (int) substr($l, 0, 4), $labels), 'in order, without a gap');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0041, current');
+        assertSame(42, count($labels), 'forty-two migrations');
+        assertSame(['0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests', '0042_alter_finance_requests_assigned_post'], array_slice($labels, -4));
+        assertSame(range(1, 42), array_map(static fn (string $l): int => (int) substr($l, 0, 4), $labels), 'in order, without a gap');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0042, current');
         assertSame([0, 0], [$count($db, 'finance_requests'), $count($db, 'finance_request_payments')], 'nothing is seeded');
     },
 
@@ -88,7 +109,9 @@ return [
         $db = authDatabase();
         $u = 'utf8mb4_unicode_ci';
         assertSame([
-            'id' => 'char(32) NO ascii_bin', 'company_id' => 'char(32) NO ascii_bin', 'kind' => 'varchar(16) NO ascii_bin', 'financial_post' => 'varchar(8) NO ascii_bin',
+            // CR-01 (ADR-017, migration 0042) authorized revision: the post is nullable, followed by the snapshot. Was: 'varchar(8) NO ascii_bin', no snapshot.
+            'id' => 'char(32) NO ascii_bin', 'company_id' => 'char(32) NO ascii_bin', 'kind' => 'varchar(16) NO ascii_bin', 'financial_post' => 'varchar(8) YES ascii_bin',
+            'pre_approval_financial_post' => 'varchar(8) YES ascii_bin', 'pre_approval_post_captured' => 'tinyint(1) NO -',
             'category' => 'varchar(64) NO ' . $u, 'description' => 'varchar(500) NO ' . $u, 'amount' => 'decimal(17,2) NO -', 'payee' => 'varchar(160) YES ' . $u,
             'owner_employee_id' => 'varchar(64) YES ascii_bin', 'document_date' => 'date NO -', 'status' => 'varchar(16) NO ascii_bin', 'status_reason' => 'varchar(200) YES ' . $u,
             'version' => 'int(10) unsigned NO -', 'idempotency_key' => 'char(32) NO ascii_bin', 'created_by_user_id' => 'char(32) NO ascii_bin',
@@ -247,7 +270,8 @@ return [
         assertSame(count($admitted), (int) $db->select('SELECT COUNT(*) AS n FROM audit_events WHERE company_id = ?', [$c['id']])[0]['n'], 'exactly the admitted triples are stored');
     },
 
-    'M2: 0039–0041 migrate a schema-0038 database forward: Phase 1, payroll, posting, execution and audit rows survive byte-identical; nothing is seeded' => static function () use ($count): void {
+    // CR-01 (ADR-017) authorized revision: the forward run from 0038 now also applies 0042. Was: 0039–0041.
+    'M2: 0039–0042 migrate a schema-0038 database forward: Phase 1, payroll, posting, execution and audit rows survive byte-identical; nothing is seeded' => static function () use ($count): void {
         $db = testDatabase();
         $files = [];
         foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
@@ -280,11 +304,156 @@ return [
             ['employees', 'payroll_plans', 'finance_postings', 'finance_executions', 'finance_transactions', 'finance_transaction_voids', 'audit_events', 'memberships', 'users', 'companies']);
         $before = $snapshot();
         $applied = (new Migrator($db, productionMigrationsDir()))->apply();
-        assertSame(['0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests'], array_map(static fn ($x): string => $x->label(), $applied), 'only the AWP-01 migrations run');
-        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0041, current');
+        assertSame(['0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests', '0042_alter_finance_requests_assigned_post'], array_map(static fn ($x): string => $x->label(), $applied), 'only the AWP-01 and CR-01 migrations run');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0042, current');
         assertSame($before, $snapshot(), 'every Phase 1, payroll, posting, execution, employee and audit row is unchanged');
         assertSame([0, 0], [$count($db, 'finance_requests'), $count($db, 'finance_request_payments')], 'nothing is seeded');
         $db->execute("INSERT INTO audit_events (company_id, occurred_at, actor_user_id, actor_membership_id, action, entity, entity_id, operation, target_user_id, request_id, fields) VALUES (?, UTC_TIMESTAMP(6), ?, ?, 'finance.execute', 'financeRequest', ?, 'pay', NULL, ?, NULL)", [$c, $u, $m, str_repeat('b', 32), str_repeat('a', 32)]);
         assertTrue(true, 'the upgraded audit vocabulary admits a request row');
+    },
+
+    'CR-01 M-T2/M-T6: 0042 migrates a schema-0041 database with both kinds in all six statuses — every row unchanged except the new columns (NULL, 0); the report figures are byte-identical' => static function () use ($company, $request, $columns): void {
+        $db = testDatabase();
+        $files = [];
+        foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
+            if ((int) substr(basename($path), 0, 4) <= 41) {
+                $files[basename($path)] = (string) file_get_contents($path);
+            }
+        }
+        assertSame(41, count($files), 'the schema-0041 fixture');
+        (new Migrator($db, migrationFixture($files)))->apply();
+        $c = $company($db);
+        $reasons = ['Rejected' => 'Fabricated rejection', 'Cancelled' => 'Fabricated cancellation'];
+        foreach (['Draft', 'Submitted', 'Approved', 'Paid', 'Rejected', 'Cancelled'] as $i => $s) {
+            $request($db, $c, ['status' => $s, 'reason' => $reasons[$s] ?? null, 'post' => ['GA', 'NPIP', 'TJB', 'DRONE'][$i % 4], 'amount' => (1000 * ($i + 1)) . '.00', 'date' => '2026-10-0' . ($i + 1)]);
+            $request($db, $c, ['kind' => 'reimbursement', 'payee' => null, 'owner' => $c['employee'], 'status' => $s, 'reason' => $reasons[$s] ?? null,
+                'post' => ['DRONE', 'TJB', 'NPIP', 'GA'][$i % 4], 'amount' => (300 * ($i + 1)) . '.00', 'date' => '2026-10-1' . ($i + 1)]);
+        }
+        $db->execute("INSERT INTO finance_transactions (id, company_id, kind, financial_post, category, description, amount, transaction_date, created_by_user_id, idempotency_key, created_at) VALUES (?, ?, 'expense', 'TJB', 'Vendor', 'Fabricated', '125000.00', '2026-10-20', ?, ?, UTC_TIMESTAMP(6))",
+            [bin2hex(random_bytes(16)), $c['id'], $c['user'], bin2hex(random_bytes(16))]);
+        $principal = Principal::fromAccount(['user_id' => $c['user'], 'user_status' => 'active', 'has_password' => true],
+            [['membership_id' => bin2hex(random_bytes(16)), 'company_id' => $c['id'], 'role' => 'ceo', 'employee_id' => null, 'membership_status' => 'active']]) ?? throw new \LogicException('fixture');
+        $scope = Scope::of($principal);
+        $figures = static function () use ($db, $scope): string {
+            $store = new FinancialReportStore(new ScopedDatabase($db));
+            return json_encode(FinancialReport::build(['from' => '2026-10-01', 'to' => '2026-10-31'], $store->transactions($scope, '2026-10-01', '2026-10-31'),
+                $store->postings($scope, '2026-10', '2026-10'), $store->executions($scope, '2026-10-01', '2026-10-31'), $store->approved($scope, '2026-10-01', '2026-10-31')), JSON_THROW_ON_ERROR);
+        };
+        $others = static fn (): array => array_map(static fn (string $t): array => $db->select('SELECT * FROM `' . $t . '` ORDER BY id'), ['finance_transactions', 'finance_request_payments', 'audit_events', 'employees', 'companies', 'users']);
+        $before = $db->select('SELECT * FROM finance_requests ORDER BY id');
+        $beforeOthers = $others();
+        $beforeFigures = $figures();
+        $applied = (new Migrator($db, productionMigrationsDir()))->apply();
+        assertSame(['0042_alter_finance_requests_assigned_post'], array_map(static fn ($x): string => $x->label(), $applied), 'only 0042 runs');
+        assertSame([], (new Migrator($db, productionMigrationsDir()))->status(), 'head 0042, current');
+        $after = $db->select('SELECT * FROM finance_requests ORDER BY id');
+        assertSame(12, count($after), 'twelve requests');
+        foreach ($after as $i => $row) {
+            assertSame([null, 0], [$row['pre_approval_financial_post'], (int) $row['pre_approval_post_captured']], 'the new columns are NULL and 0 (not captured)');
+            unset($row['pre_approval_financial_post'], $row['pre_approval_post_captured']);
+            assertSame($before[$i], $row, 'every existing value is unchanged');
+        }
+        assertSame($beforeOthers, $others(), 'transactions, payments, audit rows and identities are untouched');
+        assertSame($beforeFigures, $figures(), 'M-T6: the report figures are byte-identical across 0042');
+        assertSame('varchar(8) YES ascii_bin', $columns($db, 'finance_requests')['financial_post'], 'the post became nullable');
+    },
+
+    'CR-01 M-T3/T-D1/T-D4: every 0042 CHECK refuses its row — a payment request or an Approved/Paid reimbursement without a post, RND, a snapshot without capture, a capture outside an approved reimbursement, a capture without a final post (M-7)' => static function () use ($company, $request, $expectRefused): void {
+        $db = authDatabase();
+        $c = $company($db);
+        $reimb = ['kind' => 'reimbursement', 'payee' => null, 'owner' => $c['employee']];
+        $reasons = ['Rejected' => 'Fabricated', 'Cancelled' => 'Fabricated'];
+        $refused = [];
+        foreach (['Draft', 'Submitted', 'Approved', 'Paid', 'Rejected', 'Cancelled'] as $s) {
+            $refused['M-3: a ' . $s . ' payment request without a post'] = ['post' => null, 'status' => $s, 'reason' => $reasons[$s] ?? null];
+        }
+        $refused += [
+            'M-4/T-D4: an Approved reimbursement without a post' => ['post' => null, 'status' => 'Approved'] + $reimb,
+            'M-4/T-D4: a Paid reimbursement without a post' => ['post' => null, 'status' => 'Paid'] + $reimb,
+            'M-2: RND as the post (DRONE is the code)' => ['post' => 'RND'] + $reimb,
+            'M-2: a lower-case post' => ['post' => 'drone'] + $reimb,
+            'M-6: RND as the previous post' => ['status' => 'Approved', 'previous' => 'RND', 'captured' => 1] + $reimb,
+            'M-6: a previous post with captured = 0' => ['status' => 'Approved', 'previous' => 'GA', 'captured' => 0] + $reimb,
+            'M-6: captured on a payment request' => ['status' => 'Approved', 'captured' => 1],
+            'M-6: captured on a Draft' => ['captured' => 1] + $reimb,
+            'M-6: captured on a Submitted request' => ['status' => 'Submitted', 'captured' => 1] + $reimb,
+            'M-6: captured on a Rejected request' => ['status' => 'Rejected', 'reason' => 'Fabricated', 'captured' => 1] + $reimb,
+            'M-6: captured outside 0/1' => ['status' => 'Approved', 'captured' => 2] + $reimb,
+            'M-7/T-D1: captured with no final post, Approved' => ['status' => 'Approved', 'post' => null, 'captured' => 1] + $reimb,
+            'M-7/T-D1: captured with no final post, Paid' => ['status' => 'Paid', 'post' => null, 'captured' => 1] + $reimb,
+            'M-7/T-D1: captured with no final post, Cancelled' => ['status' => 'Cancelled', 'reason' => 'Fabricated', 'post' => null, 'captured' => 1] + $reimb,
+        ];
+        foreach ($refused as $label => $over) {
+            $expectRefused(static fn () => $request($db, $c, $over), $label);
+        }
+        assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM finance_requests WHERE company_id = ?', [$c['id']])[0]['n'], 'no refused row exists');
+        // T-D1 / T-D4 by UPDATE: an existing row cannot be made invalid either.
+        $approved = $request($db, $c, ['status' => 'Approved', 'captured' => 1, 'post' => 'DRONE'] + $reimb);
+        $cancelled = $request($db, $c, ['status' => 'Cancelled', 'reason' => 'Fabricated', 'captured' => 1, 'post' => 'TJB', 'previous' => 'GA'] + $reimb);
+        $early = $request($db, $c, ['status' => 'Cancelled', 'reason' => 'Fabricated', 'post' => null] + $reimb);
+        $payment = $request($db, $c, ['status' => 'Approved']);
+        foreach ([
+            'T-D4: clearing an Approved post' => ['UPDATE finance_requests SET financial_post = NULL WHERE id = ?', $approved],
+            'T-D1: clearing a cancelled approval\'s post' => ['UPDATE finance_requests SET financial_post = NULL WHERE id = ?', $cancelled],
+            'T-D1: capturing a Cancelled row that has no post' => ['UPDATE finance_requests SET pre_approval_post_captured = 1 WHERE id = ?', $early],
+            'T-D4: clearing a payment request post' => ['UPDATE finance_requests SET financial_post = NULL WHERE id = ?', $payment],
+            'M-6: dropping the capture flag under a previous post' => ['UPDATE finance_requests SET pre_approval_post_captured = 0 WHERE id = ?', $cancelled],
+        ] as $label => [$sql, $id]) {
+            $expectRefused(static fn () => $db->execute($sql, [$id]), $label);
+        }
+        $state = static fn (string $id): array => (static function (array $x): array { return [$x['financial_post'], $x['pre_approval_financial_post'], (int) $x['pre_approval_post_captured']]; })($db->select('SELECT financial_post, pre_approval_financial_post, pre_approval_post_captured FROM finance_requests WHERE id = ?', [$id])[0]);
+        assertSame([['DRONE', null, 1], ['TJB', 'GA', 1], [null, null, 0], ['GA', null, 0]], [$state($approved), $state($cancelled), $state($early), $state($payment)], 'the refused updates changed nothing');
+    },
+
+    'CR-01 M-T3b/T-D3: the allowed edge rows are admitted — no post before approval in Draft, Submitted, Rejected and Cancelled; a cancelled approval with its post and capture; a pre-0042 approval not captured' => static function () use ($company, $request): void {
+        $db = authDatabase();
+        $c = $company($db);
+        $reimb = ['kind' => 'reimbursement', 'payee' => null, 'owner' => $c['employee']];
+        $ids = [
+            $request($db, $c, ['post' => null] + $reimb),
+            $request($db, $c, ['post' => null, 'status' => 'Submitted'] + $reimb),
+            $request($db, $c, ['post' => null, 'status' => 'Rejected', 'reason' => 'Fabricated'] + $reimb),
+            $request($db, $c, ['post' => null, 'status' => 'Cancelled', 'reason' => 'Fabricated', 'captured' => 0] + $reimb),   // T-D3: cancelled before approval
+            $request($db, $c, ['post' => 'TJB', 'status' => 'Cancelled', 'reason' => 'Fabricated', 'captured' => 1] + $reimb),  // cancelled after approval, no previous post
+            $request($db, $c, ['post' => 'NPIP', 'status' => 'Cancelled', 'reason' => 'Fabricated', 'captured' => 1, 'previous' => 'GA'] + $reimb),
+            $request($db, $c, ['post' => 'DRONE', 'status' => 'Approved', 'captured' => 1, 'previous' => 'DRONE'] + $reimb),   // a confirmed post
+            $request($db, $c, ['post' => 'GA', 'status' => 'Paid', 'captured' => 1, 'previous' => null] + $reimb),
+            $request($db, $c, ['post' => 'GA', 'status' => 'Approved'] + $reimb),                                              // approved before 0042: not captured
+        ];
+        assertSame(count($ids), (int) $db->select('SELECT COUNT(*) AS n FROM finance_requests WHERE company_id = ?', [$c['id']])[0]['n'], 'every edge row is stored');
+    },
+
+    'CR-01 M-T4: a 0042 that cannot validate the existing rows refuses cleanly — the table unchanged, the incomplete marker blocking apply, status and inspect' => static function () use ($company, $request, $columns): void {
+        $db = testDatabase();
+        $files = [];
+        foreach (glob(productionMigrationsDir() . '/*.sql') ?: [] as $path) {
+            if ((int) substr(basename($path), 0, 4) <= 41) {
+                $files[basename($path)] = (string) file_get_contents($path);
+            }
+        }
+        (new Migrator($db, migrationFixture($files)))->apply();
+        $c = $company($db);
+        $request($db, $c);
+        $db->execute('SET SESSION check_constraint_checks = 0');
+        try {
+            $request($db, $c, ['post' => 'RND']);                  // seeded invalid row: a code the 0042 CHECK refuses
+        } finally {
+            $db->execute('SET SESSION check_constraint_checks = 1');
+        }
+        $shape = $columns($db, 'finance_requests');
+        $rowsBefore = $db->select('SELECT * FROM finance_requests ORDER BY id');
+        $e = assertThrows(DatabaseError::class, static fn () => (new Migrator($db, productionMigrationsDir()))->apply());
+        assertSame(DatabaseError::FAILURE, $e->kind, 'the ALTER is refused');
+        assertSame($shape, $columns($db, 'finance_requests'), 'the table is unchanged: the post still NOT NULL, no snapshot column');
+        assertTrue(!array_key_exists('pre_approval_financial_post', $columns($db, 'finance_requests')), 'no snapshot column');
+        assertSame($rowsBefore, $db->select('SELECT * FROM finance_requests ORDER BY id'), 'no row changed');
+        $marker = $db->select('SELECT version, applied_at FROM schema_migrations WHERE version = 42');
+        assertSame(1, count($marker), 'the started marker is committed (the runner never guesses a failed DDL complete)');
+        assertSame(null, $marker[0]['applied_at'], '0042 is recorded incomplete, never applied');
+        $m = new Migrator($db, productionMigrationsDir());
+        foreach (['apply', 'status', 'inspect'] as $op) {
+            $err = assertThrows(MigrationError::class, static fn () => $m->$op(), $op);
+            assertSame([MigrationError::SCHEMA_INCOMPLETE, 42], [$err->reason, $err->version], $op . ' refuses until the database is restored (D-AB-13)');
+        }
     },
 ];

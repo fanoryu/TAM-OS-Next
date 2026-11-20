@@ -62,6 +62,17 @@ disposable local PHP + MariaDB backend — never a production backend or real da
       no Finance section; a 401 signs out; zero console errors other than the allowed signed-out `/api/auth/me` 401 line, and
       zero CSP violations. Run it over `tools/serve-e2e-proxy.js` with a disposable backend: `tools/serve-auth-stub.js` has no
       Finance scenarios yet (DD-P1-10, deferred)
+- [ ] **Reimbursement Financial Post (CR-01, ADR-017):** an Employee's "New reimbursement" and Draft edit have no
+      Financial Post field, and their list and detail show "Not yet assigned by the CEO" until the CEO assigns one, then
+      the post read-only, never "Financial Post before approval"; the CEO's Draft edit of a reimbursement offers the post
+      (optional when none is set, no empty choice once set); the CEO's Approve panel for a reimbursement requires a post,
+      preselected with the stored one, and refuses to send without one; after approval the CEO detail shows the final post
+      and the post before approval ("Not recorded (approved before CR-01)" for an earlier approval); a payment request's
+      approval asks for no post; the CEO's "New reimbursement" requires an Employee (live, Active ones only), offers the
+      post as optional and creates the Draft for that employee, unassigned when no post is chosen; the Employee has no
+      such button and never sends an `employeeId`; the activity history names `financialPost` without values; zero console errors other than
+      the allowed signed-out `/api/auth/me` 401 line, and zero CSP violations. Run it over `tools/serve-e2e-proxy.js` with
+      a disposable backend migrated in CI-equivalent isolation only — never an Owner, demo, staging or production database
 - [ ] **No retained sign-in email (O-2):** sign in as the CEO, sign out — the email field is empty; the same for the Employee;
       Employee out → CEO in → out shows neither email; reload and browser Back after sign-out show no email supplied by TAM OS
       (record any browser or password-manager autofill separately — outside TAM OS); a failed sign-in still keeps the typed

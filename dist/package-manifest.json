@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "270af38dbf257693449654a078536b248516837b1f85a516e41cbb0953ff4706",
+  "packageDigest": "70793d36273801c72055acea693da3ecd0b95ce6ce29a2cd79f1c27dae5c875a",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3314099,
-    "sha256": "875abbdf87e519a11893342f1b7243bff796cf6572a89128e7f35e9ed5cee07d"
+    "bytes": 3329825,
+    "sha256": "c55b2d0dd7497ce2ddd7ea9496913d1db83e927408fd86ec78a9d1137b577901"
   },
   "files": [
     {
@@ -179,8 +179,8 @@
     },
     {
       "path": "js/core/request-api.js",
-      "bytes": 19486,
-      "sha256": "d20a8e59c52c223e79a3af49c49a1c1fa659291771813be8787c4e4a67a7fcbb"
+      "bytes": 24359,
+      "sha256": "0bc624a2c788ccfe1801b028a77fb2822faca857498423d9de892c5202863c59"
     },
     {
       "path": "js/core/session-audit.js",
@@ -219,8 +219,8 @@
     },
     {
       "path": "js/core/session-requests.js",
-      "bytes": 25324,
-      "sha256": "8b0556197dd0e67be4631898008e1c0a1b7bfa8d360f417fabbb94d54aa8240f"
+      "bytes": 28751,
+      "sha256": "9a52ea46b07fc3f064ffcef353133257ab2bda6fb556fb01f89a19c796a825bd"
     },
     {
       "path": "js/core/stabilization.js",
@@ -479,8 +479,8 @@
     },
     {
       "path": "js/transport/api-client.js",
-      "bytes": 13732,
-      "sha256": "b8b17e286550c61cc48de8778e8510c6caef7bfe2fca3af651ea7575744a6161"
+      "bytes": 15097,
+      "sha256": "a564e35ec50b55ef8b648903b440f5558ca4f967197e797373919ea6973c7d2e"
     },
     {
       "path": "js/transport/transport-adapter.js",
@@ -529,8 +529,8 @@
     },
     {
       "path": "js/ui/session-requests-view.js",
-      "bytes": 30245,
-      "sha256": "d0b5d68a65e229ecb279bf9fa406e18315c6091f9ec620aaf2bae2e7f1a5be60"
+      "bytes": 36306,
+      "sha256": "0673ccb51365906b6612dded26f8f2080a8205df2625038891cb446b036e6b65"
     },
     {
       "path": "js/ui/session-workspace-view.js",

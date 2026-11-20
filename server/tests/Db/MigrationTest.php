@@ -174,6 +174,8 @@ return [
             // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
             . "applied: 0036_create_finance_transactions\napplied: 0037_create_finance_transaction_voids\napplied: 0038_replace_audit_events_finance_manage\n"
             . "applied: 0039_create_finance_requests\napplied: 0040_create_finance_request_payments\napplied: 0041_replace_audit_events_finance_requests\n"
+            // CR-01 (ADR-017) authorized revision: 0042 follows (head 0042). Was: through 0041.
+            . "applied: 0042_alter_finance_requests_assigned_post\n"
             . "migrations: current\n"],
             [$apply['exit'], $apply['stdout']]);
         assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'finance_requests', 'finance_request_payments', 'finance_transactions', 'finance_transaction_voids', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));

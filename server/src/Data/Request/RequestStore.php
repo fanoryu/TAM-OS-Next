@@ -33,6 +33,13 @@ use TamOs\Policy\Scope;
  * locks the reimbursed employee row by primary key FIRST, then (submit) the request row — the lock
  * order of overtime create (employee → record), so a create or submit serializes with an archive or
  * an employment-status change. Approve, reject, cancel and pay never read or lock the employee.
+ *
+ * The Financial Post of a reimbursement (ADR-017, migration 0042) is the CEO's: the self statements
+ * never name financial_post (an Employee's Draft is created with none, and their update cannot touch
+ * it); UPDATE_SQL sets or replaces it on a Draft; APPROVE_REIMBURSEMENT_SQL writes the final post and
+ * the pre-approval snapshot (the previous value read under the lock, bound as :previous_post and
+ * re-checked null-safely) in the one statement that makes the request Approved. No other statement
+ * writes financial_post, pre_approval_financial_post or pre_approval_post_captured.
  */
 final class RequestStore
 {
@@ -47,15 +54,15 @@ final class RequestStore
     public const FIND_SELF_SQL = 'SELECT id, company_id, owner_employee_id, status FROM finance_requests WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id';
 
     // Record reads: the request with its payment, if any.
-    public const RECORD_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.id = :id AND r.company_id = :company_id';
-    public const RECORD_SELF_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.id = :id AND r.company_id = :company_id AND r.owner_employee_id = :self_employee_id';
+    public const RECORD_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.pre_approval_financial_post, r.pre_approval_post_captured, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.id = :id AND r.company_id = :company_id';
+    public const RECORD_SELF_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.pre_approval_financial_post, r.pre_approval_post_captured, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.id = :id AND r.company_id = :company_id AND r.owner_employee_id = :self_employee_id';
     // The list: by documentDate, with every status and kind bound when no filter is given.
-    public const LIST_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.company_id = :company_id AND r.document_date >= :from_date AND r.document_date <= :to_date AND r.status IN (:status_1, :status_2, :status_3, :status_4, :status_5, :status_6) AND r.kind IN (:kind_1, :kind_2) ORDER BY r.document_date, r.created_at, r.id LIMIT 2001';
-    public const LIST_SELF_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.company_id = :company_id AND r.owner_employee_id = :self_employee_id AND r.document_date >= :from_date AND r.document_date <= :to_date AND r.status IN (:status_1, :status_2, :status_3, :status_4, :status_5, :status_6) AND r.kind IN (:kind_1, :kind_2) ORDER BY r.document_date, r.created_at, r.id LIMIT 2001';
+    public const LIST_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.pre_approval_financial_post, r.pre_approval_post_captured, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.company_id = :company_id AND r.document_date >= :from_date AND r.document_date <= :to_date AND r.status IN (:status_1, :status_2, :status_3, :status_4, :status_5, :status_6) AND r.kind IN (:kind_1, :kind_2) ORDER BY r.document_date, r.created_at, r.id LIMIT 2001';
+    public const LIST_SELF_SQL = 'SELECT r.id, r.company_id, r.owner_employee_id, r.kind, r.financial_post, r.pre_approval_financial_post, r.pre_approval_post_captured, r.category, r.description, r.amount, r.payee, r.document_date, r.status, r.status_reason, r.version, r.created_by_user_id, r.created_at, r.updated_at, p.finance_transaction_id, p.paid_on, p.payment_method, p.paid_by_user_id, p.created_at AS paid_at FROM finance_requests r LEFT JOIN finance_request_payments p ON p.company_id = r.company_id AND p.finance_request_id = r.id WHERE r.company_id = :company_id AND r.owner_employee_id = :self_employee_id AND r.document_date >= :from_date AND r.document_date <= :to_date AND r.status IN (:status_1, :status_2, :status_3, :status_4, :status_5, :status_6) AND r.kind IN (:kind_1, :kind_2) ORDER BY r.document_date, r.created_at, r.id LIMIT 2001';
 
     // The one lock of every write: the request, by primary key (ADR-016 §2, §5 step 1).
-    public const LOCK_SQL = 'SELECT id, company_id, owner_employee_id, kind, financial_post, category, description, amount, payee, document_date, status, version FROM finance_requests WHERE id = :id AND company_id = :company_id FOR UPDATE';
-    public const LOCK_SELF_SQL = 'SELECT id, company_id, owner_employee_id, kind, financial_post, category, description, amount, payee, document_date, status, version FROM finance_requests WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id FOR UPDATE';
+    public const LOCK_SQL = 'SELECT id, company_id, owner_employee_id, kind, financial_post, pre_approval_post_captured, category, description, amount, payee, document_date, status, version FROM finance_requests WHERE id = :id AND company_id = :company_id FOR UPDATE';
+    public const LOCK_SELF_SQL = 'SELECT id, company_id, owner_employee_id, kind, financial_post, pre_approval_post_captured, category, description, amount, payee, document_date, status, version FROM finance_requests WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id FOR UPDATE';
 
     // The reimbursed employee, locked by primary key before the request (create, submit; R1 = A).
     public const LOCK_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id FOR UPDATE';
@@ -70,9 +77,16 @@ final class RequestStore
     // Writes. A new request is always a version 1 Draft; the owner comes from the authorized
     // candidate (an employee record read in scope) or the scope itself, never from the request.
     public const CREATE_SQL = "INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (:id, :company_id, :kind, :financial_post, :category, :description, :amount, :payee, :owner_employee_id, :document_date, 'Draft', NULL, 1, :idempotency_key, :created_by_user_id, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))";
-    public const CREATE_SELF_SQL = "INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (:id, :company_id, 'reimbursement', :financial_post, :category, :description, :amount, NULL, :self_employee_id, :document_date, 'Draft', NULL, 1, :idempotency_key, :created_by_user_id, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))";
+    // ADR-017 §1: an Employee's reimbursement is created with no post (NULL), never one they chose.
+    public const CREATE_SELF_SQL = "INSERT INTO finance_requests (id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (:id, :company_id, 'reimbursement', NULL, :category, :description, :amount, NULL, :self_employee_id, :document_date, 'Draft', NULL, 1, :idempotency_key, :created_by_user_id, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))";
     public const UPDATE_SQL = "UPDATE finance_requests SET financial_post = :financial_post, category = :category, description = :description, amount = :amount, payee = :payee, document_date = :document_date, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = 'Draft'";
-    public const UPDATE_SELF_SQL = "UPDATE finance_requests SET financial_post = :financial_post, category = :category, description = :description, amount = :amount, document_date = :document_date, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'";
+    // ADR-017 §1: the Employee's Draft update does not name financial_post (defence below input validation).
+    public const UPDATE_SELF_SQL = "UPDATE finance_requests SET category = :category, description = :description, amount = :amount, document_date = :document_date, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id AND version = :expected_version AND status = 'Draft'";
+    // ADR-017 §3: the reimbursement approval — Approved, the final post and the pre-approval snapshot in one
+    // compare-and-swap. :previous_post is the value read under the lock (bound twice, as :previous_post and
+    // :previous_post_check — native prepares take each named parameter once); the null-safe re-check and
+    // captured = 0 make a changed or already-captured row match nothing. No assignment reads another column.
+    public const APPROVE_REIMBURSEMENT_SQL = "UPDATE finance_requests SET status = 'Approved', pre_approval_financial_post = :previous_post, pre_approval_post_captured = 1, financial_post = :financial_post, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND kind = 'reimbursement' AND financial_post <=> :previous_post_check AND pre_approval_post_captured = 0 AND version = :expected_version AND status = 'Submitted'";
     public const TRANSITION_SQL = 'UPDATE finance_requests SET status = :to_status, status_reason = :status_reason, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status';
     public const TRANSITION_SELF_SQL = 'UPDATE finance_requests SET status = :to_status, status_reason = :status_reason, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id AND version = :expected_version AND status = :from_status';
     // §5 step 5: the one payment of an Approved request (immutable; CEO company scope only).
@@ -172,14 +186,13 @@ final class RequestStore
      * reimbursement; otherwise the owner is the authorized candidate's (a reimbursement) or none (a
      * payment request).
      *
-     * @param array{kind: string, financialPost: string, category: string, description: string, amount: string, payee: ?string, documentDate: string, idempotencyKey: string} $in
+     * @param array{kind: string, financialPost: ?string, category: string, description: string, amount: string, payee: ?string, documentDate: string, idempotencyKey: string} $in
      */
     public function create(Authorization $auth, string $id, array $in, string $actorUserId): void
     {
         $auth = self::authorized($auth);
         $params = [
             'id' => self::hex($id),
-            'financial_post' => $in['financialPost'],
             'category' => $in['category'],
             'description' => $in['description'],
             'amount' => $in['amount'],
@@ -188,12 +201,16 @@ final class RequestStore
             'created_by_user_id' => self::hex($actorUserId),
         ];
         if ($auth->scope->isSelf()) {
-            if ($in['kind'] !== 'reimbursement' || $auth->action !== Action::ReimbursementCreateSelfDraft) {
-                throw new \LogicException('an Employee creates only their own reimbursement');
+            if ($in['kind'] !== 'reimbursement' || $auth->action !== Action::ReimbursementCreateSelfDraft || $in['financialPost'] !== null) {
+                throw new \LogicException('an Employee creates only their own reimbursement, with no Financial Post');
             }
             $this->db->execute($auth, self::CREATE_SELF_SQL, $params);
             return;
         }
+        if ($in['kind'] !== 'reimbursement' && $in['financialPost'] === null) {
+            throw new \LogicException('a payment request is created with its Financial Post');
+        }
+        $params['financial_post'] = $in['financialPost'];
         if ($in['kind'] === 'reimbursement') {
             if ($auth->action !== Action::ReimbursementCreateSelfDraft || $auth->record === null || $auth->record->ownerEmployeeId === null) {
                 throw new \LogicException('a reimbursement is created against its employee candidate');
@@ -211,9 +228,11 @@ final class RequestStore
     }
 
     /**
-     * Writes the editable fields of the locked Draft at the expected version.
+     * Writes the editable fields of the locked Draft at the expected version. Under a self scope the
+     * Financial Post is not written (ADR-017 §1); under finance.manage it is set or replaced, and a
+     * caller never clears a post the Draft holds (RequestService compares against the locked row).
      *
-     * @param array{financialPost: string, category: string, description: string, amount: string, payee: ?string, documentDate: string} $fields
+     * @param array{financialPost: ?string, category: string, description: string, amount: string, payee: ?string, documentDate: string} $fields
      * @return int 1 when the Draft changed
      */
     public function update(Authorization $auth, string $id, int $expectedVersion, array $fields): int
@@ -222,7 +241,6 @@ final class RequestStore
         $params = [
             'id' => self::hex($id),
             'expected_version' => $expectedVersion,
-            'financial_post' => $fields['financialPost'],
             'category' => $fields['category'],
             'description' => $fields['description'],
             'amount' => $fields['amount'],
@@ -231,7 +249,29 @@ final class RequestStore
         if ($auth->scope->isSelf()) {
             return $this->db->execute($auth, self::UPDATE_SELF_SQL, $params);
         }
-        return $this->db->execute($auth, self::UPDATE_SQL, $params + ['payee' => $fields['payee']]);
+        return $this->db->execute($auth, self::UPDATE_SQL, $params + ['financial_post' => $fields['financialPost'], 'payee' => $fields['payee']]);
+    }
+
+    /**
+     * ADR-017 §3: approves the locked Submitted reimbursement at the expected version, writing the final
+     * post and the snapshot of $previousPost — the value read under this transaction's lock — in one
+     * statement (finance.manage, company scope).
+     *
+     * @return int 1 when the reimbursement was approved; 0 when the row no longer matches
+     */
+    public function approveReimbursement(Authorization $auth, string $id, int $expectedVersion, ?string $previousPost, string $financialPost): int
+    {
+        $auth = self::authorized($auth);
+        if ($auth->action !== Action::FinanceManage) {
+            throw new \LogicException('a reimbursement is approved under finance.manage, in company scope');
+        }
+        return $this->db->execute($auth, self::APPROVE_REIMBURSEMENT_SQL, [
+            'id' => self::hex($id),
+            'expected_version' => $expectedVersion,
+            'previous_post' => $previousPost,
+            'previous_post_check' => $previousPost,
+            'financial_post' => $financialPost,
+        ]);
     }
 
     /** One status change of the locked request, at the expected version; the reason only on Rejected / Cancelled. */

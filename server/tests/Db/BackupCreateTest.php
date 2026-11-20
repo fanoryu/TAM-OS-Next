@@ -107,13 +107,14 @@ return [
         // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
         // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
         assertSame(17, $result['tables']);
-        assertSame([41, 41, 0], [$result['databaseHead'], $result['codeHead'], $result['pruned']]);
+        // CR-01 (ADR-017) authorized revision: 0042 follows (head 0042). Was: [41, 41, 0].
+        assertSame([42, 42, 0], [$result['databaseHead'], $result['codeHead'], $result['pruned']]);
         $path = $dir . DIRECTORY_SEPARATOR . BackupStore::fileName($result['backupId']);
         $m = (new BackupVerifier($keys['secretKey']))->verify($path);
         assertSame(BackupTables::INCLUDED, array_column($m['tables'], 'name'));
         assertSame([], $m['absentTables']);
         assertSame(BackupTables::EXCLUDED, $m['excludedTables']);
-        assertSame(41, count($m['schema']['migrations'])); // Phase 1 authorized revision: 38 (was 35). AWP-01 authorized revision: 41 (was 38).
+        assertSame(42, count($m['schema']['migrations'])); // Phase 1 authorized revision: 38 (was 35). AWP-01 authorized revision: 41 (was 38). CR-01 (ADR-017) authorized revision: 42 (was 41).
         $applied = $db->select('SELECT version, sha256 FROM schema_migrations ORDER BY version');
         assertSame(array_column($applied, 'sha256'), array_column($m['schema']['migrations'], 'sha256'), 'the applied history');
         $total = 0;
@@ -221,7 +222,8 @@ return [
         $result = $creator($dir, $keys['publicKey'])->create();
         // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
         // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
-        assertSame([33, 41, 12], [$result['databaseHead'], $result['codeHead'], $result['tables']]);
+        // CR-01 (ADR-017) authorized revision: the code head is 0042. Was: [33, 41, 12].
+        assertSame([33, 42, 12], [$result['databaseHead'], $result['codeHead'], $result['tables']]);
         $m = (new BackupVerifier($keys['secretKey']))->verify($dir . DIRECTORY_SEPARATOR . BackupStore::fileName($result['backupId']));
         assertSame(['finance_executions', 'finance_transactions', 'finance_transaction_voids', 'finance_requests', 'finance_request_payments'], $m['absentTables']);
         assertSame(33, count($m['schema']['migrations']));
@@ -322,7 +324,7 @@ return [
         $file = writeConfigFile($config);
         $run = runBackupCli(['create'], $file);
         assertSame(0, $run['exit'], $run['stderr']);
-        assertTrue(preg_match('/^backup: ([0-9]{8}T[0-9]{6}Z-[0-9a-f]{8})\nbytes: [0-9]+\ntables: 17, rows: [0-9]+\nschema: database head 41, code head 41\npruned: 0\n$/D', $run['stdout'], $m) === 1, $run['stdout']);
+        assertTrue(preg_match('/^backup: ([0-9]{8}T[0-9]{6}Z-[0-9a-f]{8})\nbytes: [0-9]+\ntables: 17, rows: [0-9]+\nschema: database head 42, code head 42\npruned: 0\n$/D', $run['stdout'], $m) === 1, $run['stdout']);
         $status = runBackupCli(['status'], $file);
         assertSame(0, $status['exit'], $status['stderr']);
         assertTrue(str_starts_with($status['stdout'], "backups: 1, intact: 1\nnewest: " . $m[1] . ' (0 h old, '), $status['stdout']);

@@ -26,6 +26,13 @@ declare(strict_types=1);
  *          enters a total; the documentDate range rule; Phase 1 figures byte-identical across 0041;
  *          REPORT_CAP fails closed
  *
+ *   CR-01  (ADR-017, migration 0042) T-H an Employee never sends a post, the CEO's create may omit it and
+ *          a post is set or replaced, never cleared; T-A every reimbursement approval names its post and
+ *          writes Approved, the final post and the snapshot of the locked row's previous post atomically,
+ *          its audit row naming financialPost only when it changed; T-I create idempotency (R2-2 = A);
+ *          T-W no later operation changes the post or the snapshot; T-P payment and the report use the
+ *          approved post; T-V the Employee never receives a snapshot key
+ *
  * Route coverage (RouteHostileCoverageTest): '/api/finance-requests', '/api/finance-request',
  * '/api/finance-requests/create', '/api/finance-requests/update', '/api/finance-requests/submit',
  * '/api/finance-requests/approve', '/api/finance-requests/reject', '/api/finance-requests/cancel',
@@ -45,6 +52,8 @@ use TamOs\Data\Scope\ScopedDatabase;
 use TamOs\Data\Transaction\TransactionStore;
 use TamOs\Http\Response;
 use TamOs\Identity\Principal;
+use TamOs\Policy\Action;
+use TamOs\Policy\Policy;
 use TamOs\Policy\Scope;
 use TamOs\Report\FinancialReport;
 use TamOs\Request\RequestService;
@@ -116,7 +125,9 @@ $reason = static function (array $w): ?string {
 $key = static fn (): string => bin2hex(random_bytes(16));
 $pr = static fn (array $over = []): array => $over + ['kind' => 'paymentRequest', 'financialPost' => 'GA', 'category' => 'Vendor', 'description' => 'Fabricated printer toner',
     'amount' => '450000.00', 'payee' => 'CV Fiktif Sejahtera', 'documentDate' => '2026-10-10', 'idempotencyKey' => bin2hex(random_bytes(16))];
-$rb = static fn (array $over = []): array => $over + ['kind' => 'reimbursement', 'financialPost' => 'TJB', 'category' => 'Transport', 'description' => 'Fabricated taxi fare',
+// CR-01 (ADR-017) authorized revision: a reimbursement body carries no Financial Post (an Employee may not send one;
+// the CEO's is optional) — the approval assigns it ($args). Was: 'financialPost' => 'TJB' in every reimbursement body.
+$rb = static fn (array $over = []): array => $over + ['kind' => 'reimbursement', 'category' => 'Transport', 'description' => 'Fabricated taxi fare',
     'amount' => '125000.00', 'documentDate' => '2026-10-08', 'idempotencyKey' => bin2hex(random_bytes(16))];
 $create = static fn (array $w, string $who, array $body): Response => $post($w, $who, AWP01_WRITES['create'], $body);
 $op = static fn (array $w, string $who, string $operation, array $body): Response => $post($w, $who, AWP01_WRITES[$operation], $body);
@@ -125,7 +136,9 @@ $args = static function (string $operation, array $r, array $over = []): array {
     $b = ['financeRequestId' => $r['id'], 'expectedVersion' => $r['version']];
     $b += match ($operation) {
         'update' => ['description' => $r['description'] . ' (edited)'],
-        'approve' => ['expectedAmount' => $r['amount']],
+        // CR-01 (ADR-017 D6) authorized revision: a reimbursement approval names its post — the stored one, or TJB
+        // (the post these tests used before ADR-017) when none is assigned yet. Was: ['expectedAmount'] only.
+        'approve' => ['expectedAmount' => $r['amount']] + ($r['kind'] === 'reimbursement' ? ['financialPost' => $r['financialPost'] ?? 'TJB'] : []),
         'reject', 'cancel' => ['reason' => 'Fabricated reason'],
         'pay' => ['expectedAmount' => $r['amount'], 'paidOn' => '2026-10-20', 'paymentMethod' => 'bankTransfer', 'idempotencyKey' => bin2hex(random_bytes(16))],
         default => [],
@@ -195,7 +208,8 @@ return [
         $m = $ok($op($w, 'empA1', 'update', $args('update', $m)), 'own update')['financeRequest'];
         $m = $ok($op($w, 'empA1', 'submit', $args('submit', $m)), 'own submit')['financeRequest'];
         assertSame(['Submitted', 3, 'e_a1'], [$m['status'], $m['version'], $m['employeeId']]);
-        assertSame(['reimbursement.createSelfDraft financeRequest - financialPost,category,description,amount,documentDate', 'reimbursement.updateSelfDraft financeRequest - description',
+        // CR-01 (ADR-017) authorized revision: an Employee Draft is created without a post. Was: '- financialPost,category,…'.
+        assertSame(['reimbursement.createSelfDraft financeRequest - category,description,amount,documentDate', 'reimbursement.updateSelfDraft financeRequest - description',
             'reimbursement.submitSelf financeRequest submit -'], $audits($w['db'], $m['id']), 'the self actions are audited under their own names');
     },
 
@@ -241,9 +255,15 @@ return [
             $again = $ok($create($w, $who, $body), $label . ' replay')['financeRequest'];
             assertSame($first, $again, $label . ': the same request');
             assertSame($n, $counts($w['db']), $label . ': no row, no audit');
-            foreach (['amount' => '1000.00', 'description' => 'Fabricated other', 'documentDate' => '2026-10-09', 'financialPost' => 'NPIP'] as $field => $value) {
+            // CR-01 (ADR-017) authorized revision: an Employee body may not carry a post at all (400, before the key is
+            // read); the CEO's reimbursement without one differs from a retry naming one. Was: financialPost for every creator.
+            $differs = ['amount' => '1000.00', 'description' => 'Fabricated other', 'documentDate' => '2026-10-09'] + ($who === 'empA1' ? [] : ['financialPost' => 'NPIP']);
+            foreach ($differs as $field => $value) {
                 assertSame([409, 'conflict'], $code($create($w, $who, [$field => $value] + $body)), $label . ': ' . $field . ' differs');
                 assertSame('idempotency_mismatch', $reason($w), $label . ': ' . $field);
+            }
+            if ($who === 'empA1') {
+                assertSame([400, 'validation_failed'], $code($create($w, $who, ['financialPost' => 'NPIP'] + $body)), $label . ': an Employee naming a post is 400 (ADR-017)');
             }
             assertSame($n, $counts($w['db']), $label . ': the mismatches wrote nothing');
         }
@@ -624,5 +644,199 @@ return [
         $over = $get($w, 'ceoA', '/api/reports/financial', 'from=2026-10-01&to=2026-10-31');
         assertSame([500, 'internal_error'], $code($over), 'REPORT_CAP + 1: fails closed');
         assertTrue(!str_contains($over->body, 'financialReport') && !str_contains($over->body, 'approvedNotPaid') && !str_contains($over->body, '.00'), 'nothing partial');
+    },
+
+    'CR-01 T-H1–T-H5 (ADR-017 §1): an Employee Draft has no post and cannot get one from the Employee; the CEO may omit, set and replace it, never clear it' => static function () use ($world, $get, $create, $op, $args, $ok, $code, $rb, $pr, $rows, $audits): void {
+        $w = $world();
+        $snap = ['preApprovalFinancialPost', 'preApprovalPostCaptured'];
+        $before = $rows($w['db']);
+        assertSame([400, 'validation_failed'], $code($create($w, 'empA1', $rb(['financialPost' => 'GA']))), 'T-H1: an Employee naming a post');
+        assertSame([400, 'validation_failed'], $code($create($w, 'empA1', $rb(['financialPost' => null]))), 'T-H1: even null');
+        assertSame($before, $rows($w['db']), 'T-H1: nothing written');
+        $mine = $ok($create($w, 'empA1', $rb()), 'T-H1: without a post')['financeRequest'];
+        assertSame(null, $mine['financialPost'], 'T-H1: the Draft has no post');
+        assertSame([], array_values(array_intersect($snap, array_keys($mine))), 'T-V2: the Employee response has no snapshot key');
+        assertSame([null, 0, null], array_map(static fn ($v) => is_numeric($v) ? (int) $v : $v, array_values($w['db']->select('SELECT financial_post, pre_approval_post_captured, pre_approval_financial_post FROM finance_requests WHERE id = ?', [$mine['id']])[0])), 'stored NULL, not captured');
+        $before = $rows($w['db']);
+        assertSame([400, 'validation_failed'], $code($op($w, 'empA1', 'update', $args('update', $mine, ['financialPost' => 'GA']))), 'T-H2: an Employee update naming a post');
+        assertSame($before, $rows($w['db']), 'T-H2: nothing written');
+        $mine = $ok($op($w, 'empA1', 'update', $args('update', $mine)), 'T-H2: the other fields update')['financeRequest'];
+        assertSame([null, 2], [$mine['financialPost'], $mine['version']], 'T-H2: the post is unchanged');
+        $ceoView = $ok($get($w, 'ceoA', AWP01_READ, 'id=' . $mine['id']), 'CEO read')['financeRequest'];
+        assertSame([null, null, false], [$ceoView['financialPost'], $ceoView['preApprovalFinancialPost'], $ceoView['preApprovalPostCaptured']], 'T-V3: the CEO sees the snapshot, not captured');
+        // T-H4: the CEO sets the missing post on the Employee's Draft, then replaces it; null is refused.
+        $set = $ok($op($w, 'ceoA', 'update', ['financeRequestId' => $mine['id'], 'expectedVersion' => $mine['version'], 'financialPost' => 'GA']), 'T-H4: set')['financeRequest'];
+        assertSame(['GA', 3], [$set['financialPost'], $set['version']]);
+        $replaced = $ok($op($w, 'ceoA', 'update', ['financeRequestId' => $set['id'], 'expectedVersion' => $set['version'], 'financialPost' => 'NPIP']), 'T-H4: replace')['financeRequest'];
+        assertSame('NPIP', $replaced['financialPost']);
+        $before = $rows($w['db']);
+        assertSame([400, 'validation_failed'], $code($op($w, 'ceoA', 'update', ['financeRequestId' => $replaced['id'], 'expectedVersion' => $replaced['version'], 'financialPost' => null])), 'T-H4: never cleared');
+        assertSame([400, 'validation_failed'], $code($op($w, 'ceoA', 'update', ['financeRequestId' => $replaced['id'], 'expectedVersion' => $replaced['version'], 'financialPost' => 'RND'])), 'T-H4: never an unknown code');
+        assertSame($before, $rows($w['db']), 'T-H4: nothing written');
+        assertSame(['reimbursement.createSelfDraft financeRequest - category,description,amount,documentDate', 'reimbursement.updateSelfDraft financeRequest - description',
+            'reimbursement.updateSelfDraft financeRequest - financialPost', 'reimbursement.updateSelfDraft financeRequest - financialPost'], $audits($w['db'], $mine['id']), 'field names only, never a value');
+        // T-H3: the CEO's own reimbursement create.
+        $none = $ok($create($w, 'ceoA', $rb(['employeeId' => 'e_a1'])), 'T-H3: no post')['financeRequest'];
+        $drone = $ok($create($w, 'ceoA', $rb(['employeeId' => 'e_a1', 'financialPost' => 'DRONE'])), 'T-H3: DRONE')['financeRequest'];
+        assertSame([null, 'DRONE'], [$none['financialPost'], $drone['financialPost']], 'T-H3: absent → NULL; a canonical code is stored as sent');
+        assertSame(['reimbursement.createSelfDraft financeRequest - category,description,amount,documentDate', 'reimbursement.createSelfDraft financeRequest - financialPost,category,description,amount,documentDate'],
+            [$audits($w['db'], $none['id'])[0], $audits($w['db'], $drone['id'])[0]], 'the create row names the post only when one was set');
+        $before = $rows($w['db']);
+        foreach ([null, 'RND', 'drone'] as $v) {
+            assertSame([400, 'validation_failed'], $code($create($w, 'ceoA', $rb(['employeeId' => 'e_a1', 'financialPost' => $v]))), 'T-H3: ' . var_export($v, true));
+        }
+        assertSame([400, 'validation_failed'], $code($create($w, 'ceoA', array_diff_key($pr(), ['financialPost' => true]))), 'T-H5: a payment request needs its post');
+        assertSame($before, $rows($w['db']), 'T-H3/T-H5: nothing written');
+    },
+
+    'CR-01 T-A1–T-A7 (ADR-017 §1, §3, D6): every reimbursement approval names its post; Approved, the final post and the locked row\'s previous post are written together; the audit row names financialPost only when it changed' => static function () use ($world, $get, $create, $op, $args, $ok, $code, $rb, $at, $rows, $audits, $reason): void {
+        $w = $world();
+        $submitted = static function (array $body, string $who = 'empA1') use ($w, $create, $op, $args, $ok): array {
+            $r = $ok($create($w, $who, $body), 'create')['financeRequest'];
+            return $ok($op($w, $who, 'submit', $args('submit', $r)), 'submit')['financeRequest'];
+        };
+        $stored = static function (string $id) use ($w): array {
+            $x = $w['db']->select('SELECT status, financial_post, pre_approval_financial_post, pre_approval_post_captured, version FROM finance_requests WHERE id = ?', [$id])[0];
+            return [$x['status'], $x['financial_post'], $x['pre_approval_financial_post'], (int) $x['pre_approval_post_captured'], (int) $x['version']];
+        };
+        $noPost = static fn (array $b): array => array_diff_key($b, ['financialPost' => true]);
+        // T-A1: no post (or an unknown one) on a reimbursement approval is 400, nothing written, no audit row.
+        $r = $submitted($rb());
+        $before = $rows($w['db']);
+        assertSame([400, 'validation_failed'], $code($op($w, 'ceoA', 'approve', $noPost($args('approve', $r)))), 'T-A1: no post');
+        assertSame([400, 'validation_failed'], $code($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => 'RND']))), 'T-A1: RND');
+        assertSame([400, 'validation_failed'], $code($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => null]))), 'T-A1: null');
+        // T-A4: an Employee is 403 before any lookup; T-A6: stale version or another amount is 409.
+        assertSame([403, 'forbidden'], $code($op($w, 'empA1', 'approve', $args('approve', $r, ['financialPost' => 'GA']))), 'T-A4');
+        assertSame([409, 'conflict'], $code($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => 'GA', 'expectedVersion' => $r['version'] - 1]))), 'T-A6: stale');
+        assertSame('finance_request_version', $reason($w));
+        assertSame([409, 'conflict'], $code($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => 'GA', 'expectedAmount' => '1.00']))), 'T-A6: another amount');
+        assertSame('finance_request_amount', $reason($w));
+        assertSame($before, $rows($w['db']), 'T-A1/T-A4/T-A6: nothing changed, no audit row');
+        // T-A2: assigning a post that was missing.
+        $a = $ok($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => 'DRONE'])), 'T-A2: approve with DRONE')['financeRequest'];
+        assertSame(['Approved', $r['version'] + 1, 'DRONE', null, true], [$a['status'], $a['version'], $a['financialPost'], $a['preApprovalFinancialPost'], $a['preApprovalPostCaptured']], 'T-A2: final DRONE, captured, no previous post');
+        assertSame(['Approved', 'DRONE', null, 1, $r['version'] + 1], $stored($r['id']), 'T-A2: stored');
+        assertSame('finance.manage financeRequest approve financialPost', $audits($w['db'], $r['id'])[2], 'T-A2/T-V5: the approval names the field, never a value');
+        // D3: reassigning a preassigned post.
+        $g = $submitted($rb(['employeeId' => 'e_a2', 'financialPost' => 'GA']), 'ceoA');
+        $ga = $ok($op($w, 'ceoA', 'approve', $args('approve', $g, ['financialPost' => 'NPIP'])), 'reassign GA → NPIP')['financeRequest'];
+        assertSame(['NPIP', 'GA', true], [$ga['financialPost'], $ga['preApprovalFinancialPost'], $ga['preApprovalPostCaptured']], 'previous GA, final NPIP');
+        assertSame(['Approved', 'NPIP', 'GA', 1, $g['version'] + 1], $stored($g['id']));
+        assertSame('finance.manage financeRequest approve financialPost', $audits($w['db'], $g['id'])[2]);
+        // T-A7: confirming the stored post.
+        $t = $submitted($rb(['employeeId' => 'e_a2', 'financialPost' => 'TJB']), 'ceoA');
+        $tj = $ok($op($w, 'ceoA', 'approve', $args('approve', $t)), 'confirm TJB')['financeRequest'];
+        assertSame(['TJB', 'TJB', true], [$tj['financialPost'], $tj['preApprovalFinancialPost'], $tj['preApprovalPostCaptured']], 'T-A7: previous = final, captured');
+        assertSame('finance.manage financeRequest approve -', $audits($w['db'], $t['id'])[2], 'T-A7: no field when the post is confirmed');
+        // T-V2: the Employee reads the approved reimbursement with its post and no snapshot key.
+        $mine = $ok($get($w, 'empA1', AWP01_READ, 'id=' . $r['id']), 'Employee read')['financeRequest'];
+        assertSame(['DRONE', false, false], [$mine['financialPost'], array_key_exists('preApprovalFinancialPost', $mine), array_key_exists('preApprovalPostCaptured', $mine)], 'T-V2: the assigned post, no snapshot');
+        foreach ($ok($get($w, 'empA1', AWP01_LIST, 'from=2026-10-01&to=2026-10-31'), 'Employee list')['financeRequests'] as $x) {
+            assertTrue(!array_key_exists('preApprovalFinancialPost', $x) && !array_key_exists('preApprovalPostCaptured', $x), 'T-V2: no snapshot key in the Employee list');
+        }
+        // T-A3: a payment request approval names no post; without one it is unchanged and never captured.
+        $p = $at($w, 'Submitted');
+        $before = $rows($w['db']);
+        assertSame([400, 'validation_failed'], $code($op($w, 'ceoA', 'approve', $args('approve', $p, ['financialPost' => 'GA']))), 'T-A3: a post on a payment request');
+        assertSame($before, $rows($w['db']), 'T-A3: nothing written');
+        $pa = $ok($op($w, 'ceoA', 'approve', $args('approve', $p)), 'T-A3: payment request approve')['financeRequest'];
+        assertSame(['GA', null, false], [$pa['financialPost'], $pa['preApprovalFinancialPost'], $pa['preApprovalPostCaptured']], 'T-A3: unchanged behaviour, not captured');
+        assertSame(['Approved', 'GA', null, 0, $p['version'] + 1], $stored($p['id']));
+    },
+
+    'CR-01 T-A5 (ADR-017 §3): the approval statement captures only the value it was given under the lock — a changed post, a stale version or an already captured row matches no row' => static function () use ($world, $create, $op, $args, $ok, $rb, $b1Ceo): void {
+        $w = $world();
+        $r = $ok($create($w, 'ceoA', $rb(['employeeId' => 'e_a1', 'financialPost' => 'GA'])), 'create')['financeRequest'];
+        $r = $ok($op($w, 'ceoA', 'submit', $args('submit', $r)), 'submit')['financeRequest'];
+        $store = new RequestStore(new ScopedDatabase($w['db']));
+        $auth = Policy::authorize($b1Ceo($w), Action::FinanceManage);
+        $state = static function () use ($w, $r): array {
+            $x = $w['db']->select('SELECT status, financial_post, pre_approval_financial_post, pre_approval_post_captured, version FROM finance_requests WHERE id = ?', [$r['id']])[0];
+            return [$x['status'], $x['financial_post'], $x['pre_approval_financial_post'], (int) $x['pre_approval_post_captured'], (int) $x['version']];
+        };
+        $before = $state();
+        assertSame(0, $store->approveReimbursement($auth, $r['id'], $r['version'], null, 'DRONE'), 'a NULL previous post does not match GA (null-safe)');
+        assertSame(0, $store->approveReimbursement($auth, $r['id'], $r['version'], 'NPIP', 'DRONE'), 'another previous post');
+        assertSame(0, $store->approveReimbursement($auth, $r['id'], $r['version'] + 1, 'GA', 'DRONE'), 'a stale version');
+        assertSame($before, $state(), 'nothing changed');
+        assertSame(1, $store->approveReimbursement($auth, $r['id'], $r['version'], 'GA', 'DRONE'), 'the locked value');
+        assertSame(['Approved', 'DRONE', 'GA', 1, $r['version'] + 1], $state(), 'the snapshot is the bound previous value');
+        $after = $state();
+        assertSame(0, $store->approveReimbursement($auth, $r['id'], $r['version'] + 1, 'DRONE', 'TJB'), 'an Approved, captured row is never approved again');
+        assertSame($after, $state());
+    },
+
+    'CR-01 T-W1/T-D2 (ADR-017 §4): after approval no operation changes the post or the snapshot; a cancelled approval keeps both' => static function () use ($world, $create, $op, $args, $ok, $code, $rb): void {
+        $w = $world();
+        $snap = static function (string $id) use ($w): array {
+            $x = $w['db']->select('SELECT financial_post, pre_approval_financial_post, pre_approval_post_captured FROM finance_requests WHERE id = ?', [$id])[0];
+            return [$x['financial_post'], $x['pre_approval_financial_post'], (int) $x['pre_approval_post_captured']];
+        };
+        $approved = static function (string $post) use ($w, $create, $op, $args, $ok, $rb): array {
+            $r = $ok($create($w, 'empA1', $rb()), 'create')['financeRequest'];
+            $r = $ok($op($w, 'empA1', 'submit', $args('submit', $r)), 'submit')['financeRequest'];
+            return $ok($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => $post])), 'approve')['financeRequest'];
+        };
+        $a = $approved('DRONE');
+        $fixed = $snap($a['id']);
+        assertSame(['DRONE', null, 1], $fixed);
+        foreach (['update' => ['financialPost' => 'GA'], 'submit' => [], 'reject' => [], 'approve' => ['financialPost' => 'GA']] as $operation => $over) {
+            assertSame([409, 'conflict'], $code($op($w, 'ceoA', $operation, $args($operation, $a, $over))), 'T-W1: ' . $operation . ' after approval');
+            assertSame($fixed, $snap($a['id']), 'T-W1: ' . $operation . ' changed nothing');
+        }
+        $paid = $ok($op($w, 'ceoA', 'pay', $args('pay', $a)), 'pay')['financeRequest'];
+        assertSame(['Paid', 'DRONE', null, true], [$paid['status'], $paid['financialPost'], $paid['preApprovalFinancialPost'], $paid['preApprovalPostCaptured']], 'T-W1: pay keeps the post and the snapshot');
+        assertSame($fixed, $snap($a['id']));
+        $c = $approved('TJB');
+        $cancelled = $ok($op($w, 'ceoA', 'cancel', $args('cancel', $c)), 'cancel the approval')['financeRequest'];
+        assertSame(['Cancelled', 'TJB', true], [$cancelled['status'], $cancelled['financialPost'], $cancelled['preApprovalPostCaptured']], 'T-D2: a cancelled approval keeps its post and captured = 1');
+        assertSame(['TJB', null, 1], $snap($c['id']));
+        $refused = false;
+        try {
+            $w['db']->execute('UPDATE finance_requests SET financial_post = NULL WHERE id = ?', [$c['id']]);
+        } catch (DatabaseError $e) {
+            $refused = true;
+        }
+        assertTrue($refused, 'T-D2: clearing the post of a cancelled approval is refused (finance_requests_captured_post)');
+        assertSame(['TJB', null, 1], $snap($c['id']));
+    },
+
+    'CR-01 T-I1–T-I3 (ADR-017, R2-2 = Option A): a create retry replays until the stored request changes; after a post assignment it is 409 idempotency_mismatch and never a duplicate' => static function () use ($world, $create, $op, $args, $ok, $code, $rb, $counts, $reason, $key): void {
+        $w = $world();
+        $body = $rb(['idempotencyKey' => $key()]);
+        $first = $ok($create($w, 'empA1', $body), 'create')['financeRequest'];
+        $n = $counts($w['db']);
+        assertSame($first, $ok($create($w, 'empA1', $body), 'T-I1: retry')['financeRequest'], 'T-I1: the same Draft, post NULL');
+        assertSame($n, $counts($w['db']), 'T-I1: no row, no audit');
+        $s = $ok($op($w, 'empA1', 'submit', $args('submit', $first)), 'submit')['financeRequest'];
+        $ok($op($w, 'ceoA', 'approve', $args('approve', $s, ['financialPost' => 'GA'])), 'approve with GA');
+        $n = $counts($w['db']);
+        assertSame([409, 'conflict'], $code($create($w, 'empA1', $body)), 'T-I2: the retry after the CEO assigned a post');
+        assertSame('idempotency_mismatch', $reason($w));
+        assertSame($n, $counts($w['db']), 'T-I2: no new row');
+        assertSame([$first['id']], array_column($w['db']->select('SELECT id FROM finance_requests WHERE company_id = ? AND idempotency_key = ?', [$w['a'], $body['idempotencyKey']]), 'id'), 'T-I2: the key is still held by the original');
+        $ceoBody = $rb(['employeeId' => 'e_a2', 'idempotencyKey' => $key()]);
+        $d = $ok($create($w, 'ceoA', $ceoBody), 'CEO create, no post')['financeRequest'];
+        $ok($op($w, 'ceoA', 'update', ['financeRequestId' => $d['id'], 'expectedVersion' => $d['version'], 'financialPost' => 'TJB']), 'set the post');
+        $n = $counts($w['db']);
+        assertSame([409, 'conflict'], $code($create($w, 'ceoA', $ceoBody)), 'T-I3: as any baseline Draft edit');
+        assertSame('idempotency_mismatch', $reason($w));
+        assertSame($n, $counts($w['db']), 'T-I3: no new row');
+    },
+
+    'CR-01 T-P1–T-P3 (ADR-017 §3): pay records the expense on the approved post; the Approved-not-paid line groups by it; pay idempotency is unchanged' => static function () use ($world, $create, $op, $args, $ok, $rb, $report, $counts, $rows): void {
+        $w = $world();
+        $r = $ok($create($w, 'ceoA', $rb(['employeeId' => 'e_a1', 'financialPost' => 'GA', 'amount' => '210000.00', 'documentDate' => '2026-10-12'])), 'create GA')['financeRequest'];
+        $r = $ok($op($w, 'ceoA', 'submit', $args('submit', $r)), 'submit')['financeRequest'];
+        $r = $ok($op($w, 'ceoA', 'approve', $args('approve', $r, ['financialPost' => 'DRONE'])), 'approve on DRONE')['financeRequest'];
+        $line = $report($w, '2026-10-01', '2026-10-31')['approvedNotPaid'];
+        assertSame([['code' => 'GA', 'amount' => '0.00', 'count' => 0], ['code' => 'NPIP', 'amount' => '0.00', 'count' => 0], ['code' => 'TJB', 'amount' => '0.00', 'count' => 0], ['code' => 'DRONE', 'amount' => '210000.00', 'count' => 1]], $line['posts'], 'T-P2: on the approved post');
+        $body = $args('pay', $r);
+        $paid = $ok($op($w, 'ceoA', 'pay', $body), 'pay')['financeRequest'];
+        assertSame('DRONE', (string) $w['db']->select('SELECT financial_post AS p FROM finance_transactions WHERE id = ?', [$paid['payment']['financeTransactionId']])[0]['p'], 'T-P1: the expense carries the canonical approved code, not the earlier GA');
+        $after = $rows($w['db']);
+        assertSame($paid, $ok($op($w, 'ceoA', 'pay', $body), 'T-P3: replay')['financeRequest'], 'T-P3: the replay answers the payment');
+        assertSame($after, $rows($w['db']), 'T-P3: the replay writes nothing');
     },
 ];

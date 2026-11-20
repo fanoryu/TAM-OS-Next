@@ -254,6 +254,9 @@ const FRONTEND_TRANSACTION_API = 'js/core/transaction-api.js';
 const TRANSACTION_INPUT = 'server/src/Transaction/TransactionInput.php';
 // Phase 2 (ADR-016 §1): finance_requests carries the same closed Financial Post list as 0036.
 const REQUEST_POST_MIGRATION = 'server/migrations/0039_create_finance_requests.sql';
+// CR-01 (ADR-017 §2): 0042 makes the reimbursement post nullable until approval and adds the pre-approval
+// snapshot — the same closed list as 0036, in both CHECKs.
+const REQUEST_ASSIGNED_POST_MIGRATION = 'server/migrations/0042_alter_finance_requests_assigned_post.sql';
 const TRANSACTION_ROUTES = ['/api/general-transactions/create', '/api/general-transactions/void'];
 const TRANSACTION_READ_ROUTES = { 'GET /api/general-transactions': "['from', 'to']", 'GET /api/reports/financial': "['from', 'to']" };
 // ADR-016 (AWP-01) authorized revision: the three reimbursement self actions join (21 -> 24). Was: 21.
@@ -1074,6 +1077,7 @@ function checkRequestStatements(file, lex) {
   if (file !== REQUEST_STORE) return [];
   const out = [];
   let inserts = 0;
+  let approveStatements = 0;
   for (const s of lex.strings) {
     if (!SQL_VERB.test(s)) continue;
     if (SQL_MONEY_ARITHMETIC.test(s) || /\bamount\s*[-+*\/]|[-+*\/]\s*:?amount\b/i.test(s)) out.push('finance requests never compute money in SQL');
@@ -1082,11 +1086,26 @@ function checkRequestStatements(file, lex) {
       if (/\bIGNORE\b|\bON\s+DUPLICATE\s+KEY\b/i.test(s)) out.push('a finance request or payment is inserted plainly — never IGNORE or ON DUPLICATE KEY UPDATE');
     }
     if (/\b(FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|FOR\s+SHARE)\b/i.test(s) && (!REQUEST_LOCK.test(s) || /\bJOIN\b|\bOR\b/i.test(s))) out.push('a finance request write locks only its request or its owner employee, by primary key — never a range, a join or a payment');
-    if (/^\s*UPDATE\b/i.test(s) && (!/ AND version = :expected_version AND status = ('Draft'|:from_status)$/.test(s) || /\bOR\b/i.test(s))) out.push('every finance request UPDATE is a compare-and-swap ending AND version = :expected_version AND status = <expected>');
+    // CR-01 (ADR-017) authorized revision: the reimbursement approval is a compare-and-swap from 'Submitted'. Was: 'Draft' or :from_status only.
+    if (/^\s*UPDATE\b/i.test(s) && (!/ AND version = :expected_version AND status = ('Draft'|:from_status|'Submitted')$/.test(s) || /\bOR\b/i.test(s))) out.push('every finance request UPDATE is a compare-and-swap ending AND version = :expected_version AND status = <expected>');
+    // CR-01 (ADR-017 §4): the Financial Post and its pre-approval snapshot have exactly the writers ADR-017 lists.
+    const setPart = /^\s*UPDATE\b/i.test(s) ? s.split(/\bWHERE\b/)[0] : '';
+    const writesSnapshot = /\bpre_approval_(financial_post|post_captured)\s*=/.test(setPart);
+    const writesPost = /(^|[^_])\bfinancial_post\s*=/.test(setPart.replace(/pre_approval_financial_post/g, ''));
+    if (/ AND status = 'Submitted'$/.test(s) || writesSnapshot) {
+      approveStatements++;
+      if (!/^UPDATE finance_requests SET status = 'Approved', pre_approval_financial_post = :previous_post, pre_approval_post_captured = 1, financial_post = :financial_post, version = version \+ 1, updated_at = UTC_TIMESTAMP\(6\) WHERE id = :id AND company_id = :company_id AND kind = 'reimbursement' AND financial_post <=> :previous_post_check AND pre_approval_post_captured = 0 AND version = :expected_version AND status = 'Submitted'$/.test(s)) {
+        out.push('the pre-approval snapshot is written only by the reimbursement approval: Approved, the bound previous post, captured = 1 and the final post, re-checked null-safely against the locked value (ADR-017 §3)');
+      }
+    } else if (writesPost && (!/ AND status = 'Draft'$/.test(s) || /:self_employee_id\b/.test(s))) {
+      out.push('financial_post is updated only on a Draft under finance.manage or the CEO reimbursement update (never an Employee statement) or by the approval (ADR-017 §4)');
+    }
+    if (/^\s*INSERT\b/i.test(s) && (/\bpre_approval_/.test(s) || (/:self_employee_id\b/.test(s) && /:financial_post\b/.test(s)))) out.push('an insert never writes the pre-approval snapshot, and an Employee reimbursement is created with no Financial Post (ADR-017 §1)');
     if (/^\s*(INSERT|UPDATE)\b/i.test(s) && /:self_employee_id\b/.test(s) && !/(owner_employee_id = :self_employee_id|, :self_employee_id, )/.test(s)) out.push('an Employee finance request write names its owner (:self_employee_id)');
     if (/^SELECT /.test(s) && /document_date >= :from_date/.test(s) && !/ ORDER BY r\.document_date, r\.created_at, r\.id LIMIT 2001$/.test(s)) out.push('the finance request list ends ORDER BY r.document_date, r.created_at, r.id LIMIT 2001 (LIST_CAP + 1) so the cap fails closed');
   }
   if (inserts !== 3) out.push('RequestStore has exactly three INSERT statements (a payment request or reimbursement, an Employee reimbursement, a payment); found ' + inserts);
+  if (approveStatements !== 1) out.push('RequestStore has exactly one reimbursement approval statement writing the pre-approval snapshot (ADR-017 §3); found ' + approveStatements);
   return out;
 }
 
@@ -1163,6 +1182,17 @@ function checkFinancialPostParity(enumSrc, migrationSrc, frontendSrc, inputSrc, 
       if (rCodes.join(',') !== enumCodes.join(',')) out.push(name + ': the finance_requests financial_post CHECK must equal ' + FINANCIAL_POST_FILE);
       if (!/^  financial_post VARCHAR\(8\) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,$/m.test(sql)) out.push(name + ': financial_post stays VARCHAR(8) ascii_bin NOT NULL (a case-sensitive exact match)');
       if ((sql.match(/\bfinancial_post\b/g) || []).length !== 2) out.push(name + ': names financial_post only as its column and its one CHECK');
+      continue;
+    }
+    // CR-01 (ADR-017) authorized revision: migration 0042 replaces the 0039 CHECK with a NULL-admitting one
+    // over exactly the same codes, keeps the column type, and gives the pre-approval snapshot the same list.
+    // Was: no migration after 0039 named financial_post.
+    if (name === REQUEST_ASSIGNED_POST_MIGRATION) {
+      const codes = (re) => { const m = re.exec(sql); return m ? [...m[1].matchAll(/'([A-Z]+)'/g)].map((x) => x[1]) : []; };
+      if (codes(/finance_requests_financial_post_v2 CHECK \(financial_post IS NULL OR financial_post IN \(([^)]*)\)\)/).join(',') !== enumCodes.join(',')) out.push(name + ': the finance_requests financial_post_v2 CHECK must equal ' + FINANCIAL_POST_FILE);
+      if (codes(/finance_requests_pre_approval_post CHECK \(pre_approval_financial_post IS NULL OR \(pre_approval_financial_post IN \(([^)]*)\) AND pre_approval_post_captured = 1\)\)/).join(',') !== enumCodes.join(',')) out.push(name + ': the pre_approval_financial_post CHECK must equal ' + FINANCIAL_POST_FILE);
+      if (!/^  DROP CONSTRAINT finance_requests_financial_post,$/m.test(sql) || !/^  MODIFY financial_post VARCHAR\(8\) CHARACTER SET ascii COLLATE ascii_bin NULL,$/m.test(sql)
+        || !/^  ADD COLUMN pre_approval_financial_post VARCHAR\(8\) CHARACTER SET ascii COLLATE ascii_bin NULL AFTER financial_post,$/m.test(sql)) out.push(name + ': financial_post and its snapshot stay VARCHAR(8) ascii_bin (a case-sensitive exact match); only nullability changes');
       continue;
     }
     if (/financial_post/i.test(sql)) out.push(name + ': only ' + FINANCIAL_POST_MIGRATION + ' may define financial_post — a later change to the Financial Posts must update this parity check with it');
@@ -2538,6 +2568,15 @@ function selftest() {
   dirty('a finance request DELETE is caught', REQUEST_STORE, inReq("public const D_SQL = 'DELETE FROM finance_requests WHERE id = :id AND company_id = :company_id';"), 'never deleted');
   dirty('a request payment UPDATE is caught (no reversal)', REQUEST_STORE, inReq("public const U_SQL = \"UPDATE finance_request_payments SET amount = '0.00' WHERE id = :id AND company_id = :company_id\";"), 'payment is immutable');
   dirty('a request write outside RequestStore is caught', PAYROLL_STORE, fs.readFileSync(path.join(root, PAYROLL_STORE), 'utf8').replace('final class PayrollStore\n{\n', "final class PayrollStore\n{\n    public const R_SQL = 'INSERT INTO finance_request_payments (id, company_id) VALUES (:id, :company_id)';\n"), 'written only by ' + REQUEST_STORE);
+  // CR-01 (ADR-017 §4, T-W1): seeded extra writers of the post or the snapshot.
+  dirty('CR-01: an Employee update writing the post is caught', REQUEST_STORE, reqSwap('"UPDATE finance_requests SET category = :category, description = :description, amount = :amount, document_date = :document_date, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id', '"UPDATE finance_requests SET financial_post = :financial_post, category = :category, description = :description, amount = :amount, document_date = :document_date, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND owner_employee_id = :self_employee_id'), 'never an Employee statement');
+  dirty('CR-01: an Employee create binding a post is caught', REQUEST_STORE, reqSwap("VALUES (:id, :company_id, 'reimbursement', NULL, :category", "VALUES (:id, :company_id, 'reimbursement', :financial_post, :category"), 'created with no Financial Post');
+  dirty('CR-01: a transition writing the post is caught', REQUEST_STORE, reqSwap("'UPDATE finance_requests SET status = :to_status, status_reason = :status_reason, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version", "'UPDATE finance_requests SET status = :to_status, status_reason = :status_reason, financial_post = NULL, version = version + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = :id AND company_id = :company_id AND version"), 'financial_post is updated only');
+  dirty('CR-01: a second snapshot writer is caught', REQUEST_STORE, inReq("public const Z_SQL = \"UPDATE finance_requests SET pre_approval_post_captured = 0, version = version + 1 WHERE id = :id AND company_id = :company_id AND version = :expected_version AND status = :from_status\";"), 'snapshot is written only by the reimbursement approval');
+  dirty('CR-01: an approval without the null-safe re-check is caught', REQUEST_STORE, reqSwap('financial_post <=> :previous_post_check AND ', ''), 'snapshot is written only by the reimbursement approval');
+  dirty('CR-01: an approval computing the snapshot from the row is caught', REQUEST_STORE, reqSwap('pre_approval_financial_post = :previous_post,', 'pre_approval_financial_post = financial_post,'), 'snapshot is written only by the reimbursement approval');
+  dirty('CR-01: a removed approval statement is caught', REQUEST_STORE, realReq.replace(/^    public const APPROVE_REIMBURSEMENT_SQL = [^\n]*\n/m, ''), 'exactly one reimbursement approval statement');
+  dirty('CR-01: an insert writing the snapshot is caught', REQUEST_STORE, reqSwap('(id, company_id, kind, financial_post, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (:id, :company_id, :kind,', '(id, company_id, kind, financial_post, pre_approval_post_captured, category, description, amount, payee, owner_employee_id, document_date, status, status_reason, version, idempotency_key, created_by_user_id, created_at, updated_at) VALUES (:id, :company_id, :kind, 1,'), 'never writes the pre-approval snapshot');
   dirty('a fourth request INSERT is caught', REQUEST_STORE, inReq("public const X_SQL = 'INSERT INTO finance_request_payments (id, company_id) VALUES (:id, :company_id)';"), 'exactly three INSERT statements');
   dirty('an INSERT IGNORE of a request is caught', REQUEST_STORE, reqSwap('"INSERT INTO finance_requests (id, company_id, kind,', '"INSERT IGNORE INTO finance_requests (id, company_id, kind,'), 'inserted plainly');
   dirty('a range lock of requests is caught (deadlock)', REQUEST_STORE, inReq("public const R_SQL = \"SELECT id, company_id, owner_employee_id FROM finance_requests WHERE company_id = :company_id AND status = 'Approved' FOR UPDATE\";"), 'by primary key');
@@ -2790,6 +2829,13 @@ function selftest() {
     post('a renamed database code is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('GA', 'NPI', 'TJB', 'DRONE'))") }, 'CHECK must equal');
     post('a lower-case database code is caught', { m: sub(pm, CHK, "CHECK (financial_post IN ('ga', 'NPIP', 'TJB', 'DRONE'))") }, 'CHECK must equal');
     post('a dropped database CHECK is caught', { m: sub(pm, '  CONSTRAINT finance_transactions_financial_post ' + CHK + ',\n', '') }, 'CHECK must equal');
+    // CR-01 (ADR-017): seeded drift in migration 0042.
+    const m42 = (a, b) => ({ o: po.map(([n, s]) => [n, n === REQUEST_ASSIGNED_POST_MIGRATION ? sub(s, a, b) : s]) });
+    post('0042: a fifth code in the nullable post CHECK is caught', m42("financial_post IS NULL OR financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE')", "financial_post IS NULL OR financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE', 'RND')"), 'financial_post_v2 CHECK must equal');
+    post('0042: DRONE replaced by RND in the nullable post CHECK is caught', m42("financial_post IS NULL OR financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE')", "financial_post IS NULL OR financial_post IN ('GA', 'NPIP', 'TJB', 'RND')"), 'financial_post_v2 CHECK must equal');
+    post('0042: a code omitted from the snapshot CHECK is caught', m42("pre_approval_financial_post IN ('GA', 'NPIP', 'TJB', 'DRONE')", "pre_approval_financial_post IN ('GA', 'NPIP', 'TJB')"), 'pre_approval_financial_post CHECK must equal');
+    post('0042: a case-insensitive nullable post is caught', m42('MODIFY financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NULL', 'MODIFY financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_general_ci NULL'), 'only nullability changes');
+    post('0042: a migration after 0042 naming financial_post is caught', { o: po.concat([['server/migrations/0043_x.sql', 'ALTER TABLE finance_requests MODIFY financial_post VARCHAR(16) NULL;\n']]) }, 'only ' + FINANCIAL_POST_MIGRATION + ' may define financial_post');
     post('a case-insensitive financial_post column is caught', { m: sub(pm, 'financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL', 'financial_post VARCHAR(8) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL') }, 'case-sensitive');
     post('a fifth enum case is caught', { e: sub(pe, "    case Drone = 'DRONE';\n", "    case Drone = 'DRONE';\n    case Hr = 'HR';\n") }, 'exactly GA, NPIP, TJB, DRONE');
     post('an omitted enum case is caught', { e: sub(pe, "    case Drone = 'DRONE';\n", '') }, 'exactly GA, NPIP, TJB, DRONE');

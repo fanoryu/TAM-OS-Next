@@ -85,6 +85,15 @@ harnesses, 477 PHP tests without the database and 926 with it, migration head 00
 [ADR-016](docs/03-adr/ADR-016-Finance-Payment-Requests-and-Reimbursements.md): 95 modules in 109 package files, verifier
 3116, migration head 0041, 67 routes, ACTIONS 24. New frontend modules `js/core/session-home.js` (UX-1) and
 `js/core/request-api.js`, `js/core/session-requests.js`, `js/ui/session-requests-view.js` (I4); new migrations `0039`–`0041`.)*
+*(CR-01, 2026-11-20 — proposed for merge, not deployed; see
+[ADR-017](docs/03-adr/ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md): migration head `0042`, verifier 3124,
+67 routes, ACTIONS 24, no module or package file added. `finance_requests.financial_post` is nullable for a
+reimbursement the CEO has not approved (Draft, Submitted, Rejected, Cancelled) and NOT NULL for a payment request and
+for Approved or Paid; the approval keeps the post before it in `pre_approval_financial_post` with the flag
+`pre_approval_post_captured`, exposed only in the CEO projection (`RequestView::CEO_FIELDS`). Only the Draft CEO update
+and the single atomic approve statement may write the post; `tools/verify-backend-boundary.js` pins both writers.
+The CEO's Requests list offers "New reimbursement" beside "New payment request": an Employee selection is required and
+the post is optional, under the pinned `ApiClient` exception noted under D-AFI4b1-3.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
@@ -1892,6 +1901,14 @@ The server still decides everything — it resolves the id inside the session's 
 another company is 404), applies Policy and the live + Active eligibility (409). Client identity is never authority;
 identity-shaped mutation keys stay forbidden everywhere else (SDR-0002 §23.8's intent is unchanged).
 
+*CR-01 note (ADR-017 §6, Owner direction 2026-11-20).* A second, separately pinned exception now exists,
+`API_REIMBURSEMENT_OWNER_EXCEPTION`: `employeeId` on `POST /api/finance-requests/create` **only** when the body's
+`kind` is `reimbursement`. It lets the CEO name the employee a reimbursement is for; the optional post follows ADR-017
+§6 (an omitted post is unassigned). D-AFI4b1-3 and `API_BODY_KEY_EXCEPTION` are unchanged, and the global forbidden
+keys still apply to every other method, path, key and kind. The client sends the key only for a CEO principal; the
+server's `RequestInput` refuses an Employee's `employeeId` (400) and resolves the CEO's choice in company and scope.
+The CEO's selector lists live, Active employees only, as the Overtime selector (UX only).
+
 **Matrix (D-BF4b-5, UX only — the controller re-checks it and the server decides).**
 
 | Principal + status | Actions |
@@ -3031,6 +3048,9 @@ same closed list is migration `0036`'s CHECK `finance_transactions_financial_pos
 the enum `TamOs\Transaction\FinancialPost` and `FINANCIAL_POSTS` in `js/core/transaction-api.js`;
 `tools/verify-backend-boundary.js` fails unless all three agree in order, both validators still use the list, the category
 stays its own column and no later migration touches `financial_post`, and its `--selftest` seeds that drift (22 cases).
+Finance requests carry the same four codes: migration `0039`'s CHECK, replaced by `0042`'s nullable
+`finance_requests_financial_post_v2` and the snapshot CHECK `finance_requests_pre_approval_post` (CR-01, ADR-017), each
+pinned to the enum by the same boundary rule.
 Adding, removing or renaming a post is a new migration plus coordinated code and verifier changes — never data-driven.
 A Financial Post is not a category.
 

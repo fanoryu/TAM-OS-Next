@@ -9,6 +9,8 @@ declare(strict_types=1);
  * worker must act on the committed state. Where two workers race, the assertion holds for either order.
  *
  *   C1 two approves of one request: one success, one 409
+ *   CR-01 T-C1 two approves of one Submitted reimbursement selecting different Financial Posts: one
+ *      success, one 409; the stored post, snapshot and audit row are the winner's alone
  *   C2 two pays of one request under different keys: one Paid, one 409; exactly one payment row and
  *      one linked expense
  *   C3 a pay against a cancel: exactly one wins and the database matches the winner
@@ -126,6 +128,25 @@ return [
         assertSame(['200 ok', '409 conflict'], $out, 'exactly one approve');
         $row = $w['db']->select('SELECT status, version FROM finance_requests WHERE id = ?', [$r['id']])[0];
         assertSame(['Approved', 3], [(string) $row['status'], (int) $row['version']], 'Approved once, version + 1');
+        assertSame(1, (int) $w['db']->select("SELECT COUNT(*) AS n FROM audit_events WHERE entity_id = ? AND operation = 'approve'", [$r['id']])[0]['n'], 'one approve audit row');
+        $invariants($w['db']);
+    },
+
+    'CR-01 T-C1: two concurrent reimbursement approvals with different posts — one 200, one 409; the stored post is the winner\'s' => static function () use ($world, $post, $data, $key, $raceHold, $invariants): void {
+        $w = $world();
+        $r = $data($post($w, '/api/finance-requests/create', ['kind' => 'reimbursement', 'employeeId' => 'e_1', 'category' => 'Transport', 'description' => 'Fabricated post race',
+            'amount' => '75000.00', 'documentDate' => '2026-10-08', 'idempotencyKey' => $key()]), 'create')['financeRequest'];
+        assertSame(null, $r['financialPost'], 'created without a post');
+        $r = $data($post($w, '/api/finance-requests/submit', ['financeRequestId' => $r['id'], 'expectedVersion' => $r['version']]), 'submit')['financeRequest'];
+        $body = static fn (string $p): array => ['financeRequestId' => $r['id'], 'expectedVersion' => $r['version'], 'expectedAmount' => $r['amount'], 'financialPost' => $p];
+        $out = $raceHold($w, [['request-approve', $body('GA')], ['request-approve', $body('DRONE')]], $r['id'], 2);
+        $sorted = $out;
+        sort($sorted);
+        assertSame(['200 ok', '409 conflict'], $sorted, 'exactly one approve');
+        $winner = $out[0] === '200 ok' ? 'GA' : 'DRONE';
+        $row = $w['db']->select('SELECT status, version, financial_post, pre_approval_financial_post, pre_approval_post_captured FROM finance_requests WHERE id = ?', [$r['id']])[0];
+        assertSame(['Approved', 3, $winner, null, 1], [(string) $row['status'], (int) $row['version'], (string) $row['financial_post'], $row['pre_approval_financial_post'], (int) $row['pre_approval_post_captured']],
+            'Approved once with the winner\'s post; previous NULL captured');
         assertSame(1, (int) $w['db']->select("SELECT COUNT(*) AS n FROM audit_events WHERE entity_id = ? AND operation = 'approve'", [$r['id']])[0]['n'], 'one approve audit row');
         $invariants($w['db']);
     },

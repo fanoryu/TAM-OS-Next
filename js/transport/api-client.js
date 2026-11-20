@@ -29,6 +29,12 @@
                target-selector exception, API_BODY_KEY_EXCEPTION, is employeeId on
                exactly POST /api/overtime-records/create — it names the record's
                owner; the server re-scopes and authorizes it. It is not authority.
+               CR-01 (ADR-017, Owner direction 2026-11-20): the second, narrower
+               selector, API_REIMBURSEMENT_OWNER_EXCEPTION, is employeeId on exactly
+               POST /api/finance-requests/create and only in a body whose kind is
+               exactly 'reimbursement' — the employee a CEO-filed reimbursement is
+               for; RequestInput refuses it from an Employee and the server
+               re-scopes it. Also not authority.
        csrf    true only for a session-bound mutation. The token is read from
                the in-memory CsrfHolder and sent as X-CSRF-Token; never sent
                otherwise. An empty holder refuses the request locally.
@@ -74,6 +80,12 @@ const API_FORBIDDEN_BODY_KEYS = Object.freeze(['role', 'companyId', 'company_id'
 // server resolves it inside the session's scope (404 outside it) and Policy decides — the value
 // selects a target and is never authority. Every other forbidden key, route and method is refused.
 const API_BODY_KEY_EXCEPTION = Object.freeze({ method: 'POST', path: '/api/overtime-records/create', key: 'employeeId' });
+// CR-01 (ADR-017 §6; Owner direction 2026-11-20): the second target-selector exception, narrower than
+// D-AFI4b1-3 — this exact method, path and key, and only when the body's kind is exactly
+// 'reimbursement'. A CEO-filed reimbursement names the employee it is for (RequestInput::create); the
+// server refuses the key from an Employee (400) and resolves it inside the CEO's scope, and Policy
+// decides — a target, never authority. D-AFI4b1-3 is unchanged; every other key, route, method and kind is refused.
+const API_REIMBURSEMENT_OWNER_EXCEPTION = Object.freeze({ method: 'POST', path: '/api/finance-requests/create', key: 'employeeId', kind: 'reimbursement' });
 // AFI-4a1 structured query: the only query keys a read may send (GET /api/employees
 // ?archived=1, GET /api/employee?id=<opaque id>), and the only value shape — the server
 // Employee id pattern (server/src/Employee/EmployeeInput.php ID_PATTERN), which '1' also fits.
@@ -208,6 +220,7 @@ const ApiClient = (function(){
           const key = API_FORBIDDEN_BODY_KEYS[i];
           if(!Object.prototype.hasOwnProperty.call(body, key)) continue;
           if(method === API_BODY_KEY_EXCEPTION.method && path === API_BODY_KEY_EXCEPTION.path && key === API_BODY_KEY_EXCEPTION.key) continue;
+          if(method === API_REIMBURSEMENT_OWNER_EXCEPTION.method && path === API_REIMBURSEMENT_OWNER_EXCEPTION.path && key === API_REIMBURSEMENT_OWNER_EXCEPTION.key && body.kind === API_REIMBURSEMENT_OWNER_EXCEPTION.kind) continue;
           return failure(API_RESULT_KINDS.CLIENT_FAULT);
         }
         headers['Content-Type'] = 'application/json';

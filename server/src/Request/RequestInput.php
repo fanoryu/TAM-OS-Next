@@ -20,16 +20,22 @@ use TamOs\Transaction\TransactionInput;
  *
  *   create (paymentRequest)   exactly { kind, financialPost, category, description, amount, payee,
  *                             documentDate, idempotencyKey }
- *   create (reimbursement)    the CEO: exactly { kind, employeeId, financialPost, category,
- *                             description, amount, documentDate, idempotencyKey }; an Employee: the
- *                             same without employeeId — the owner is taken from the Scope (§4)
+ *   create (reimbursement)    the CEO: { kind, employeeId, category, description, amount,
+ *                             documentDate, idempotencyKey } and optionally financialPost (ADR-017
+ *                             §1: absent = not yet assigned; a JSON null is refused); an Employee: the
+ *                             same without employeeId and without financialPost — the owner is taken
+ *                             from the Scope (§4), the post is the CEO's to assign (ADR-017)
  *   update                    { financeRequestId, expectedVersion } and at least one of
  *                             { financialPost, category, description, amount, payee, documentDate };
- *                             kind and owner are immutable; the kind-dependent rules (payee only on a
- *                             payment request, the documentDate bound) are checked against the locked
- *                             request by applyUpdate()
+ *                             an Employee may not send financialPost (ADR-017 §1); a post is set or
+ *                             replaced, never cleared (null is refused); kind and owner are immutable;
+ *                             the kind-dependent rules (payee only on a payment request, the
+ *                             documentDate bound) are checked against the locked request by
+ *                             applyUpdate()
  *   submit                    exactly { financeRequestId, expectedVersion }
- *   approve                   exactly { financeRequestId, expectedVersion, expectedAmount }
+ *   approve                   { financeRequestId, expectedVersion, expectedAmount } and, exactly for
+ *                             a reimbursement, financialPost — the post the CEO selects or confirms
+ *                             (ADR-017 §1, D6); checked against the request's kind by approvalPost()
  *   reject / cancel           exactly { financeRequestId, expectedVersion, reason }
  *   pay                       exactly { financeRequestId, expectedVersion, expectedAmount, paidOn,
  *                             paymentMethod, idempotencyKey }
@@ -51,6 +57,8 @@ final class RequestInput
     public const NEEDED_BY_DAYS = 366;
     public const MAX_VERSION = 4294967295;
     public const FIELDS = ['financialPost', 'category', 'description', 'amount', 'payee', 'documentDate'];
+    /** ADR-017 §1: the fields an Employee may change on their own Draft — never the Financial Post. */
+    public const SELF_FIELDS = ['category', 'description', 'amount', 'payee', 'documentDate'];
 
     private const PAYMENT_REQUEST_KEYS = ['kind', 'financialPost', 'category', 'description', 'amount', 'payee', 'documentDate', 'idempotencyKey'];
     private const REIMBURSEMENT_KEYS = ['kind', 'employeeId', 'financialPost', 'category', 'description', 'amount', 'documentDate', 'idempotencyKey'];
@@ -59,15 +67,16 @@ final class RequestInput
      * POST /api/finance-requests/create
      *
      * @param array<string, mixed> $json
-     * @param bool $selfScope the caller is an Employee (no employeeId key is accepted)
-     * @return array{kind: string, employeeId: ?string, financialPost: string, category: string, description: string, amount: string, payee: ?string, documentDate: string, idempotencyKey: string}
+     * @param bool $selfScope the caller is an Employee (no employeeId and no financialPost key is accepted)
+     * @return array{kind: string, employeeId: ?string, financialPost: ?string, category: string, description: string, amount: string, payee: ?string, documentDate: string, idempotencyKey: string}
      */
     public static function create(array $json, string $today, bool $selfScope): array
     {
         $kind = $json['kind'] ?? null;
         $reimbursement = $kind === RequestStatus::KIND_REIMBURSEMENT;
         if ($reimbursement) {
-            $keys = $selfScope ? array_values(array_diff(self::REIMBURSEMENT_KEYS, ['employeeId'])) : self::REIMBURSEMENT_KEYS;
+            // ADR-017 §1: an Employee never sends a post (400 naming it); the CEO's is optional.
+            $keys = $selfScope ? array_values(array_diff(self::REIMBURSEMENT_KEYS, ['employeeId', 'financialPost'])) : self::REIMBURSEMENT_KEYS;
         } elseif ($kind === RequestStatus::KIND_PAYMENT_REQUEST) {
             $keys = self::PAYMENT_REQUEST_KEYS;
         } else {
@@ -85,7 +94,9 @@ final class RequestInput
                 $bad[] = 'employeeId';
             }
         }
-        $bad = array_merge($bad, self::fieldErrors($json, ['financialPost', 'category', 'description', 'amount'], true));
+        // A payment request always carries its post; a reimbursement's is checked only when sent (ADR-017).
+        $bad = array_merge($bad, self::fieldErrors($json, ['financialPost'], !$reimbursement));
+        $bad = array_merge($bad, self::fieldErrors($json, ['category', 'description', 'amount'], true));
         $payee = null;
         if ($kind === RequestStatus::KIND_PAYMENT_REQUEST) {
             $payee = $json['payee'] ?? null;
@@ -106,7 +117,7 @@ final class RequestInput
         return [
             'kind' => $kind,
             'employeeId' => $employeeId,
-            'financialPost' => $json['financialPost'],
+            'financialPost' => $json['financialPost'] ?? null,
             'category' => $json['category'],
             'description' => $json['description'],
             'amount' => $json['amount'],
@@ -121,15 +132,17 @@ final class RequestInput
      * (400 before any lookup); the kind-dependent rules run again in applyUpdate().
      *
      * @param array<string, mixed> $json
+     * @param bool $selfScope the caller is an Employee (no financialPost key is accepted, ADR-017 §1)
      * @return array{financeRequestId: string, expectedVersion: int, patch: array<string, string>}
      */
-    public static function update(array $json): array
+    public static function update(array $json, bool $selfScope): array
     {
-        self::onlyKeys($json, array_merge(['financeRequestId', 'expectedVersion'], self::FIELDS));
+        $fields = $selfScope ? self::SELF_FIELDS : self::FIELDS;
+        self::onlyKeys($json, array_merge(['financeRequestId', 'expectedVersion'], $fields));
         $bad = self::targetErrors($json);
         $patch = array_diff_key($json, ['financeRequestId' => true, 'expectedVersion' => true]);
         if ($patch === [] && $bad === []) {
-            throw new ApiError(ErrorCode::ValidationFailed, 'no finance request field to update', fields: self::FIELDS);
+            throw new ApiError(ErrorCode::ValidationFailed, 'no finance request field to update', fields: $fields);
         }
         $bad = array_merge($bad, self::fieldErrors($patch, array_values(array_intersect(['financialPost', 'category', 'description', 'amount'], array_keys($patch))), true));
         if (array_key_exists('payee', $patch) && !TransactionInput::isText($patch['payee'], self::PAYEE_MAX)) {
@@ -150,7 +163,7 @@ final class RequestInput
      * kind-dependent rules: payee belongs to a payment request only, and the documentDate bound
      * depends on the kind (§6).
      *
-     * @param array<string, ?string> $current the locked request's editable fields (RequestView::editable)
+     * @param array<string, ?string> $current the locked request's editable fields (RequestView::editable); a reimbursement's post may be null (ADR-017)
      * @param array<string, string> $patch
      * @return array<string, ?string> the fields after the patch
      */
@@ -204,22 +217,37 @@ final class RequestInput
     }
 
     /**
-     * POST /api/finance-requests/approve: the target and the exact amount the CEO was shown.
+     * POST /api/finance-requests/approve: the target, the exact amount the CEO was shown and, when
+     * sent, the Financial Post (validated now, 400 before any lookup; whether the request's kind
+     * requires or forbids it is decided by approvalPost() after the load).
      *
      * @param array<string, mixed> $json
-     * @return array{financeRequestId: string, expectedVersion: int, expectedAmount: string}
+     * @return array{financeRequestId: string, expectedVersion: int, expectedAmount: string, financialPost: ?string}
      */
     public static function approve(array $json): array
     {
-        self::onlyKeys($json, ['financeRequestId', 'expectedVersion', 'expectedAmount']);
+        self::onlyKeys($json, ['financeRequestId', 'expectedVersion', 'expectedAmount', 'financialPost']);
         $bad = self::targetErrors($json);
         if (!self::isPositiveAmount($json['expectedAmount'] ?? null)) {
             $bad[] = 'expectedAmount';
         }
+        $bad = array_merge($bad, self::fieldErrors($json, ['financialPost'], false));
         if ($bad !== []) {
             throw new ApiError(ErrorCode::ValidationFailed, 'invalid finance request approval', fields: $bad);
         }
-        return ['financeRequestId' => $json['financeRequestId'], 'expectedVersion' => $json['expectedVersion'], 'expectedAmount' => $json['expectedAmount']];
+        return ['financeRequestId' => $json['financeRequestId'], 'expectedVersion' => $json['expectedVersion'], 'expectedAmount' => $json['expectedAmount'], 'financialPost' => $json['financialPost'] ?? null];
+    }
+
+    /**
+     * ADR-017 §1 (D6): every reimbursement approval names the post the CEO selects or confirms; a
+     * payment request's approval names none (its post was required at create). 400 naming the field.
+     */
+    public static function approvalPost(string $kind, ?string $financialPost): ?string
+    {
+        if (($kind === RequestStatus::KIND_REIMBURSEMENT) !== ($financialPost !== null)) {
+            throw new ApiError(ErrorCode::ValidationFailed, 'invalid finance request approval', fields: ['financialPost']);
+        }
+        return $financialPost;
     }
 
     /**

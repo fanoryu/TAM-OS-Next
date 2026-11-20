@@ -62,7 +62,8 @@ return [
             '0024_create_payroll_plans', '0025_create_payroll_plan_overtime', '0026_replace_audit_events_payroll_checks', '0027_add_payroll_plans_commit_key', '0028_replace_audit_events_payroll_commit',
             // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
             // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
-            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage', '0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests'],
+            // CR-01 (ADR-017) authorized revision: 0042 joins the forward run. Was: the list ended at 0041.
+            '0029_create_supplemental_payrolls', '0030_create_supplemental_payroll_overtime', '0031_replace_audit_events_supplemental_checks', '0032_create_finance_postings', '0033_replace_audit_events_finance_post', '0034_create_finance_executions', '0035_replace_audit_events_finance_execute', '0036_create_finance_transactions', '0037_create_finance_transaction_voids', '0038_replace_audit_events_finance_manage', '0039_create_finance_requests', '0040_create_finance_request_payments', '0041_replace_audit_events_finance_requests', '0042_alter_finance_requests_assigned_post'],
             array_map(static fn ($m): string => $m->label(), $applied));
         assertSame(['account_tokens', 'audit_events', 'auth_events', 'auth_rate_limits', 'companies', 'employees', 'finance_executions', 'finance_postings', 'finance_requests', 'finance_request_payments', 'finance_transactions', 'finance_transaction_voids', 'mail_outbox', 'memberships', 'overtime_records', 'payroll_plans', 'payroll_plan_overtime', 'schema_migrations', 'sessions', 'supplemental_payrolls', 'supplemental_payroll_overtime', 'users'], $tables($db));
         assertSame(0, (int) $db->select('SELECT COUNT(*) AS n FROM finance_postings')[0]['n'], 'no Finance posting');
@@ -102,7 +103,8 @@ return [
         // BF-4f authorized revision: through 0035. Was: 33 files through 0033 (BF-4e).
         // Phase 1 authorized revision: 0036–0038 (general transactions, their voids, the finance.manage audit vocabulary) follow (head 0038). Was: through 0035.
         // AWP-01 (ADR-016) authorized revision: 0039–0041 (finance requests, their payments, the request audit vocabulary) follow (head 0041). Was: through 0038.
-        assertSame(41, count($files), 'the production set through 0041 (AWP-01)');
+        // CR-01 (ADR-017) authorized revision: 0042 (the CEO-assigned reimbursement post and its snapshot) follows (head 0042). Was: through 0041.
+        assertSame(42, count($files), 'the production set through 0042 (CR-01)');
         $files['0004_create_sessions.sql'] .= "\n";
         $dir = migrationFixture($files);
         assertSame(MigrationError::SCHEMA_DRIFT, (new Readiness(testDbConfig(), $dir))->check());
@@ -156,6 +158,8 @@ return [
     // action_v6, entity_v5, operation_v7, action_operation_v7 and no general transaction constraint.
     // AWP-01 (ADR-016) authorized revision: 0041 replaces them again (v8, v7, v9, v9) and 0039–0040 add the finance
     // request and payment CHECKs and seven foreign keys. Was: v7, v6, v8, v8 and no finance request constraint.
+    // CR-01 (ADR-017) authorized revision: 0042 replaces finance_requests_financial_post with _financial_post_v2 and adds
+    // post_payment_request, post_approved, pre_approval_post, pre_approval_captured and captured_post. Was: the 0039 set.
     'the named CHECK constraints and foreign keys exist' => static function (): void {
         $db = authDatabase();
         $checks = array_map(static fn (array $r): string => (string) $r['n'],
@@ -165,9 +169,10 @@ return [
             'auth_events_event_v3', 'employees_code', 'employees_employment_status', 'employees_full_name', 'employees_id', 'employees_salary', 'employees_version',
             'finance_executions_amount', 'finance_executions_id', 'finance_executions_idempotency_key_format', 'finance_executions_month_key', 'finance_executions_payment_method',
             'finance_postings_amount', 'finance_postings_id', 'finance_postings_idempotency_key_format', 'finance_postings_month_key', 'finance_postings_source', 'finance_postings_status',
-            'finance_requests_amount', 'finance_requests_category', 'finance_requests_created_by', 'finance_requests_description', 'finance_requests_document_date',
-            'finance_requests_financial_post', 'finance_requests_id', 'finance_requests_idempotency_key_format', 'finance_requests_kind', 'finance_requests_owner_by_kind',
-            'finance_requests_payee_by_kind', 'finance_requests_status', 'finance_requests_status_reason', 'finance_requests_version',
+            'finance_requests_amount', 'finance_requests_captured_post', 'finance_requests_category', 'finance_requests_created_by', 'finance_requests_description', 'finance_requests_document_date',
+            'finance_requests_financial_post_v2', 'finance_requests_id', 'finance_requests_idempotency_key_format', 'finance_requests_kind', 'finance_requests_owner_by_kind',
+            'finance_requests_payee_by_kind', 'finance_requests_post_approved', 'finance_requests_post_payment_request', 'finance_requests_pre_approval_captured', 'finance_requests_pre_approval_post',
+            'finance_requests_status', 'finance_requests_status_reason', 'finance_requests_version',
             'finance_request_payments_amount', 'finance_request_payments_id', 'finance_request_payments_idempotency_key_format', 'finance_request_payments_method',
             'finance_request_payments_paid_by', 'finance_request_payments_paid_on',
             'finance_transactions_amount', 'finance_transactions_category', 'finance_transactions_created_by', 'finance_transactions_date_range', 'finance_transactions_description',

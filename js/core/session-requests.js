@@ -5,12 +5,19 @@
    routes (FinanceRequestApi, js/core/request-api.js):
 
      CEO       Finance Requests: the company's payment requests and reimbursements; create a
-               payment request; edit / submit a Draft; approve or reject a Submitted request; cancel
+               payment request or (CR-01) a reimbursement for one active employee, its post
+               optional; edit / submit a Draft; approve or reject a Submitted request; cancel
                a Draft, Submitted or Approved one; pay an Approved one (which records the linked
                general expense); each request's activity history (AuditApi.record)
      Employee  My reimbursements: their own reimbursements only; create one; edit / submit their
                own Draft; follow its status (approved, rejected, cancelled, paid). Never a CEO
                control — and the server refuses one anyway (403 before any lookup).
+
+   FINANCIAL POST (CR-01, ADR-017): an Employee never chooses a reimbursement's post; they see the
+   one the CEO assigned, read-only. The CEO may set or replace it in a Draft edit and selects or
+   confirms it in the approval panel (preselected with the stored post). A projection that does not
+   fit the principal (the snapshot fields for an Employee, or their absence for the CEO) is
+   INVALID_RESPONSE.
 
    Held in memory only and owned here — never in the LOCAL `State`, never in storage, the URL or
    history. The server is the only source; this module remembers its last decoded answers for the
@@ -26,10 +33,13 @@
      detailId, detail, detailStatus   the request opened, read from the server
      history, historyStatus     the CEO's activity history of the request opened
      employees                  the CEO's employee names by id, archived included (display only), or null
+     employeeOptions            CR-01: the CEO's live, Active employees [{ id, fullName }] offered by the
+                                reimbursement create form, or null (the server decides eligibility)
      form                       null, or { mode: 'create' | 'edit', kind, values, key } — the
                                 create key is made once when the form opens
      action                     null, or the confirmation panel { op, reason, paidOn,
-                                paymentMethod, key } — the pay key is made once when it opens
+                                paymentMethod, financialPost, key } — the pay key is made once
+                                when it opens; financialPost is the approval's post (CR-01)
      mutation                   { kind, status, error, fields }
      errors                     { list, detail, history }: each read's own last failure, or null —
                                 one read's failure never overwrites or clears another's (I4-F01)
@@ -54,8 +64,11 @@ const SESSION_REQUESTS_OPS = Object.freeze(['submit', 'approve', 'reject', 'canc
 
 function sessionRequestsIsCeo(p){ return !!p && p.principalType === PRINCIPAL_TYPES.CEO; }
 function sessionRequestsIsEmployee(p){ return !!p && p.principalType === PRINCIPAL_TYPES.EMPLOYEE && typeof p.employeeId === 'string' && p.employeeId !== ''; }
-// The kind this principal creates: the CEO a payment request, an Employee a reimbursement.
+// The kind this principal creates by default: the CEO a payment request, an Employee a reimbursement.
 function sessionRequestsCreateKind(p){ return sessionRequestsIsCeo(p) ? 'paymentRequest' : (sessionRequestsIsEmployee(p) ? 'reimbursement' : null); }
+// CR-01 (ADR-017 §6): the kinds this principal may create — the CEO either (a reimbursement for an
+// employee), an Employee only their own reimbursement.
+function sessionRequestsCreateKinds(p){ return sessionRequestsIsCeo(p) ? ['paymentRequest', 'reimbursement'] : (sessionRequestsIsEmployee(p) ? ['reimbursement'] : []); }
 // The company-calendar year of `now`: the range the section opens on (365 or 366 days).
 function sessionRequestsYearRange(now){
   const y = transactionToday(now).slice(0, 4);
@@ -75,8 +88,10 @@ function sessionRequestsOffered(p, r){
   return out;
 }
 function sessionRequestsValuesOf(r){
-  return { financialPost: r.financialPost, category: r.category, description: r.description, amount: r.amount, payee: r.payee === null ? '' : r.payee, documentDate: r.documentDate };
+  return { financialPost: r.financialPost === null ? '' : r.financialPost, category: r.category, description: r.description, amount: r.amount, payee: r.payee === null ? '' : r.payee, documentDate: r.documentDate };
 }
+// CR-01 (ADR-017 R-3): the CEO receives the approval snapshot, an Employee never does.
+function sessionRequestsShapeFits(p, r){ return sessionRequestsIsCeo(p) ? financeRequestHasSnapshot(r) : !financeRequestHasSnapshot(r); }
 
 const SessionRequestsStore = (function(){
   const IDLE_MUTATION = Object.freeze({ kind: null, status: SESSION_REQUESTS_MUTATION_STATUS.IDLE, error: null, fields: null });
@@ -85,7 +100,7 @@ const SessionRequestsStore = (function(){
   let list = null, listSeq = 0, listStatus = SESSION_REQUESTS_STATUS.IDLE;
   let detailId = null, detail = null, detailSeq = 0, detailStatus = SESSION_REQUESTS_STATUS.IDLE;
   let history = null, historySeq = 0, historyStatus = SESSION_REQUESTS_STATUS.IDLE;
-  let employees = null, employeesSeq = 0;
+  let employees = null, employeeOptions = null, employeesSeq = 0;
   let form = null, action = null, mutation = IDLE_MUTATION;
   let errors = { list: null, detail: null, history: null }, notice = null, focus = null;
 
@@ -101,7 +116,7 @@ const SessionRequestsStore = (function(){
   }
   function clear(){
     open = false; range = null; rangeDraft = null; filter = '';
-    dropList(); detailId = null; dropDetail(); employeesSeq++; employees = null;
+    dropList(); detailId = null; dropDetail(); employeesSeq++; employees = null; employeeOptions = null;
     form = null; action = null; mutation = IDLE_MUTATION;
     errors = { list: null, detail: null, history: null }; notice = null; focus = null;
     principalKey = null;
@@ -152,7 +167,7 @@ const SessionRequestsStore = (function(){
       if(token.kind === 'list'){ list = data; listStatus = SESSION_REQUESTS_STATUS.READY; clearError('list'); }
       else if(token.kind === 'detail'){ if(token.id !== detailId) return false; detail = data; detailStatus = SESSION_REQUESTS_STATUS.READY; clearError('detail'); }
       else if(token.kind === 'history'){ if(token.id !== detailId) return false; history = data; historyStatus = SESSION_REQUESTS_STATUS.READY; clearError('history'); }
-      else if(token.kind === 'employees'){ employees = data; }
+      else if(token.kind === 'employees'){ employees = data.names; employeeOptions = data.options; }
       return true;
     },
     applyError(token, failed){
@@ -165,10 +180,10 @@ const SessionRequestsStore = (function(){
       return true;
     },
     openForm(mode, kind, values, key){ form = { mode: mode, kind: kind, values: Object.assign({}, values), key: key }; action = null; notice = null; mutation = IDLE_MUTATION; },
-    setDraft(name, value){ if(form && FINANCE_REQUEST_FIELDS.indexOf(name) !== -1) form.values[name] = typeof value === 'string' ? value : ''; },
+    setDraft(name, value){ if(form && (FINANCE_REQUEST_FIELDS.indexOf(name) !== -1 || name === 'employeeId')) form.values[name] = typeof value === 'string' ? value : ''; },
     closeForm(){ form = null; if(mutation.kind === 'create' || mutation.kind === 'update') mutation = IDLE_MUTATION; },
-    openAction(op, today, key){ action = { op: op, reason: '', paidOn: today, paymentMethod: '', key: key }; form = null; notice = null; mutation = IDLE_MUTATION; },
-    setActionField(name, value){ if(action && (name === 'reason' || name === 'paidOn' || name === 'paymentMethod')) action[name] = typeof value === 'string' ? value : ''; },
+    openAction(op, today, key, post){ action = { op: op, reason: '', paidOn: today, paymentMethod: '', financialPost: typeof post === 'string' ? post : '', key: key }; form = null; notice = null; mutation = IDLE_MUTATION; },
+    setActionField(name, value){ if(action && (name === 'reason' || name === 'paidOn' || name === 'paymentMethod' || name === 'financialPost')) action[name] = typeof value === 'string' ? value : ''; },
     closeAction(){ action = null; if(SESSION_REQUESTS_OPS.indexOf(mutation.kind) !== -1) mutation = IDLE_MUTATION; },
     beginMutation(kind){
       mutation = Object.freeze({ kind: kind, status: SESSION_REQUESTS_MUTATION_STATUS.PENDING, error: null, fields: null });
@@ -205,7 +220,7 @@ const SessionRequestsStore = (function(){
         principalKey: principalKey, generation: generation, open: open, range: range, filter: filter,
         rangeDraft: rangeDraft ? Object.freeze({ from: rangeDraft.from, to: rangeDraft.to }) : null,
         list: list, listStatus: listStatus, detailId: detailId, detail: detail, detailStatus: detailStatus,
-        history: history, historyStatus: historyStatus, employees: employees,
+        history: history, historyStatus: historyStatus, employees: employees, employeeOptions: employeeOptions,
         form: form ? Object.freeze({ mode: form.mode, kind: form.kind, values: Object.freeze(Object.assign({}, form.values)), key: form.key }) : null,
         action: action ? Object.freeze(Object.assign({}, action)) : null,
         mutation: mutation, errors: Object.freeze({ list: errors.list, detail: errors.detail, history: errors.history }), notice: notice
@@ -242,11 +257,19 @@ const SessionRequests = (function(){
       : EmployeeApi.list({ archived: true }));   // names, archived employees included
     if(!SessionRequestsStore.isCurrent(token)) return;
     if(!out.ok && out.kind === API_RESULT_KINDS.UNAUTHENTICATED){ AuthBoot.sessionLost(); return; }
+    // CR-01: a request projection that does not fit this principal is refused whole.
+    if(out.ok && (kind === 'list' || kind === 'detail') && !(kind === 'list' ? out.data : [out.data]).every(function(r){ return sessionRequestsShapeFits(p, r); })){
+      if(SessionRequestsStore.applyError(token, { kind: TRANSACTION_API_INVALID })) paint();
+      return;
+    }
     let data = out.ok ? out.data : null;
     if(out.ok && kind === 'employees'){
       const names = {};
       (data || []).forEach(function(e){ names[e.id] = e.fullName; });
-      data = Object.freeze(names);
+      // CR-01: the employees a CEO-filed reimbursement may name — live and Active, as the Overtime
+      // create selector (UX only; the server decides eligibility). Display order kept.
+      const options = (data || []).filter(function(e){ return e.archived === false && e.employmentStatus === 'Active'; }).map(function(e){ return Object.freeze({ id: e.id, fullName: e.fullName }); });
+      data = Object.freeze({ names: Object.freeze(names), options: Object.freeze(options) });
     }
     if(out.ok ? SessionRequestsStore.applyRead(token, data) : SessionRequestsStore.applyError(token, out)) paint();
   }
@@ -261,6 +284,8 @@ const SessionRequests = (function(){
 
   async function settle(token, out, noticeKey, openId){
     if(out.recovery === 'unavailable'){ AuthBoot.sessionUncertain(); return; }   // identity already cleared: fail closed
+    // CR-01: an answer of the wrong projection confirms nothing (ambiguous, never resent).
+    if(out.ok && !sessionRequestsShapeFits(principalNow(), out.data)) out = Object.freeze({ ok: false, kind: TRANSACTION_API_INVALID, recovery: out.recovery });
     if(!SessionRequestsStore.isLive(token)) return;
     if(out.recovery === 'principal_changed'){ SessionRequestsStore.clear(); paint(); return; }
     if(out.recovery === 'signed_out' || (!out.ok && out.kind === API_RESULT_KINDS.UNAUTHENTICATED)){ AuthBoot.sessionLost(); return; }
@@ -344,13 +369,17 @@ const SessionRequests = (function(){
       return loading;
     },
     back(){ if(!canAct()) return; SessionRequestsStore.closeDetail(); SessionRequestsStore.setFocus('list'); paint(); },
-    openCreate(){
+    // `kind` (CR-01): the CEO's choice — a payment request (the default) or a reimbursement for an
+    // employee; an Employee always creates their own reimbursement and names no one.
+    openCreate(kind){
       if(!canAct()) return;
-      const kind = sessionRequestsCreateKind(principalNow());
+      const p = principalNow();
+      const chosen = sessionRequestsIsCeo(p) && kind !== undefined ? kind : sessionRequestsCreateKind(p);
+      if(sessionRequestsCreateKinds(p).indexOf(chosen) === -1) return;
       const key = payrollIdempotencyKey();
       if(key === null){ message('noCrypto'); return; }
       SessionRequestsStore.closeDetail();
-      SessionRequestsStore.openForm('create', kind, { financialPost: '', category: '', description: '', amount: '', payee: '', documentDate: today() }, key);
+      SessionRequestsStore.openForm('create', chosen, { employeeId: '', financialPost: '', category: '', description: '', amount: '', payee: '', documentDate: today() }, key);
       SessionRequestsStore.setFocus('form');
       paint();
     },
@@ -370,9 +399,10 @@ const SessionRequests = (function(){
       const f = s.form;
       if(!f) return;
       if(f.mode === 'create'){
-        if(f.kind !== sessionRequestsCreateKind(principalNow())) return;
+        const p = principalNow();
+        if(sessionRequestsCreateKinds(p).indexOf(f.kind) === -1) return;
         const token = SessionRequestsStore.beginMutation('create');
-        const sending = FinanceRequestApi.create(f.kind, f.values, f.key, today())
+        const sending = FinanceRequestApi.create(f.kind, f.values, f.key, today(), sessionRequestsIsCeo(p))
           .then(function(out){ return settle(token, out, 'created', function(r){ return r.id; }); });
         paint();
         return sending;
@@ -380,20 +410,22 @@ const SessionRequests = (function(){
       const r = shown('update');
       if(!r) return;
       const token = SessionRequestsStore.beginMutation('update');
-      const sending = FinanceRequestApi.update(r, f.values, today()).then(function(out){ return settle(token, out, 'updated'); });
+      const sending = FinanceRequestApi.update(r, f.values, today(), sessionRequestsIsEmployee(principalNow())).then(function(out){ return settle(token, out, 'updated'); });
       paint();
       return sending;
     },
     // The confirmation panel for an operation offered on the request shown. Submit and approve
-    // confirm; reject and cancel ask for a reason; pay asks for the date and method.
+    // confirm; reject and cancel ask for a reason; pay asks for the date and method; a
+    // reimbursement's approval asks for its post, preselected with the stored one (CR-01).
     openAction(op){
-      if(!canAct() || SESSION_REQUESTS_OPS.indexOf(op) === -1 || !shown(op)) return;
+      const r = canAct() && SESSION_REQUESTS_OPS.indexOf(op) !== -1 ? shown(op) : null;
+      if(!r) return;
       let key = null;
       if(op === 'pay'){
         key = payrollIdempotencyKey();
         if(key === null){ message('noCrypto'); return; }
       }
-      SessionRequestsStore.openAction(op, today(), key);
+      SessionRequestsStore.openAction(op, today(), key, op === 'approve' && r.kind === 'reimbursement' && r.financialPost !== null ? r.financialPost : '');
       SessionRequestsStore.setFocus('action');
       paint();
     },
@@ -406,7 +438,7 @@ const SessionRequests = (function(){
       if(!r) return;
       const token = SessionRequestsStore.beginMutation(a.op);
       const call = a.op === 'submit' ? FinanceRequestApi.submit(r)
-        : a.op === 'approve' ? FinanceRequestApi.approve(r)
+        : a.op === 'approve' ? FinanceRequestApi.approve(r, r.kind === 'reimbursement' ? a.financialPost : undefined)
         : a.op === 'reject' ? FinanceRequestApi.reject(r, a.reason)
         : a.op === 'cancel' ? FinanceRequestApi.cancel(r, a.reason)
         : FinanceRequestApi.pay(r, { paidOn: a.paidOn, paymentMethod: a.paymentMethod }, a.key, today());
