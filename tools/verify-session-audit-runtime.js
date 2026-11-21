@@ -701,16 +701,22 @@ function firewall(rt, label){
     const rt = await open();
     const calls = rt.net.calls.length;
     check(/id="swauExportBtn"/.test(rt.appHTML()) && rt.app.fire('swauExportBtn', 'click') === 'fired' && rt.dl.clicks.length === 1, 'X. the month list shows Export CSV and starts one download'); await flush();
-    // The shown table, cell by cell (time from its <time>, the em dash of "no fields" as an empty cell).
-    const shown = (rt.appHTML().match(/<tr><td><time datetime="[^"]*">[^<]*<\/time><\/td>(<td>[^<]*<\/td>){4}/g) || []).map((r) => {
-      const time = /<time datetime="([^"]*)">([^<]*)<\/time>/.exec(r);
-      const tds = (r.match(/<td>([^<]*)<\/td>/g) || []).map((t) => t.replace(/<\/?td>/g, '').replace(/&amp;/g, '&'));
-      return [time[2]].concat(tds.slice(0, 3), [tds[3] === '—' ? '' : tds[3]]);
-    });
+    // The shown table, cell by cell, read by its exact structure (CodeQL alert #21 correction: no tag stripping).
+    // Every cell's text is a captured group that holds no markup ([^<>]); the table, its head and every body row
+    // must match the expected structure in full, so unexpected or malformed markup fails the check instead of
+    // being passed through. The five entities escapeHtml() emits are decoded in one pass, never re-scanned.
+    const ENTITY = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" };
+    const decode = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (m, n) => ENTITY[n]);
+    const tableM = /<div class="table-wrap" id="swauList" data-swau-from="month"><table><thead><tr>((?:<th scope="col">[^<>]+<\/th>)+)<th scope="col" aria-label="Open event"><\/th><\/tr><\/thead><tbody>((?:<tr>.*?<\/tr>)*)<\/tbody><\/table><\/div>/.exec(rt.appHTML());
+    const ROW = /<tr><td><time datetime="([^"<>]+)">([^"<>]+)<\/time><\/td><td>([^<>]*)<\/td><td>([^<>]*)<\/td><td>([^<>]*)<\/td><td>([^<>]*)<\/td><td><button class="btn" type="button" data-swau-open="(\d+)">View<\/button><\/td><\/tr>/g;
+    const rowMs = tableM ? Array.from(tableM[2].matchAll(ROW)) : [];
+    check(!!tableM && rowMs.map((m) => m[0]).join('') === tableM[2] && rowMs.every((m, i) => m[7] === String(i)),
+      'X. the month table is read by its exact structure: every body row is a whole, well-formed six-cell row (no unexpected markup), opened by its own position');
+    const shown = rowMs.map((m) => [decode(m[2]), decode(m[3]), decode(m[4]), decode(m[5]), m[6] === '—' ? '' : decode(m[6])]);
     const q = (v) => /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     const expected = BOM + [HEAD].concat(shown.map((r) => r.map(q).join(','))).join(CRLF) + CRLF;
     check(shown.length === 4 && csvOf(rt) === expected, 'X. the CSV is exactly the four events shown, in their order, cell for cell as the month table shows them');
-    const ths = ((rt.appHTML().split('id="swauList"')[1] || '').split('</thead>')[0].match(/<th scope="col">([^<]+)<\/th>/g) || []).map((t) => t.replace(/<[^>]+>/g, ''));
+    const ths = tableM ? Array.from(tableM[1].matchAll(/<th scope="col">([^<>]+)<\/th>/g)).map((m) => decode(m[1])) : [];
     check(ths.join(',') === HEAD && csvOf(rt).slice(1).split(CRLF)[0] === HEAD && HEAD.split(',').length === 5,
       'X. the CSV header is exactly the five month-table columns, in their order: Time (WIB), Action, Record, Actor user id, Fields changed');
     const cells = (line) => { const out = []; let cur = '', inQ = false; for(let i = 0; i < line.length; i++){ const ch = line[i];
