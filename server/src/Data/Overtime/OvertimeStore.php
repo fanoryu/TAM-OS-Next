@@ -60,7 +60,8 @@ final class OvertimeStore
     public const LOCK_SELF_SQL = 'SELECT id, company_id, employee_id AS owner_employee_id, employee_id, month_key, overtime_date, hours, work_description, notes, status, version FROM overtime_records WHERE id = :id AND company_id = :company_id AND employee_id = :self_employee_id FOR UPDATE';
 
     // The employee a create is for, locked inside the create transaction: its archive and
-    // employment status decide eligibility.
+    // employment status decide eligibility. ARCH-OT-1: a submit locks its owner the same way,
+    // before the record (lock order employee → overtime, as approve), and refuses an archived one.
     public const LOCK_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id FOR UPDATE';
     public const LOCK_EMPLOYEE_SELF_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id AND id = :self_employee_id FOR UPDATE';
 
@@ -134,15 +135,16 @@ final class OvertimeStore
     }
 
     /**
-     * Locks the employee row a create candidate belongs to and returns its eligibility facts, or
-     * null. Must run inside the create transaction, before the insert.
+     * Locks the employee row a create candidate (or, ARCH-OT-1, a record being submitted) belongs
+     * to and returns its eligibility facts, or null. Must run inside the create or submit
+     * transaction, before the insert or the record lock.
      *
      * @return array{employmentStatus: string, archived: bool}|null
      */
     public function lockEmployee(Authorization $auth): ?array
     {
-        if ($auth->action !== Action::OvertimeCreateSelfDraft || $auth->record === null || $auth->record->ownerEmployeeId === null) {
-            throw new \LogicException('the employee is locked only for an authorized overtime create');
+        if (!in_array($auth->action, [Action::OvertimeCreateSelfDraft, Action::OvertimeSubmitSelf], true) || $auth->record === null || $auth->record->ownerEmployeeId === null) {
+            throw new \LogicException('the employee is locked only for an authorized overtime create or submit');
         }
         $sql = $auth->scope->isSelf() ? self::LOCK_EMPLOYEE_SELF_SQL : self::LOCK_EMPLOYEE_SQL;
         $rows = $this->db->select($auth->scope, $sql, ['employee_id' => $auth->record->ownerEmployeeId]);

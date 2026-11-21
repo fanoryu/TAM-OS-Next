@@ -99,7 +99,7 @@ const SESSION_WORKSPACE_MUTATION_ERRORS = Object.freeze({
 const SESSION_WORKSPACE_CONFLICTS = Object.freeze({
   create: 'The employee record could not be created because of a conflict. The employee code may already be in use.',
   update: 'The employee record changed or could not be saved because of a conflict. Reload the record, then review your changes before saving again.',
-  archive: 'The employee record changed or could not be archived because of a conflict. Reload the record before trying again.',
+  archive: 'The employee record changed or could not be archived because of a conflict. Possible causes include an active login on the record or overtime still waiting for review or approval. Reload the record before trying again.',
   provision: 'This login changed or the action is no longer available. Reload the record to see what can be done now.',
   reissue: 'This login changed or the action is no longer available. Reload the record to see what can be done now.',
   disable: 'This login changed or the action is no longer available. Reload the record to see what can be done now.',

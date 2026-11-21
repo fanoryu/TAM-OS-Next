@@ -75,6 +75,9 @@ return [
         assertTrue(str_ends_with(EmployeeStore::FIND_PROFILE_SQL, 'WHERE e.id = :id AND e.company_id = :company_id'), 'CEO detail');
         assertTrue(str_ends_with(EmployeeStore::LOCK_PROFILE_SQL, 'WHERE id = :id AND company_id = :company_id FOR UPDATE'), 'the write lock');
         assertTrue(str_contains(EmployeeStore::ACTIVE_BINDING_SQL, "WHERE company_id = :company_id AND employee_id = :employee_id AND status = 'active'"), 'active binding');
+        // ARCH-OT-1: the pending-overtime archive guard — a plain company-scoped read of Submitted / Reviewed only.
+        assertSame("SELECT id, company_id, employee_id AS owner_employee_id FROM overtime_records WHERE company_id = :company_id AND employee_id = :employee_id AND status IN ('Submitted', 'Reviewed') LIMIT 1",
+            EmployeeStore::PENDING_OVERTIME_SQL, 'pending overtime: Submitted and Reviewed only, never Draft, Approved or Rejected; no lock, no money');
         assertTrue(str_contains(EmployeeStore::CREATE_SQL, 'VALUES (:id, :company_id, :employee_code,') && str_contains(EmployeeStore::CREATE_SQL, ':monthly_base_salary, NULL, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))'), 'create: live, version 1');
     },
     'BF-4a2: the CEO reads derive accountState from the bound login, in-company, without a hash; the self read does not join it' => static function (): void {

@@ -117,6 +117,10 @@ const CR01_PACKAGE_DIGEST = '70793d36273801c72055acea693da3ecd0b95ce6ce29a2cd79f
 // Committed payroll plan as a CEO-only warning (session-payroll.js afterDetail; the Committed notice in
 // session-payroll-view.js); no module or file added. Prior pin was CR01_PACKAGE_DIGEST (kept as the baseline).
 const PAYDRIFT1_PACKAGE_DIGEST = '647370c3f39eac93fd7b77c9ac7d0a787825af0812e22a1f22c5809015a06faf';
+// ARCH-OT-1 (Owner GO 2026-11-21, EL-DEC-5 / HV-Q-3 = A on the SESSION CEO archive): the PAY-DRIFT-1 package with
+// the archive conflict wording listing pending overtime as a possible cause (session-workspace-view.js);
+// no module or file added. Prior pin was PAYDRIFT1_PACKAGE_DIGEST (kept as the baseline).
+const ARCHOT1_PACKAGE_DIGEST = '2db53760850f1743deafa021393bfed6befc219fd391c04ca7d222ea06dfcf2c';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -8411,7 +8415,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8733,7 +8737,7 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
@@ -8763,7 +8767,7 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
     'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
 }
 
@@ -8844,7 +8848,7 @@ console.log('== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017) ==
     'CR-01: the view shows "Not yet assigned by the CEO", "Not recorded (approved before CR-01)" and the approval post selector; the runtime harness covers section L (T-V1 … T-V4)');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
     'CR-01: no frontend module or package file added; SCHEMA_VERSION 6 and ACTIONS 24; the package at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… kept as the baseline)');
 }
 
