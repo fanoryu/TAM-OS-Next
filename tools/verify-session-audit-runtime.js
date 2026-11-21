@@ -298,6 +298,52 @@ function firewall(rt, label){
     label + ': every audit request is a bodiless same-origin GET without a CSRF token whose query is exactly ?month= or ?entity=&id= (never a company, role or scope)');
 }
 
+// AWP-05 (CodeQL alerts #21 and #22 corrections): the CEO Audit month table read by its exact structure with a
+// forward-only cursor — literal startsWith() / indexOf() delimiters and slice(), no regular expression over the
+// table and no tag stripping. Each cell's text must hold no '<' or '>'; the header cells, every body row (six cells
+// and its View button, numbered 0, 1, 2 … in order) and the closing tags must follow exactly, or the whole table is
+// refused (null). The cursor only moves forward and every indexOf() result is consumed or ends the read, so the
+// work is linear in the input. The five entities escapeHtml() emits are decoded in one pass, never re-scanned.
+const AUDIT_TABLE_ENTITY = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" };
+const auditTableDecode = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (m, n) => AUDIT_TABLE_ENTITY[n]);
+function readAuditMonthTable(html){
+  const OPEN = '<div class="table-wrap" id="swauList" data-swau-from="month"><table><thead><tr>';
+  const start = html.indexOf(OPEN);
+  if(start === -1) return null;
+  let i = start + OPEN.length;
+  const take = (lit) => { if(!html.startsWith(lit, i)) return false; i += lit.length; return true; };
+  // The text up to the next `end`, which must hold no markup; the cursor moves past `end`.
+  const until = (end) => {
+    const j = html.indexOf(end, i);
+    if(j === -1) return null;
+    const v = html.slice(i, j);
+    if(v.indexOf('<') !== -1 || v.indexOf('>') !== -1) return null;
+    i = j + end.length;
+    return v;
+  };
+  const heads = [];
+  while(take('<th scope="col">')){
+    const h = until('</th>');
+    if(h === null || h === '') return null;
+    heads.push(auditTableDecode(h));
+  }
+  if(!heads.length || !take('<th scope="col" aria-label="Open event"></th></tr></thead><tbody>')) return null;
+  const rows = [];
+  while(take('<tr><td><time datetime="')){
+    const iso = until('">');
+    const wib = iso === null ? null : until('</time></td><td>');
+    const action = wib === null ? null : until('</td><td>');
+    const record = action === null ? null : until('</td><td>');
+    const actor = record === null ? null : until('</td><td>');
+    const fields = actor === null ? null : until('</td><td><button class="btn" type="button" data-swau-open="');
+    const index = fields === null ? null : until('">View</button></td></tr>');
+    if(index === null || iso.indexOf('"') !== -1 || wib === '' || index !== String(rows.length)) return null;
+    rows.push({ iso: iso, wib: auditTableDecode(wib), action: auditTableDecode(action), record: auditTableDecode(record),
+      actor: auditTableDecode(actor), fields: auditTableDecode(fields) });
+  }
+  return take('</tbody></table></div>') ? { heads: heads, rows: rows } : null;
+}
+
 (async function main(){
   console.log('== AFI-4g — SESSION AUDIT RUNTIME VERIFICATION ==');
 
@@ -701,22 +747,42 @@ function firewall(rt, label){
     const rt = await open();
     const calls = rt.net.calls.length;
     check(/id="swauExportBtn"/.test(rt.appHTML()) && rt.app.fire('swauExportBtn', 'click') === 'fired' && rt.dl.clicks.length === 1, 'X. the month list shows Export CSV and starts one download'); await flush();
-    // The shown table, cell by cell, read by its exact structure (CodeQL alert #21 correction: no tag stripping).
-    // Every cell's text is a captured group that holds no markup ([^<>]); the table, its head and every body row
-    // must match the expected structure in full, so unexpected or malformed markup fails the check instead of
-    // being passed through. The five entities escapeHtml() emits are decoded in one pass, never re-scanned.
-    const ENTITY = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" };
-    const decode = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (m, n) => ENTITY[n]);
-    const tableM = /<div class="table-wrap" id="swauList" data-swau-from="month"><table><thead><tr>((?:<th scope="col">[^<>]+<\/th>)+)<th scope="col" aria-label="Open event"><\/th><\/tr><\/thead><tbody>((?:<tr>.*?<\/tr>)*)<\/tbody><\/table><\/div>/.exec(rt.appHTML());
-    const ROW = /<tr><td><time datetime="([^"<>]+)">([^"<>]+)<\/time><\/td><td>([^<>]*)<\/td><td>([^<>]*)<\/td><td>([^<>]*)<\/td><td>([^<>]*)<\/td><td><button class="btn" type="button" data-swau-open="(\d+)">View<\/button><\/td><\/tr>/g;
-    const rowMs = tableM ? Array.from(tableM[2].matchAll(ROW)) : [];
-    check(!!tableM && rowMs.map((m) => m[0]).join('') === tableM[2] && rowMs.every((m, i) => m[7] === String(i)),
+    // The shown table, cell by cell, read by readAuditMonthTable() (a forward-only cursor parser; see its comment).
+    const table = readAuditMonthTable(rt.appHTML());
+    check(!!table && table.rows.length === 4,
       'X. the month table is read by its exact structure: every body row is a whole, well-formed six-cell row (no unexpected markup), opened by its own position');
-    const shown = rowMs.map((m) => [decode(m[2]), decode(m[3]), decode(m[4]), decode(m[5]), m[6] === '—' ? '' : decode(m[6])]);
+    const shown = table ? table.rows.map((r) => [r.wib, r.action, r.record, r.actor, r.fields === '—' ? '' : r.fields]) : [];
     const q = (v) => /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     const expected = BOM + [HEAD].concat(shown.map((r) => r.map(q).join(','))).join(CRLF) + CRLF;
     check(shown.length === 4 && csvOf(rt) === expected, 'X. the CSV is exactly the four events shown, in their order, cell for cell as the month table shows them');
-    const ths = tableM ? Array.from(tableM[1].matchAll(/<th scope="col">([^<>]+)<\/th>/g)).map((m) => decode(m[1])) : [];
+    const ths = table ? table.heads : [];
+    // The parser itself: malformed or unexpected markup is refused whole, and a large hostile input ends in one pass.
+    const T_OPEN = '<div class="table-wrap" id="swauList" data-swau-from="month"><table><thead><tr><th scope="col">Time (WIB)</th>'
+      + '<th scope="col" aria-label="Open event"></th></tr></thead><tbody>';
+    const T_ROW = (i, cell) => '<tr><td><time datetime="2031-04-01T00:00:00.000000Z">2031-04-01 07:00:00</time></td><td>' + cell + '</td><td>R</td><td>A</td><td>F</td>'
+      + '<td><button class="btn" type="button" data-swau-open="' + i + '">View</button></td></tr>';
+    const T_CLOSE = '</tbody></table></div>';
+    const good = readAuditMonthTable(T_OPEN + T_ROW(0, 'Employee &amp;lt;x&amp;gt; &quot;q&quot;') + T_ROW(1, 'B') + T_CLOSE);
+    check(!!good && good.heads.join() === 'Time (WIB)' && good.rows.length === 2 && good.rows[0].action === 'Employee &lt;x&gt; "q"',
+      'X. parser: a well-formed table is read; entities are decoded once (&amp;lt; stays the text "&lt;")');
+    const BAD = [
+      ['markup inside a cell', T_OPEN + T_ROW(0, '<b>B</b>') + T_CLOSE],
+      ['an extra cell', T_OPEN + T_ROW(0, 'B</td><td>extra') + T_CLOSE],
+      ['rows out of order', T_OPEN + T_ROW(1, 'B') + T_ROW(0, 'B') + T_CLOSE],
+      ['a stray element between rows', T_OPEN + T_ROW(0, 'B') + '<tr></tr>' + T_ROW(1, 'B') + T_CLOSE],
+      ['no closing table', T_OPEN + T_ROW(0, 'B')],
+      ['no table at all', '<p>nothing</p>'],
+      ['an empty header cell', T_OPEN.replace('Time (WIB)', '') + T_CLOSE],
+      ['a quote in the datetime', T_OPEN + T_ROW(0, 'B').replace('2031-04-01T00', '2031"-04-01T00') + T_CLOSE]
+    ];
+    check(BAD.every((b) => readAuditMonthTable(b[1]) === null), 'X. parser: refused whole — ' + BAD.map((b) => b[0]).join('; '));
+    const big = T_OPEN + '<tr>' + '</tr><tr>'.repeat(200000) + T_CLOSE;
+    const longCell = T_OPEN + T_ROW(0, 'x'.repeat(2000000)) + T_CLOSE;
+    const t0 = process.hrtime.bigint();
+    const bigOut = readAuditMonthTable(big), longOut = readAuditMonthTable(longCell);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    check(bigOut === null && !!longOut && longOut.rows[0].action.length === 2000000 && ms < 2000,
+      'X. parser: 200,000 repetitions of "</tr><tr>" are refused and a 2,000,000-character cell is read, in one linear pass (' + Math.round(ms) + ' ms)');
     check(ths.join(',') === HEAD && csvOf(rt).slice(1).split(CRLF)[0] === HEAD && HEAD.split(',').length === 5,
       'X. the CSV header is exactly the five month-table columns, in their order: Time (WIB), Action, Record, Actor user id, Fields changed');
     const cells = (line) => { const out = []; let cur = '', inQ = false; for(let i = 0; i < line.length; i++){ const ch = line[i];
