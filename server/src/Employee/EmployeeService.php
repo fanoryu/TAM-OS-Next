@@ -30,7 +30,9 @@ use TamOs\Policy\Scope;
  *            refuse archived (409) or a moved version (409), compare-and-swap + audit
  *   archive  validate → scoped load (404) → Policy (403) → one transaction: lock the row,
  *            refuse archived, a moved version or an active login bound to it (409), soft
- *            archive + audit
+ *            archive + audit. ARCH-OT-1 (EL-DEC-5 / HV-Q-3 = A, applied to this CEO archive):
+ *            also 409 while any overtime of the record is Submitted or Reviewed — it must be
+ *            approved or rejected first, or it could never be approved after the archive
  *
  * A duplicate employee code is 409. A forced failure anywhere inside a transaction rolls back
  * the write and its audit row together. Employment status never changes a login.
@@ -117,6 +119,9 @@ final class EmployeeService
             $this->lockedLive($auth, $in['expectedVersion']);
             if ($this->data->employees()->hasActiveBinding($auth)) {
                 throw new ApiError(ErrorCode::Conflict, logReason: 'employee_bound');
+            }
+            if ($this->data->employees()->hasPendingOvertime($auth)) {
+                throw new ApiError(ErrorCode::Conflict, logReason: 'employee_pending_overtime');   // ARCH-OT-1
             }
             if ($this->data->employees()->archive($auth, $in['expectedVersion']) !== 1) {
                 throw new ApiError(ErrorCode::Conflict, logReason: 'employee_version');

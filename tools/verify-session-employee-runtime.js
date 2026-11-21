@@ -1059,7 +1059,7 @@ async function archiveWith(archiveRoutes, extra){
     const rt = await archiveWith([err(409, 'conflict')], { '/api/employee?id=e_1': [ok({ employee: D1 }), ok({ employee: D1V(5) })] });
     await rt.SessionWorkspace.confirmArchive(); await flush(20);
     const html = rt.appHTML();
-    check(writes(rt).length === 1 && /swConfirmTitle/.test(html) && /could not be archived because of a conflict/.test(html) && /id="swReloadBtn"/.test(html) && rt.store().detail.archived === false,
+    check(writes(rt).length === 1 && /swConfirmTitle/.test(html) && /could not be archived because of a conflict/.test(html) && /Possible causes include an active login on the record or overtime still waiting for review or approval. Reload the record before trying again./.test(html) && /id="swReloadBtn"/.test(html) && rt.store().detail.archived === false,
       'O. 409: the confirmation stays with a generic conflict and Reload record; nothing resent');
     await rt.SessionWorkspace.reloadRecord(); await flush();
     await rt.SessionWorkspace.confirmArchive(); await flush();

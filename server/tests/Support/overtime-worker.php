@@ -8,6 +8,9 @@ declare(strict_types=1);
  * blocked on it. Prints "<status> <error code | ok>". Never resets the database; refuses unless
  * the database test guards pass. Arguments: session token, CSRF token, operation, JSON body
  * (fabricated test values only).
+ *
+ * ARCH-OT-1: the operation "archive" performs POST /api/employees/archive instead, for
+ * tests/Db/EmployeeArchivePendingOvertimeTest.php (archive racing submit and approve).
  */
 
 if (PHP_SAPI !== 'cli' || count($argv) !== 5) {
@@ -31,7 +34,7 @@ use function TamOs\Tests\testDbConfig;
 \TamOs\installErrorHandler();
 
 [, $token, $csrf, $operation, $body] = $argv;
-if (!in_array($operation, ['create', 'update', 'delete', 'submit', 'review', 'reject', 'approve'], true)) {
+if (!in_array($operation, ['create', 'update', 'delete', 'submit', 'review', 'reject', 'approve', 'archive'], true)) {
     exit(2);
 }
 $config = testDbConfig();
@@ -40,7 +43,8 @@ if (dbGuardViolations($config, ['TAMOS_DB_TESTS' => getenv('TAMOS_DB_TESTS')]) !
     exit(1);
 }
 $kernel = authKernel($config, AuthData::fromDatabase(new Database(DatabaseConfig::fromConfig($config))), productionMigrationsDir());
-$response = $kernel->handle(sessionRequest('POST', '/api/overtime-records/' . $operation, $token, $csrf, $body), requestId());
+$path = $operation === 'archive' ? '/api/employees/archive' : '/api/overtime-records/' . $operation;
+$response = $kernel->handle(sessionRequest('POST', $path, $token, $csrf, $body), requestId());
 $decoded = json_decode($response->body, true);
 echo $response->status . ' ' . ($decoded['error']['code'] ?? 'ok') . "\n";
 exit(0);

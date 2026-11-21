@@ -31,7 +31,10 @@ use TamOs\Policy\Scope;
  *   delete  scoped load → overtime.deleteSelfDraft → lock, Draft and version (409) → hard delete
  *           + audit in the same transaction (D-BF4b-6)
  *   submit / review / reject  scoped load → the transition's Action → lock, source status and
- *           version (409) → compare-and-swap + audit naming the operation (D-BF4b-5)
+ *           version (409) → compare-and-swap + audit naming the operation (D-BF4b-5).
+ *           ARCH-OT-1: submit first locks the owning employee (create's lock order) and refuses
+ *           an archived one (409), so no record becomes Submitted under an archived employee —
+ *           the archive itself refuses while any record is Submitted or Reviewed
  *
  * Policy decides on the record as loaded; the locked row decides again, so a change that lands
  * between the two loses deterministically (409).
@@ -153,6 +156,12 @@ final class OvertimeService
         $in = OvertimeInput::transition($json);
         $auth = $this->authorized($actor, OvertimeStatus::action($operation), $in['id']);
         $this->data->atomically(function () use ($auth, $actor, $operation, $in, $requestId): void {
+            if ($operation === 'submit') {                  // ARCH-OT-1: employee → record, as approve
+                $owner = $this->data->overtime()->lockEmployee($auth) ?? throw new ApiError(ErrorCode::NotFound);
+                if ($owner['archived']) {
+                    throw new ApiError(ErrorCode::Conflict, logReason: 'employee_archived');
+                }
+            }
             $current = $this->locked($auth, OvertimeStatus::TRANSITIONS[$operation][1], $in['expectedVersion']);
             $from = (string) $current['status'];
             $to = OvertimeStatus::target($operation, $from) ?? throw new \LogicException('transition: no target');

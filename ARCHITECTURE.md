@@ -1230,7 +1230,7 @@ employee ACTIONS), `entity` (`employee`), `entity_id`, `target_user_id` (always 
 | `GET /api/employee?id=` | company scope for the CEO, self scope for an Employee; absent and out of scope are byte-identical 404s | `{employee: detail}` (CEO) or `{employee: self}` (Employee) |
 | `POST /api/employees/create` | `employee.create` (record-free, decided by the kernel) | server-generated opaque id, the session's company, version 1 |
 | `POST /api/employees/update` | `employee.update` (record-bearing: scoped load → 404, then Policy → 403) | `{id, expectedVersion, …fields}`; stale version or archived record 409 |
-| `POST /api/employees/archive` | `employee.delete` (record-bearing) | **soft archive**: `archived_at` set, version + 1; refused (409) while an active login is bound to the record |
+| `POST /api/employees/archive` | `employee.delete` (record-bearing) | **soft archive**: `archived_at` set, version + 1; refused (409) while an active login is bound to the record, or (ARCH-OT-1, EL-DEC-5 / HV-Q-3 = A) while any of its overtime is Submitted or Reviewed — read after the employee lock, which every overtime create and submit also takes |
 
 Reads add no ACTION — the session's role and `Scope` decide them (SDR-0002 §8). Every write runs in one
 transaction with its audit row (`AuditLog`, the only writer of `audit_events`, insert-only), under a row
@@ -1363,7 +1363,9 @@ there is no generic status update and no reject reason.
 compare-and-swap (`version + 1`) and the audit row. Create builds a Draft candidate with
 `ScopedDatabase::candidate()` — whose scope and owner come only from an employee record already read in scope —
 then locks that employee and refuses it unless it is live and `employmentStatus` is Active (409); existing records
-keep their workflow after the employee is archived. Update rejects `employeeId` (immutable) and is no write and no
+keep their workflow after the employee is archived, except that submit (ARCH-OT-1) locks the employee, then the
+record, and refuses an archived employee (409), so no record becomes pending after the archive. Update rejects
+`employeeId` (immutable) and is no write and no
 audit when nothing changes. Delete (D-BF4b-6) hard-deletes a Draft only: the `DELETE` itself names the company,
 the expected version and `status = 'Draft'`, and its audit row survives the record. No business write is retried;
 a lost answer is reconciled by re-reading (the month list after a create, the detail after anything else).

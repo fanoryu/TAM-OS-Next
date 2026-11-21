@@ -6,6 +6,10 @@ Not deployed and not released: entries here are merged into `main` (or proposed 
 published release, and none is on a production host. Hostinger stays NO-GO; Gate D, Gate R and v3.0.0 stay on HOLD.
 
 ### Added
+- **ARCH-OT-1 — no archive over pending overtime (not merged, not deployed, not released).** Applies EL-DEC-5 /
+  HV-Q-3 = A to the SESSION CEO employee archive only (Owner GO 2026-11-21; OD-03 stays open). The archive is refused
+  (409) while any of the employee's overtime is Submitted or Reviewed; Draft, Approved and Rejected never block. Submit
+  now locks the employee before the record and refuses an archived employee (409). No migration, schema or route change.
 - **PAY-DRIFT-1 — drift warning on Committed payroll (not merged, not deployed, not released).** Closes AWP-00 F-01 under
   Owner D-1..D-5 (2026-11-21). `GET /api/payroll-plan/drift` now answers a Committed plan (Cancelled stays 409, CEO only,
   404/403 unchanged); overtime covered by a Committed Supplemental of the same company, employee, month and base plan is

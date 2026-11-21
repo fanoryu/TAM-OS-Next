@@ -65,6 +65,11 @@ final class EmployeeStore
     // archive transaction; binding a membership (BF-4a2) locks the same employee row first.
     public const ACTIVE_BINDING_SQL = "SELECT id, company_id, employee_id AS owner_employee_id FROM memberships WHERE company_id = :company_id AND employee_id = :employee_id AND status = 'active' LIMIT 1";
 
+    // ARCH-OT-1 (EL-DEC-5 / HV-Q-3 = A): overtime of the record still waiting for a decision. Read
+    // after LOCK_PROFILE_SQL inside the archive transaction — a plain read, no overtime lock; an
+    // overtime create or submit locks the same employee row first, so none can slip in meanwhile.
+    public const PENDING_OVERTIME_SQL = "SELECT id, company_id, employee_id AS owner_employee_id FROM overtime_records WHERE company_id = :company_id AND employee_id = :employee_id AND status IN ('Submitted', 'Reviewed') LIMIT 1";
+
     // BF-4a2: the login bound to the record (membership + user), for account.manage only. LOCK_ takes
     // the membership and user rows after the caller locked the employee row (lock order: employee →
     // membership/user → tokens). The password hash itself is never read — only whether one is set.
@@ -131,6 +136,13 @@ final class EmployeeStore
     {
         $record = $auth->record ?? throw new \LogicException('a binding check needs the authorized record');
         return $this->db->select($auth->scope, self::ACTIVE_BINDING_SQL, ['employee_id' => $record->id]) !== [];
+    }
+
+    /** ARCH-OT-1: whether the authorized record has overtime still Submitted or Reviewed. */
+    public function hasPendingOvertime(Authorization $auth): bool
+    {
+        $record = $auth->record ?? throw new \LogicException('a pending overtime check needs the authorized record');
+        return $this->db->select($auth->scope, self::PENDING_OVERTIME_SQL, ['employee_id' => $record->id]) !== [];
     }
 
     /**

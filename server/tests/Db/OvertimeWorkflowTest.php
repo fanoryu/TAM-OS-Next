@@ -112,12 +112,15 @@ return [
         $w['db']->execute("UPDATE employees SET archived_at = NULL WHERE id = 'e_a3'");
         $create($w, 'ceoA', ['employeeId' => 'e_a3']);
     },
-    'existing records stay readable and keep their workflow after the employee is archived or leaves' => static function () use ($world, $create, $get, $ok, $step): void {
+    'existing records stay readable and keep their workflow after the employee is archived or leaves — except submit (ARCH-OT-1)' => static function () use ($world, $create, $get, $ok, $step, $code): void {
         $w = $world();
         $o = $create($w, 'ceoA', ['employeeId' => 'e_a3']);
+        $s = $ok($step($w, 'ceoA', 'submit', $create($w, 'ceoA', ['employeeId' => 'e_a3'])), 'submit before archive')['overtimeRecord'];
+        // Test SQL archives past the ARCH-OT-1 guard, as a record pending from before the guard would be.
         $w['db']->execute("UPDATE employees SET employment_status = 'Resigned', archived_at = UTC_TIMESTAMP(6) WHERE id = 'e_a3'");
         assertSame('Draft', $ok($get($w, 'ceoA', '/api/overtime-record', 'id=' . $o['id']), 'detail')['overtimeRecord']['status']);
-        $s = $ok($step($w, 'ceoA', 'submit', $o), 'submit after archive')['overtimeRecord'];
+        assertSame([409, 'conflict'], $code($step($w, 'ceoA', 'submit', $o)), 'ARCH-OT-1: no submit after archive');
+        assertSame('Draft', $ok($get($w, 'ceoA', '/api/overtime-record', 'id=' . $o['id']), 'still Draft')['overtimeRecord']['status']);
         assertSame('Rejected', $ok($step($w, 'ceoA', 'reject', $s), 'reject after archive')['overtimeRecord']['status']);
     },
     'the month list: required month, company scope for the CEO, own rows for an Employee, date desc (undated last) then id' => static function () use ($world, $create, $get, $ok): void {

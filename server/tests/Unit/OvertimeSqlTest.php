@@ -199,6 +199,11 @@ return [
         $reviewed = new ScopedRecord(Scope::of($ceo), 'overtime', str_repeat('c', 32), 'emp_1', 'Reviewed');
         assertThrows(\LogicException::class, static fn () => $store->approve(Policy::authorize($ceo, Action::OvertimeSubmitSelf, $reviewed), 1, $valuation), 'approve under submitSelf');
         assertThrows(\LogicException::class, static fn () => $store->lockValuationInputs(Policy::authorize($ceo, Action::OvertimeSubmitSelf, $reviewed)), 'owner lock under submitSelf');
+        // ARCH-OT-1: the employee eligibility lock serves create and submit only — never review, reject, approve, update or delete.
+        foreach ([Action::OvertimeManage, Action::OvertimeUpdateSelfDraft, Action::OvertimeDeleteSelfDraft] as $a) {
+            $e = assertThrows(\LogicException::class, static fn () => $store->lockEmployee(Policy::authorize($ceo, $a, $rec)), 'employee lock under ' . $a->value);
+            assertTrue(str_contains($e->getMessage(), 'overtime create or submit'), 'employee lock refused under ' . $a->value);
+        }
         foreach ([['Reviewed', 'Approved'], ['Approved', 'Rejected'], ['Approved', 'Reviewed'], ['Approved', 'Draft']] as [$from, $to]) {
             assertThrows(\LogicException::class, static fn () => $store->transition(Policy::authorize($ceo, Action::OvertimeManage, $reviewed), 1, $from, $to), 'generic ' . $from . ' → ' . $to);
         }
