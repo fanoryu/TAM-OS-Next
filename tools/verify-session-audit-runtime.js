@@ -695,7 +695,9 @@ function firewall(rt, label){
   {
     const BOM = String.fromCharCode(0xFEFF), CRLF = String.fromCharCode(13, 10);
     const csvOf = (rt) => rt.dl.blobs[rt.dl.blobs.length - 1].parts.join('');
-    const HEAD = 'Time (WIB),"Time (UTC, as stored)",Action,Record,Actor user id,Fields changed';
+    // AWP-05 correction (Owner GO 2026-11-21): exactly the five columns of the month table, in its order. Was: plus
+    // "Time (UTC, as stored)" as the second column.
+    const HEAD = 'Time (WIB),Action,Record,Actor user id,Fields changed';
     const rt = await open();
     const calls = rt.net.calls.length;
     check(/id="swauExportBtn"/.test(rt.appHTML()) && rt.app.fire('swauExportBtn', 'click') === 'fired' && rt.dl.clicks.length === 1, 'X. the month list shows Export CSV and starts one download'); await flush();
@@ -703,14 +705,27 @@ function firewall(rt, label){
     const shown = (rt.appHTML().match(/<tr><td><time datetime="[^"]*">[^<]*<\/time><\/td>(<td>[^<]*<\/td>){4}/g) || []).map((r) => {
       const time = /<time datetime="([^"]*)">([^<]*)<\/time>/.exec(r);
       const tds = (r.match(/<td>([^<]*)<\/td>/g) || []).map((t) => t.replace(/<\/?td>/g, '').replace(/&amp;/g, '&'));
-      return [time[2], time[1]].concat(tds.slice(0, 3), [tds[3] === '—' ? '' : tds[3]]);
+      return [time[2]].concat(tds.slice(0, 3), [tds[3] === '—' ? '' : tds[3]]);
     });
     const q = (v) => /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     const expected = BOM + [HEAD].concat(shown.map((r) => r.map(q).join(','))).join(CRLF) + CRLF;
-    check(shown.length === 4 && csvOf(rt) === expected, 'X. the CSV is exactly the four events shown, in their order and with the columns of the list (plus the stored UTC instant)');
-    check(csvOf(rt).split(CRLF)[1] === '2031-04-01 00:00:00,2031-03-31T17:00:00.000000Z,Employee updated,Employee emp_1,' + U1 + ',"fullName, phone"'
-      && csvOf(rt).split(CRLF)[2] === '2031-04-10 10:04:05,2031-04-10T03:04:05.123456Z,Login access — Create login,Employee emp_1,' + U1 + ',',
-      'X. independently: the first instant of April (WIB) and its UTC instant, field names quoted for their comma; no fields is an empty cell, never "—" or 0');
+    check(shown.length === 4 && csvOf(rt) === expected, 'X. the CSV is exactly the four events shown, in their order, cell for cell as the month table shows them');
+    const ths = ((rt.appHTML().split('id="swauList"')[1] || '').split('</thead>')[0].match(/<th scope="col">([^<]+)<\/th>/g) || []).map((t) => t.replace(/<[^>]+>/g, ''));
+    check(ths.join(',') === HEAD && csvOf(rt).slice(1).split(CRLF)[0] === HEAD && HEAD.split(',').length === 5,
+      'X. the CSV header is exactly the five month-table columns, in their order: Time (WIB), Action, Record, Actor user id, Fields changed');
+    const cells = (line) => { const out = []; let cur = '', inQ = false; for(let i = 0; i < line.length; i++){ const ch = line[i];
+      if(inQ){ if(ch === '"' && line[i + 1] === '"'){ cur += '"'; i++; } else if(ch === '"') inQ = false; else cur += ch; }
+      else if(ch === '"') inQ = true; else if(ch === ','){ out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; };
+    const body = csvOf(rt).slice(1).split(CRLF).slice(1, -1);
+    check(body.length === 4 && body.every((l) => cells(l).length === 5) && !/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|UTC/.test(csvOf(rt)),
+      'X. every row has exactly five cells; no stored UTC instant (or UTC column) is in the file');
+    check(csvOf(rt).split(CRLF)[1] === '2031-04-01 00:00:00,Employee updated,Employee emp_1,' + U1 + ',"fullName, phone"'
+      && csvOf(rt).split(CRLF)[2] === '2031-04-10 10:04:05,Login access — Create login,Employee emp_1,' + U1 + ','
+      && csvOf(rt).split(CRLF)[4] === '2031-04-30 23:59:59,Payroll plan — Commit,Payroll plan ' + PP1 + ',' + U1 + ',',
+      'X. independently: WIB times are correct at both month edges (2031-03-31T17:00Z is 2031-04-01 00:00:00; 2031-04-30T16:59:59.999999Z is 2031-04-30 23:59:59); field names quoted for their comma; no fields is an empty cell, never "—" or 0');
+    const hostile = rt.sessionAuditMonthCsv({ listStatus: 'ready', list: [Object.assign({}, A1, { actorUserId: '=HYPERLINK("http://example.invalid")', entityId: '+cmd', fields: ['@x', '-1'] })], listMonth: MONTH, month: MONTH });
+    check(!!hostile && hostile.content.split(CRLF)[1] === '2031-04-01 00:00:00,Employee updated,Employee +cmd,"\'=HYPERLINK(""http://example.invalid"")","\'@x, -1"',
+      'X. formula protection holds in the audit CSV: an actor id starting with = and fields starting with @ are apostrophe-neutralised (a label that does not start with a prefix stays as is)');
     check(!new RegExp([M1, RQ, T1, 'requestId', 'membership', CSRF].join('|')).test(csvOf(rt)), 'X. no membership id, request id, target user id or token is exported');
     const k = rt.dl.clicks[0];
     check(k.download === 'tam-os-audit-2031-04.csv' && /^blob:http:\/\/127\.0\.0\.1\//.test(k.href) && k.rel === 'noopener' && rt.dl.blobs[0].type === 'text/csv;charset=utf-8' && rt.net.calls.length === calls,
@@ -722,6 +737,8 @@ function firewall(rt, label){
     firewall(rt, 'X. month export');
     // An event or a record history open: no export.
     rt.app.row(0); await flush();
+    check(/<tr><th scope="row">Time \(UTC, as stored\)<\/th><td>2031-03-31T17:00:00\.000000Z<\/td><\/tr>/.test(rt.appHTML()),
+      'X. the event view still shows the stored UTC instant (Time (UTC, as stored)), unchanged by the export');
     check(!/id="swauExportBtn"/.test(rt.appHTML()) && rt.SessionAudit.exportCsv() === false && rt.dl.clicks.length === 1, 'X. an event open shows no Export CSV and exports nothing');
     rt.SessionAuditStore.openRecord(A1);
     check(rt.SessionAudit.exportCsv() === false && rt.dl.clicks.length === 1, 'X. a record history open exports nothing');
@@ -730,7 +747,7 @@ function firewall(rt, label){
     const BOM = String.fromCharCode(0xFEFF), CRLF = String.fromCharCode(13, 10);
     const rt = await open({ [LIST(MONTH)]: [ok({ auditEvents: [] })] });
     rt.app.fire('swauExportBtn', 'click'); await flush();
-    check(rt.dl.clicks.length === 1 && rt.dl.blobs[0].parts.join('') === BOM + 'Time (WIB),"Time (UTC, as stored)",Action,Record,Actor user id,Fields changed' + CRLF,
+    check(rt.dl.clicks.length === 1 && rt.dl.blobs[0].parts.join('') === BOM + 'Time (WIB),Action,Record,Actor user id,Fields changed' + CRLF,
       'X. an empty month exports a valid CSV of the header alone');
     firewall(rt, 'X. empty month');
   }

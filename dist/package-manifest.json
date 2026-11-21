@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "00d50d2979b18b7a9fb7512a65be3f38c292d341524d4722f85e9a931f4fbf22",
+  "packageDigest": "0b8b3bb847c2f867627289d94915f846612e8448159ad9584107a844ea9f1b86",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3344420,
-    "sha256": "7e2a04fd543c41bef9643d4142cecc6e4e63ca24c83447841ad57dc76e4ad830"
+    "bytes": 3344403,
+    "sha256": "a9c8d2c9a73a2aac8ea08d763fb445491538ffe4ffa6ba3c0df5397650800bf0"
   },
   "files": [
     {
@@ -514,8 +514,8 @@
     },
     {
       "path": "js/ui/session-audit-view.js",
-      "bytes": 16522,
-      "sha256": "a933a1fa90e6741634709069c9e9d15adda56eb086c7d88bdd16ff41878f9851"
+      "bytes": 16505,
+      "sha256": "01a2d45d4a2676a19fde22a7dc28b110f059e2a985e9fb28b01c396bbf10269e"
     },
     {
       "path": "js/ui/session-ledger-view.js",

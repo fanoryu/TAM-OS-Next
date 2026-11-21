@@ -124,14 +124,15 @@ function sessionAuditTableHTML(rows, from){
 }
 
 // AWP-05 (OD-13 = A): the month list shown as CSV, from the answer already read for this month, or
-// null while that read has not succeeded. The columns are the list's own, plus the exact stored UTC
-// instant the event view shows; field NAMES only, as stored; every cell through SessionCsv.text.
-const SESSION_AUDIT_CSV_HEADERS = Object.freeze(['Time (WIB)', 'Time (UTC, as stored)', 'Action', 'Record', 'Actor user id', 'Fields changed']);
+// null while that read has not succeeded. The columns are exactly the month table's own, in its order
+// (the stored UTC instant stays in the event view only); field NAMES only, as stored; every cell
+// through SessionCsv.text.
+const SESSION_AUDIT_CSV_HEADERS = Object.freeze(['Time (WIB)', 'Action', 'Record', 'Actor user id', 'Fields changed']);
 function sessionAuditMonthCsv(w){
   if(w.listStatus !== SESSION_AUDIT_STATUS.READY || !w.list || w.listMonth !== w.month || !OvertimeCalendar.isMonth(w.month)) return null;
   const c = SessionCsv;
   const rows = w.list.map(function(e){
-    return [c.text(auditJakartaTime(e.occurredAt)), c.text(e.occurredAt), c.text(sessionAuditActionLabel(e)), c.text(sessionAuditRecordLabel(e.entity, e.entityId)),
+    return [c.text(auditJakartaTime(e.occurredAt)), c.text(sessionAuditActionLabel(e)), c.text(sessionAuditRecordLabel(e.entity, e.entityId)),
       c.text(e.actorUserId), c.text(e.fields.length ? e.fields.join(', ') : null)];
   });
   return { content: c.document(SESSION_AUDIT_CSV_HEADERS, rows), filename: c.filename(['audit', w.month]) };

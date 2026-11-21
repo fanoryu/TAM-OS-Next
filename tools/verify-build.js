@@ -130,7 +130,9 @@ const ARCHOT1_PACKAGE_DIGEST = '2db53760850f1743deafa021393bfed6befc219fd391c04c
 // AWP-05 (Owner GO 2026-11-21, OD-13 = A): the ARCH-OT-1 package with the CEO's CSV export of the Transactions list,
 // the Financial dashboard and the Audit month (core/session-csv.js added, after core/session-home.js; the export
 // controls in session-ledger(-view).js and session-audit(-view).js). Prior pin was ARCHOT1_PACKAGE_DIGEST (kept as the baseline).
-const AWP05_PACKAGE_DIGEST = '00d50d2979b18b7a9fb7512a65be3f38c292d341524d4722f85e9a931f4fbf22';
+// AWP-05 correction (Owner GO 2026-11-21): the Audit month CSV holds exactly the five month-table columns.
+// Was: 00d50d2979b18b7a9fb7512a65be3f38c292d341524d4722f85e9a931f4fbf22 (PR #103 head 2f6c976, with the stored UTC column).
+const AWP05_PACKAGE_DIGEST = '0b8b3bb847c2f867627289d94915f846612e8448159ad9584107a844ea9f1b86';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
