@@ -120,7 +120,7 @@
  *
  * AFI-4c2 (a test-only model of BF-4c2): the two reads serve an Employee their OWN COMMITTED plans
  * only (anything else 404, the month list filtered); GET /api/payroll-plan/drift?id= (CEO; 409 for
- * a Committed or Cancelled plan) answers { id, current, reasons }; POST /api/payroll-plans/commit
+ * a Cancelled plan; PAY-DRIFT-1: a Committed plan is answered too) answers { id, current, reasons }; POST /api/payroll-plans/commit
  * takes exactly { id, expectedVersion, expectedTotal, idempotencyKey } — the key 32 lowercase hex,
  * the total "N.00" — and commits a Ready plan at the expected version with exactly that total and
  * no drift (409 otherwise), storing the key on the plan; the same key and request again answers the
@@ -128,6 +128,8 @@
  * is 409. Fixtures add a Ready plan, the Employee's (EMP-001) own Committed plan and own Ready plan.
  *   /__stub/drift-payroll      marks every Ready plan as drifted (salary_changed, overtime_changed),
  *                              so its drift read explains it and its commit answers 409
+ *   /__stub/drift-committed-payroll   PAY-DRIFT-1: marks every Committed plan as drifted
+ *                              (salary_changed) — the post-commit warning; nothing else changes
  *   /__stub/fail-next-commit   the next commit is APPLIED and then answered 503: an unknown
  *                              outcome the page must reconcile by reading the plan again
  *
@@ -590,7 +592,7 @@ async function handleApi(req, res, p, query){
     if(!/^[0-9a-f]{32}$/.test(id)) return api(res, 400, 'validation_failed', null, ['id']);
     const x = payroll.find((y) => y.id === id);
     if(!x) return api(res, 404, 'not_found');
-    if(x.status === 'Committed' || x.status === 'Cancelled') return api(res, 409, 'conflict');
+    if(x.status === 'Cancelled') return api(res, 409, 'conflict');   // PAY-DRIFT-1: Committed is answered
     const reasons = PR_DRIFT_REASONS.filter((r) => (x.drift || []).indexOf(r) !== -1);
     return api(res, 200, { payrollPlanDrift: { id: x.id, current: reasons.length === 0, reasons: reasons } });
   }
@@ -1160,6 +1162,12 @@ http.createServer((req, res) => {
     payroll.forEach((x) => { if(x.status === 'Ready') x.drift = ['salary_changed', 'overtime_changed']; });
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end('ready plans drifted');
+  }
+  if(urlPath === '/__stub/drift-committed-payroll' && req.method === 'GET'){
+    // PAY-DRIFT-1: every Committed plan no longer matches its inputs; its amounts stay as committed.
+    payroll.forEach((x) => { if(x.status === 'Committed') x.drift = ['salary_changed']; });
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end('committed plans drifted');
   }
   if(urlPath === '/__stub/fail-next-commit' && req.method === 'GET'){
     // AFI-4c2: the next commit is applied, then its answer is dropped.

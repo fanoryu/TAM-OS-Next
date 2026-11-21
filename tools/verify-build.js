@@ -113,6 +113,10 @@ const CR02_PACKAGE_DIGEST = '270af38dbf257693449654a078536b248516837b1f85a516e41
 // previous / final post (session-requests-view.js); no module or file added. Prior pin was CR02_PACKAGE_DIGEST
 // (kept as the baseline).
 const CR01_PACKAGE_DIGEST = '70793d36273801c72055acea693da3ecd0b95ce6ce29a2cd79f1c27dae5c875a'; // CR-01 R1 (C-2 CEO reimbursement create); superseded first CR-01 pin db03b3c5aed005a4df62963100c27794e225f6d800732303b85427d4aeef3394
+// PAY-DRIFT-1 (Owner GO 2026-11-21, AWP-00 F-01, D-1..D-4): the CR-01 package with the drift read extended to a
+// Committed payroll plan as a CEO-only warning (session-payroll.js afterDetail; the Committed notice in
+// session-payroll-view.js); no module or file added. Prior pin was CR01_PACKAGE_DIGEST (kept as the baseline).
+const PAYDRIFT1_PACKAGE_DIGEST = '647370c3f39eac93fd7b77c9ac7d0a787825af0812e22a1f22c5809015a06faf';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -7054,7 +7058,9 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
     && (storeC.match(/PayrollApi\.commit\(/g) || []).length === 1 && /sessionPayrollIntentState\(s\.commitIntent, d\.plan\) !== 'unresolved'\) return;/.test(storeC),
     'AFI-4c2: one commit send path; an unknown outcome keeps the intent and re-reads; Retry commit only while the re-read is still Ready at the same version and total (D-AFI4c2-1 = A)');
   check(/const PAYROLL_DRIFT_REASONS = Object\.freeze\(\['employee_archived', 'employee_not_active', 'salary_missing', 'salary_changed', 'overtime_changed'\]\);/.test(apiC)
-    && /if\(plan\.status === 'Ready'\) loadDrift\(plan\.id\);/.test(storeC) && !/drift[^;\n]*(current|reasons)[^;\n]*(openPanel|confirmPanel|COMMIT|commit\()/i.test(storeC),
+    && /if\(plan\.status === 'Ready' \|\| plan\.status === 'Committed'\) loadDrift\(plan\.id\);/.test(storeC)   // PAY-DRIFT-1 authorized revision (D-1, D-4): Committed too, a warning only. Was: Ready only.
+    && /if\(p\.status === 'Committed'\) return sessionPayrollCommittedDriftHTML\(w, p\);/.test(viewC)
+    && !/swp(Commit|RetryCommit|Return|Cancel)Btn|paid|payment/i.test(viewC.slice(viewC.indexOf('function sessionPayrollCommittedDriftHTML'), viewC.indexOf('\n}', viewC.indexOf('function sessionPayrollCommittedDriftHTML')))) && !/drift[^;\n]*(current|reasons)[^;\n]*(openPanel|confirmPanel|COMMIT|commit\()/i.test(storeC),
     'AFI-4c2: drift is the closed BF-4c2 reason set, read for a Ready detail, and never decides Commit (D-AFI4c2-2 = A)');
   // AFI-4e authorized revision: "Post to Finance" is the approved posting control and confirmation
   // (D-AFI4e-5 = A; pinned in the AFI-4e section). Was: never Post to Finance.
@@ -8405,7 +8411,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === CR01_PACKAGE_DIGEST,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8727,7 +8733,7 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === CR01_PACKAGE_DIGEST,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
@@ -8757,7 +8763,7 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === CR01_PACKAGE_DIGEST,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
     'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
 }
 
@@ -8838,7 +8844,7 @@ console.log('== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017) ==
     'CR-01: the view shows "Not yet assigned by the CEO", "Not recorded (approved before CR-01)" and the approval post selector; the runtime harness covers section L (T-V1 … T-V4)');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === CR01_PACKAGE_DIGEST,
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === PAYDRIFT1_PACKAGE_DIGEST /* PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
     'CR-01: no frontend module or package file added; SCHEMA_VERSION 6 and ACTIONS 24; the package at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… kept as the baseline)');
 }
 

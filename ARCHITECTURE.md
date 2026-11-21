@@ -2180,7 +2180,15 @@ snapshots and never drift. A drifted plan is refused; the CEO returns it to Draf
 answers `{ payrollPlanDrift: { id, current, reasons } }`: `current` is true exactly when `reasons` is empty; the reasons
 are the closed enum above, each at most once, in that order — never a salary, total, amount or other input value. It runs
 the same `PayrollDrift` in one consistent-read transaction, writes nothing, and is advisory: Commit always re-checks under
-its own locks. Absent or another company is 404; a Committed or Cancelled plan, which can no longer be committed, is 409.
+its own locks. Absent or another company is 404; a Cancelled plan is 409.
+
+**Committed drift (PAY-DRIFT-1, AWP-00 F-01, Owner D-1..D-5 2026-11-21).** The same route also answers a Committed plan,
+as a warning only: it reads the same inputs and runs the same `PayrollDrift::reasons()`, except that approved overtime
+linked to a **Committed** Supplemental document of the same company, employee, month and base plan
+(`PayrollStore::committedSupplementalOvertime`, a plain company-scoped read) is left out of the comparison — Draft,
+Reviewed, Ready and Cancelled documents never qualify, and overtime linked to the plan itself is never left out. It
+writes nothing (no audit row) and changes no total, posting or execution; a Committed Supplemental is an obligation, not
+evidence of payment.
 
 **Locking (D-BF4c2-3 = A).** Commit runs at READ COMMITTED — the narrow extension of the generate exception (a unit test
 pins exactly two such transactions in the backend) — in the global order: the plan's employee (`LOCK_EMPLOYEE_SQL`, by
@@ -2245,7 +2253,9 @@ intent is open, Commit payroll is not offered again (no second intent, no second
 there is none. It is read whenever a Ready detail becomes current (so after a 409 too), under its own sequence token, and
 a late answer never attaches to another plan. The page lists the reasons in fixed words and says "Return it to Draft, then
 prepare payroll for <month> again"; it shows nothing when current, never decides Commit and never returns, regenerates or
-commits anything itself.
+commits anything itself. PAY-DRIFT-1: a Committed detail is read too (CEO only); a drifted one shows "Changed since
+this payroll was committed" with the reasons and says the committed amounts are unchanged and remain the obligation — no
+control, no recalculation, posting or payment; current shows nothing.
 
 **Words (D-AFI4c2-3 = A).** "Commit payroll", "Committing…", "Retry commit", and Committed as **"Committed — final, not
 paid"** in both views; never Paid, Pay, Mark paid, Execute payment or Post to Finance.

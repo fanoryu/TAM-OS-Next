@@ -260,7 +260,7 @@ return [
         assertSame(['Committed', '3521875.00'], [$c['status'], $c['totalAmount']]);
         assertSame([$late], $links($w['db'], $p['id']));
     },
-    'the drift read: CEO only, read-only, exact { id, current, reasons } — an Employee is 403, another company and an absent plan 404, a Committed or Cancelled plan 409; no input value leaks' => static function () use ($world, $ready, $generate, $step, $commit, $drift, $ok, $code, $counts, $newKey): void {
+    'the drift read: CEO only, read-only, exact { id, current, reasons } — an Employee is 403, another company and an absent plan 404, a Cancelled plan 409, a Committed plan answered as a warning only (PAY-DRIFT-1); no input value leaks' => static function () use ($world, $ready, $generate, $step, $commit, $drift, $ok, $code, $counts, $newKey): void {
         $w = $world();
         $db = $w['db'];
         $plans = $generate($w);
@@ -279,8 +279,11 @@ return [
         $c = $ok($step($w, 'cancel', $plans['e_a3']), 'cancel')['payrollPlan'];
         assertSame([409, 'conflict'], $code($drift($w, $c['id'])), 'Cancelled can no longer be committed');
         $r2 = $ok($step($w, 'approve', $plans['e_a2']), 'approve')['payrollPlan'];
-        $ok($commit($w, $r2, $newKey()), 'commit');
-        assertSame([409, 'conflict'], $code($drift($w, $r2['id'])), 'Committed is the obligation, never re-judged');
+        $c2 = $ok($commit($w, $r2, $newKey()), 'commit')['payrollPlan'];
+        // PAY-DRIFT-1 (D-1, D-4): a Committed plan is answered — a warning about the obligation, never a re-judgement of it.
+        $committedRow = $db->select('SELECT * FROM payroll_plans WHERE id = ?', [$r2['id']]);
+        assertSame(['id' => $r2['id'], 'current' => true, 'reasons' => []], $ok($drift($w, $r2['id']), 'Committed')['payrollPlanDrift'], 'an unchanged Committed plan is current');
+        assertSame([$committedRow, 'Committed'], [$db->select('SELECT * FROM payroll_plans WHERE id = ?', [$r2['id']]), $c2['status']], 'the Committed plan is untouched');
     },
     'Committed is terminal: no transition, no second commit, no generate and no link release touches it (M3, M4)' => static function () use ($world, $overtime, $ready, $commit, $step, $generate, $ok, $code, $row, $links, $newKey): void {
         $w = $world();

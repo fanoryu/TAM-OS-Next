@@ -87,6 +87,10 @@ final class PayrollStore
     public const DRIFT_EMPLOYEE_SQL = 'SELECT id, company_id, id AS owner_employee_id, employment_status, monthly_base_salary, archived_at FROM employees WHERE id = :employee_id AND company_id = :company_id';
     public const EMPLOYEE_APPROVED_SQL = "SELECT id, company_id, employee_id AS owner_employee_id, hours, approved_amount FROM overtime_records WHERE company_id = :company_id AND employee_id = :employee_id AND month_key = :month_key AND status = 'Approved' ORDER BY id LIMIT 2001";
     public const PLAN_LINKS_SQL = 'SELECT l.id, l.company_id, p.employee_id AS owner_employee_id FROM payroll_plan_overtime l JOIN payroll_plans p ON p.company_id = l.company_id AND p.id = l.payroll_plan_id WHERE l.company_id = :company_id AND l.payroll_plan_id = :payroll_plan_id ORDER BY l.id';
+    // PAY-DRIFT-1 (D-3): the overtime a COMMITTED Supplemental document of this same base plan,
+    // employee and month settles — a plain read, no lock; Draft, Reviewed, Ready and Cancelled
+    // documents never qualify.
+    public const COVERED_SQL = "SELECT l.id, l.company_id, s.employee_id AS owner_employee_id FROM supplemental_payroll_overtime l JOIN supplemental_payrolls s ON s.company_id = l.company_id AND s.id = l.supplemental_payroll_id WHERE l.company_id = :company_id AND s.payroll_plan_id = :payroll_plan_id AND s.employee_id = :employee_id AND s.month_key = :month_key AND s.status = 'Committed' ORDER BY l.id LIMIT 2001";
 
     // Writes. A new plan is always a version 1 Draft; its owner comes from the authorized candidate.
     public const CREATE_SQL = "INSERT INTO payroll_plans (id, company_id, employee_id, month_key, status, employee_code_snapshot, employee_name_snapshot, department_snapshot, base_salary, overtime_amount, overtime_hours, overtime_count, total_amount, calculated_at, committed_at, version, created_at, updated_at) VALUES (:id, :company_id, :employee_id, :month_key, 'Draft', :employee_code_snapshot, :employee_name_snapshot, :department_snapshot, :base_salary, :overtime_amount, :overtime_hours, :overtime_count, :total_amount, UTC_TIMESTAMP(6), NULL, 1, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))";
@@ -283,6 +287,28 @@ final class PayrollStore
         }
         $linked = array_map(static fn (array $r): string => (string) $r['id'], $this->db->select($scope, self::PLAN_LINKS_SQL, ['payroll_plan_id' => $planId]));
         return ['plan' => $plan, 'employee' => $employee, 'approved' => $approved, 'linked' => $linked];
+    }
+
+    /**
+     * PAY-DRIFT-1 (D-3): the ids of the overtime records linked to a Committed Supplemental document
+     * of the plan $plan (a driftInputs plan row) — same company, base plan, employee and month.
+     * Plain reads in company scope; nothing is locked or written.
+     *
+     * @param array<string, mixed> $plan
+     * @return list<string>
+     */
+    public function committedSupplementalOvertime(Scope $scope, array $plan): array
+    {
+        self::companyOnly($scope);
+        $rows = $this->db->select($scope, self::COVERED_SQL, [
+            'payroll_plan_id' => (string) $plan['id'],
+            'employee_id' => (string) $plan['employee_id'],
+            'month_key' => (string) $plan['month_key'],
+        ]);
+        if (count($rows) > self::LIST_CAP) {
+            throw new \LogicException('an employee month above the payroll overtime cap');
+        }
+        return array_map(static fn (array $r): string => (string) $r['id'], $rows);
     }
 
     /**
