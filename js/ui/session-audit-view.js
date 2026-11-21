@@ -8,7 +8,8 @@
    or "Acting as" (U1: it sits inside the SESSION shell only). An Employee has no Audit section.
 
      Month          the month bar (Previous, the month, Next) and the month's audit events, oldest
-                    first: time (WIB), action, record, actor and the field names — "View" opens one
+                    first: time (WIB), action, record, actor and the field names — "View" opens one;
+                    AWP-05 (OD-13 = A): "Export CSV" downloads the month shown (js/core/session-csv.js)
      Event          every stored field of one event (D-BF4g-3 = A: the eleven, never the company):
                     the WIB wall time and the exact stored UTC instant, the action and operation
                     with their codes, the record, the actor and membership, the target user, the
@@ -46,6 +47,9 @@ const SESSION_AUDIT_TEXT = Object.freeze({
   emptyRecord: 'No audit history is available for this record.',
   recordLead: 'Every audit event that names this record, oldest first.',
   fieldsNote: 'Field names only: the audit history records which fields changed, never their values.',
+  // AWP-05 (OD-13 = A): the CSV export of the month shown.
+  exported: 'CSV file prepared for download: exactly the events shown for this month. Downloads are not recorded in the audit history.',
+  exportUnavailable: 'This browser cannot prepare a download, so nothing was exported.',
   loadingMonth: 'Loading audit history…',
   loadingRecord: 'Loading the record history…'
 });
@@ -119,6 +123,24 @@ function sessionAuditTableHTML(rows, from){
     + '<tbody>' + body + '</tbody></table></div>';
 }
 
+// AWP-05 (OD-13 = A): the month list shown as CSV, from the answer already read for this month, or
+// null while that read has not succeeded. The columns are exactly the month table's own, in its order
+// (the stored UTC instant stays in the event view only); field NAMES only, as stored; every cell
+// through SessionCsv.text.
+const SESSION_AUDIT_CSV_HEADERS = Object.freeze(['Time (WIB)', 'Action', 'Record', 'Actor user id', 'Fields changed']);
+function sessionAuditMonthCsv(w){
+  if(w.listStatus !== SESSION_AUDIT_STATUS.READY || !w.list || w.listMonth !== w.month || !OvertimeCalendar.isMonth(w.month)) return null;
+  const c = SessionCsv;
+  const rows = w.list.map(function(e){
+    return [c.text(auditJakartaTime(e.occurredAt)), c.text(sessionAuditActionLabel(e)), c.text(sessionAuditRecordLabel(e.entity, e.entityId)),
+      c.text(e.actorUserId), c.text(e.fields.length ? e.fields.join(', ') : null)];
+  });
+  return { content: c.document(SESSION_AUDIT_CSV_HEADERS, rows), filename: c.filename(['audit', w.month]) };
+}
+function sessionAuditExportHTML(){
+  return '<div class="auth-actions"><button class="btn" type="button" id="swauExportBtn">Export CSV</button></div>';
+}
+
 function sessionAuditMonthBarHTML(w){
   return '<div class="head-controls" role="group" aria-label="Month">'
     + '<button class="btn" type="button" id="swauPrevMonth">Previous month</button>'
@@ -127,14 +149,15 @@ function sessionAuditMonthBarHTML(w){
 }
 
 function sessionAuditMonthHTML(w){
-  const message = w.notice === 'monthInvalid'
-    ? '<p class="auth-message auth-message-warn" id="swauMessage" role="alert" tabindex="-1">' + escapeHtml(SESSION_AUDIT_TEXT.monthInvalid) + '</p>' : '';
+  const message = w.notice === 'monthInvalid' || w.notice === 'exportUnavailable'
+    ? '<p class="auth-message auth-message-warn" id="swauMessage" role="alert" tabindex="-1">' + escapeHtml(SESSION_AUDIT_TEXT[w.notice]) + '</p>'
+    : (w.notice === 'exported' ? '<p class="auth-message" id="swauMessage" role="status" tabindex="-1">' + escapeHtml(SESSION_AUDIT_TEXT.exported) + '</p>' : '');
   const head = '<p class="hint">' + escapeHtml(SESSION_AUDIT_TEXT.lead) + '</p>' + sessionAuditMonthBarHTML(w) + message
     + '<h2 class="section-title" id="swauListTitle" tabindex="-1">' + escapeHtml(sessionAuditMonthLabel(w.month)) + ' (WIB)</h2>';
   if(w.listStatus === SESSION_AUDIT_STATUS.ERROR && w.error && w.error.scope === 'list') return head + sessionAuditErrorHTML(w.error);
   if(w.listStatus !== SESSION_AUDIT_STATUS.READY || !w.list || w.listMonth !== w.month) return head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_AUDIT_TEXT.loadingMonth) + '</p>';
-  if(!w.list.length) return head + '<div class="empty" role="status">No audit events in ' + escapeHtml(sessionAuditMonthLabel(w.month)) + ' (WIB).</div>';
-  return head + sessionAuditTableHTML(w.list, 'month');
+  if(!w.list.length) return head + '<div class="empty" role="status">No audit events in ' + escapeHtml(sessionAuditMonthLabel(w.month)) + ' (WIB).</div>' + sessionAuditExportHTML();
+  return head + sessionAuditExportHTML() + sessionAuditTableHTML(w.list, 'month');
 }
 
 function sessionAuditRecordHTML(w){
@@ -191,6 +214,7 @@ function bindSessionAudit(app){
   on('swauMonth', 'change', function(){ SessionAudit.setMonth(this.value); });
   on('swauBackBtn', 'click', function(){ SessionAudit.back(); });
   on('swauRetryBtn', 'click', function(){ SessionAudit.retry(); });
+  on('swauExportBtn', 'click', function(){ SessionAudit.exportCsv(); });
   on('swauRecordBtn', 'click', function(){ SessionAudit.openRecord(); });
   // One listener for every row: the button's position in the list that was rendered.
   on('swauList', 'click', function(ev){

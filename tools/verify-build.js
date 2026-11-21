@@ -58,6 +58,12 @@ const UX1_FILES = UX1_MODULES.length;
 // request client, the section data and controller, and its view — load after the workspace view.
 const I4_MODULES = Object.freeze(['core/request-api.js', 'core/session-requests.js', 'ui/session-requests-view.js']);
 const I4_FILES = I4_MODULES.length;
+// AWP-05 authorized revision (Owner GO 2026-11-21, OD-13 = A): one production module, core/session-csv.js (the
+// browser-side CSV writer of the CEO's Transactions, Financial dashboard and Audit month exports), loads directly
+// after core/session-home.js. Every earlier slice's module and package-file count is read as that slice left it
+// plus these; the AWP-05 section below pins the module, its order and its behaviour. Was: 95 modules, 109 files.
+const AWP05_MODULES = Object.freeze(['core/session-csv.js']);
+const AWP05_FILES = AWP05_MODULES.length;
 // The Phase 1 deployment package digest (the three Ledger modules; the from/to query keys; the PD-7
 // over-cap guidance in session-ledger-view.js, Owner 2026-11-13; the migration-0038 Audit vocabulary
 // and labels, PH1-QA-01, Owner 2026-11-13). Was: 1b35dbcc… (commit 094b8926); 092810b9… (commit eadf4274).
@@ -121,6 +127,12 @@ const PAYDRIFT1_PACKAGE_DIGEST = '647370c3f39eac93fd7b77c9ac7d0a787825af0812e22a
 // the archive conflict wording listing pending overtime as a possible cause (session-workspace-view.js);
 // no module or file added. Prior pin was PAYDRIFT1_PACKAGE_DIGEST (kept as the baseline).
 const ARCHOT1_PACKAGE_DIGEST = '2db53760850f1743deafa021393bfed6befc219fd391c04ca7d222ea06dfcf2c';
+// AWP-05 (Owner GO 2026-11-21, OD-13 = A): the ARCH-OT-1 package with the CEO's CSV export of the Transactions list,
+// the Financial dashboard and the Audit month (core/session-csv.js added, after core/session-home.js; the export
+// controls in session-ledger(-view).js and session-audit(-view).js). Prior pin was ARCHOT1_PACKAGE_DIGEST (kept as the baseline).
+// AWP-05 correction (Owner GO 2026-11-21): the Audit month CSV holds exactly the five month-table columns.
+// Was: 00d50d2979b18b7a9fb7512a65be3f38c292d341524d4722f85e9a931f4fbf22 (PR #103 head 2f6c976, with the stored UTC column).
+const AWP05_PACKAGE_DIGEST = '0b8b3bb847c2f867627289d94915f846612e8448159ad9584107a844ea9f1b86';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -6414,8 +6426,10 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   const LEDGER_NEW = ['core/transaction-api.js', 'core/session-ledger.js', 'ui/session-ledger-view.js'];
   // UX-1 authorized revision: core/session-home.js follows the Ledger modules, before employee-api.js. Was: the
   // Ledger modules directly before employee-api.js.
-  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 15).join() === NEW.concat(PAYROLL_NEW, AUDIT_NEW, LEDGER_NEW, UX1_MODULES, ['core/employee-api.js']).join()
-    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/audit-api.js"></script>\n<script src="js/core/session-audit.js"></script>\n<script src="js/ui/session-audit-view.js"></script>\n<script src="js/core/transaction-api.js"></script>\n<script src="js/core/session-ledger.js"></script>\n<script src="js/ui/session-ledger-view.js"></script>\n<script src="js/core/session-home.js"></script>\n<script src="js/core/employee-api.js"></script>'),
+  // AWP-05 authorized revision: core/session-csv.js follows session-home.js, before employee-api.js. Was: session-home.js
+  // directly before employee-api.js (iTa + 15).
+  check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 16).join() === NEW.concat(PAYROLL_NEW, AUDIT_NEW, LEDGER_NEW, UX1_MODULES, AWP05_MODULES, ['core/employee-api.js']).join()
+    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/audit-api.js"></script>\n<script src="js/core/session-audit.js"></script>\n<script src="js/ui/session-audit-view.js"></script>\n<script src="js/core/transaction-api.js"></script>\n<script src="js/core/session-ledger.js"></script>\n<script src="js/ui/session-ledger-view.js"></script>\n<script src="js/core/session-home.js"></script>\n<script src="js/core/session-csv.js"></script>\n<script src="js/core/employee-api.js"></script>'),
     'AFI-4b1/AFI-4c1/AFI-4g/Phase 1/UX-1: the three Overtime modules load right after transport-adapter.js, then the three Payroll modules, then the three Audit modules, then the three Ledger modules, then session-home.js, then employee-api.js (manifest and index.html)');
   const apiC = code(rd('core/overtime-api.js')), storeC = code(rd('core/session-overtime.js')), viewC = code(rd('ui/session-overtime-view.js'));
   const wsC = code(rd('ui/session-workspace-view.js')), abC = code(rd('core/auth-boot.js'));
@@ -6668,7 +6682,7 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   // AFI-4g authorized revision: AFI-4g adds exactly its three Audit modules (100 → 103 files); the 100
   // are still the 97 plus the three AFI-4c1 modules. Was: 100 files.
   const AFI4G_MODULES = ['js/core/audit-api.js', 'js/core/session-audit.js', 'js/ui/session-audit-view.js'];
-  check(Array.isArray(manifest.files) && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
+  check(Array.isArray(manifest.files) && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
     && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
     'BF-4b2 + AFI-4b2 + AFI-4c1 + AFI-4g: AFI-4b2 added no production module; the package now holds 103 files, 102 since AFI-5b — the 97, exactly the three AFI-4c1 Payroll modules and exactly the three AFI-4g Audit modules');
   const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
@@ -6857,7 +6871,7 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   // AFI-4c1 authorized revision: BF-4c1 changed no package (it stayed 97 files, digest 2d826d4d…);
   // AFI-4c1 then added its three modules. Was: 97 files at digest 2d826d4d….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4c1 + AFI-4c1: BF-4c1 changed no package; the package is now the AFI-4c1 one plus AFI-4g (103 files, 102 since AFI-5b, no longer 2d826d4d…), ACTIONS 21');
   check(['Unit/PayrollCalculationTest.php', 'Unit/PayrollDomainTest.php', 'Http/PayrollRoutingTest.php', 'Db/PayrollSchemaTest.php', 'Db/PayrollWorkflowTest.php', 'Db/PayrollConcurrencyTest.php', 'Support/payroll-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))),
@@ -7024,7 +7038,7 @@ console.log('== BF-4c2 — PAYROLL COMMIT + EMPLOYEE SELF-READ (BACKEND ONLY) ==
   // AFI-4c2 authorized revision: BF-4c2 left the package unchanged (100 files, a0a95b13…); AFI-4c2
   // changed four modules and so its digest. Was: digest a0a95b13….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4c2 + AFI-4c2: BF-4c2 changed no package; the package is now the AFI-4c2 one plus AFI-4g (103 files, 102 since AFI-5b, no longer a0a95b13…), ACTIONS 21');
   check(serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4c2: ACTIONS stay 21 (commit reuses payroll.manage), AUTH_MODE SESSION since AFI-5b');
@@ -7083,7 +7097,7 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'AFI-4c2: no new production module — the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
@@ -7184,7 +7198,7 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
   // pinned in the AFI-4d section. Was: 100 files at digest 16e06b7e… (BF-4d left the package unchanged).
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4d/AFI-4d: the production package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector) and ACTIONS 21 (BF-4d added no frontend; AFI-4d added no module)');
   check(['Unit/SupplementalDomainTest.php', 'Http/SupplementalRoutingTest.php', 'Db/SupplementalSchemaTest.php', 'Db/SupplementalWorkflowTest.php', 'Db/SupplementalConcurrencyTest.php', 'Support/supplemental-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /C8 race/.test(srv('tests/Db/SupplementalConcurrencyTest.php')),
@@ -7295,7 +7309,7 @@ console.log('== AFI-4d — SESSION SUPPLEMENTAL PAYROLL ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') < mods.indexOf('core/session-payroll.js') && mods.indexOf('core/session-payroll.js') < mods.indexOf('ui/session-payroll-view.js')
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions - PHASE2_ACTIONS.length === 21,
+    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21,
     // AFI-4e authorized revision: the package changed with AFI-4e (frontend only) and its new digest
     // is pinned in the AFI-4e section. Was: digest 7768d72b… (AFI-4d).
     'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4e section)');
@@ -7396,7 +7410,7 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   // Finance posting routes; they are pinned in the /api/ path check. Was: /\/api\/finance/.
   check(jsFiles.filter((f) => /\/api\/finance(?!-request)/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
+    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4e/AFI-4e: exactly one frontend module — core/payroll-api.js (AFI-4e FinancePostingApi) — names a Finance posting route; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   check(['Unit/FinancePostingDomainTest.php', 'Http/FinanceRoutingTest.php', 'Db/FinancePostingSchemaTest.php', 'Db/FinancePostingWorkflowTest.php', 'Db/FinancePostingConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /F6 race/.test(srv('tests/Db/FinancePostingConcurrencyTest.php')),
@@ -7510,7 +7524,7 @@ console.log('== AFI-4e — SESSION FINANCE POSTING (CEO) ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
+  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
     'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
@@ -7624,7 +7638,7 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   check(exeFiles.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
     && jsFiles.filter((f) => /finance-executions/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && manifest.actions - PHASE2_ACTIONS.length === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
     'BF-4f/AFI-4f: exactly the three SESSION Payroll modules name a Finance execution and only core/payroll-api.js its routes; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   check(['Unit/FinanceExecutionDomainTest.php', 'Http/FinanceExecutionRoutingTest.php', 'Db/FinanceExecutionSchemaTest.php', 'Db/FinanceExecutionWorkflowTest.php', 'Db/FinanceExecutionConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /X5 race/.test(srv('tests/Db/FinanceExecutionConcurrencyTest.php')) && /'execute' => '\/api\/finance-executions\/execute'/.test(srv('tests/Support/finance-worker.php')),
@@ -7765,7 +7779,7 @@ console.log('== AFI-4f — SESSION RECORD PAYMENT (CEO) ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added exactly its three Audit modules (86 → 89, 100 → 103 files) and so
   // changed the digest (its digest: the AFI-4g section). Was: 86 modules, 100 files at digest d030d544….
-  check(mods.length === new Set(mods).size && mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
+  check(mods.length === new Set(mods).size && mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'AFI-4f: no new production module (module order and index.html unchanged by AFI-4f); the package kept 100 files at digest d030d544… until AFI-4g (now 103 files, 102 since AFI-5b, its digest: the AFI-4g section), ACTIONS 21');
   check(migrationsBeforePhase1().pop() === '0035_replace_audit_events_finance_execute.sql' && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
@@ -7849,7 +7863,7 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
     && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-1 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions - PHASE2_ACTIONS.length === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'OPS-1: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-1 (100 files at digest d030d544… until AFI-4g)');
   check(['Unit/BackupFormatTest.php', 'Unit/BackupFileTest.php', 'Unit/BackupCliTest.php', 'Db/BackupCreateTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
     && /continuity end to end/.test(srv('tests/Db/BackupCreateTest.php')) && /rows committed while the backup runs are not in it/.test(srv('tests/Db/BackupCreateTest.php')),
@@ -7927,7 +7941,7 @@ console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==')
     && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-2 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'OPS-2: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-2 (100 files at digest d030d544… until AFI-4g)');
   const dbTest = srv('tests/Db/BackupRestoreTest.php');
   check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'BackupRestoreTest.php')) && ['round trip: every backed-up row returns exactly', 'any one row in any of the 19 classified tables',
@@ -7992,7 +8006,7 @@ console.log('== BF-4g — CEO AUDIT READ API (BACKEND ONLY) ==');
   // changed with it (103 files; its digest: the AFI-4g section). BF-4g itself stays backend only. Was:
   // no frontend module names an audit route; the package unchanged at 100 files, digest d030d544….
   check(jsFiles.filter((f) => /audit-events/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/audit-api.js'
-    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
     && migrationsBeforePhase1().length === 35
     && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4g: backend only — its one frontend reference is AFI-4g\'s core/audit-api.js, the package changed only with AFI-4g (103 files, 102 since AFI-5b, no longer d030d544…), no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b');
@@ -8160,7 +8174,7 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   // so the package digest changed (files, modules and ACTIONS unchanged). Was: digest 097f6b50….
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
+  check(mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4' // AFI-5b: historical (its digest: the AFI-5b section)
     && pkg.packageDigest !== 'b2dae6ed01864793c2fe05e9b7fdf355a72b22d3744fd8fa1c8cfa3820c88147', // O-2 (PR #67): historical 103-file digest
     'AFI-4g: exactly three new production modules (89 modules, 88 since AFI-5b); the package held 103 files at digest 097f6b50… (b2dae6ed… with O-2; 102 since AFI-5b, its digest pinned in the AFI-5b section), ACTIONS 21');
@@ -8410,12 +8424,12 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // v3.0.0 (Owner decision 2026-11-05): re-pinned for the release identity only — APP_VERSION 3.0.0, APP_RELEASE_NAME
   // "Core SESSION Foundation", the <title> and the 3.0.0 in-app Release Notes entry. Prior pin was
   // f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430 (WP-1).
-  check(jsFiles.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES
+  check(jsFiles.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8698,7 +8712,7 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: migrations 0036–0038 are the head (38 files), ACTIONS stay 21 (the existing finance.manage), AUTH_MODE SESSION');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const iAudit = order.indexOf('ui/session-audit-view.js');
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && iAudit !== -1 && order.slice(iAudit + 1, iAudit + 4).join() === PHASE1_MODULES.join()
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && iAudit !== -1 && order.slice(iAudit + 1, iAudit + 4).join() === PHASE1_MODULES.join()
     && order.indexOf('core/payroll-api.js') < order.indexOf('core/transaction-api.js'),
     'Phase 1: exactly three new production modules (91), directly after the Audit modules and after payroll-api.js (payrollIdempotencyKey)');
   const DENY = /\b(State|StorageAdapter|loadState|saveState|persist[A-Za-z]*|localStorage|sessionStorage|indexedDB|EmployeeRepository|TransportAdapter|ApplicationGateway|renderShell|renderView|renderViewContent|LocalIdentityProvider|openGlobalSearch|renderTransactions|renderDashboard|renderExecutiveDashboard|renderExecutionCenter|renderCashflow|renderBudget|addTransaction|saveTxn|State\.txns|KNOWN_CATEGORIES|XMLHttpRequest)\b|document\s*\.\s*cookie|\bfetch\s*\(/;
@@ -8736,9 +8750,9 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
   check(['A. ', 'B. ', 'C. ', 'D. ', 'E. ', 'F. ', 'G. '].every((s) => h.includes("'" + s)) && /require\('\.\/session-shell-chrome\.js'\)/.test(h),
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
-    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
+  check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
+    && pkg.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
 // ===== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS, BACKEND S1–S5 (ADR-016, Owner 2026-11-17) =====
@@ -8767,8 +8781,8 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.actions === 24 && pkg.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
-    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions === 24 && pkg.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
 }
 
 
@@ -8848,7 +8862,7 @@ console.log('== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017) ==
     'CR-01: the view shows "Not yet assigned by the CEO", "Not recorded (approved before CR-01)" and the approval post selector; the runtime harness covers section L (T-V1 … T-V4)');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === ARCHOT1_PACKAGE_DIGEST /* ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
     'CR-01: no frontend module or package file added; SCHEMA_VERSION 6 and ACTIONS 24; the package at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… kept as the baseline)');
 }
 
@@ -8872,7 +8886,7 @@ console.log('== UX-1: SESSION Home, routing, money display, Payroll/Overtime TO-
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const list = Array.isArray(order) ? order : (order.MODULE_ORDER || order.modules || order.order || []);
   const iH = list.indexOf('core/session-home.js');
-  check(home !== '' && iH > 0 && list[iH - 1] === 'ui/session-ledger-view.js' && list[iH + 1] === 'core/employee-api.js'
+  check(home !== '' && iH > 0 && list[iH - 1] === 'ui/session-ledger-view.js' && list[iH + 1] === AWP05_MODULES[0] && list[iH + 2] === 'core/employee-api.js' /* AWP-05: was list[iH + 1] === 'core/employee-api.js' */
     && (read(path.join(root, 'index.html')).match(/<script src="js\/core\/session-home\.js"><\/script>/g) || []).length === 1,
     'UX-1: core/session-home.js loads once, directly after ui/session-ledger-view.js and before core/employee-api.js (manifest and index.html)');
   const calls = (home.match(/\b[A-Z][A-Za-z]*Api\.[A-Za-z]+\(/g) || []).map((x) => x.slice(0, -1)).sort();
@@ -8928,6 +8942,43 @@ console.log('== UX-1: SESSION Home, routing, money display, Payroll/Overtime TO-
     'UX-1 G-4: the amount preview reads a value back only when transactionIsAmount() (the transaction validator) accepts it');
   check(/Marking a record reviewed is not approval\. Only Approve freezes the valuation and makes the record final\./.test(ov) && /'Mark reviewed'/.test(ov),
     'UX-1 (Overtime TO-BE A): review is clearly not approval — the review button reads "Mark reviewed" and the decision hint says so');
+}
+
+// ===== AWP-05 SESSION CSV export (Owner GO 2026-11-21, OD-13 = A) =====
+// The CEO's Transactions list, Financial dashboard and Audit month are exported in the browser from the
+// answer already read; js/core/session-csv.js is the one writer. These pins hold the boundaries the runtime
+// harnesses (verify-session-ledger-runtime.js, verify-session-audit-runtime.js: section X) exercise.
+{
+  const code = (s) => stripComments(s).replace(/\s\/\/\s.*$/gm, '');
+  const rd = (f) => { const p = path.join(root, 'js', f); return fs.existsSync(p) ? read(p) : ''; };
+  const csv = code(rd('core/session-csv.js'));
+  const lv = code(rd('ui/session-ledger-view.js')), la = code(rd('core/session-ledger.js'));
+  const av = code(rd('ui/session-audit-view.js')), aa = code(rd('core/session-audit.js'));
+  check(csv !== '' && !/\bfetch\b|ApiClient|XMLHttpRequest|sendBeacon|WebSocket|localStorage|sessionStorage|indexedDB|document\.cookie|\/api\/|innerHTML|insertAdjacentHTML|\beval\b|new Function|window\.open|location\./.test(csv),
+    'AWP-05: session-csv.js reads, sends and stores nothing (no fetch, ApiClient, storage, cookie, /api/, HTML insertion, eval, window.open or navigation)');
+  check(/const SESSION_CSV_BOM = '\\uFEFF';/.test(csv) && /const SESSION_CSV_EOL = '\\r\\n';/.test(csv) && /const SESSION_CSV_MIME = 'text\/csv;charset=utf-8';/.test(csv)
+    && /const SESSION_CSV_MONEY = \/\^-\?\(0\|\[1-9\]\[0-9\]\*\)\\\.00\$\/;/.test(csv),
+    'AWP-05: UTF-8 BOM, CRLF line ends, text/csv;charset=utf-8, and money passed through only as an exact "N.00" / "-N.00" server string');
+  check(/const SESSION_CSV_UNSAFE_START = \/\^\[=\+\\-@\\uff1d\\uff0b\\uff0d\\uff20\\s\\u0000-\\u001f\\u007f-\\u009f/.test(csv) && /SESSION_CSV_UNSAFE_START\.test\(s\) \? "'" \+ s : s/.test(csv),
+    'AWP-05: a text cell starting with = + - @ (or a full-width form), whitespace or a control character is apostrophe-neutralised');
+  check(/URL\.createObjectURL\(new Blob\(\[content\], \{ type: SESSION_CSV_MIME \}\)\)/.test(csv) && /a\.download = filename; a\.rel = 'noopener';/.test(csv) && /URL\.revokeObjectURL\(url\)/.test(csv),
+    'AWP-05: the download is a same-document Blob object URL behind <a download rel="noopener">, revoked afterwards');
+  check(/exportCsv\(\)\{\s*if\(!canAct\(\)\) return false;\s*const s = SessionLedgerStore\.snapshot\(\);\s*if\(s\.form \|\| s\.voidTarget\) return false;/.test(la)
+    && /exportCsv\(\)\{\s*if\(!canRead\(\)\) return false;\s*const s = SessionAuditStore\.snapshot\(\);\s*if\(s\.record \|\| s\.selected\) return false;/.test(aa),
+    'AWP-05: each export entry point is CEO-gated (canAct / canRead) and refused while a form, void panel, event or record history is open');
+  const ledgerCsv = lv.split('function sessionLedgerTransactionsCsv(')[1].split('\nfunction sessionLedgerExportHTML(')[0];
+  check(/if\(w\.listStatus !== SESSION_LEDGER_STATUS\.READY \|\| !w\.list \|\| !w\.range\) return null;/.test(ledgerCsv)
+    && /if\(w\.reportStatus !== SESSION_LEDGER_STATUS\.READY \|\| !w\.report \|\| !w\.range\) return null;/.test(ledgerCsv)
+    && /if\(w\.listStatus !== SESSION_AUDIT_STATUS\.READY \|\| !w\.list \|\| w\.listMonth !== w\.month/.test(av),
+    'AWP-05: an export is built only from a read that succeeded for the range / month shown (a read over its cap fails closed, so never a truncated file)');
+  check(!/payroll|consolidated|createdByUserId|createdAt|voidedByUserId|\.id\b/i.test(ledgerCsv),
+    'AWP-05 (GP-03): the ledger CSV never reads the payroll line, the consolidated total, an id, a user id or a timestamp');
+  const auditCsv = av.split('function sessionAuditMonthCsv(')[1].split('\nfunction ')[0];
+  check(!/actorMembershipId|requestId|targetUserId|\.id\b/.test(auditCsv),
+    'AWP-05: the audit CSV holds the list\'s columns only (no membership id, request id, target user id or event id)');
+  check(/Downloads are not recorded in the audit history\./.test(lv) && /Downloads are not recorded in the audit history\./.test(av) && /Payroll and the consolidated total are not exported\./.test(lv)
+    && !/audit-logged|is logged|are logged|recorded in the audit history\.'/.test((lv + av).replace(/not recorded in the audit history\./g, '')),
+    'AWP-05: the notices say a download is not recorded in the audit history, and the dashboard says payroll and the consolidated total are not exported');
 }
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }

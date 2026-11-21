@@ -149,7 +149,7 @@ function loadRuntime(routes){
   const src = parts.join('\n')
     + '\n;window.__TAM__ = { State: State, AuthBoot: AuthBoot, TransactionApi: TransactionApi, TransactionDecoders: TransactionDecoders, TransactionRequests: TransactionRequests,'
     + ' FINANCIAL_POSTS: FINANCIAL_POSTS, transactionMonthRange: transactionMonthRange, transactionIsRange: transactionIsRange,'
-    + ' SessionLedgerStore: SessionLedgerStore, SessionLedger: SessionLedger, sessionNavModel: sessionNavModel, render: render,'
+    + ' SessionLedgerStore: SessionLedgerStore, SessionLedger: SessionLedger, sessionNavModel: sessionNavModel, render: render, SessionCsv: SessionCsv, sessionLedgerTransactionsCsv: sessionLedgerTransactionsCsv, sessionLedgerReportCsv: sessionLedgerReportCsv,'
     + ' transactionIsAmount: transactionIsAmount, sessionLedgerAmountPreview: sessionLedgerAmountPreview, parse: function(j){ return JSON.parse(j); } };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
@@ -182,14 +182,20 @@ function loadRuntime(routes){
   }
   FixedDate.UTC = RealDate.UTC; FixedDate.parse = RealDate.parse; FixedDate.now = () => FIXED_NOW;
   FixedDate.prototype = RealDate.prototype;
+  // AWP-05 authorized revision (Owner GO 2026-11-21, OD-13 = A): a recording download: the Blob, its object URL,
+  // the <a download> link the CSV export clicks and the deferred revoke (2,000 ms, held until a test runs it).
+  // Was: no Blob or URL, and createElement returned an inert element.
+  const dl = { blobs: [], clicks: [], revoked: [], timers: [] };
+  function RecBlob(parts, opts){ this.parts = parts; this.type = opts && opts.type; dl.blobs.push(this); }
+  const dlEl = (tag) => { const el = mkEl(); if(String(tag).toLowerCase() === 'a') el.click = function(){ dl.clicks.push({ href: el.href, download: el.download, rel: el.rel }); }; return el; };
   const document = { addEventListener:noop, removeEventListener:noop, getElementById: (id) => (els[id] = els[id] || mkEl()),
-    querySelector:()=>null, querySelectorAll:()=>[], createElement:()=>mkEl(), contains:()=>false,
+    querySelector:()=>null, querySelectorAll:()=>[], createElement:(t)=>dlEl(t), contains:()=>false,
     body: mkEl(), documentElement: { dataset:{}, style:{} }, activeElement: null };
   Object.defineProperty(document, 'cookie', { get: () => { access.cookie.push('get'); return ''; }, set: () => { access.cookie.push('set'); } });
   const sandbox = {
     __spy: [], __spyErr: [], Date: FixedDate, crypto: require('crypto').webcrypto,
     console: { log:noop, warn:noop, error:noop, info:noop }, navigator: { userAgent:'tam-phase1' },
-    setTimeout: function(fn, ms){ if(ms === 10000) return 'api-timer'; return setTimeout(fn, ms); },
+    setTimeout: function(fn, ms){ if(ms === 2000){ dl.timers.push(fn); return 'dl-timer-' + dl.timers.length; } if(ms === 10000) return 'api-timer'; return setTimeout(fn, ms); },
     clearTimeout: function(id){ if(id !== 'api-timer') clearTimeout(id); },
     requestAnimationFrame: (fn) => setTimeout(fn, 0), AbortController: AbortController, fetch: fetchStub,
     localStorage: storageOf(access.local), sessionStorage: storageOf(access.session),
@@ -202,11 +208,13 @@ function loadRuntime(routes){
     location: { hash: '#/employees', search: '', pathname: '/', href: 'http://127.0.0.1/#/employees' },
     history: { replaceState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; }, pushState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; } },   // UX-1: a bare-path write clears the hash
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }), getComputedStyle: () => ({ getPropertyValue: () => '' }),
-    document: document
+    document: document,
+    Blob: RecBlob, URL: { createObjectURL: (b) => 'blob:http://127.0.0.1/' + dl.blobs.indexOf(b), revokeObjectURL: (u) => { dl.revoked.push(u); } }   // AWP-05
   };
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
   vm.runInContext(src, vm.createContext(sandbox), { filename: 'tam-phase1-runtime.js' });
   const rt = sandbox.__TAM__;
+  rt.dl = dl; rt.sandbox = sandbox;   // AWP-05
   rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr;
   rt.appHTML = () => els.app.innerHTML; rt.app = els.app; rt.dom = dom; rt.loc = sandbox.location;
   rt.sf = () => rt.SessionLedgerStore.snapshot();
@@ -468,6 +476,181 @@ function firewall(rt, label){
     const full = TX.rangeResponse({ generalTransactions: rows(2000) });
     check(full !== null && full.length === 2000 && TX.rangeResponse({ generalTransactions: rows(2001) }) === null,
       'H. the history decoder accepts exactly 2,000 rows and refuses 2,001 whole (never a truncated list)');
+  }
+
+  /* ---------- X. AWP-05 CSV export (OD-13 = A, Owner 2026-11-21) ---------- */
+  {
+    const BOM = String.fromCharCode(0xFEFF), CR = String.fromCharCode(13), LF = String.fromCharCode(10), CRLF = CR + LF, TAB = String.fromCharCode(9);
+    const fw = (n) => String.fromCharCode(n);
+    const unq = (v) => v[0] === '"' ? v.slice(1, -1).replace(/""/g, '"') : v;
+    const name = (rt, code) => rt.FINANCIAL_POSTS.find((p) => p.code === code).name;
+    const blob = (rt) => rt.dl.blobs[rt.dl.blobs.length - 1];
+    const csvOf = (rt) => blob(rt).parts.join('');
+    const EXPORTED = /<p class="auth-message" id="sfMessage" role="status" tabindex="-1">CSV file prepared for download: exactly the rows shown for this range\. Downloads are not recorded in the audit history\.<\/p>/;
+
+    // X1. the encoder
+    const rt = await open();
+    const c = rt.SessionCsv;
+    check(c.text(null) === '' && c.text(undefined) === '' && c.money(null) === '' && c.money(undefined) === '' && c.count(null) === '' && c.count(undefined) === ''
+      && c.money('0.00') === '0.00' && c.count(0) === '0' && c.money('-2500000.00') === '-2500000.00' && c.money('12000000.00') === '12000000.00' && c.count(12) === '12',
+      'X. missing values are empty cells, never 0; zero stays 0; an exact negative money string stays a bare number');
+    check(c.money('1,000.00') === '"1,000.00"' && c.money('=1') === "'=1" && c.money('-0.5') === "'-0.5" && c.money(12) === '12' && c.count(-1) === "'-1" && c.count(1.5) === '1.5' && c.count('7') === '7',
+      'X. a value that is not an exact money string / safe count is written as text (formula-safe), never parsed or rounded');
+    check(c.text('a,b') === '"a,b"' && c.text('say "hi"') === '"say ""hi"""' && c.text('one' + LF + 'two') === '"one' + LF + 'two"' && c.text('one' + CRLF + 'two') === '"one' + CRLF + 'two"'
+      && c.text('trail ') === '"trail "' && c.text('plain') === 'plain' && c.text('') === '',
+      'X. RFC 4180: a comma, quote, CR, LF or trailing space is quoted with doubled quotes; plain text is bare');
+    const ID = 'Sewa kantor Jl. Merdeka — pembayaran bulan April, "lunas" (café, 日本)';
+    check(c.text(ID) === '"' + ID.replace(/"/g, '""') + '"' && unq(c.text(ID)) === ID && c.text('Biaya perjalanan dinas – Jawa Timur') === 'Biaya perjalanan dinas – Jawa Timur',
+      'X. Unicode and Indonesian text pass through unchanged (quoted only where RFC 4180 needs it)');
+    const FORMULAS = ['=1+1', '=HYPERLINK("http://example.invalid","x")', '+SUM(A1:A2)', '-2+3', '@SUM(A1)', TAB + '=1', CR + '=1', LF + '=1', ' =1', fw(0xFF1D) + '1+1', fw(0xFF0B) + '1', fw(0xFF0D) + '1', fw(0xFF20) + 'x', fw(0) + '=1', fw(0x200B) + '=1', fw(0xFEFF) + '=1', fw(0x2028) + '=1', fw(0xA0) + '=1'];
+    check(FORMULAS.every((p) => unq(c.text(p)) === "'" + p) && unq(c.text('-2500000.00')) === "'-2500000.00" && c.text('a=b') === 'a=b',
+      'X. formula payloads (= + - @, full-width forms, tab / CR / LF / space / control / zero-width / BOM / line-separator lead) get a leading apostrophe; a text cell never starts a formula');
+    check(c.filename(['Transactions', '2031-04-01', 'to', '2031-04-30']) === 'tam-os-transactions-2031-04-01-to-2031-04-30.csv' && c.filename(['../x/<y>', '', 'Z']) === 'tam-os-x-y-z.csv'
+      && c.document(['A', 'B'], []) === BOM + 'A,B' + CRLF && c.document(['=A'], [['1']]) === BOM + "'=A" + CRLF + '1' + CRLF,
+      'X. deterministic file names ([a-z0-9-] only); a document is BOM + header + CRLF rows + a final CRLF; an empty one is the header alone');
+
+    // X2. the Financial dashboard: the shown report, GP-03 payroll and consolidated excluded
+    check(/id="sfExportBtn"/.test(card(rt)) && /id="sfExportNote">Export CSV holds the Financial Post lines, the voided line and the approved-not-paid line of this range\. Payroll and the consolidated total are not exported\.</.test(card(rt)),
+      'X. the dashboard shows Export CSV with a note naming what is and is not exported');
+    const callsBefore = rt.net.calls.length;
+    check(rt.app.fire('sfExportBtn', 'click') === 'fired' && rt.dl.clicks.length === 1, 'X. Export CSV on the dashboard starts one download'); await flush();
+    const D = '2031-04-01,2031-04-30,';
+    const REPORT_CSV = BOM + ['From,To,Section,Financial Post,Income (Rp),Expenses (Rp),Net (Rp),Amount (Rp),Count',
+      D + 'Income and expenses,GA,0.00,2500000.00,-2500000.00,,1', D + 'Income and expenses,NP & IP,0.00,0.00,0.00,,0', D + 'Income and expenses,TJB,0.00,0.00,0.00,,0',
+      D + 'Income and expenses,RnD — Research & Development,12000000.00,0.00,12000000.00,,1', D + 'Income and expenses,All Financial Posts,12000000.00,2500000.00,9500000.00,,2',
+      D + '"Voided, not counted",,,,,2500000.00,1',
+      D + '"Approved, not paid",' + name(rt, 'GA') + ',,,,750000.00,2', D + '"Approved, not paid",' + name(rt, 'NPIP') + ',,,,0.00,0', D + '"Approved, not paid",' + name(rt, 'TJB') + ',,,,0.00,0',
+      D + '"Approved, not paid",' + name(rt, 'DRONE') + ',,,,1000000.00,1', D + '"Approved, not paid",All Financial Posts,,,,1750000.00,3'].join(CRLF) + CRLF;
+    check(csvOf(rt) === REPORT_CSV, 'X. the report CSV is exactly the shown range, posts, total, voided and approved-not-paid lines (negative net bare, unused cells empty, never 0)');
+    check(!/7021875|3500000\.00|6000000|payroll|consolidated/i.test(csvOf(rt)), 'X. GP-03: no payroll amount, payroll count or consolidated total is exported');
+    const k = rt.dl.clicks[0];
+    check(k.download === 'tam-os-financial-report-2031-04-01-to-2031-04-30.csv' && k.href === 'blob:http://127.0.0.1/0' && k.rel === 'noopener' && blob(rt).type === 'text/csv;charset=utf-8',
+      'X. the download is a same-document blob: link named tam-os-financial-report-2031-04-01-to-2031-04-30.csv, typed text/csv;charset=utf-8');
+    check(rt.net.calls.length === callsBefore, 'X. exporting makes no request at all (no fetch, no new privilege, no third party)');
+    check(EXPORTED.test(card(rt)) && rt.dom.focused[rt.dom.focused.length - 1] === 'sfMessage',
+      'X. a status notice says the file holds exactly the rows shown and that downloads are not recorded in the audit history; focus moves to it');
+    check(rt.dl.revoked.length === 0 && rt.dl.timers.length === 1, 'X. the object URL stays alive while the download starts');
+    rt.dl.timers.shift()();
+    check(rt.dl.revoked.join() === k.href, 'X. the object URL is revoked afterwards');
+    firewall(rt, 'X dashboard');
+
+    // X3. the Transactions list shown
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    check(/id="sfExportBtn"/.test(card(rt)) && !/id="sfExportNote"/.test(card(rt)), 'X. the Transactions list shows Export CSV');
+    rt.app.fire('sfExportBtn', 'click'); await flush();
+    const TX_CSV = BOM + ['Date,Type,Financial Post,Category,Description,Amount (Rp),Status,Void reason',
+      '2031-04-02,Expense,' + name(rt, 'GA') + ',Operasional Rutin,Fabricated <b>rent</b>,2500000.00,Active,',
+      '2031-04-10,Income,' + name(rt, 'DRONE') + ',Jasa Survey,Fabricated survey,12000000.00,Active,',
+      '2031-04-11,Expense,' + name(rt, 'GA') + ',Operasional Rutin,Fabricated <b>rent</b>,2500000.00,Voided,Fabricated duplicate'].join(CRLF) + CRLF;
+    check(rt.dl.clicks.length === 2 && rt.dl.clicks[1].download === 'tam-os-transactions-2031-04-01-to-2031-04-30.csv' && csvOf(rt) === TX_CSV,
+      'X. the Transactions CSV is exactly the rows shown, in their order, Voided rows with their reason, active rows with an empty reason cell');
+    check(!new RegExp(['1'.repeat(32), U, 'createdAt', 'voidedBy', CSRF, 'csrf', '&lt;'].join('|'), 'i').test(csvOf(rt)), 'X. no id, user id, timestamp, CSRF token or HTML escaping is in the file');
+    check(EXPORTED.test(card(rt)), 'X. the Transactions export shows the same notice');
+    firewall(rt, 'X transactions');
+
+    // X4. the open void panel blocks an export
+    rt.app.voidRow(0); await flush();
+    check(/id="sfExportBtn"[^>]* disabled/.test(card(rt)) && rt.app.fire('sfExportBtn', 'click') === 'disabled' && rt.SessionLedger.exportCsv() === false && rt.dl.clicks.length === 2,
+      'X. while the void panel is open, Export CSV is disabled and refused');
+  }
+  {
+    const rt = await open();
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    rt.SessionLedgerStore.openForm('2031-04-15', 'f'.repeat(32));
+    check(rt.SessionLedger.exportCsv() === false && rt.dl.clicks.length === 0, 'X. while the Record form is open, an export is refused');
+  }
+  {
+    // X5. view-level formula, Unicode and Indonesian text
+    const BOM = String.fromCharCode(0xFEFF);
+    const HOSTILE = tx('4'.repeat(32), '2031-04-03', { description: '=HYPERLINK("http://example.invalid","klik")' });
+    const INDO = tx('5'.repeat(32), '2031-04-04', { description: 'Sewa kantor Jl. Merdeka — pembayaran, "lunas" (café)' });
+    const NEG = tx('6'.repeat(32), '2031-04-05', { description: '-1+2', amount: '1.00' });
+    const rt = await open({ [RANGE(...APRIL)]: [ok({ generalTransactions: [HOSTILE, INDO, NEG] })] });
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    check(rt.sf().list && rt.sf().list.length === 3, 'X. a list with a formula payload and Indonesian text is read and shown');
+    rt.app.fire('sfExportBtn', 'click'); await flush();
+    const lines = rt.dl.blobs[0].parts.join('').slice(1).split(String.fromCharCode(13, 10));
+    check(rt.dl.blobs[0].parts.join('')[0] === BOM && lines[1].split(',')[4] === "\"'=HYPERLINK(\"\"http://example.invalid\"\"" && /,"Sewa kantor Jl\. Merdeka — pembayaran, ""lunas"" \(café\)",/.test(lines[2])
+      && lines[3].split(',')[4] === "'-1+2" && lines[3].split(',')[5] === '1.00' && lines.length === 5 && lines[4] === '',
+      'X. in the file the formula description is apostrophe-neutralised and quoted, the Indonesian text is exact, a description "-1+2" is neutralised while its amount stays a number');
+    firewall(rt, 'X hostile');
+  }
+  {
+    // X6. empty, failed, loading, over-cap
+    const BOM = String.fromCharCode(0xFEFF);
+    const rt = await open({ [RANGE(...APRIL)]: [ok({ generalTransactions: [] })] });
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    rt.app.fire('sfExportBtn', 'click'); await flush();
+    check(rt.dl.clicks.length === 1 && rt.dl.blobs[0].parts.join('') === BOM + 'Date,Type,Financial Post,Category,Description,Amount (Rp),Status,Void reason' + String.fromCharCode(13, 10),
+      'X. an empty range exports a valid CSV of the header alone');
+    firewall(rt, 'X empty');
+  }
+  {
+    const rt = await open({ [REP(...APRIL)]: [err(500, 'internal_error')], [RANGE(...APRIL)]: [err(500, 'internal_error')] });
+    check(!/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false, 'X. a report that failed shows no Export CSV and exports nothing');
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    check(!/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false && rt.dl.clicks.length === 0 && rt.dl.blobs.length === 0, 'X. a history that failed (the cap fails closed) shows no Export CSV and exports nothing');
+    firewall(rt, 'X failed');
+  }
+  {
+    const hang = () => new Promise(() => {});
+    const rt = await open({ [REP(...APRIL)]: [hang], [RANGE(...APRIL)]: [hang] });
+    check(!/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false, 'X. a report still loading shows no Export CSV and exports nothing');
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    check(!/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false && rt.dl.clicks.length === 0, 'X. a history still loading shows no Export CSV and exports nothing');
+  }
+  {
+    const id = (n) => n.toString(16).padStart(32, '0');
+    const rows = (n) => Array.from({ length: n }, (_, i) => tx(id(i + 1), '2031-04-10'));
+    const over = await open({ [RANGE(...APRIL)]: [ok({ generalTransactions: rows(2001) })] });
+    over.app.fire('swSectionTransactions', 'click'); await flush();
+    check(!/id="sfExportBtn"/.test(card(over)) && over.SessionLedger.exportCsv() === false && over.dl.clicks.length === 0, 'X. 2,001 rows are refused whole: no Export CSV, never a truncated file');
+    const full = await open({ [RANGE(...APRIL)]: [ok({ generalTransactions: rows(2000) })] });
+    full.app.fire('swSectionTransactions', 'click'); await flush();
+    full.app.fire('sfExportBtn', 'click'); await flush();
+    check(full.dl.clicks.length === 1 && full.dl.blobs[0].parts.join('').split(String.fromCharCode(13, 10)).length === 2002, 'X. exactly 2,000 rows export as 2,000 lines under the header');
+  }
+  {
+    // X6b. a new range still loading: the previous range is never exported under it
+    const hang = () => new Promise(() => {});
+    const rt = await open({ [REP('2031-04-10', '2031-04-11')]: [hang], [RANGE('2031-04-10', '2031-04-11')]: [hang] });
+    rt.app.type('sfFrom', '2031-04-10'); rt.app.type('sfTo', '2031-04-11'); rt.app.fire('sfRangeForm', 'submit'); await flush();
+    check(!/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false && rt.dl.blobs.length === 0, 'X. while a new report range loads, the previous report is never exported');
+    rt.app.fire('swSectionTransactions', 'click'); await flush();
+    check(!/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false && rt.dl.blobs.length === 0, 'X. while a new history range loads, the previous list is never exported');
+    const back = await open();
+    back.app.fire('swSectionTransactions', 'click'); await flush();
+    back.net.routes[RANGE('2031-04-10', '2031-04-11')] = [hang];
+    back.app.type('sfFrom', '2031-04-10'); back.app.type('sfTo', '2031-04-11'); back.app.fire('sfRangeForm', 'submit'); await flush();
+    check(!/id="sfExportBtn"/.test(card(back)) && back.SessionLedger.exportCsv() === false && back.dl.blobs.length === 0, 'X. a shown April list is not exported once the From and To of a new range are being read');
+  }
+  {
+    // X7. no Blob support; the Employee
+    const rt = await open();
+    rt.sandbox.Blob = undefined;
+    rt.app.fire('sfExportBtn', 'click'); await flush();
+    check(rt.dl.clicks.length === 0 && /<p class="auth-message auth-message-warn" id="sfMessage" role="alert" tabindex="-1">This browser cannot prepare a download, so nothing was exported\.<\/p>/.test(card(rt)),
+      'X. a browser without Blob gets an alert that nothing was exported');
+    const emp = await boot(ME_EMP);
+    check(!/sfExportBtn|Export CSV/.test(emp.appHTML()) && emp.SessionLedger.exportCsv() === false && emp.dl.clicks.length === 0 && emp.dl.blobs.length === 0 && ledgerCalls(emp).length === 0,
+      'X. an Employee never sees Export CSV, and a direct exportCsv() call exports nothing and reads nothing');
+    // AWP-05 final pre-commit: the CEO guard alone. Fabricated, successfully read CEO-like data is planted in the
+    // Employee's store (open, READY list and report); the CSV builders would export it, exportCsv() must not.
+    const S = emp.SessionLedgerStore;
+    S.setOpen(true, Object.freeze({ from: APRIL[0], to: APRIL[1] }));
+    const tl = S.begin('list'); S.applyRead(tl, emp.TransactionDecoders.rangeResponse(emp.parse(JSON.stringify(LIST)), ...APRIL));
+    const tr = S.begin('report'); S.applyRead(tr, emp.TransactionDecoders.reportResponse(emp.parse(JSON.stringify(REPORT)), ...APRIL));
+    const planted = emp.sf();
+    const callsBefore = emp.net.calls.length;
+    check(planted.open === true && planted.listStatus === 'ready' && planted.reportStatus === 'ready' && planted.list.length === 3
+      && !!emp.sessionLedgerTransactionsCsv(planted) && !!emp.sessionLedgerReportCsv(planted),
+      'X. control: the planted Employee store holds a READY list and report that the CSV builders would export');
+    let results = [];
+    ['transactions', 'dashboard'].forEach((v) => { S.setView(v); results.push(emp.SessionLedger.exportCsv()); });
+    check(results.join() === 'false,false' && emp.dl.blobs.length === 0 && emp.dl.clicks.length === 0 && emp.net.calls.length === callsBefore,
+      'X. CEO guard: an Employee holding fabricated READY CEO-like data gets false from exportCsv() on both views: no Blob, no download, no request');
+    check(emp.sf().notice === null && !/sfExportBtn|sfMessage|Export CSV|Fabricated (&lt;b&gt;)?rent|Fabricated survey|Fabricated duplicate|2500000|Operasional|tam-os-/.test(emp.appHTML()),
+      'X. CEO guard: nothing of the planted data, no export notice and no file name reaches the Employee page');
   }
 
   /* ---------- G. session end ---------- */

@@ -166,6 +166,10 @@ module.exports = [
   //     role's Home page over the existing month reads (Payroll, Overtime, Financial report,
   //     Audit). Loads after the API clients it calls; rendered by session-workspace-view.js. ---
   'core/session-home.js',
+  // --- AWP-05 SESSION CSV export (OD-13 = A, Owner 2026-11-21): the one CSV writer the CEO's
+  //     Transactions, Financial dashboard and Audit month exports use; it reads nothing and sends
+  //     nothing. Defines functions and frozen objects only. ---
+  'core/session-csv.js',
   // --- AFI-4a1 read-only SESSION Employee workspace: the strict Employee read client
   //     (over ApiClient), the in-memory SESSION Employee data and its controller, and
   //     the view auth-view.js renders while AUTHENTICATED. Defined before the auth

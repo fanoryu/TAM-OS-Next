@@ -3,8 +3,9 @@
    ------------------------------------------------------------
    The SESSION-mode Audit section of the authenticated workspace — CEO only (D-AFI4g-3 = A) — over
    BF-4g (PR #56): one company-calendar month of the business audit trail, one event in full, and
-   the history of the record an event names. Read only: nothing here writes, corrects, deletes or
-   exports anything, and the authentication log is never read. Held in memory only and owned here
+   the history of the record an event names. Read only: nothing here writes, corrects or deletes
+   anything, and the authentication log is never read. AWP-05 (OD-13 = A) authorized revision: the
+   month list shown may be exported as a CSV download in the browser (exportCsv). Was: no export. Held in memory only and owned here
    — never in the LOCAL `State`, never in storage, the URL or history, never through a LOCAL
    module (the LOCAL activity log, js/ui/activity-log.js, is another thing and is never reached).
    The server (AuditApi, js/core/audit-api.js) is the only source; this module only remembers its
@@ -263,6 +264,21 @@ const SessionAudit = (function(){
       else if(s.record){ SessionAuditStore.closeRecord(); SessionAuditStore.setFocus('list'); }
       else return;
       paint();
+    },
+    // AWP-05 (OD-13 = A): the month list shown, exported in the browser from the answer already
+    // read — only once that read of this month succeeded (above 2,000 events it fails closed, so a
+    // ready month is the whole month). Never the record history or one event. Nothing is read or
+    // sent; the download is not recorded in the audit history.
+    exportCsv(){
+      if(!canRead()) return false;
+      const s = SessionAuditStore.snapshot();
+      if(s.record || s.selected) return false;
+      const out = sessionAuditMonthCsv(s);
+      if(!out) return false;
+      SessionAuditStore.setNotice(SessionCsv.download(out.content, out.filename) ? 'exported' : 'exportUnavailable');
+      SessionAuditStore.setFocus('message');
+      paint();
+      return true;
     },
     // A failed read, read again — a deliberate click only.
     retry(){

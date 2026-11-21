@@ -18,6 +18,8 @@
                    category, description, amount, date) and "Void" on an Active row (an inline
                    panel asking for the reason). There is no edit and no delete: a void is the only
                    correction, and the voided row stays in the history.
+     Export CSV    AWP-05 (OD-13 = A): the view shown, once read, as a CSV download built in the
+                   browser (js/core/session-csv.js) — never Payroll or the consolidated total (GP-03)
 
    Data comes only from SessionLedger / SessionLedgerStore (js/core/session-ledger.js); nothing
    is written here but the DOM. MONEY is exactly the string the server sent, escaped, with "(Rp)"
@@ -49,6 +51,10 @@ const SESSION_LEDGER_TEXT = Object.freeze({
   noCrypto: 'This browser cannot create a secure request key, so nothing was sent.',
   created: 'Transaction recorded.',
   voided: 'Transaction voided. It stays in the history, marked Voided, and no longer counts in any total.',
+  // AWP-05 (OD-13 = A): the CSV export of the view shown.
+  exported: 'CSV file prepared for download: exactly the rows shown for this range. Downloads are not recorded in the audit history.',
+  exportUnavailable: 'This browser cannot prepare a download, so nothing was exported.',
+  exportReportNote: 'Export CSV holds the Financial Post lines, the voided line and the approved-not-paid line of this range. Payroll and the consolidated total are not exported.',
   loadingReport: 'Loading the financial dashboard…',
   loadingList: 'Loading transactions…',
   payrollNote: 'Payroll is not allocated to a Financial Post. Posted is the payroll recorded for the months this range touches; paid is the payroll paid on dates in this range. Only paid payroll counts in the consolidated total, so nothing is counted twice.',
@@ -91,6 +97,39 @@ function sessionLedgerRangeLabel(r){
   return r ? (r.from === r.to ? r.from : r.from + ' to ' + r.to) : '—';
 }
 
+// AWP-05 (OD-13 = A): the CSV of the view shown, from the answer already read, or null while that read
+// has not succeeded. Every text cell goes through SessionCsv.text (formula-safe); every amount is the
+// exact server string (SessionCsv.money); a value with no meaning on its line is empty, never 0.
+// GP-03: the Payroll line and the consolidated total (which counts payroll) are never exported.
+const SESSION_LEDGER_CSV_TRANSACTIONS = Object.freeze(['Date', 'Type', 'Financial Post', 'Category', 'Description', 'Amount (Rp)', 'Status', 'Void reason']);
+const SESSION_LEDGER_CSV_REPORT = Object.freeze(['From', 'To', 'Section', 'Financial Post', 'Income (Rp)', 'Expenses (Rp)', 'Net (Rp)', 'Amount (Rp)', 'Count']);
+function sessionLedgerTransactionsCsv(w){
+  if(w.listStatus !== SESSION_LEDGER_STATUS.READY || !w.list || !w.range) return null;
+  const c = SessionCsv;
+  const rows = w.list.map(function(t){
+    return [c.text(t.transactionDate), c.text(SESSION_LEDGER_KIND_LABELS[t.kind]), c.text(transactionPostName(t.financialPost)), c.text(t.category),
+      c.text(t.description), c.money(t.amount), c.text(t.status), c.text(t.void ? t.void.reason : null)];
+  });
+  return { content: c.document(SESSION_LEDGER_CSV_TRANSACTIONS, rows), filename: c.filename(['transactions', w.range.from, 'to', w.range.to]) };
+}
+function sessionLedgerReportCsv(w){
+  if(w.reportStatus !== SESSION_LEDGER_STATUS.READY || !w.report || !w.range) return null;
+  const c = SessionCsv, r = w.report;
+  const lead = [c.text(r.from), c.text(r.to)];
+  const flow = function(section, name, l){ return lead.concat([c.text(section), c.text(name), c.money(l.income), c.money(l.expense), c.money(l.net), '', c.count(l.count)]); };
+  const amount = function(section, name, l){ return lead.concat([c.text(section), c.text(name), '', '', '', c.money(l.amount), c.count(l.count)]); };
+  const rows = r.posts.map(function(p){ return flow('Income and expenses', p.name, p); })
+    .concat([flow('Income and expenses', 'All Financial Posts', r.general), amount('Voided, not counted', null, r.voided)])
+    .concat(r.approvedNotPaid.posts.map(function(p){ return amount('Approved, not paid', transactionPostName(p.code), p); }))
+    .concat([amount('Approved, not paid', 'All Financial Posts', r.approvedNotPaid)]);
+  return { content: c.document(SESSION_LEDGER_CSV_REPORT, rows), filename: c.filename(['financial-report', w.range.from, 'to', w.range.to]) };
+}
+function sessionLedgerExportHTML(w, note){
+  const dis = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING || w.form || w.voidTarget ? ' disabled' : '';
+  return '<div class="auth-actions"><button class="btn" type="button" id="sfExportBtn"' + dis + '>Export CSV</button></div>'
+    + (note ? '<p class="hint" id="sfExportNote">' + escapeHtml(note) + '</p>' : '');
+}
+
 function sessionLedgerDashboardHTML(w){
   const head = '<h2 class="section-title" id="sfViewTitle" tabindex="-1">Financial dashboard, ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '</h2>';
   if(w.reportStatus === SESSION_LEDGER_STATUS.ERROR && w.error && w.error.scope === 'report') return head + sessionLedgerErrorHTML(w.error, 'sfReadError');
@@ -120,7 +159,7 @@ function sessionLedgerDashboardHTML(w){
     + a.posts.map(function(p){ return '<tr><th scope="row">' + escapeHtml(transactionPostName(p.code)) + '</th><td>' + moneyHTML(p.amount) + '</td><td>' + escapeHtml(String(p.count)) + '</td></tr>'; }).join('')
     + '<tr><th scope="row">All Financial Posts</th><td>' + moneyHTML(a.amount) + '</td><td>' + escapeHtml(String(a.count)) + '</td></tr></tbody></table></div>'
     + '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.approvedNote) + '</p>';
-  return head + posts + payroll + consolidated + pending;
+  return head + sessionLedgerExportHTML(w, SESSION_LEDGER_TEXT.exportReportNote) + posts + payroll + consolidated + pending;
 }
 
 // UX-1 (UX-OD-07): what the typed amount reads as, display only — the field value is sent exactly as
@@ -203,7 +242,7 @@ function sessionLedgerTransactionsHTML(w){
       : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="sfAddBtn"' + dis + '>Record transaction</button></div>'));
   if(w.listStatus === SESSION_LEDGER_STATUS.ERROR && w.error && w.error.scope === 'list') return head + sessionLedgerErrorHTML(w.error, 'sfReadError');
   if(w.listStatus !== SESSION_LEDGER_STATUS.READY || !w.list) return head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_LEDGER_TEXT.loadingList) + '</p>';
-  if(!w.list.length) return head + '<div class="empty" role="status">No transactions dated ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '.</div>';
+  if(!w.list.length) return head + '<div class="empty" role="status">No transactions dated ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '.</div>' + sessionLedgerExportHTML(w, null);
   const body = w.list.map(function(t, i){
     const voided = t.status === 'Voided';
     return '<tr><td>' + escapeHtml(t.transactionDate) + '</td><td>' + escapeHtml(SESSION_LEDGER_KIND_LABELS[t.kind]) + '</td><td>' + escapeHtml(transactionPostName(t.financialPost)) + '</td>'
@@ -211,7 +250,7 @@ function sessionLedgerTransactionsHTML(w){
       + '<td>' + (voided ? statusBadgeHTML('Voided', 'stop') + ' ' + escapeHtml(t.void.reason) : statusBadgeHTML('Active', 'done')) + '</td>'
       + '<td>' + (voided ? '' : '<button class="btn" type="button" data-sf-void="' + i + '"' + dis + '>Void</button>') + '</td></tr>';
   }).join('');
-  return head + '<p class="hint">' + w.list.length + (w.list.length === 1 ? ' transaction' : ' transactions') + ', oldest first.</p>'
+  return head + '<p class="hint">' + w.list.length + (w.list.length === 1 ? ' transaction' : ' transactions') + ', oldest first.</p>' + sessionLedgerExportHTML(w, null)
     + '<div class="table-wrap" id="sfList"><table><thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Financial Post</th><th scope="col">Category</th>'
     + '<th scope="col">Description</th><th scope="col">Amount (Rp)</th><th scope="col">Status</th><th scope="col" aria-label="Void"></th></tr></thead><tbody>' + body + '</tbody></table></div>';
 }
@@ -221,8 +260,9 @@ function sessionLedgerTransactionsHTML(w){
 function renderSessionLedgerTitle(w){ return w.view === 'transactions' ? 'Transactions' : 'Finance Overview'; }
 function renderSessionLedgerHTML(w){
   const dis = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING || w.form || w.voidTarget ? ' disabled' : '';
-  const notice = w.notice === 'created' || w.notice === 'voided'
-    ? '<p class="auth-message" id="sfMessage" role="status" tabindex="-1">' + escapeHtml(SESSION_LEDGER_TEXT[w.notice]) + '</p>' : '';
+  const notice = w.notice === 'created' || w.notice === 'voided' || w.notice === 'exported'
+    ? '<p class="auth-message" id="sfMessage" role="status" tabindex="-1">' + escapeHtml(SESSION_LEDGER_TEXT[w.notice]) + '</p>'
+    : (w.notice === 'exportUnavailable' ? '<p class="auth-message auth-message-warn" id="sfMessage" role="alert" tabindex="-1">' + escapeHtml(SESSION_LEDGER_TEXT.exportUnavailable) + '</p>' : '');
   return '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.lead) + '</p>' + sessionLedgerRangeHTML(w, dis) + notice
     + (w.view === 'transactions' ? sessionLedgerTransactionsHTML(w) : sessionLedgerDashboardHTML(w));
 }
@@ -239,6 +279,7 @@ function bindSessionLedger(app){
     SessionLedger.applyRange();
   });
   on('sfRetryBtn', 'click', function(){ SessionLedger.retry(); });
+  on('sfExportBtn', 'click', function(){ SessionLedger.exportCsv(); });
   on('sfAddBtn', 'click', function(){ SessionLedger.openCreate(); });
   on('sfFormCancel', 'click', function(){ SessionLedger.cancelCreate(); });
   on('sfVoidCancel', 'click', function(){ SessionLedger.cancelVoid(); });
