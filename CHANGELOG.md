@@ -6,6 +6,10 @@ Not deployed and not released: entries here are merged into `main` (or proposed 
 published release, and none is on a production host. Hostinger stays NO-GO; Gate D, Gate R and v3.0.0 stay on HOLD.
 
 ### Added
+- **PAY-DRIFT-1 — drift warning on Committed payroll (not merged, not deployed, not released).** Closes AWP-00 F-01 under
+  Owner D-1..D-5 (2026-11-21). `GET /api/payroll-plan/drift` now answers a Committed plan (Cancelled stays 409, CEO only,
+  404/403 unchanged); overtime covered by a Committed Supplemental of the same company, employee, month and base plan is
+  not reported. The CEO's Committed detail shows a warning only; totals, postings and executions are never changed.
 - **CR-01 — CEO-assigned Financial Post for employee reimbursements (proposed for merge; not deployed, not
   released).** Under [ADR-017](docs/03-adr/ADR-017-CEO-Assigned-Financial-Post-for-Reimbursements.md) (Accepted
   2026-11-20) an Employee creates, edits and submits a reimbursement without a Financial Post and sees the post the

@@ -141,7 +141,14 @@ return [
             } else {
                 assertTrue(!str_ends_with($name, '_SELF_SQL'), $name);
             }
-            if ($name !== 'COMMIT_SQL' && !str_ends_with($name, '_SELF_SQL')) {
+            // PAY-DRIFT-1 authorized revision (D-3): COVERED_SQL reads Committed Supplemental documents
+            // (pinned below as a plain SELECT). Was: only COMMIT_SQL and the _SELF_SQL reads name 'Committed'.
+            if ($name === 'COVERED_SQL') {
+                assertTrue(str_starts_with($s, 'SELECT ') && !str_contains($s, 'FOR UPDATE') && !str_contains($s, 'overtime_records') && !str_contains($s, 'payroll_plans')
+                    && substr_count($s, "'Committed'") === 1 && str_contains($s, "s.status = 'Committed'")
+                    && str_contains($s, 'l.company_id = :company_id AND s.payroll_plan_id = :payroll_plan_id AND s.employee_id = :employee_id AND s.month_key = :month_key'),
+                    'COVERED_SQL: a plain company-scoped read of the Committed Supplemental documents of the same base plan, employee and month — never a lock or a write');
+            } elseif ($name !== 'COMMIT_SQL' && !str_ends_with($name, '_SELF_SQL')) {
                 assertTrue(!str_contains($s, "'Committed'") && !preg_match('/committed_at\s*=/', $s) && !(str_contains($s, 'commit_idempotency_key') && !str_starts_with($s, 'SELECT ')), $name . ' never writes Committed, committed_at or the commit key');
             }
             assertTrue(!preg_match('/^\s*DELETE\s+FROM\s+payroll_plans\b/i', $s), $name . ': no plan DELETE');

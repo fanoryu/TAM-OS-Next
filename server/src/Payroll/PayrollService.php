@@ -67,8 +67,11 @@ use TamOs\Policy\Scope;
  *                A refused or failed commit stores no key, so the key is not consumed.
  *   drift        validate (400) → CEO (403) → in one transaction, the same PayrollDrift over the
  *                plan's current inputs (404 when absent or another company; 409 payroll_state when
- *                the plan is Committed or Cancelled and can no longer be committed). Read-only and
- *                advisory: Commit always re-checks under its own locks.
+ *                the plan is Cancelled). Read-only and advisory: Commit always re-checks under its
+ *                own locks. PAY-DRIFT-1 (OD-F01-1 broad, D-1..D-4): a Committed plan is answered
+ *                too — the post-commit warning (CLAUDE.md §8.6), which never changes, recalculates
+ *                or pays anything; Approved overtime a Committed Supplemental document of that same
+ *                plan settles is left out of its comparison (never the plan's own linked overtime).
  *
  * Committed is an immutable obligation: never paid, executed or posted anywhere.
  */
@@ -301,11 +304,38 @@ final class PayrollService
     {
         $id = PayrollInput::id($id);                        // 400 before any lookup
         $scope = self::companyScope($actor);                // an Employee: 403 before any lookup
-        $inputs = $this->data->atomically(fn (): ?array => $this->data->payroll()->driftInputs($scope, $id)) ?? throw new ApiError(ErrorCode::NotFound);
-        if (!in_array($inputs['plan']['status'], PayrollStatus::PRE_COMMIT, true)) {
+        $inputs = $this->data->atomically(function () use ($scope, $id): ?array {
+            $in = $this->data->payroll()->driftInputs($scope, $id);
+            if ($in !== null && $in['plan']['status'] === PayrollStatus::COMMITTED) {
+                $in['covered'] = $this->data->payroll()->committedSupplementalOvertime($scope, $in['plan']);
+            }
+            return $in;
+        }) ?? throw new ApiError(ErrorCode::NotFound);
+        $status = $inputs['plan']['status'];
+        if (!in_array($status, PayrollStatus::PRE_COMMIT, true) && $status !== PayrollStatus::COMMITTED) {
             throw new ApiError(ErrorCode::Conflict, logReason: 'payroll_state');
         }
-        return ['id' => $id, 'reasons' => PayrollDrift::reasons($inputs['plan'], $inputs['employee'], $inputs['approved'], $inputs['linked'])];
+        $approved = $status === PayrollStatus::COMMITTED
+            ? self::withoutSettled($inputs['approved'], $inputs['linked'], $inputs['covered'])
+            : $inputs['approved'];
+        return ['id' => $id, 'reasons' => PayrollDrift::reasons($inputs['plan'], $inputs['employee'], $approved, $inputs['linked'])];
+    }
+
+    /**
+     * PAY-DRIFT-1 (D-3): a Committed plan's Approved overtime without the additional records a
+     * Committed Supplemental document of the same plan settles. A record linked to the base plan
+     * itself is never removed, so a change to the plan's own overtime stays visible.
+     *
+     * @param list<array<string, mixed>> $approved
+     * @param list<string> $linked
+     * @param list<string> $covered
+     * @return list<array<string, mixed>>
+     */
+    private static function withoutSettled(array $approved, array $linked, array $covered): array
+    {
+        $own = array_fill_keys($linked, true);
+        $settled = array_fill_keys($covered, true);
+        return array_values(array_filter($approved, static fn (array $o): bool => isset($own[(string) $o['id']]) || !isset($settled[(string) $o['id']])));
     }
 
     /**

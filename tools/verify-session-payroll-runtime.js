@@ -999,7 +999,8 @@ function firewall(rt, label, overtimeOpened){
       'M. a confirmed commit: the plan is Committed — final, not paid; the intent is gone');
     check(/Payroll plan committed: it is the final payroll obligation for April 2031 — not paid\./.test(html), 'M. the notice: final payroll obligation — not paid');
     check(!/id="swp(Commit|RetryCommit|Return|Cancel|Review|Approve)Btn"/.test(html), 'M. Committed offers no control at all (M18)');
-    check(countOf(rt, DRIFT(ID6)) === 1, 'M. a Committed plan is never checked for drift');
+    // PAY-DRIFT-1 authorized revision (D-1, D-4): the Committed plan is read for drift as a warning only. Was: never checked.
+    check(countOf(rt, DRIFT(ID6)) >= 1 && !/Changed since this payroll was committed/.test(html), 'M. a Committed plan is checked for drift (PAY-DRIFT-1); current shows no notice');
     firewall(rt, 'M. committed');
     // The success answer must confirm the intent exactly (M11, M12, M13, total).
     for(const [label, answer] of [['another id', one(Object.assign({}, committedOf(PRX), { id: ID1 }))], ['not Committed', one(Object.assign({}, committedOf(PRX), { status: 'Ready' }))],
@@ -1113,9 +1114,28 @@ function firewall(rt, label, overtimeOpened){
     const clean = await openReady();
     check(!/Changed since this plan was prepared/.test(clean.appHTML()) && /id="swpCommitBtn"/.test(clean.appHTML()) && !/ready to commit|safe to commit|matches TAM OS/i.test(clean.appHTML()),
       'N. current = true shows nothing and grants nothing: Commit is offered by status alone');
-    for(const p of [P1, P2, P4, P5]){
+    // PAY-DRIFT-1 authorized revision (D-1): a Committed plan (P4) is checked too. Was: [P1, P2, P4, P5] never.
+    for(const p of [P1, P2, P5]){
       const r = await detail(p.id, det(p));
       check(countOf(r, DRIFT(p.id)) === 0, 'N. a ' + p.status + ' plan is never checked for drift');
+    }
+    {
+      // PAY-DRIFT-1 (D-4): a drifted Committed plan shows a warning only — no control, no write, the amounts as committed.
+      const r = await detail(P4.id, det(P4), { [DRIFT(P4.id)]: [driftOk(P4.id, ['salary_changed', 'overtime_changed'])] });
+      const h = r.appHTML();
+      const ct = ['The employee&#39;s monthly base salary changed after this payroll was committed.',
+        'The employee&#39;s approved overtime for this month changed after this payroll was committed, and no committed supplemental payroll covers the change.'];
+      check(countOf(r, DRIFT(P4.id)) === 1 && /id="swpDrift"/.test(h) && /Changed since this payroll was committed/.test(h) && ct.every((t) => h.indexOf(t) !== -1) && h.indexOf(ct[0]) < h.indexOf(ct[1]),
+        'N. a drifted Committed plan reads its drift once and shows every reason, in order, with its committed wording (PAY-DRIFT-1)');
+      check(/The committed amounts above are unchanged and remain the payroll obligation\./.test(h) && !/Changed since this plan was prepared|Return it to Draft/.test(h),
+        'N. the Committed notice says the committed amounts stand and never offers Return to draft');
+      check(!/id="swp(Commit|RetryCommit|Return|Cancel|Review|Approve)Btn"/.test(h) && posts(r).length === 0 && !/paid|payment|settled/i.test((h.match(/<section class="card" id="swpDrift"[\s\S]*?<\/section>/) || [''])[0]),
+        'N. the Committed notice adds no control and no write, and never calls the plan paid');
+      const cur = await detail(P4.id, det(P4), { [DRIFT(P4.id)]: [driftOk(P4.id, [])] });
+      check(countOf(cur, DRIFT(P4.id)) === 1 && !/id="swpDrift"/.test(cur.appHTML()), 'N. a current Committed plan shows no notice');
+      const fail = await detail(P4.id, det(P4), { [DRIFT(P4.id)]: [err(500, 'internal_error')] });
+      check(/could not check this payroll for changes since it was committed/.test(fail.appHTML()) && posts(fail).length === 0, 'N. a failed Committed drift read says so and changes nothing');
+      firewall(r, 'N. committed drift');
     }
     const D = (o) => rt.PayrollDecoders.driftResponse(rt.parse(JSON.stringify(o)), ID6);
     const good = { payrollPlanDrift: { id: ID6, current: false, reasons: ['salary_missing', 'overtime_changed'] } };

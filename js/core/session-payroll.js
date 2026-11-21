@@ -66,7 +66,8 @@
        else drops the intent as stale; a failed read keeps it and sends nothing.
      DRIFT (CEO): read whenever a Ready plan's detail becomes current (so also after a commit 409)
        — the explanation of what changed, never authority: Commit is offered by status alone and
-       the server decides.
+       the server decides. PAY-DRIFT-1: also read for a Committed plan's detail — the post-commit
+       warning (CLAUDE.md §8.6); it changes nothing and offers no action.
      MY PAYROLL (Employee): the same section and month bar over the Employee's own Committed
        plans only (PayrollApi.myMonth / myGet); never a drift read, never a write.
    drift, driftId, driftSeq, driftStatus belong to the detail; commitIntent survives a re-read
@@ -725,7 +726,7 @@ const SessionPayroll = (function(){
       SessionPayrollStore.dropIntent();
       if(s.mutation.kind === 'commit') SessionPayrollStore.resolveMutation('commitStale');
     }
-    if(plan.status === 'Ready') loadDrift(plan.id);
+    if(plan.status === 'Ready' || plan.status === 'Committed') loadDrift(plan.id);   // PAY-DRIFT-1: Committed too
   }
 
   // AFI-4d: a Supplemental document the CEO now sees — reconcile an open commit intent with it.

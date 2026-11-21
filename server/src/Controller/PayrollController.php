@@ -30,7 +30,8 @@ use TamOs\Payroll\PayrollView;
  *   POST /api/payroll-plans/commit          { payrollPlan: plan }   Ready → Committed (BF-4c2)
  *                                           body exactly { id, expectedVersion, expectedTotal, idempotencyKey };
  *                                           a replay answers the original Committed plan
- *   GET  /api/payroll-plan/drift?id=<id>    { payrollPlanDrift: { id, current, reasons } }   CEO only (BF-4c2)
+ *   GET  /api/payroll-plan/drift?id=<id>    { payrollPlanDrift: { id, current, reasons } }   CEO only (BF-4c2);
+ *                                           Draft / Reviewed / Ready / Committed (PAY-DRIFT-1), Cancelled 409
  */
 final class PayrollController
 {

@@ -138,6 +138,14 @@ const SESSION_PAYROLL_DRIFT_TEXT = Object.freeze({
   salary_changed: "The employee's monthly base salary changed after this plan was prepared.",
   overtime_changed: "The employee's approved overtime for this month changed after this plan was prepared."
 });
+// PAY-DRIFT-1: the same reasons on a Committed plan — what changed after the commit, never a value.
+const SESSION_PAYROLL_COMMITTED_DRIFT_TEXT = Object.freeze({
+  employee_archived: 'The employee has been archived since this payroll was committed.',
+  employee_not_active: "The employee's employment status is no longer Active.",
+  salary_missing: 'The employee no longer has a monthly base salary.',
+  salary_changed: "The employee's monthly base salary changed after this payroll was committed.",
+  overtime_changed: "The employee's approved overtime for this month changed after this payroll was committed, and no committed supplemental payroll covers the change."
+});
 const SESSION_PAYROLL_PANELS = Object.freeze({
   generate: { title: 'Prepare payroll for this month?',
     text: 'TAM OS creates a Draft plan for each eligible employee and recalculates existing Drafts from the current salaries and approved overtime. Reviewed and Ready plans are not changed. Nothing is paid and nothing is posted to Finance.',
@@ -440,8 +448,11 @@ function sessionPayrollMineDetailHTML(w){
 }
 
 // AFI-4c2: what changed since a Ready plan was prepared (the drift read) — explanation only.
+// PAY-DRIFT-1 (OD-F01-1 broad): a Committed plan gets the same read as a warning only — the
+// committed amounts stand; nothing is recalculated, posted or paid, and no action is offered.
 function sessionPayrollDriftHTML(w){
   const p = w.detail.plan;
+  if(p.status === 'Committed') return sessionPayrollCommittedDriftHTML(w, p);
   if(p.status !== 'Ready' || w.driftId !== p.id) return '';
   if(w.driftStatus === SESSION_PAYROLL_STATUS.LOADING) return '<p class="hint" role="status" aria-busy="true">Checking this plan against TAM OS…</p>';
   if(w.driftStatus === SESSION_PAYROLL_STATUS.ERROR) return '<p class="hint">TAM OS could not check this plan for changes.</p>';
@@ -449,6 +460,15 @@ function sessionPayrollDriftHTML(w){
   return '<section class="card" id="swpDrift" aria-labelledby="swpDriftTitle"><h2 class="section-title" id="swpDriftTitle">Changed since this plan was prepared</h2>'
     + '<ul>' + w.drift.reasons.map(function(r){ return '<li>' + escapeHtml(SESSION_PAYROLL_DRIFT_TEXT[r]) + '</li>'; }).join('') + '</ul>'
     + '<p class="auth-lead">' + escapeHtml('This plan no longer matches TAM OS. Return it to Draft, then prepare payroll for ' + sessionPayrollMonthLabel(p.monthKey) + ' again.') + '</p></section>';
+}
+function sessionPayrollCommittedDriftHTML(w, p){
+  if(w.driftId !== p.id) return '';
+  if(w.driftStatus === SESSION_PAYROLL_STATUS.LOADING) return '<p class="hint" role="status" aria-busy="true">Checking this payroll against TAM OS…</p>';
+  if(w.driftStatus === SESSION_PAYROLL_STATUS.ERROR) return '<p class="hint">TAM OS could not check this payroll for changes since it was committed.</p>';
+  if(w.driftStatus !== SESSION_PAYROLL_STATUS.READY || !w.drift || w.drift.current) return '';
+  return '<section class="card" id="swpDrift" aria-labelledby="swpDriftTitle"><h2 class="section-title" id="swpDriftTitle">Changed since this payroll was committed</h2>'
+    + '<ul>' + w.drift.reasons.map(function(r){ return '<li>' + escapeHtml(SESSION_PAYROLL_COMMITTED_DRIFT_TEXT[r]) + '</li>'; }).join('') + '</ul>'
+    + '<p class="auth-lead">' + escapeHtml('The committed amounts above are unchanged and remain the payroll obligation. TAM OS does not recalculate, post or pay anything because of this notice. Review the change before relying on these amounts.') + '</p></section>';
 }
 
 function sessionPayrollListHTML(w){
