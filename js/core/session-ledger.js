@@ -29,7 +29,8 @@
    in the current generation. A write takes { gen } and is dropped when the principal changed.
 
    SessionLedger — the controller the view calls. CEO only: for any other principal every entry
-   point is a no-op and no request is ever made. A 401 ends the session (AuthBoot.sessionLost());
+   point is a no-op and no request is ever made. AWP-05 (OD-13 = A): exportCsv() turns the view
+   shown into a CSV download (js/core/session-csv.js) without any request. A 401 ends the session (AuthBoot.sessionLost());
    a recovery that could not confirm the session fails closed (AuthBoot.sessionUncertain()).
    Nothing is retried automatically. After a successful write the report and the list are read
    again from the server — nothing is computed or updated optimistically here.
@@ -233,6 +234,21 @@ const SessionLedger = (function(){
       return loading;
     },
     setRangeDraft(name, value){ if(canRead()) SessionLedgerStore.setRangeDraft(name, value); },
+    // AWP-05 (OD-13 = A): the view shown — the Transactions list or the Financial dashboard of the
+    // range shown — exported in the browser from the answer already read, only once that read
+    // succeeded. A read above its cap fails closed, so a ready view is the whole range. Nothing is
+    // read or sent; the download is not recorded anywhere.
+    exportCsv(){
+      if(!canAct()) return false;
+      const s = SessionLedgerStore.snapshot();
+      if(s.form || s.voidTarget) return false;
+      const out = s.view === 'transactions' ? sessionLedgerTransactionsCsv(s) : sessionLedgerReportCsv(s);
+      if(!out) return false;
+      SessionLedgerStore.setNotice(SessionCsv.download(out.content, out.filename) ? 'exported' : 'exportUnavailable');
+      SessionLedgerStore.setFocus('message');
+      paint();
+      return true;
+    },
     // Apply: the typed range, read again from the server. A range outside the grammar is never
     // sent: the view says so and the range shown stays.
     applyRange(){

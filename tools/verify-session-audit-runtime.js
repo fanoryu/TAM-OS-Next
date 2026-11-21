@@ -160,7 +160,7 @@ function loadRuntime(routes){
     + ' ApiClient: ApiClient, AuditApi: AuditApi, AuditDecoders: AuditDecoders, auditJakartaTime: auditJakartaTime, auditJakartaMonth: auditJakartaMonth,'
     + ' auditIsRecord: auditIsRecord, AUDIT_LIST_CAP: AUDIT_LIST_CAP, SessionAuditStore: SessionAuditStore, SessionAudit: SessionAudit,'
     + ' sessionAuditCurrentMonth: sessionAuditCurrentMonth, SessionOvertimeStore: SessionOvertimeStore, SessionPayrollStore: SessionPayrollStore,'
-    + ' SESSION_AUDIT_LIMIT_NOTE: SESSION_AUDIT_LIMIT_NOTE, render: render, parse: function(json){ return JSON.parse(json); } };';
+    + ' SESSION_AUDIT_LIMIT_NOTE: SESSION_AUDIT_LIMIT_NOTE, render: render, SessionCsv: SessionCsv, sessionAuditMonthCsv: sessionAuditMonthCsv, parse: function(json){ return JSON.parse(json); } };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => {
@@ -202,15 +202,21 @@ function loadRuntime(routes){
   }
   FixedDate.UTC = RealDate.UTC; FixedDate.parse = RealDate.parse; FixedDate.now = () => FIXED_NOW;
   FixedDate.prototype = RealDate.prototype;
+  // AWP-05 authorized revision (Owner GO 2026-11-21, OD-13 = A): a recording download: the Blob, its object URL,
+  // the <a download> link the CSV export clicks and the deferred revoke (2,000 ms, held until a test runs it).
+  // Was: no Blob or URL, and createElement returned an inert element.
+  const dl = { blobs: [], clicks: [], revoked: [], timers: [] };
+  function RecBlob(parts, opts){ this.parts = parts; this.type = opts && opts.type; dl.blobs.push(this); }
+  const dlEl = (tag) => { const el = mkEl(); if(String(tag).toLowerCase() === 'a') el.click = function(){ dl.clicks.push({ href: el.href, download: el.download, rel: el.rel }); }; return el; };
   const document = { addEventListener:noop, removeEventListener:noop,
     getElementById: (id) => (els[id] = els[id] || mkEl()),
-    querySelector:()=>null, querySelectorAll:()=>[], createElement:()=>mkEl(), contains:()=>false,
+    querySelector:()=>null, querySelectorAll:()=>[], createElement:(t)=>dlEl(t), contains:()=>false,
     body: mkEl(), documentElement: { dataset:{}, style:{} }, activeElement: null };
   Object.defineProperty(document, 'cookie', { get: () => { access.cookie.push('get'); return ''; }, set: () => { access.cookie.push('set'); } });
   const sandbox = {
     __spy: [], __spyErr: [], Date: FixedDate,
     console: { log:noop, warn:noop, error:noop, info:noop }, navigator: { userAgent:'tam-afi4g' },
-    setTimeout: function(fn, ms){ if(ms === 10000){ net.timers.push(fn); return 'api-timer-' + net.timers.length; } return setTimeout(fn, ms); },
+    setTimeout: function(fn, ms){ if(ms === 2000){ dl.timers.push(fn); return 'dl-timer-' + dl.timers.length; } if(ms === 10000){ net.timers.push(fn); return 'api-timer-' + net.timers.length; } return setTimeout(fn, ms); },
     clearTimeout: function(id){ if(!/^api-timer-/.test(String(id))) clearTimeout(id); },
     requestAnimationFrame: (fn) => setTimeout(fn, 0),
     AbortController: AbortController, fetch: fetchStub,
@@ -225,12 +231,14 @@ function loadRuntime(routes){
     history: { replaceState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; }, pushState: (a, b, u) => { access.url.push(String(u)); sandbox.location.hash = /^#/.test(String(u)) ? String(u) : ''; } },   // UX-1: a bare-path write clears the hash
     matchMedia: ()=>({ matches:false, addEventListener:noop, addListener:noop }),
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
-    document: document
+    document: document,
+    Blob: RecBlob, URL: { createObjectURL: (b) => 'blob:http://127.0.0.1/' + dl.blobs.indexOf(b), revokeObjectURL: (u) => { dl.revoked.push(u); } }   // AWP-05
   };
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
   dom.doc = sandbox.document;
   vm.runInContext(src, vm.createContext(sandbox), { filename: 'tam-afi4g-runtime.js' });
   const rt = sandbox.__TAM__;
+  rt.dl = dl; rt.sandbox = sandbox;   // AWP-05
   rt.net = net; rt.access = access; rt.spy = sandbox.__spy; rt.spyErr = sandbox.__spyErr;
   rt.appHTML = () => (els.app ? els.app.innerHTML : '');
   rt.app = els.app; rt.dom = dom; rt.loc = sandbox.location;
@@ -681,6 +689,89 @@ function firewall(rt, label){
     check((rt.appHTML().match(/data-swau-open="\d+"/g) || []).length === 2000 && /2000 events, oldest first/.test(rt.appHTML()), 'N. 2,000 events are all listed');
     rt.app.row(1999); await flush();
     check(rt.au().selected.event.id === '2000', 'N. the last of 2,000 rows opens through the one delegated listener');
+  }
+
+  /* ---------- X. AWP-05 CSV export of the month shown (OD-13 = A, Owner 2026-11-21) ---------- */
+  {
+    const BOM = String.fromCharCode(0xFEFF), CRLF = String.fromCharCode(13, 10);
+    const csvOf = (rt) => rt.dl.blobs[rt.dl.blobs.length - 1].parts.join('');
+    const HEAD = 'Time (WIB),"Time (UTC, as stored)",Action,Record,Actor user id,Fields changed';
+    const rt = await open();
+    const calls = rt.net.calls.length;
+    check(/id="swauExportBtn"/.test(rt.appHTML()) && rt.app.fire('swauExportBtn', 'click') === 'fired' && rt.dl.clicks.length === 1, 'X. the month list shows Export CSV and starts one download'); await flush();
+    // The shown table, cell by cell (time from its <time>, the em dash of "no fields" as an empty cell).
+    const shown = (rt.appHTML().match(/<tr><td><time datetime="[^"]*">[^<]*<\/time><\/td>(<td>[^<]*<\/td>){4}/g) || []).map((r) => {
+      const time = /<time datetime="([^"]*)">([^<]*)<\/time>/.exec(r);
+      const tds = (r.match(/<td>([^<]*)<\/td>/g) || []).map((t) => t.replace(/<\/?td>/g, '').replace(/&amp;/g, '&'));
+      return [time[2], time[1]].concat(tds.slice(0, 3), [tds[3] === '—' ? '' : tds[3]]);
+    });
+    const q = (v) => /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    const expected = BOM + [HEAD].concat(shown.map((r) => r.map(q).join(','))).join(CRLF) + CRLF;
+    check(shown.length === 4 && csvOf(rt) === expected, 'X. the CSV is exactly the four events shown, in their order and with the columns of the list (plus the stored UTC instant)');
+    check(csvOf(rt).split(CRLF)[1] === '2031-04-01 00:00:00,2031-03-31T17:00:00.000000Z,Employee updated,Employee emp_1,' + U1 + ',"fullName, phone"'
+      && csvOf(rt).split(CRLF)[2] === '2031-04-10 10:04:05,2031-04-10T03:04:05.123456Z,Login access — Create login,Employee emp_1,' + U1 + ',',
+      'X. independently: the first instant of April (WIB) and its UTC instant, field names quoted for their comma; no fields is an empty cell, never "—" or 0');
+    check(!new RegExp([M1, RQ, T1, 'requestId', 'membership', CSRF].join('|')).test(csvOf(rt)), 'X. no membership id, request id, target user id or token is exported');
+    const k = rt.dl.clicks[0];
+    check(k.download === 'tam-os-audit-2031-04.csv' && /^blob:http:\/\/127\.0\.0\.1\//.test(k.href) && k.rel === 'noopener' && rt.dl.blobs[0].type === 'text/csv;charset=utf-8' && rt.net.calls.length === calls,
+      'X. the download is a blob: link named tam-os-audit-2031-04.csv, typed text/csv;charset=utf-8, and no request is made');
+    check(/<p class="auth-message" id="swauMessage" role="status" tabindex="-1">CSV file prepared for download: exactly the events shown for this month\. Downloads are not recorded in the audit history\.<\/p>/.test(rt.appHTML()),
+      'X. a status notice says the file holds exactly the events shown and that downloads are not recorded in the audit history');
+    rt.dl.timers.shift()();
+    check(rt.dl.revoked.join() === k.href, 'X. the object URL is revoked afterwards');
+    firewall(rt, 'X. month export');
+    // An event or a record history open: no export.
+    rt.app.row(0); await flush();
+    check(!/id="swauExportBtn"/.test(rt.appHTML()) && rt.SessionAudit.exportCsv() === false && rt.dl.clicks.length === 1, 'X. an event open shows no Export CSV and exports nothing');
+    rt.SessionAuditStore.openRecord(A1);
+    check(rt.SessionAudit.exportCsv() === false && rt.dl.clicks.length === 1, 'X. a record history open exports nothing');
+  }
+  {
+    const BOM = String.fromCharCode(0xFEFF), CRLF = String.fromCharCode(13, 10);
+    const rt = await open({ [LIST(MONTH)]: [ok({ auditEvents: [] })] });
+    rt.app.fire('swauExportBtn', 'click'); await flush();
+    check(rt.dl.clicks.length === 1 && rt.dl.blobs[0].parts.join('') === BOM + 'Time (WIB),"Time (UTC, as stored)",Action,Record,Actor user id,Fields changed' + CRLF,
+      'X. an empty month exports a valid CSV of the header alone');
+    firewall(rt, 'X. empty month');
+  }
+  {
+    const CRLF = String.fromCharCode(13, 10);
+    const rt = await open({ [LIST(MONTH)]: [err(500, 'internal_error')] });
+    check(!/id="swauExportBtn"/.test(rt.appHTML()) && rt.SessionAudit.exportCsv() === false && rt.dl.blobs.length === 0, 'X. a month that failed (the 2,000 cap fails closed) shows no Export CSV and exports nothing');
+    const hang = await open({ [LIST(MONTH)]: ['HANG'] });
+    check(!/id="swauExportBtn"/.test(hang.appHTML()) && hang.SessionAudit.exportCsv() === false && hang.dl.blobs.length === 0, 'X. a month still loading shows no Export CSV and exports nothing');
+    const moved = await open({ [LIST('2031-03')]: ['HANG'] });
+    moved.SessionAudit.setMonth('2031-03'); await flush();
+    check(moved.au().month === '2031-03' && !/id="swauExportBtn"/.test(moved.appHTML()) && moved.SessionAudit.exportCsv() === false && moved.dl.blobs.length === 0,
+      'X. after a month change, the previous month is never exported as the new one');
+    const over = await open({ [LIST(MONTH)]: [ok({ auditEvents: Array.from({ length: 2001 }, (_, i) => ev(i + 1, '2031-04-10T00:00:00.000000Z')) })] });
+    check(!/id="swauExportBtn"/.test(over.appHTML()) && over.SessionAudit.exportCsv() === false, 'X. 2,001 events are refused whole: no Export CSV, never a truncated file');
+    const full = await open({ [LIST(MONTH)]: [ok({ auditEvents: Array.from({ length: 2000 }, (_, i) => ev(i + 1, '2031-04-10T00:00:00.000000Z')) })] });
+    full.app.fire('swauExportBtn', 'click'); await flush();
+    check(full.dl.blobs.length === 1 && full.dl.blobs[0].parts.join('').split(CRLF).length === 2002, 'X. exactly 2,000 events export as 2,000 lines under the header');
+  }
+  {
+    const rt = await open();
+    rt.sandbox.Blob = undefined;
+    rt.app.fire('swauExportBtn', 'click'); await flush();
+    check(rt.dl.clicks.length === 0 && /<p class="auth-message auth-message-warn" id="swauMessage" role="alert" tabindex="-1">This browser cannot prepare a download, so nothing was exported\.<\/p>/.test(rt.appHTML()),
+      'X. a browser without Blob gets an alert that nothing was exported');
+    const emp = await boot(ME_EMP);
+    check(!/swauExportBtn|Export CSV/.test(emp.appHTML()) && emp.SessionAudit.exportCsv() === false && emp.dl.blobs.length === 0 && auditCalls(emp).length === 0,
+      'X. an Employee never sees Export CSV, and a direct exportCsv() call exports nothing and reads nothing');
+    // AWP-05 final pre-commit: the CEO guard alone. A fabricated, successfully read month is planted in the Employee's
+    // store (open, READY, the month shown); the CSV builder would export it, exportCsv() must not.
+    const S = emp.SessionAuditStore;
+    S.setOpen(true, MONTH);
+    const t = S.begin('list', MONTH); S.applyList(t, emp.AuditDecoders.monthResponse(emp.parse(JSON.stringify(MONTH_EVENTS)), MONTH));
+    const planted = emp.au();
+    const callsBefore = emp.net.calls.length;
+    check(planted.open === true && planted.listStatus === 'ready' && planted.listMonth === MONTH && planted.month === MONTH && planted.list.length === 4 && !!emp.sessionAuditMonthCsv(planted),
+      'X. control: the planted Employee store holds a READY month that the CSV builder would export');
+    check(emp.SessionAudit.exportCsv() === false && emp.dl.blobs.length === 0 && emp.dl.clicks.length === 0 && emp.net.calls.length === callsBefore,
+      'X. CEO guard: an Employee holding a fabricated READY audit month gets false from exportCsv(): no Blob, no download, no request');
+    check(emp.au().notice === null && !/swauExportBtn|swauMessage|Export CSV|emp_1|fullName|tam-os-/.test(emp.appHTML()),
+      'X. CEO guard: nothing of the planted month, no export notice and no file name reaches the Employee page');
   }
 
   /* ---------- O. escaping and no identity join ---------- */

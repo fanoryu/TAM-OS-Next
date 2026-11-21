@@ -6,6 +6,12 @@ Not deployed and not released: entries here are merged into `main` (or proposed 
 published release, and none is on a production host. Hostinger stays NO-GO; Gate D, Gate R and v3.0.0 stay on HOLD.
 
 ### Added
+- **AWP-05 — CEO CSV export (not merged, not deployed, not released).** OD-13 = A (Owner GO 2026-11-21): the SESSION
+  CEO can export the Transactions list, the Financial dashboard and the Audit month shown as a UTF-8 CSV (BOM, CRLF,
+  RFC 4180), built in the browser from the read already made (new module `js/core/session-csv.js`). Formula-leading
+  cells are apostrophe-neutralised; amounts stay exact server strings; missing values are empty. Only a successfully
+  read view is exportable (reads above their caps fail closed, so never a truncated file). Payroll and the consolidated
+  total are not exported (GP-03). No endpoint, ACTION, migration or schema change; downloads are not audit-logged.
 - **ARCH-OT-1 — no archive over pending overtime (not merged, not deployed, not released).** Applies EL-DEC-5 /
   HV-Q-3 = A to the SESSION CEO employee archive only (Owner GO 2026-11-21; OD-03 stays open). The archive is refused
   (409) while any of the employee's overtime is Submitted or Reviewed; Draft, Approved and Rejected never block. Submit

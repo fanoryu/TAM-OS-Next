@@ -94,6 +94,10 @@ for Approved or Paid; the approval keeps the post before it in `pre_approval_fin
 and the single atomic approve statement may write the post; `tools/verify-backend-boundary.js` pins both writers.
 The CEO's Requests list offers "New reimbursement" beside "New payment request": an Employee selection is required and
 the post is optional, under the pinned `ApiClient` exception noted under D-AFI4b1-3.)*
+*(AWP-05, 2026-11-21 — local, not merged, not deployed; OD-13 = A: 96 modules in 110 package files, verifier 3134. New
+frontend module `js/core/session-csv.js` (after `js/core/session-home.js`): the one browser-side CSV writer of the
+CEO's Transactions, Financial dashboard and Audit month exports; it reads, sends and stores nothing. No route, ACTION,
+migration or schema change; payroll and the consolidated total are never exported.)*
 **Presentation architecture (UX-002A / UX-002B):** the application shell is mounted once by
 `renderShell()` and persists; ordinary navigation replaces only the content inside `#main`
 (`renderView()`) and reapplies the nav's derived state in place (`syncShellState()`), with `render()`
