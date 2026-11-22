@@ -62,6 +62,7 @@ function loadRuntime(){
     remove:noop, querySelector:()=>null, querySelectorAll:()=>[] });
   const toasts = [];
   const sandbox = {
+    crypto: require('crypto').webcrypto, // the browser's Web Crypto — uid() has no Math.random fallback
     console: { log:noop, warn:noop, error:noop }, navigator: { userAgent:'tam-c2c1' },
     setTimeout: setTimeout, clearTimeout: clearTimeout,
     localStorage: memStorage, storage: undefined,

@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "0b8b3bb847c2f867627289d94915f846612e8448159ad9584107a844ea9f1b86",
+  "packageDigest": "d821936024f70ca72bb901418b7fd2c335e077b9e336c0bfe21a9b79f7c2f299",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 3344403,
-    "sha256": "a9c8d2c9a73a2aac8ea08d763fb445491538ffe4ffa6ba3c0df5397650800bf0"
+    "bytes": 3346676,
+    "sha256": "9230a47cacf4a1351b47249cc90e2be4519456c2630f8d888f3deb70acb34e10"
   },
   "files": [
     {
@@ -89,8 +89,8 @@
     },
     {
       "path": "js/analytics/reports.js",
-      "bytes": 7597,
-      "sha256": "b978d8007b6903325486b9fac01f3d03f5f88d9b25502e34030523f049854a06"
+      "bytes": 8793,
+      "sha256": "494c4385325be7392a11bb402a6eba59da3efa43af4c6a01e85d9e8fd1699441"
     },
     {
       "path": "js/analytics/trends.js",
@@ -254,8 +254,8 @@
     },
     {
       "path": "js/core/utils.js",
-      "bytes": 5803,
-      "sha256": "d3e8ac4f34d461b30aaee853c0158686ac20678454e640b84c0194df01516add"
+      "bytes": 6880,
+      "sha256": "aa2fb75d8b89f38d1996040db9cac578c829389bb1258e30124b9a8c800415ec"
     },
     {
       "path": "js/core/workspace.js",

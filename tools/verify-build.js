@@ -133,6 +133,10 @@ const ARCHOT1_PACKAGE_DIGEST = '2db53760850f1743deafa021393bfed6befc219fd391c04c
 // AWP-05 correction (Owner GO 2026-11-21): the Audit month CSV holds exactly the five month-table columns.
 // Was: 00d50d2979b18b7a9fb7512a65be3f38c292d341524d4722f85e9a931f4fbf22 (PR #103 head 2f6c976, with the stored UTC column).
 const AWP05_PACKAGE_DIGEST = '0b8b3bb847c2f867627289d94915f846612e8448159ad9584107a844ea9f1b86';
+// Legacy CodeQL #2–#5 (Owner GO 2026-11-22): the AWP-05 package with uid() on Web Crypto (core/utils.js) and the
+// Markdown report built from plain text (analytics/reports.js); no module or file added. Prior pin was
+// AWP05_PACKAGE_DIGEST (kept as the baseline).
+const CODEQL25_PACKAGE_DIGEST = 'd821936024f70ca72bb901418b7fd2c335e077b9e336c0bfe21a9b79f7c2f299';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -8429,7 +8433,7 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8751,7 +8755,7 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
@@ -8781,7 +8785,7 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions === 24 && pkg.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions === 24 && pkg.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
     'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
 }
 
@@ -8862,7 +8866,7 @@ console.log('== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017) ==
     'CR-01: the view shows "Not yet assigned by the CEO", "Not recorded (approved before CR-01)" and the approval post selector; the runtime harness covers section L (T-V1 … T-V4)');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === AWP05_PACKAGE_DIGEST /* AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
     'CR-01: no frontend module or package file added; SCHEMA_VERSION 6 and ACTIONS 24; the package at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… kept as the baseline)');
 }
 
@@ -8979,6 +8983,99 @@ console.log('== UX-1: SESSION Home, routing, money display, Payroll/Overtime TO-
   check(/Downloads are not recorded in the audit history\./.test(lv) && /Downloads are not recorded in the audit history\./.test(av) && /Payroll and the consolidated total are not exported\./.test(lv)
     && !/audit-logged|is logged|are logged|recorded in the audit history\.'/.test((lv + av).replace(/not recorded in the audit history\./g, '')),
     'AWP-05: the notices say a download is not recorded in the audit history, and the dashboard says payroll and the consolidated total are not exported');
+}
+
+// Legacy CodeQL #2–#5 (Owner GO 2026-11-22). #3–#5: uid() takes its random part from Web Crypto and never
+// from Math.random — with no crypto.getRandomValues it throws instead of making a weak id. #2: the Markdown
+// report is built from plain text (the exact inverse of escapeHtml, then Markdown-escaped), never by stripping
+// tags from escaped HTML. The HTML report is unchanged. The LOCAL runtime harnesses that create records give
+// their sandbox Node's Web Crypto, as a browser has.
+console.log('== LEGACY CODEQL #2–#5 — SECURE RECORD IDS + PLAIN-TEXT MARKDOWN REPORT ==');
+{
+  const vm = require('vm');
+  const rd = (f) => read(path.join(root, 'js', f));
+  const utilsSrc = rd('core/utils.js'), repSrc = rd('analytics/reports.js');
+  const uidCode = stripComments((utilsSrc.match(/function uid\(prefix\)\{[\s\S]*?\n\}/) || [''])[0]);
+  check(uidCode !== '' && /c\.getRandomValues\(new Uint8Array\(16\)\)/.test(uidCode) && /if\(bytes\[i\] < 252\)/.test(uidCode)
+    && !/Math\.random|randomUUID/.test(stripComments(utilsSrc)),
+    'CodeQL #3–#5: uid() draws its random part from crypto.getRandomValues (bytes >= 252 rejected); utils.js has no Math.random at all');
+  check(!/startsWith\('(emp|ct|pay|txn|exec|cacc|backup|manual|import|irow|pp|mp|plan|ot)_'\)|\/\^(emp|ct|pay|txn|exec|cacc)_/.test(jsFiles.map((f) => stripComments(rd(f))).join('\n')),
+    'CodeQL #3–#5: no module parses a record id by its prefix or shape, so ids made before and after the change are read alike');
+  // A fresh utils.js per run, with Math.random replaced by a counting trap.
+  const loadUtils = (cryptoObj) => {
+    const box = { __mathRandom: 0 };
+    if(cryptoObj !== undefined) box.crypto = cryptoObj;
+    vm.createContext(box);
+    vm.runInContext('Math.random = function(){ __mathRandom++; return 0.5; };\n' + utilsSrc + '\n;this.uid = uid; this.escapeHtml = escapeHtml; this.fmtIDR = fmtIDR;', box);
+    return box;
+  };
+  const throwsWith = (fn, re) => { try{ fn(); return false; }catch(e){ return re.test(String(e && e.message)); } };
+  {
+    const u = loadUtils(require('crypto').webcrypto);
+    const ids = []; for(let i = 0; i < 20000; i++) ids.push(u.uid('emp'));
+    const seen = new Set(); ids.forEach((id) => seen.add(id.slice(4, 12)));
+    check(new Set(ids).size === 20000 && ids.every((id) => /^emp_[0-9a-z]{12}$/.test(id)) && seen.size >= 19990 && u.__mathRandom === 0,
+      'CodeQL #3–#5: 20,000 Web Crypto ids are unique, keep the prefix_ + 12 base-36 shape, and never call Math.random');
+    const chars = new Set(); ids.forEach((id) => { for(const ch of id.slice(4, 12)) chars.add(ch); });
+    check(chars.size === 36 && /^txn_[0-9a-z]{12}$/.test(u.uid()) && /^cacc_[0-9a-z]{12}$/.test(u.uid('cacc')) && /^exec_[0-9a-z]{12}$/.test(u.uid('exec')),
+      'CodeQL #3–#5: all 36 base-36 characters occur in the random part; the default prefix stays txn_ and the prefixes of #3–#5 (emp, exec, cacc) are kept');
+  }
+  {
+    const none = loadUtils(undefined), empty = loadUtils({}), notFn = loadUtils({ getRandomValues: 1 });
+    check(throwsWith(() => none.uid('emp'), /secure random numbers/) && throwsWith(() => empty.uid('emp'), /secure random numbers/)
+      && throwsWith(() => notFn.uid('emp'), /secure random numbers/) && none.__mathRandom + empty.__mathRandom + notFn.__mathRandom === 0,
+      'CodeQL #3–#5 (negative): without crypto.getRandomValues uid() throws a clear error — no id, and no Math.random fallback');
+    let calls = 0;
+    const stuck = loadUtils({ getRandomValues: (a) => { calls++; a.fill(255); return a; } });
+    check(throwsWith(() => stuck.uid('emp'), /not usable/) && calls === 8 && stuck.__mathRandom === 0,
+      'CodeQL #3–#5 (negative): a source that only yields rejected bytes ends after 8 bounded rounds with an error, never a loop or a weak id');
+    let n = 0;
+    const seq = loadUtils({ getRandomValues: (a) => { n++; for(let i = 0; i < a.length; i++) a[i] = n === 1 ? 252 + (i % 4) : [0, 35, 36, 251, 71, 10, 255, 1, 2, 3, 4, 5, 6, 7, 8, 9][i]; return a; } });
+    check(/^emp_0z0zza12[0-9a-z]{4}$/.test(seq.uid('emp')) && n === 2,
+      'CodeQL #3–#5: bytes 252–255 are rejected and the rest map by byte % 36 (0→0, 35/71/251→z, 36→0, 10→a), drawing again when a round is short');
+  }
+  // #2 — the Markdown report, run over real escapeHtml/fmtIDR with fabricated report inputs.
+  const repCode = stripComments(repSrc);
+  const htmlBody = (repSrc.match(/function buildReportHTML\(key\)\{[\s\S]*?\n\}/) || [''])[0];
+  check(!/replace\(\/<\[\^>\]\+>\/g/.test(repCode) && !/<\[\^>\]/.test(repCode)
+    && /md \+= `- \$\{reportMdText\(reportPlainText\(i\.text\)\)\}\\n`;/.test(repCode) && /`\| \$\{reportMdText\(c\.category\)\} \|/.test(repCode),
+    'CodeQL #2: no tag-stripping regex remains; insights are decoded to plain text then Markdown-escaped, and category names are Markdown-escaped');
+  check(crypto.createHash('sha256').update(htmlBody, 'utf8').digest('hex') === '7d719d3a98be0bc941222c0ef8004d8aa2bb31f2f41b88a9b012870d4f1cfd8a',
+    'CodeQL #2: buildReportHTML() is byte-identical to main 7f2239c (the HTML report is unchanged)');
+  const report = (cats, label) => {
+    const box = loadUtils(require('crypto').webcrypto);
+    Object.assign(box, { APP_NAME: 'TAM OS', APP_VERSION: '0.0.0-test', APP_TAGLINE: 'Test build', __cats: cats, __label: label });
+    vm.runInContext(repSrc + '\n;'
+      + 'function monthTotals(){ return { planned: 3000000, actual: 2500000, variance: 500000, netCashFlow: -2500000 }; }'
+      + 'function execStats(){ return { executed: 2500000, planned: 3000000, rate: 83.3, remaining: 500000, completed: 2, partial: 1, pending: 1, cancelled: 0 }; }'
+      + 'function scopedMonths(){ return [{ key: "2026-01", label: __label }]; } function monthLabel(m){ return m ? m.label : ""; }'
+      + 'function categoryBreakdown(){ return __cats.map(function(c){ return { category: c, planned: 1000000, actual: 900000, hasActual: true }; }); }'
+      + 'function computeInsights(){ return __cats.map(function(c){ return { type: "info", text: escapeHtml(c) + " is the largest spending category this month at " + fmtIDR(900000) + "." }; })'
+      + '.concat([{ type: "warn", text: "Largest overrun: \\"" + escapeHtml(__cats[0]) + "\\" ran " + fmtIDR(100000) + " over its " + fmtIDR(1000000) + " plan." }]); }'
+      + 'this.md = buildReportMarkdown("2026-01"); this.plain = reportPlainText; this.mdText = reportMdText;', box);
+    return box;
+  };
+  const cats = ['R&D', 'Rent | Utilities', '<script>alert(1)</script>', '&lt;b&gt;', 'Line1\nLine2', '**bold** _i_ [x](http://e.test) `c` ~~s~~ #h',
+    '- item', '1. First', "O'Brien \"Q\"", '&amp;', 'Rent (Q1) 50% + tax'];
+  const r = report(cats, '<img src=x> | Jan 2026');
+  const lines = r.md.split('\n'), rows = lines.filter((l) => l.startsWith('| ')), bullets = lines.filter((l) => l.startsWith('- '));
+  const pipes = (l) => (l.match(/(^|[^\\])\|/g) || []).length;
+  check(rows.length === cats.length + 1 && rows.slice(1).every((l) => pipes(l) === 5) && lines.filter((l) => /^#/.test(l)).length === 5
+    && lines.filter((l) => /^\|---/.test(l)).length === 1,
+    'CodeQL #2: every category stays one table row of exactly four columns, and no stored value adds a heading, row or separator');
+  check(!/(^|[^\\])<[a-z\/!?]/i.test(r.md) && r.md.includes('| \\<script\\>alert(1)\\</script\\> |') && r.md.includes('Monthly Finance Report — \\<img src=x\\> \\| Jan 2026'),
+    'CodeQL #2: a tag typed into a category or month label is literal escaped text in the Markdown, never an HTML element');
+  check(r.md.includes('| R&D |') && r.md.includes('- R&D is the largest') && r.md.includes('| Rent \\| Utilities |') && r.md.includes('| Rent (Q1) 50% + tax |')
+    && r.md.includes('- O\'Brien "Q" is the largest') && r.md.includes('Largest overrun: "R&D" ran') && !/&amp;|&#39;|&quot;/.test(r.md.replace(/\\&amp;/g, '')),
+    'CodeQL #2: ordinary names (R&D, quotes, apostrophes, parentheses, %) read exactly as typed — no &amp;, &#39; or &quot; left in the report');
+  check(r.md.includes('| \\&lt;b\\&gt; |') && r.md.includes('| \\&amp; |') && r.md.includes('- \\&amp; is the largest'),
+    'CodeQL #2: text that looks like an entity stays literal (decoded in one pass, so typed "&amp;" is never turned into "&"; the Markdown & is escaped)');
+  check(r.md.includes('| Line1 Line2 |') && r.md.includes('| \\*\\*bold\\*\\* \\_i\\_ \\[x\\](http://e.test) \\`c\\` \\~\\~s\\~\\~ \\#h |')
+    && bullets.some((l) => l.startsWith('- \\- item is')) && bullets.some((l) => l.startsWith('- 1\\. First is')),
+    'CodeQL #2: line breaks, emphasis, links, code, strike-through, headings and leading list markers in a stored value are neutralised');
+  const round = ['', 'plain', 'a & b', '<>', '"\'', '&amp;', '&lt;script&gt;', '&#39;', 'a&b;c', '&&;;'];
+  check(round.every((s) => r.plain(r.escapeHtml(s)) === s) && r.plain(null) === '' && r.mdText(undefined) === '' && r.plain('&amp;lt;') === '&lt;',
+    'CodeQL #2: reportPlainText() is the exact inverse of escapeHtml() and decodes in a single pass ("&amp;lt;" gives "&lt;", never "<")');
 }
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }
