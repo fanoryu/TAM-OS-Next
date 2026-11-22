@@ -1,5 +1,21 @@
 /* ---------- utils ---------- */
-function uid(prefix){ return (prefix||'txn') + '_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+// Local record id: prefix + '_' + 8 random base-36 characters + the last 4 base-36 characters of the
+// clock — the shape ids have always had, so stored ids stay valid (no consumer parses them). The random
+// part comes from Web Crypto (bytes >= 252 are rejected so every character is uniform), never from
+// Math.random: without crypto.getRandomValues no id is made and the calling action stops with a clear
+// error before it writes anything.
+const UID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+function uid(prefix){
+  const c = (typeof crypto !== 'undefined') ? crypto : null;
+  if(!c || typeof c.getRandomValues !== 'function') throw new Error('Cannot create a record id: this browser does not provide secure random numbers (Web Crypto).');
+  let rand = '';
+  for(let round = 0; round < 8 && rand.length < 8; round++){
+    const bytes = c.getRandomValues(new Uint8Array(16));
+    for(let i = 0; i < bytes.length && rand.length < 8; i++){ if(bytes[i] < 252) rand += UID_ALPHABET.charAt(bytes[i] % 36); }
+  }
+  if(rand.length < 8) throw new Error('Cannot create a record id: secure random numbers were not usable.');
+  return (prefix||'txn') + '_' + rand + Date.now().toString(36).slice(-4);
+}
 function fmtIDR(n){
   if(n===null || n===undefined || isNaN(n)) return '—';
   const neg = n<0; n = Math.abs(Math.round(n));

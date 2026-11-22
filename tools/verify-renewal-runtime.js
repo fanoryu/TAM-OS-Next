@@ -79,6 +79,7 @@ function loadRuntime(){
     addEventListener:noop, removeEventListener:noop, appendChild:noop, setAttribute:noop,
     remove:noop, querySelector:()=>null, querySelectorAll:()=>[] });
   const sandbox = {
+    crypto: require('crypto').webcrypto, // the browser's Web Crypto — uid() has no Math.random fallback
     console: { log:noop, warn:noop, error:noop }, navigator: { userAgent:'tam-spr077' },
     setTimeout: setTimeout, clearTimeout: clearTimeout,
     localStorage: memStorage, storage: undefined,
