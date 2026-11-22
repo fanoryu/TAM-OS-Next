@@ -8,7 +8,7 @@
  * Do NOT reorder casually — top-level const initializations depend on it.
  */
 'use strict';
-module.exports = [
+const ORDER = [
   // --- core leaves + data ---
   'core/constants.js',
   'core/utils.js',
@@ -45,6 +45,9 @@ module.exports = [
   'core/state-load-migrations.js',
   'core/domain-services.js',
   'import/parser.js',
+  // U-ISO (ADR-0005): the shell part the SESSION workspace shares (floating Actions menu,
+  // NAV_GROUPS, drawer helpers, the render() facade); the LOCAL shell follows it.
+  'ui/shell-core.js',
   'ui/shell-render.js',
   'ui/global-search-ui.js',
   // --- finance pages (from 09) ---
@@ -196,3 +199,90 @@ module.exports = [
   // --- bootstrap (19) ---
   'core/app-bootstrap.js'
 ];
+
+/*
+ * LOCAL-only classification (U-ISO, ADR-0005). These modules are the LOCAL development and test
+ * application (State, its storage, the LOCAL shell and the LOCAL business pages). They load in
+ * the canonical ORDER above in LOCAL development (tools/serve-local-dev.js) and in the LOCAL
+ * runtime harnesses, and are NEVER in the production package: index.html lists exactly
+ * productionOrder — ORDER without these, same relative order. This is a classification of
+ * ORDER, not a second load order; every entry must be in ORDER (verify-build checks it).
+ */
+const LOCAL_ONLY = Object.freeze([
+  'core/workspace.js',
+  'core/authz.js',
+  'core/data-grid.js',
+  'core/global-search.js',
+  'core/storage-adapter.js',
+  'ui/charts.js',
+  'core/state.js',
+  'core/state-load-migrations.js',
+  'core/domain-services.js',
+  'import/parser.js',
+  'ui/shell-render.js',
+  'ui/global-search-ui.js',
+  'finance/dashboard.js',
+  'finance/execution-center.js',
+  'finance/transaction-modals.js',
+  'finance/transactions.js',
+  'finance/add-upload.js',
+  'core/hr-persistence-portability.js',
+  'repository/employee-repository.js',
+  'repository/contract-repository.js',
+  'repository/payroll-repository.js',
+  'import/import-preview.js',
+  'analytics/plan-vs-actual.js',
+  'analytics/compare.js',
+  'analytics/trends.js',
+  'analytics/executive-dashboard.js',
+  'finance/cashflow.js',
+  'finance/budget.js',
+  'analytics/executive-insights.js',
+  'ui/settings-about.js',
+  'ui/activity-log.js',
+  'analytics/reports.js',
+  'people/people-core.js',
+  'people/employees.js',
+  'people/contracts.js',
+  'people/payroll-planning.js',
+  'people/recurring-expenses.js',
+  'people/monthly-plan.js',
+  'people/legacy-mapping.js',
+  'people/hr-dashboard-reports.js',
+  'core/stabilization.js',
+  'people/overtime.js',
+  'core/onboarding-reset.js',
+  'import/smart-import-extract.js',
+  'import/smart-import-commit.js',
+  'people/employee-dedup.js',
+  'import/smart-import-ui.js',
+  'people/payroll-ops-engine.js',
+  'people/payroll-workspace.js',
+  'people/supplemental-engine.js',
+  'domain/aggregates.js',
+  'domain/commands.js',
+  'domain/queries.js',
+  'domain/events.js',
+  'domain/aggregate-helpers.js',
+  'domain/employee-contact-aggregate.js',
+  'domain/employee-employment-aggregate.js',
+  'domain/employee-lifecycle-aggregate.js',
+  'domain/employee-compensation-aggregate.js',
+  'domain/contract-date-aggregate.js',
+  'domain/payroll-lifecycle-aggregate.js',
+  'domain/contract-status-aggregate.js',
+  'domain/contract-renewal-aggregate.js',
+  'domain/contract-core-aggregate.js',
+  'domain/domain-layer.js',
+  'platform/application-gateway.js',
+  'transport/transport-adapter.js'
+]);
+const LOCAL_ONLY_SET = new Set(LOCAL_ONLY);
+const PRODUCTION_ORDER = Object.freeze(ORDER.filter((m) => !LOCAL_ONLY_SET.has(m)));
+
+// The export stays the full canonical order (an array), so every existing reader keeps working;
+// the classification rides along as non-enumerable properties.
+Object.defineProperty(ORDER, 'localOnly', { value: LOCAL_ONLY });
+Object.defineProperty(ORDER, 'productionOrder', { value: PRODUCTION_ORDER });
+Object.defineProperty(ORDER, 'isLocalOnly', { value: (m) => LOCAL_ONLY_SET.has(m) });
+module.exports = ORDER;

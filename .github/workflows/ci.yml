@@ -87,6 +87,9 @@ jobs:
       - name: Runtime harness - SESSION Finance Requests (I4)
         run: node tools/verify-session-requests-runtime.js
 
+      - name: Runtime harness - SESSION-only production package (U-ISO)
+        run: node tools/verify-session-package-runtime.js
+
       # Offline release guard (release immutability hardening): mocked GitHub API, git and gh;
       # never touches the network, a tag or a release.
       - name: Release guard selftest

@@ -637,7 +637,8 @@ const swap = (file, a, b) => (f, src) => {
 const MUTATIONS = [
   ['M1 allowsWorkspace() true in every state', swap('core/auth-boot.js', 'return state === AUTH_STATES.AUTHENTICATED && typeof sessionNavModel', 'return true || typeof sessionNavModel')],
   ['M2 an Employee is given the Audit item', swap('ui/session-workspace-view.js', "labels: Object.freeze({ ceo: 'Activity Log' })", "labels: Object.freeze({ ceo: 'Activity Log', employee: 'Audit' })")],
-  ['M3 render() gated on allowsWorkspace() again (LOCAL shell when AUTHENTICATED)', swap('ui/shell-render.js', '  if(AUTH_MODE !== AUTH_MODES.LOCAL){', "  if(AUTH_MODE !== AUTH_MODES.LOCAL && !(typeof AuthBoot !== 'undefined' && AuthBoot.allowsWorkspace())){")],
+  // U-ISO (ADR-0005): render() lives in ui/shell-core.js. Was: swap('ui/shell-render.js', …).
+  ['M3 render() gated on allowsWorkspace() again (LOCAL shell when AUTHENTICATED)', swap('ui/shell-core.js','  if(AUTH_MODE !== AUTH_MODES.LOCAL){', "  if(AUTH_MODE !== AUTH_MODES.LOCAL && !(typeof AuthBoot !== 'undefined' && AuthBoot.allowsWorkspace())){")],
   ['M4 sessionNavModel accepts any role', (f, src) => swap('ui/session-workspace-view.js', '  if(role !== PRINCIPAL_TYPES.CEO && role !== PRINCIPAL_TYPES.EMPLOYEE) return null;\n', '')(f,
     swap('ui/session-workspace-view.js', "  if(!groups.some(function(g){ return g.items.some(function(i){ return i.id === SESSION_HOME_ROUTE; }); })) return null;\n", '')(f, src))],
   ['M6 the closed drawer is not inert', swap('ui/session-workspace-view.js', " sidebar.setAttribute('inert', '');", '')],

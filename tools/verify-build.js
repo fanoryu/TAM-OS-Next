@@ -64,6 +64,13 @@ const I4_FILES = I4_MODULES.length;
 // plus these; the AWP-05 section below pins the module, its order and its behaviour. Was: 95 modules, 109 files.
 const AWP05_MODULES = Object.freeze(['core/session-csv.js']);
 const AWP05_FILES = AWP05_MODULES.length;
+// U-ISO SESSION-only production package (Owner GO 2026-11-23, ADR-0005): one module added to the canonical order
+// (ui/shell-core.js, split out of ui/shell-render.js) and the 67 LOCAL-only modules (tools/module-order.js localOnly)
+// no longer in the package. Every earlier slice's module count is read plus ISO_MODULES and its package-file count
+// plus ISO_FILES; the U-ISO section below pins the classification and the package. Was: 96 modules, 110 files.
+const ISO_MODULES = 1;
+const ISO_LOCAL_ONLY = 67;
+const ISO_FILES = ISO_MODULES - ISO_LOCAL_ONLY;
 // The Phase 1 deployment package digest (the three Ledger modules; the from/to query keys; the PD-7
 // over-cap guidance in session-ledger-view.js, Owner 2026-11-13; the migration-0038 Audit vocabulary
 // and labels, PH1-QA-01, Owner 2026-11-13). Was: 1b35dbcc… (commit 094b8926); 092810b9… (commit eadf4274).
@@ -137,6 +144,9 @@ const AWP05_PACKAGE_DIGEST = '0b8b3bb847c2f867627289d94915f846612e8448159ad95841
 // Markdown report built from plain text (analytics/reports.js); no module or file added. Prior pin was
 // AWP05_PACKAGE_DIGEST (kept as the baseline).
 const CODEQL25_PACKAGE_DIGEST = 'd821936024f70ca72bb901418b7fd2c335e077b9e336c0bfe21a9b79f7c2f299';
+// U-ISO (Owner GO 2026-11-23, ADR-0005): the SESSION-only production package — the CODEQL-2-5 package without the 67
+// LOCAL-only modules and with ui/shell-core.js. Prior pin was CODEQL25_PACKAGE_DIGEST (kept as the baseline).
+const ISO_PACKAGE_DIGEST = 'e19cbcf589f9305a2d3722713d2589140c0de26bd4c48a4411b63f76f7a95922';
 function migrationsBeforePhase1() {
   return migrationsBeforePhase2().filter((f) => !PHASE1_MIGRATIONS.includes(f));
 }
@@ -149,6 +159,9 @@ function clientActionsBeforePhase2() {
 }
 const LF = '\n';
 const read = (p) => fs.readFileSync(p, 'utf8');
+// U-ISO (ADR-0005): the app shell source is js/ui/shell-core.js (shared with SESSION) followed by
+// js/ui/shell-render.js (the LOCAL shell) — one file until U-ISO, read as one here.
+const readShell = () => read(path.join(root, 'js', 'ui', 'shell-core.js')) + LF + read(path.join(root, 'js', 'ui', 'shell-render.js'));
 const trimLF = (s) => s.replace(/^\n+/, '').replace(/\n+$/, '');
 
 // Version is derived from the single source of truth (constants.js) — never hardcoded here.
@@ -163,7 +176,10 @@ function assembleApplication() {
   const order = require('./module-order.js');
   const cssNames = ['fonts.css', 'tokens.css', 'base.css', 'shell.css', 'components.css', 'charts.css'];
   const cssLinkBlock = cssNames.map((f) => '<link rel="stylesheet" href="css/' + f + '">').join(LF);
-  const jsTagBlock = order.map((f) => '<script src="js/' + f + '"></script>').join(LF);
+  // U-ISO (ADR-0005): index.html lists only the production (SESSION + shared) modules; the
+  // application under test is still the FULL canonical order (LOCAL development included), inlined
+  // in place of that production block, so every source check keeps seeing every module.
+  const jsTagBlock = order.productionOrder.map((f) => '<script src="js/' + f + '"></script>').join(LF);
   if (!html.includes(cssLinkBlock) || !html.includes(jsTagBlock)) return null;
   const cssInline = '<style>' + LF + cssNames.map((f) => read(path.join(root, 'css', f))).join(LF) + LF + '</style>';
   const jsInline = '<script>' + LF + order.map((f) => read(path.join(root, 'js', f))).join(LF) + LF + '</script>';
@@ -374,9 +390,9 @@ const pkgPaths = pkgMan.files.map((f) => f.path);
 check(pkgA.files.every((f) => f.data.equals(fs.readFileSync(path.join(root, f.path)))),
   'every package file is a byte-identical copy of the source file at the same relative path (no transformation)');
 const pkgExpected = ['index.html', 'js/boot/theme-boot.js', 'vendor/sheetjs/xlsx.full.min.js']
-  .concat(cssFiles.map((f) => 'css/' + f), jsFiles.map((f) => 'js/' + f), pkgTool.PACKAGE_LICENSES).sort();
+  .concat(cssFiles.map((f) => 'css/' + f), jsFiles.productionOrder.map((f) => 'js/' + f), pkgTool.PACKAGE_LICENSES).sort();
 check(JSON.stringify(pkgPaths) === JSON.stringify(pkgExpected),
-  'package file set is exactly index.html + theme boot + 6 CSS + every module-order JS + vendored SheetJS + licences (' + pkgExpected.length + ' files)');
+  'package file set is exactly index.html + theme boot + 6 CSS + every module-order productionOrder JS (U-ISO: no LOCAL-only module) + vendored SheetJS + licences (' + pkgExpected.length + ' files)');
 check(pkgPaths.every((p) => /^(index\.html|css\/[a-z-]+\.css|js\/[a-z0-9\/-]+\.js|vendor\/sheetjs\/(xlsx\.full\.min\.js|LICENSE)|assets\/fonts\/[A-Za-z0-9]+-OFL\.txt)$/.test(p)),
   'package holds only runtime files and licence texts (no docs, tools, tests, workflows, raw fonts or history)');
 {
@@ -614,8 +630,11 @@ check(flatLeft.length === 0, 'no flat js/NN-*.js files remain' + (flatLeft.lengt
 ['core','ui','finance','people','import','analytics'].forEach((d)=>check(fs.existsSync(path.join(jsdir,d)), 'js/'+d+'/ folder present'));
 // index.html references the subfolder script paths, in manifest order
 const indexHtml = read(path.join(root,'index.html'));
-const idxTagBlock = jsFiles.map((f)=>`<script src="js/${f}"></script>`).join(LF);
-check(indexHtml.includes(idxTagBlock), 'index.html <script> tags match module-order.js exactly (order + paths)');
+// U-ISO (ADR-0005): the page LOCAL development serves (tools/serve-local-dev.js, in memory) — index.html with the
+// full canonical module order. LOCAL-only modules are wired there, never in the production index.html.
+const indexHtmlLocal = require('./serve-local-dev.js').localDevIndexHtml(indexHtml) || '';
+const idxTagBlock = jsFiles.productionOrder.map((f)=>`<script src="js/${f}"></script>`).join(LF);
+check(indexHtml.includes(idxTagBlock), 'index.html <script> tags match module-order.js productionOrder exactly (order + paths)');
 
 console.log('== ACTIVITY LOG + AUDIT VISIBILITY (v2.6.4) ==');
 // Activity Log page: helpers, render, incremental filter, CSV, nav + dispatch.
@@ -1003,7 +1022,7 @@ domainFiles.forEach((f)=>check(fs.existsSync(path.join(root,'js','domain',f)), '
 domainFiles.forEach((f)=>{
   const p = 'domain/'+f;
   check(jsFiles.indexOf(p) !== -1, 'module-order.js includes '+p);
-  check(indexHtml.includes('<script src="js/'+p+'"></script>'), 'index.html includes '+p);
+  check(indexHtmlLocal.includes('<script src="js/'+p+'"></script>'), 'LOCAL development page includes '+p);
 });
 const cmdSrc = read(path.join(root,'js','domain','commands.js'));
 const qrySrc = read(path.join(root,'js','domain','queries.js'));
@@ -1078,7 +1097,7 @@ console.log('== EMPLOYEE CONTACT AGGREGATE (PR-5D — business authority) ==');
 const aggPath = path.join(root,'js','domain','employee-contact-aggregate.js');
 check(fs.existsSync(aggPath), 'aggregate module present: js/domain/employee-contact-aggregate.js');
 check(jsFiles.indexOf('domain/employee-contact-aggregate.js') !== -1, 'module-order.js includes domain/employee-contact-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/employee-contact-aggregate.js"></script>'), 'index.html includes domain/employee-contact-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/employee-contact-aggregate.js"></script>'), 'LOCAL development page includes domain/employee-contact-aggregate.js');
 const aggSrc2 = read(aggPath);
 check(/const EmployeeContactAggregate = Object\.freeze\(/.test(aggSrc2), 'EmployeeContactAggregate is a frozen object');
 check(/prepare:\s*function/.test(aggSrc2), 'aggregate exposes prepare()');
@@ -1114,7 +1133,7 @@ console.log('== EMPLOYEE EMPLOYMENT AGGREGATE (PR-5E — business authority) =='
 const empAggPath = path.join(root,'js','domain','employee-employment-aggregate.js');
 check(fs.existsSync(empAggPath), 'aggregate module present: js/domain/employee-employment-aggregate.js');
 check(jsFiles.indexOf('domain/employee-employment-aggregate.js') !== -1, 'module-order.js includes domain/employee-employment-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/employee-employment-aggregate.js"></script>'), 'index.html includes domain/employee-employment-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/employee-employment-aggregate.js"></script>'), 'LOCAL development page includes domain/employee-employment-aggregate.js');
 // Load order: the employment aggregate loads before the facade.
 check(jsFiles.indexOf('domain/employee-employment-aggregate.js') < jsFiles.indexOf('domain/domain-layer.js'), 'employment aggregate loads before domain-layer.js');
 const empAggSrc = read(empAggPath);
@@ -1169,7 +1188,7 @@ console.log('== EMPLOYEE LIFECYCLE AGGREGATE (PR-5G — business authority) ==')
 const lifeAggPath = path.join(root,'js','domain','employee-lifecycle-aggregate.js');
 check(fs.existsSync(lifeAggPath), 'aggregate module present: js/domain/employee-lifecycle-aggregate.js');
 check(jsFiles.indexOf('domain/employee-lifecycle-aggregate.js') !== -1, 'module-order.js includes domain/employee-lifecycle-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/employee-lifecycle-aggregate.js"></script>'), 'index.html includes domain/employee-lifecycle-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/employee-lifecycle-aggregate.js"></script>'), 'LOCAL development page includes domain/employee-lifecycle-aggregate.js');
 // Load order: the lifecycle aggregate loads before the facade and after the helpers.
 check(jsFiles.indexOf('domain/employee-lifecycle-aggregate.js') < jsFiles.indexOf('domain/domain-layer.js') &&
       jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/employee-lifecycle-aggregate.js'), 'lifecycle aggregate loads after helpers and before domain-layer.js');
@@ -1229,7 +1248,7 @@ console.log('== EMPLOYEE COMPENSATION AGGREGATE (PR-5H — business authority) =
 const compAggPath = path.join(root,'js','domain','employee-compensation-aggregate.js');
 check(fs.existsSync(compAggPath), 'aggregate module present: js/domain/employee-compensation-aggregate.js');
 check(jsFiles.indexOf('domain/employee-compensation-aggregate.js') !== -1, 'module-order.js includes domain/employee-compensation-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/employee-compensation-aggregate.js"></script>'), 'index.html includes domain/employee-compensation-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/employee-compensation-aggregate.js"></script>'), 'LOCAL development page includes domain/employee-compensation-aggregate.js');
 // Load order: after helpers, before the facade.
 check(jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/employee-compensation-aggregate.js') &&
       jsFiles.indexOf('domain/employee-compensation-aggregate.js') < jsFiles.indexOf('domain/domain-layer.js'), 'compensation aggregate loads after helpers and before domain-layer.js');
@@ -1296,7 +1315,7 @@ console.log('== CONTRACT DATE AGGREGATE (PR-5I — business authority) ==');
 const ctAggPath = path.join(root,'js','domain','contract-date-aggregate.js');
 check(fs.existsSync(ctAggPath), 'aggregate module present: js/domain/contract-date-aggregate.js');
 check(jsFiles.indexOf('domain/contract-date-aggregate.js') !== -1, 'module-order.js includes domain/contract-date-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/contract-date-aggregate.js"></script>'), 'index.html includes domain/contract-date-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/contract-date-aggregate.js"></script>'), 'LOCAL development page includes domain/contract-date-aggregate.js');
 // Load order: after helpers, before the facade.
 check(jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/contract-date-aggregate.js') &&
       jsFiles.indexOf('domain/contract-date-aggregate.js') < jsFiles.indexOf('domain/domain-layer.js'), 'contract-date aggregate loads after helpers and before domain-layer.js');
@@ -1371,7 +1390,7 @@ console.log('== PAYROLL LIFECYCLE AGGREGATE (PR-5J — business authority) ==');
 const payAggPath = path.join(root,'js','domain','payroll-lifecycle-aggregate.js');
 check(fs.existsSync(payAggPath), 'aggregate module present: js/domain/payroll-lifecycle-aggregate.js');
 check(jsFiles.indexOf('domain/payroll-lifecycle-aggregate.js') !== -1, 'module-order.js includes domain/payroll-lifecycle-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/payroll-lifecycle-aggregate.js"></script>'), 'index.html includes domain/payroll-lifecycle-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/payroll-lifecycle-aggregate.js"></script>'), 'LOCAL development page includes domain/payroll-lifecycle-aggregate.js');
 // Load order: after helpers + the payroll read/lock helpers, before the facade.
 check(jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/payroll-lifecycle-aggregate.js') &&
       jsFiles.indexOf('people/payroll-ops-engine.js') < jsFiles.indexOf('domain/payroll-lifecycle-aggregate.js') &&
@@ -1463,7 +1482,7 @@ console.log('== CONTRACT STATUS AGGREGATE (PR-5K — business authority) ==');
 const csAggPath = path.join(root,'js','domain','contract-status-aggregate.js');
 check(fs.existsSync(csAggPath), 'aggregate module present: js/domain/contract-status-aggregate.js');
 check(jsFiles.indexOf('domain/contract-status-aggregate.js') !== -1, 'module-order.js includes domain/contract-status-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/contract-status-aggregate.js"></script>'), 'index.html includes domain/contract-status-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/contract-status-aggregate.js"></script>'), 'LOCAL development page includes domain/contract-status-aggregate.js');
 // Load order: after helpers, before the facade.
 check(jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/contract-status-aggregate.js') &&
       jsFiles.indexOf('domain/contract-status-aggregate.js') < jsFiles.indexOf('domain/domain-layer.js'), 'contract status aggregate loads after helpers and before domain-layer.js');
@@ -1554,7 +1573,7 @@ console.log('== CONTRACT RENEWAL AGGREGATE (SPR-077 — business authority) ==')
 const crAggPath = path.join(root,'js','domain','contract-renewal-aggregate.js');
 check(fs.existsSync(crAggPath), 'aggregate module present: js/domain/contract-renewal-aggregate.js');
 check(jsFiles.indexOf('domain/contract-renewal-aggregate.js') !== -1, 'module-order.js includes domain/contract-renewal-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/contract-renewal-aggregate.js"></script>'), 'index.html includes domain/contract-renewal-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/contract-renewal-aggregate.js"></script>'), 'LOCAL development page includes domain/contract-renewal-aggregate.js');
 // Load order: after helpers and after the date aggregate it reuses, before the facade.
 check(jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/contract-renewal-aggregate.js') &&
       jsFiles.indexOf('domain/contract-date-aggregate.js') < jsFiles.indexOf('domain/contract-renewal-aggregate.js') &&
@@ -1680,7 +1699,7 @@ console.log('== SPR-078 PAYROLL POSTING AUTHORITY (single path + one committed p
 const planSrc078 = read(path.join(root,'js','people','payroll-planning.js'));
 const planCode078 = stripComments(planSrc078);
 const coreSrc078 = read(path.join(root,'js','people','people-core.js'));
-const shellSrc078 = read(path.join(root,'js','ui','shell-render.js'));
+const shellSrc078 = readShell();
 
 // (a) THE DEAD SURFACE IS GONE. None of these had an external consumer.
 ['commitPayroll','renderPayrollPlanning','renderPayrollDraft','payrollRowHTML','generatePayrollRows','buildPayrollTxn','payrollAmount','samePayrollComponents'].forEach((fname)=>
@@ -1694,7 +1713,7 @@ check(/function num\(x\)/.test(planSrc078), 'shared utility num() is preserved i
 check(/function ensureMonthlyPlan\(monthKey\)/.test(planSrc078), 'shared utility ensureMonthlyPlan() is preserved in payroll-planning.js');
 check((srcJs.match(/^function num\(/gm)||[]).length === 1, 'num() has exactly one definition repository-wide');
 check((srcJs.match(/^function ensureMonthlyPlan\(/gm)||[]).length === 1, 'ensureMonthlyPlan() has exactly one definition repository-wide');
-check(jsFiles.indexOf('people/payroll-planning.js') !== -1 && indexHtml.includes('<script src="js/people/payroll-planning.js"></script>'), 'payroll-planning.js remains loaded (retained for its shared utilities)');
+check(jsFiles.indexOf('people/payroll-planning.js') !== -1 && indexHtmlLocal.includes('<script src="js/people/payroll-planning.js"></script>'), 'payroll-planning.js remains loaded in LOCAL development (retained for its shared utilities)');
 // (c) ONE LIVE POSTING PATH.
 check(/async function commitReadyPayroll\(monthKey, ids\)\{/.test(poeSrc), 'commitReadyPayroll is defined');
 check((stripComments(srcJs).match(/steps\.push\(\['payrollPlans',\s+await persistPayrollPlans\(\)\]\);/g)||[]).length === 1,
@@ -2200,7 +2219,7 @@ console.log('== SHARED AGGREGATE HELPERS (PR-5F — business-support utilities) 
 const helpPath = path.join(root,'js','domain','aggregate-helpers.js');
 check(fs.existsSync(helpPath), 'helper module present: js/domain/aggregate-helpers.js');
 check(jsFiles.indexOf('domain/aggregate-helpers.js') !== -1, 'module-order.js includes domain/aggregate-helpers.js');
-check(indexHtml.includes('<script src="js/domain/aggregate-helpers.js"></script>'), 'index.html includes domain/aggregate-helpers.js');
+check(indexHtmlLocal.includes('<script src="js/domain/aggregate-helpers.js"></script>'), 'LOCAL development page includes domain/aggregate-helpers.js');
 // Helpers must load BEFORE both aggregates that consume them.
 check(jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/employee-contact-aggregate.js') &&
       jsFiles.indexOf('domain/aggregate-helpers.js') < jsFiles.indexOf('domain/employee-employment-aggregate.js'), 'helpers load before both aggregates');
@@ -2252,7 +2271,7 @@ console.log('== APPLICATION GATEWAY (PR-6A — canonical platform contract) ==')
 const gwPath = path.join(root,'js','platform','application-gateway.js');
 check(fs.existsSync(gwPath), 'platform module present: js/platform/application-gateway.js');
 check(jsFiles.indexOf('platform/application-gateway.js') !== -1, 'module-order.js includes platform/application-gateway.js');
-check(indexHtml.includes('<script src="js/platform/application-gateway.js"></script>'), 'index.html includes platform/application-gateway.js');
+check(indexHtmlLocal.includes('<script src="js/platform/application-gateway.js"></script>'), 'LOCAL development page includes platform/application-gateway.js');
 // Load order: AFTER the Domain facade it delegates to, and before bootstrap.
 check(jsFiles.indexOf('domain/domain-layer.js') < jsFiles.indexOf('platform/application-gateway.js') &&
       jsFiles.indexOf('platform/application-gateway.js') < jsFiles.indexOf('core/app-bootstrap.js'), 'gateway loads after domain-layer.js and before app-bootstrap.js');
@@ -2317,7 +2336,7 @@ console.log('== TRANSPORT ADAPTER (PR-7A — canonical application transport bou
 const txPath = path.join(root,'js','transport','transport-adapter.js');
 check(fs.existsSync(txPath), 'transport module present: js/transport/transport-adapter.js');
 check(jsFiles.indexOf('transport/transport-adapter.js') !== -1, 'module-order.js includes transport/transport-adapter.js');
-check(indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>'), 'index.html includes transport/transport-adapter.js');
+check(indexHtmlLocal.includes('<script src="js/transport/transport-adapter.js"></script>'), 'LOCAL development page includes transport/transport-adapter.js');
 // Load order: ABOVE the gateway it delegates to — AFTER application-gateway.js and before bootstrap.
 check(jsFiles.indexOf('platform/application-gateway.js') < jsFiles.indexOf('transport/transport-adapter.js') &&
       jsFiles.indexOf('transport/transport-adapter.js') < jsFiles.indexOf('core/app-bootstrap.js'), 'transport loads after application-gateway.js and before app-bootstrap.js');
@@ -2421,7 +2440,7 @@ console.log('== EMPLOYEE REPOSITORY (PR-8A — persistence-mechanics boundary) =
 const repoPath = path.join(root,'js','repository','employee-repository.js');
 check(fs.existsSync(repoPath), 'repository module present: js/repository/employee-repository.js');
 check(jsFiles.indexOf('repository/employee-repository.js') !== -1, 'module-order.js includes repository/employee-repository.js');
-check(indexHtml.includes('<script src="js/repository/employee-repository.js"></script>'), 'index.html includes repository/employee-repository.js');
+check(indexHtmlLocal.includes('<script src="js/repository/employee-repository.js"></script>'), 'LOCAL development page includes repository/employee-repository.js');
 // Load order: AFTER the persist infrastructure it delegates to, and BEFORE the migrated handler.
 check(jsFiles.indexOf('core/hr-persistence-portability.js') < jsFiles.indexOf('repository/employee-repository.js') &&
       jsFiles.indexOf('repository/employee-repository.js') < jsFiles.indexOf('people/employees.js'), 'repository loads after hr-persistence-portability.js and before people/employees.js');
@@ -2474,7 +2493,7 @@ console.log('== CONTRACT REPOSITORY (PR-10A — second entity repository) ==');
 const contractRepoPath = path.join(root,'js','repository','contract-repository.js');
 check(fs.existsSync(contractRepoPath), 'repository module present: js/repository/contract-repository.js');
 check(jsFiles.indexOf('repository/contract-repository.js') !== -1, 'module-order.js includes repository/contract-repository.js');
-check(indexHtml.includes('<script src="js/repository/contract-repository.js"></script>'), 'index.html includes repository/contract-repository.js');
+check(indexHtmlLocal.includes('<script src="js/repository/contract-repository.js"></script>'), 'LOCAL development page includes repository/contract-repository.js');
 // Load order: AFTER the persist infrastructure it delegates to, and BEFORE the migrated handler (contracts.js).
 check(jsFiles.indexOf('core/hr-persistence-portability.js') < jsFiles.indexOf('repository/contract-repository.js') &&
       jsFiles.indexOf('repository/contract-repository.js') < jsFiles.indexOf('people/contracts.js'), 'contract repository loads after hr-persistence-portability.js and before people/contracts.js');
@@ -2587,7 +2606,7 @@ console.log('== PAYROLL REPOSITORY (PR-11A — third entity repository, adoption
 const payrollRepoPath = path.join(root,'js','repository','payroll-repository.js');
 check(fs.existsSync(payrollRepoPath), 'repository module present: js/repository/payroll-repository.js');
 check(jsFiles.indexOf('repository/payroll-repository.js') !== -1, 'module-order.js includes repository/payroll-repository.js');
-check(indexHtml.includes('<script src="js/repository/payroll-repository.js"></script>'), 'index.html includes repository/payroll-repository.js');
+check(indexHtmlLocal.includes('<script src="js/repository/payroll-repository.js"></script>'), 'LOCAL development page includes repository/payroll-repository.js');
 // Load order: AFTER the persist infrastructure it delegates to, and BEFORE the migrated handler.
 check(jsFiles.indexOf('core/hr-persistence-portability.js') < jsFiles.indexOf('repository/payroll-repository.js') &&
       jsFiles.indexOf('repository/payroll-repository.js') < jsFiles.indexOf('people/payroll-ops-engine.js'), 'payroll repository loads after hr-persistence-portability.js and before people/payroll-ops-engine.js');
@@ -2759,7 +2778,7 @@ console.log('== CONTRACT CORE AUTHORITY (SPR-095 — domain preparation, ADR-014
 const ccPath = path.join(root,'js','domain','contract-core-aggregate.js');
 check(fs.existsSync(ccPath), 'aggregate module present: js/domain/contract-core-aggregate.js');
 check(jsFiles.indexOf('domain/contract-core-aggregate.js') !== -1, 'module-order.js includes domain/contract-core-aggregate.js');
-check(indexHtml.includes('<script src="js/domain/contract-core-aggregate.js"></script>'), 'index.html includes domain/contract-core-aggregate.js');
+check(indexHtmlLocal.includes('<script src="js/domain/contract-core-aggregate.js"></script>'), 'LOCAL development page includes domain/contract-core-aggregate.js');
 // Load order: after the Contract linkage helpers it reads and before the Domain facade that resolves it.
 check(jsFiles.indexOf('people/people-core.js') < jsFiles.indexOf('domain/contract-core-aggregate.js') &&
       jsFiles.indexOf('domain/contract-core-aggregate.js') < jsFiles.indexOf('domain/domain-layer.js'), 'contract-core-aggregate.js loads after people-core.js and before domain-layer.js');
@@ -2857,7 +2876,7 @@ check(/const ADR014_CORE_FIELDS = \[/.test(ccrSrc), 'SPR-095 harness asserts own
 // real function bodies — not stray words anywhere in the file — so a regression that
 // reintroduced full-shell rebuilds cannot pass verification.
 console.log('== UX-002A SHELL/VIEW PERSISTENCE (structural invariants) ==');
-const shellSrcUx2a = stripComments(read(path.join(root,'js','ui','shell-render.js')));
+const shellSrcUx2a = stripComments(readShell());
 // Top-level function bodies: a declaration at column 0 through the next line that
 // begins with a closing brace at column 0.
 const ux2aBodyOf = (name)=>{
@@ -2866,6 +2885,9 @@ const ux2aBodyOf = (name)=>{
 };
 const ux2aRenderBody = ux2aBodyOf('render');
 const ux2aRenderShellBody = ux2aBodyOf('renderShell');
+// U-ISO (ADR-0005): render() (js/ui/shell-core.js) hands LOCAL over to renderLocalShell() (js/ui/shell-render.js),
+// which mounts and syncs the shell. Was: render() itself invoked renderShell() and syncShellState().
+const ux2aLocalShellBody = ux2aBodyOf('renderLocalShell');
 
 // (1) render() must never rebuild the complete application shell.
 const ux2aR1 = [];
@@ -2880,10 +2902,11 @@ check(ux2aR1.length === 0,
 const ux2aR2 = [];
 if(!/^function renderShell\(\)\{/m.test(shellSrcUx2a)) ux2aR2.push('renderShell() is not defined at top level');
 if(!/^function syncShellState\(\)\{/m.test(shellSrcUx2a)) ux2aR2.push('syncShellState() is not defined at top level');
-if(!/\brenderShell\(\)/.test(ux2aRenderBody)) ux2aR2.push('render() does not invoke renderShell()');
-if(!/\bsyncShellState\(\)/.test(ux2aRenderBody)) ux2aR2.push('render() does not invoke syncShellState()');
+if(!/\brenderLocalShell\(\)/.test(ux2aRenderBody)) ux2aR2.push('render() does not invoke renderLocalShell()');
+if(!/\brenderShell\(\)/.test(ux2aLocalShellBody)) ux2aR2.push('renderLocalShell() does not invoke renderShell()');
+if(!/\bsyncShellState\(\)/.test(ux2aLocalShellBody)) ux2aR2.push('renderLocalShell() does not invoke syncShellState()');
 check(ux2aR2.length === 0,
-  'renderShell() and syncShellState() are defined and render() invokes both (shell mount + in-place state sync)'
+  'renderShell() and syncShellState() are defined and render() invokes both through renderLocalShell() (shell mount + in-place state sync)'
   + (ux2aR2.length ? ' >> VIOLATION: ' + ux2aR2.join('; ') : ''));
 
 // (3) bindShell() binds shell listeners once — it must be reachable ONLY from renderShell().
@@ -2906,7 +2929,7 @@ check(ux2aR3.length === 0,
 // (scattered active-state logic, a missing owner, a second renderer, a lost landmark,
 // or a stored nav setting) cannot pass verification.
 console.log('== UX-004B SIDEBAR FOUNDATION (nav manifest + hierarchical active state) ==');
-const ux4bShell = stripComments(read(path.join(root,'js','ui','shell-render.js')));
+const ux4bShell = stripComments(readShell());
 // (1) The manifest exists and is defined exactly once.
 const ux4bManifestDefs = (ux4bShell.match(/\bconst\s+NAV_VIEW_OWNER\s*=/g)||[]).length;
 check(ux4bManifestDefs === 1, 'canonical navigation manifest NAV_VIEW_OWNER is defined exactly once (found ' + ux4bManifestDefs + ')');
@@ -3184,7 +3207,7 @@ check(fs.existsSync(path.join(root,'tools','verify-breadcrumb-quickaction-runtim
    interaction; active-state, breadcrumb and Quick Action logic are untouched.
    ============================================================ */
 console.log('== UX-004E SIDEBAR INTERACTION INVARIANTS ==');
-const ux4eShell = read(path.join(root,'js','ui','shell-render.js'));
+const ux4eShell = readShell();
 const ux4eState = read(path.join(root,'js','core','state.js'));
 const ux4eCss   = read(path.join(root,'css','shell.css'));
 const ux4eBody  = (name)=> (ux4eShell.match(new RegExp('function\\s+'+name+'\\s*\\([^)]*\\)\\{[\\s\\S]*?\\n\\}'))||[''])[0];
@@ -3924,7 +3947,7 @@ check(/never implies/.test(ux3cHarness),
 console.log('== UX-005A: Executive Dashboard & Information Architecture ==');
 const ux5aExec = read(path.join(root,'js','analytics','executive-dashboard.js'));
 const ux5aDash = read(path.join(root,'js','finance','dashboard.js'));
-const ux5aShell = read(path.join(root,'js','ui','shell-render.js'));
+const ux5aShell = readShell();
 const ux5aStateMig = read(path.join(root,'js','core','state-load-migrations.js'));
 const ux5aSettings = read(path.join(root,'js','ui','settings-about.js'));
 
@@ -4148,7 +4171,7 @@ console.log('== UX-005C: Design System Consistency ==');
 const ux5cJsAll = require(path.join(root,'tools','module-order.js'))
   .map(f=>read(path.join(root,'js',f))).join('\n');
 const ux5cComponents = read(path.join(root,'css','components.css'));
-const ux5cShell = read(path.join(root,'js','ui','shell-render.js'));
+const ux5cShell = readShell();
 const ux5cSettings = read(path.join(root,'js','ui','settings-about.js'));
 // 1. canonical section-rhythm helper exists
 check(/\.stack-section\{margin-bottom:var\(--space-4\);\}/.test(ux5cComponents),
@@ -4231,7 +4254,7 @@ check(/globalSearchViewDocs\(sources\.navGroups/.test(ux5dUi) && /it\.placeholde
 check(!/const .*ROUTES *=|routeMap|\bVIEWS *= *\[/.test(ux5dUiCode),
   'UX-005D: no second hardcoded route/view inventory');
 // 10. result destinations resolve to existing routed views
-const ux5dShell = read(path.join(root,'js','ui','shell-render.js'));
+const ux5dShell = readShell();
 const ux5dRoutedViews = new Set([...ux5dShell.matchAll(/State\.view==='([a-zA-Z]+)'/g)].map(m=>m[1]));
 ['employeeDetail','contractDetail','payrollDetail'].forEach(v=>{
   check(ux5dRoutedViews.has(v), 'UX-005D: result destination "'+v+'" is an existing routed view');
@@ -4324,7 +4347,7 @@ check(trimLF(srcCss) === distCss,
 // A1 skip-link + main landmark, A2 modal Tab-trap, A3 finance dialog semantics,
 // A4 decorative-glyph hiding, A5 focus-visible coverage, A6 aria-sort on <th>.
 console.log('== UX-005F — ACCESSIBILITY HARDENING ==');
-const ux5fShell = read(path.join(root,'js','ui','shell-render.js'));
+const ux5fShell = readShell();
 const ux5fShellCss = read(path.join(root,'css','shell.css'));
 const ux5fStab = read(path.join(root,'js','core','stabilization.js'));
 const ux5fTxn = read(path.join(root,'js','finance','transaction-modals.js'));
@@ -4555,7 +4578,7 @@ const ux6bSrc = fs.existsSync(ux6bWsPath) ? read(ux6bWsPath) : '';
 const ux6bCode = ux6bSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 // Integration: registered in the manifest AND mirrored in index.html, after identity.
 check(jsFiles.indexOf('core/workspace.js') !== -1, 'UX-006B: core/workspace.js registered in module-order.js');
-check(/<script src="js\/core\/workspace\.js"><\/script>/.test(indexHtml), 'UX-006B: core/workspace.js mirrored in index.html');
+check(/<script src="js\/core\/workspace\.js"><\/script>/.test(indexHtmlLocal), 'UX-006B: core/workspace.js mirrored in the LOCAL development page (LOCAL-only, U-ISO)');
 check(jsFiles.indexOf('core/workspace.js') > jsFiles.indexOf('core/identity.js'),
   'UX-006B: workspace loads after identity.js');
 // Runtime harness discoverable.
@@ -4647,7 +4670,7 @@ const azSrc = fs.existsSync(azPath) ? read(azPath) : '';
 const azCode = azSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 // Integration: registered in the manifest AND mirrored in index.html, after workspace.
 check(jsFiles.indexOf('core/authz.js') !== -1, 'UX-006C1: core/authz.js registered in module-order.js');
-check(/<script src="js\/core\/authz\.js"><\/script>/.test(indexHtml), 'UX-006C1: core/authz.js mirrored in index.html');
+check(/<script src="js\/core\/authz\.js"><\/script>/.test(indexHtmlLocal), 'UX-006C1: core/authz.js mirrored in the LOCAL development page (LOCAL-only, U-ISO)');
 check(jsFiles.indexOf('core/authz.js') > jsFiles.indexOf('core/workspace.js'),
   'UX-006C1: authz loads after workspace.js (identity -> workspace -> authz)');
 // Runtime harness discoverable.
@@ -4746,7 +4769,7 @@ check(afi5PkgReady && afi5SelFnLeak.length === 0,
   'UX-006D1/AFI-5b: no production or package code declares, exposes or calls renderIdentitySelectorHTML/bindIdentitySelector/syncIdentitySelector'
   + (afi5SelFnLeak.length ? ' >> ' + afi5SelFnLeak.join(', ') : ''));
 // Shell wiring removed: no mount, bind or sync.
-const shellSrc = read(path.join(root, 'js', 'ui', 'shell-render.js'));
+const shellSrc = readShell();
 const shellCodeA5 = afi5Code(shellSrc);
 check(!/renderIdentitySelectorHTML/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell mounts no selector in renderShell');
 check(!/bindIdentitySelector/.test(shellCodeA5), 'UX-006D1/AFI-5b: the shell binds no selector in bindShell');
@@ -5286,7 +5309,7 @@ check(/const SCHEMA_VERSION = 6;/.test(read(path.join(root, 'js', 'core', 'const
    affordance-vs-enforcement) is proven by tools/verify-authz-integration-runtime.js.
    ============================================================ */
 const C3M = require('./integration-surface-manifest.js');
-const c3Shell = read(path.join(root, 'js', 'ui', 'shell-render.js'));
+const c3Shell = readShell();
 const c3Exec  = read(path.join(root, 'js', 'analytics', 'executive-dashboard.js'));
 const c3Stab  = read(path.join(root, 'js', 'core', 'stabilization.js'));
 // --- sidebar: every manifest id exists in NAV_GROUPS, and NAV_GROUPS adds nothing new ---
@@ -5406,7 +5429,7 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
   check(!afi5ProdJs.some((x) => />Acting as</.test(x.c)), 'UX-006D2/AFI-5b: the "Acting as" label is absent from production code');
   check(!afi5ProdJs.some((x) => /selectPrincipal|user_ceo_fixture/.test(x.c)),
     'UX-006D2/AFI-5b: no production selection and no default/implicit CEO anywhere');
-  check(/function render\(\)\{/.test(afi5Code(read(path.join(root, 'js', 'ui', 'shell-render.js')))),
+  check(/function render\(\)\{/.test(afi5Code(readShell())),
     'UX-006D2: the existing render() facade is still the only refresh path');
 
   // --- the denied affordance: marked, never hidden, never re-decided ---
@@ -5429,7 +5452,7 @@ console.log('== UX-006D2 — PRINCIPAL & WORKSPACE PRESENTATION ==');
     'UX-006D2: no navigation surface is hidden by CSS');
   check(!/(nav-item|quick-action|action-item)[^{]*\[data-authz-denied\]/.test(d2Shell + d2Comp),
     'UX-006D2: no navigation surface is styled by an authorization attribute');
-  { const c3Nav = read(path.join(root, 'js', 'ui', 'shell-render.js'));
+  { const c3Nav = readShell();
     check(!/authzDisabled/.test(c3Nav),
       'UX-006D2: the shell/navigation module still applies no availability policy'); }
 
@@ -5635,7 +5658,7 @@ const b1Index   = read(path.join(root,'index.html'));
 const b1Fonts   = read(path.join(root,'css','fonts.css'));
 const b1Tokens  = read(path.join(root,'css','tokens.css'));
 const b1Shell   = read(path.join(root,'css','shell.css'));
-const b1ShellJs = read(path.join(root,'js','ui','shell-render.js'));
+const b1ShellJs = readShell();
 
 // 1. No remote webfont dependency anywhere in the portable artifact OR the source head.
 check(!/googleapis|gstatic/.test(dist),
@@ -5894,7 +5917,7 @@ console.log('== AFI-2 — AUTHENTICATED BOOT ==');
   const bootCode = code(rd('core/app-bootstrap.js'));
   const abCode = code(rd('core/auth-boot.js'));
   const avCode = code(rd('ui/auth-view.js'));
-  const shellCode = code(rd('ui/shell-render.js'));
+  const shellCode = code(readShell());
   const gsCode = code(rd('ui/global-search-ui.js'));
   const iBoot = jsFiles.indexOf('core/app-bootstrap.js');
   check(jsFiles.indexOf('core/auth-boot.js') === iBoot - 2 && jsFiles.indexOf('ui/auth-view.js') === iBoot - 1 && iBoot === jsFiles.length - 1
@@ -6433,8 +6456,8 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   // AWP-05 authorized revision: core/session-csv.js follows session-home.js, before employee-api.js. Was: session-home.js
   // directly before employee-api.js (iTa + 15).
   check(iTa !== -1 && jsFiles.slice(iTa + 1, iTa + 16).join() === NEW.concat(PAYROLL_NEW, AUDIT_NEW, LEDGER_NEW, UX1_MODULES, AWP05_MODULES, ['core/employee-api.js']).join()
-    && indexHtml.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/audit-api.js"></script>\n<script src="js/core/session-audit.js"></script>\n<script src="js/ui/session-audit-view.js"></script>\n<script src="js/core/transaction-api.js"></script>\n<script src="js/core/session-ledger.js"></script>\n<script src="js/ui/session-ledger-view.js"></script>\n<script src="js/core/session-home.js"></script>\n<script src="js/core/session-csv.js"></script>\n<script src="js/core/employee-api.js"></script>'),
-    'AFI-4b1/AFI-4c1/AFI-4g/Phase 1/UX-1: the three Overtime modules load right after transport-adapter.js, then the three Payroll modules, then the three Audit modules, then the three Ledger modules, then session-home.js, then employee-api.js (manifest and index.html)');
+    && indexHtmlLocal.includes('<script src="js/transport/transport-adapter.js"></script>\n<script src="js/core/overtime-api.js"></script>\n<script src="js/core/session-overtime.js"></script>\n<script src="js/ui/session-overtime-view.js"></script>\n<script src="js/core/payroll-api.js"></script>\n<script src="js/core/session-payroll.js"></script>\n<script src="js/ui/session-payroll-view.js"></script>\n<script src="js/core/audit-api.js"></script>\n<script src="js/core/session-audit.js"></script>\n<script src="js/ui/session-audit-view.js"></script>\n<script src="js/core/transaction-api.js"></script>\n<script src="js/core/session-ledger.js"></script>\n<script src="js/ui/session-ledger-view.js"></script>\n<script src="js/core/session-home.js"></script>\n<script src="js/core/session-csv.js"></script>\n<script src="js/core/employee-api.js"></script>'),
+    'AFI-4b1/AFI-4c1/AFI-4g/Phase 1/UX-1: the three Overtime modules load right after transport-adapter.js, then the three Payroll modules, then the three Audit modules, then the three Ledger modules, then session-home.js, then employee-api.js (manifest and the LOCAL development page)');
   const apiC = code(rd('core/overtime-api.js')), storeC = code(rd('core/session-overtime.js')), viewC = code(rd('ui/session-overtime-view.js'));
   const wsC = code(rd('ui/session-workspace-view.js')), abC = code(rd('core/auth-boot.js'));
   // Firewall: the AFI-4a1 SESSION deny list (State, storage, legacy persistence, shell, "Acting as",
@@ -6567,7 +6590,7 @@ console.log('== AFI-4b1 — SESSION OVERTIME WORKSPACE ==');
   const otRenderers = jsFiles.filter((f) => f !== 'ui/session-overtime-view.js' && /\b(renderSessionOvertimeHTML|renderSessionOvertimeTitle|bindSessionOvertime)\s*\(/.test(code(rd(f))));
   check(otRenderers.join() === 'ui/session-workspace-view.js' && /if\(overtime\)\{ title = renderSessionOvertimeTitle\(principal, ot\); body = renderSessionOvertimeHTML\(principal, ot\); \}/.test(wsC)
     // U1 authorized revision (GR-4): allowsWorkspace() is the SESSION shell gate. Was: it stayed false.
-    && /allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abC) && !/\bSessionOvertime(Store)?\b/.test(code(rd('ui/shell-render.js')) + code(rd('ui/auth-view.js')) + code(rd('core/app-bootstrap.js'))),
+    && /allowsWorkspace\(\)\{\s*return state === AUTH_STATES\.AUTHENTICATED && typeof sessionNavModel === 'function'\s*&& sessionNavModel\(SessionIdentityProvider\.getCurrentUser\(\)\) !== null;\s*\}/.test(abC) && !/\bSessionOvertime(Store)?\b/.test(code(readShell()) + code(rd('ui/auth-view.js')) + code(rd('core/app-bootstrap.js'))),
     'AFI-4b1/U1: Overtime is rendered only as a section of the SESSION workspace (renderAuthView -> renderSessionWorkspace), inside the SESSION shell; never the LOCAL shell');
   check(!/data-[a-z-]*="' \+ [a-z]+\.(id|employeeId)|value="' \+ (e|r|d|row)\.(id|employeeId)|>' \+ [a-z]+\.(id|employeeId) \+/.test(viewC) && /'<option value="' \+ i \+ '"'/.test(viewC) && /id="swoOpen' \+ i \+ '"/.test(viewC)
     && /escapeHtml\(r\.hours\)/.test(viewC) && /escapeHtml\(value\)/.test(viewC),
@@ -6686,7 +6709,7 @@ console.log('== BF-4b2 — OVERTIME VALUATION + APPROVAL (BACKEND ONLY) ==');
   // AFI-4g authorized revision: AFI-4g adds exactly its three Audit modules (100 → 103 files); the 100
   // are still the 97 plus the three AFI-4c1 modules. Was: 100 files.
   const AFI4G_MODULES = ['js/core/audit-api.js', 'js/core/session-audit.js', 'js/ui/session-audit-view.js'];
-  check(Array.isArray(manifest.files) && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
+  check(Array.isArray(manifest.files) && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && AFI4C1_MODULES.concat(AFI4G_MODULES).every((f) => manifest.files.some((x) => x.path === f))
     && manifest.packageDigest !== 'c5d69dc1708302ab8e5be9f7d940dbd64c867bf9ab4aa27ff7bb925abb020dd3',
     'BF-4b2 + AFI-4b2 + AFI-4c1 + AFI-4g: AFI-4b2 added no production module; the package now holds 103 files, 102 since AFI-5b — the 97, exactly the three AFI-4c1 Payroll modules and exactly the three AFI-4g Audit modules');
   const deployRule = /BF-4b2 and AFI-4b2 must be deployed together/;
@@ -6875,7 +6898,7 @@ console.log('== BF-4c1 — PAYROLL PLAN FOUNDATION (BACKEND ONLY) ==');
   // AFI-4c1 authorized revision: BF-4c1 changed no package (it stayed 97 files, digest 2d826d4d…);
   // AFI-4c1 then added its three modules. Was: 97 files at digest 2d826d4d….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && manifest.packageDigest !== '2d826d4d133ac00d17c12eca9f81829d532ee371142a39635aae11df3c09a9d7' && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4c1 + AFI-4c1: BF-4c1 changed no package; the package is now the AFI-4c1 one plus AFI-4g (103 files, 102 since AFI-5b, no longer 2d826d4d…), ACTIONS 21');
   check(['Unit/PayrollCalculationTest.php', 'Unit/PayrollDomainTest.php', 'Http/PayrollRoutingTest.php', 'Db/PayrollSchemaTest.php', 'Db/PayrollWorkflowTest.php', 'Db/PayrollConcurrencyTest.php', 'Support/payroll-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))),
@@ -7042,7 +7065,7 @@ console.log('== BF-4c2 — PAYROLL COMMIT + EMPLOYEE SELF-READ (BACKEND ONLY) ==
   // AFI-4c2 authorized revision: BF-4c2 left the package unchanged (100 files, a0a95b13…); AFI-4c2
   // changed four modules and so its digest. Was: digest a0a95b13….
   // AFI-4g authorized revision: AFI-4g then added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && manifest.packageDigest !== 'a0a95b13bcc4d73910bc40219791944728af6f3dcad0f7a83be62c8f4b83a132' && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4c2 + AFI-4c2: BF-4c2 changed no package; the package is now the AFI-4c2 one plus AFI-4g (103 files, 102 since AFI-5b, no longer a0a95b13…), ACTIONS 21');
   check(serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4c2: ACTIONS stay 21 (commit reuses payroll.manage), AUTH_MODE SESSION since AFI-5b');
@@ -7101,7 +7124,7 @@ console.log('== AFI-4c2 — SESSION PAYROLL COMMIT + MY PAYROLL ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') !== -1 && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'AFI-4c2: no new production module — the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   // BF-4d authorized revision: the head moved to 0031 (BF-4d, backend only). Was: 0028.
   // BF-4e authorized revision: the head moved to 0033 (BF-4e, backend only). Was: 0031.
@@ -7202,7 +7225,7 @@ console.log('== BF-4d — SUPPLEMENTAL PAYROLL (BACKEND ONLY) ==');
   // pinned in the AFI-4d section. Was: 100 files at digest 16e06b7e… (BF-4d left the package unchanged).
   const manifest = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
+  check(manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4d/AFI-4d: the production package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector) and ACTIONS 21 (BF-4d added no frontend; AFI-4d added no module)');
   check(['Unit/SupplementalDomainTest.php', 'Http/SupplementalRoutingTest.php', 'Db/SupplementalSchemaTest.php', 'Db/SupplementalWorkflowTest.php', 'Db/SupplementalConcurrencyTest.php', 'Support/supplemental-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /C8 race/.test(srv('tests/Db/SupplementalConcurrencyTest.php')),
@@ -7313,7 +7336,7 @@ console.log('== AFI-4d — SESSION SUPPLEMENTAL PAYROLL ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   check(mods.length === new Set(mods).size && mods.indexOf('core/payroll-api.js') < mods.indexOf('core/session-payroll.js') && mods.indexOf('core/session-payroll.js') < mods.indexOf('ui/session-payroll-view.js')
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21,
+    && !mods.some((m) => /supplemental/.test(m) && m !== 'people/supplemental-engine.js') && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.actions - PHASE2_ACTIONS.length === 21,
     // AFI-4e authorized revision: the package changed with AFI-4e (frontend only) and its new digest
     // is pinned in the AFI-4e section. Was: digest 7768d72b… (AFI-4d).
     'AFI-4d: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4e section)');
@@ -7414,7 +7437,7 @@ console.log('== BF-4e — FINANCE POSTING (BACKEND ONLY) ==');
   // Finance posting routes; they are pinned in the /api/ path check. Was: /\/api\/finance/.
   check(jsFiles.filter((f) => /\/api\/finance(?!-request)/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
+    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && manifest.actions - PHASE2_ACTIONS.length === 21,
     'BF-4e/AFI-4e: exactly one frontend module — core/payroll-api.js (AFI-4e FinancePostingApi) — names a Finance posting route; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21');
   check(['Unit/FinancePostingDomainTest.php', 'Http/FinanceRoutingTest.php', 'Db/FinancePostingSchemaTest.php', 'Db/FinancePostingWorkflowTest.php', 'Db/FinancePostingConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /F6 race/.test(srv('tests/Db/FinancePostingConcurrencyTest.php')),
@@ -7528,7 +7551,7 @@ console.log('== AFI-4e — SESSION FINANCE POSTING (CEO) ==');
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
+  check(mods.length === new Set(mods).size && !mods.some((m) => /finance-post|finance-api|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
     'AFI-4e: no new production module (module order and index.html unchanged); the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   // BF-4f authorized revision: the head moved to 0035 (BF-4f, backend only). Was: 0033.
@@ -7642,7 +7665,7 @@ console.log('== BF-4f — FINANCE EXECUTION (BACKEND ONLY) ==');
   check(exeFiles.join() === 'core/payroll-api.js,core/session-payroll.js,ui/session-payroll-view.js'
     && jsFiles.filter((f) => /finance-executions/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/payroll-api.js'
     // AFI-4g authorized revision: AFI-4g added its three Audit modules. Was: 100 files.
-    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && manifest.actions - PHASE2_ACTIONS.length === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
+    && manifest.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && manifest.actions - PHASE2_ACTIONS.length === 21 && manifest.packageDigest !== 'e3e56858f93d94c1c69fe658343db571c980d8159d958534483fb60f0d40875c',
     'BF-4f/AFI-4f: exactly the three SESSION Payroll modules name a Finance execution and only core/payroll-api.js its routes; the package keeps 100 files (103 with the three AFI-4g Audit modules; 102 since AFI-5b removed the selector), ACTIONS 21 (its digest: the AFI-4f section)');
   check(['Unit/FinanceExecutionDomainTest.php', 'Http/FinanceExecutionRoutingTest.php', 'Db/FinanceExecutionSchemaTest.php', 'Db/FinanceExecutionWorkflowTest.php', 'Db/FinanceExecutionConcurrencyTest.php', 'Support/finance-worker.php']
     .every((f) => fs.existsSync(path.join(root, 'server', 'tests', f))) && /X5 race/.test(srv('tests/Db/FinanceExecutionConcurrencyTest.php')) && /'execute' => '\/api\/finance-executions\/execute'/.test(srv('tests/Support/finance-worker.php')),
@@ -7783,7 +7806,7 @@ console.log('== AFI-4f — SESSION RECORD PAYMENT (CEO) ==');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // AFI-4g authorized revision: AFI-4g added exactly its three Audit modules (86 → 89, 100 → 103 files) and so
   // changed the digest (its digest: the AFI-4g section). Was: 86 modules, 100 files at digest d030d544….
-  check(mods.length === new Set(mods).size && mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
+  check(mods.length === new Set(mods).size && mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && !mods.some((m) => /finance-exec|record-payment|session-finance/.test(m)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'AFI-4f: no new production module (module order and index.html unchanged by AFI-4f); the package kept 100 files at digest d030d544… until AFI-4g (now 103 files, 102 since AFI-5b, its digest: the AFI-4g section), ACTIONS 21');
   check(migrationsBeforePhase1().pop() === '0035_replace_audit_events_finance_execute.sql' && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
@@ -7867,7 +7890,7 @@ console.log('== OPS-1 — ENCRYPTED DATABASE BACKUP (OPERATOR TOOLING) ==');
     && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-1 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.actions - PHASE2_ACTIONS.length === 21 && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'OPS-1: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-1 (100 files at digest d030d544… until AFI-4g)');
   check(['Unit/BackupFormatTest.php', 'Unit/BackupFileTest.php', 'Unit/BackupCliTest.php', 'Db/BackupCreateTest.php'].every((f) => fs.existsSync(path.join(root, 'server', 'tests', f)))
     && /continuity end to end/.test(srv('tests/Db/BackupCreateTest.php')) && /rows committed while the backup runs are not in it/.test(srv('tests/Db/BackupCreateTest.php')),
@@ -7945,7 +7968,7 @@ console.log('== OPS-2 — RESTORE INTO AN EMPTY DATABASE (OPERATOR TOOLING) ==')
     && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js')))
     // AFI-4g authorized revision: OPS-2 left the package at 100 files, digest d030d544…; AFI-4g then
     // added its three Audit modules (its digest: the AFI-4g section). Was: 100 files at d030d544….
-    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f',
     'OPS-2: no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b, and the package unchanged by OPS-2 (100 files at digest d030d544… until AFI-4g)');
   const dbTest = srv('tests/Db/BackupRestoreTest.php');
   check(fs.existsSync(path.join(root, 'server', 'tests', 'Unit', 'BackupRestoreTest.php')) && ['round trip: every backed-up row returns exactly', 'any one row in any of the 19 classified tables',
@@ -8010,7 +8033,7 @@ console.log('== BF-4g — CEO AUDIT READ API (BACKEND ONLY) ==');
   // changed with it (103 files; its digest: the AFI-4g section). BF-4g itself stays backend only. Was:
   // no frontend module names an audit route; the package unchanged at 100 files, digest d030d544….
   check(jsFiles.filter((f) => /audit-events/.test(read(f))).map((f) => path.relative(path.join(root, 'js'), f).split(path.sep).join('/')).join() === 'core/audit-api.js'
-    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
+    && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.packageDigest !== 'd030d544b47e5f186091a81dfa8ce64a129e44eae19c23432b62abad8af6799f'
     && migrationsBeforePhase1().length === 35
     && serverActionsBeforePhase2() === 21 && /const AUTH_MODE = AUTH_MODES\.SESSION;/.test(read(path.join(root, 'js', 'core', 'constants.js'))),
     'BF-4g: backend only — its one frontend reference is AFI-4g\'s core/audit-api.js, the package changed only with AFI-4g (103 files, 102 since AFI-5b, no longer d030d544…), no migration (head 0035), no Action (ACTIONS 21), AUTH_MODE SESSION since AFI-5b');
@@ -8178,7 +8201,7 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
   // so the package digest changed (files, modules and ACTIONS unchanged). Was: digest 097f6b50….
   const mods = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
+  check(mods.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && mods.length === new Set(mods).size && NEW.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.actions - PHASE2_ACTIONS.length === 21
     && pkg.packageDigest !== '097f6b500e843d492b4f6577055d183755327fbb800fd243c079299311a890f4' // AFI-5b: historical (its digest: the AFI-5b section)
     && pkg.packageDigest !== 'b2dae6ed01864793c2fe05e9b7fdf355a72b22d3744fd8fa1c8cfa3820c88147', // O-2 (PR #67): historical 103-file digest
     'AFI-4g: exactly three new production modules (89 modules, 88 since AFI-5b); the package held 103 files at digest 097f6b50… (b2dae6ed… with O-2; 102 since AFI-5b, its digest pinned in the AFI-5b section), ACTIONS 21');
@@ -8235,6 +8258,9 @@ console.log('== AFI-4g — SESSION AUDIT (CEO, READ ONLY) ==');
 // (verify-session-requests-runtime.js) is the sixteenth, appended after the Finance harness, after its
 // repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof and its seeded-defect
 // self-proof. Was: fifteen.
+// U-ISO authorized revision (Owner GO 2026-11-23, ADR-0005): the SESSION-only package harness
+// (verify-session-package-runtime.js) is the seventeenth, appended after the Finance Requests harness, after its
+// repeated-run and timezone (UTC-12, UTC, UTC+7, UTC+14) determinism proof. Was: sixteen.
 console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
 {
   const CI_RUNTIME_HARNESSES = ['verify-identity-foundation-runtime.js', 'verify-session-identity-runtime.js',
@@ -8242,12 +8268,12 @@ console.log('== CI-HARDEN-1 — RUNTIME HARNESSES IN CI ==');
     'verify-auth-boot-runtime.js', 'verify-auth-flow-runtime.js', 'verify-session-employee-runtime.js',
     'verify-session-overtime-runtime.js', 'verify-session-payroll-runtime.js', 'verify-session-audit-runtime.js',
     'verify-dev-local-runtime.js', 'verify-afi5-runtime.js', 'verify-session-shell-runtime.js', 'verify-session-ledger-runtime.js',
-    'verify-session-requests-runtime.js'];
+    'verify-session-requests-runtime.js', 'verify-session-package-runtime.js'];
   const ciWf = read(path.join(root, '.github', 'workflows', 'ci.yml'));
   const ciRuns = (ciWf.match(/^\s*run:\s*node tools\/verify-[a-z0-9-]+-runtime\.js\s*$/gm) || [])
     .map((l) => l.replace(/^\s*run:\s*node tools\//, '').trim());
   check(ciRuns.join() === CI_RUNTIME_HARNESSES.join(),
-    'CI-HARDEN-1: ci.yml runs exactly the sixteen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
+    'CI-HARDEN-1: ci.yml runs exactly the seventeen allowlisted runtime harnesses, in order' + (ciRuns.join() === CI_RUNTIME_HARNESSES.join() ? '' : ' >> got: ' + ciRuns.join(', ')));
   check((ciWf.match(/-runtime\.js/g) || []).length === CI_RUNTIME_HARNESSES.length && !/verify-\*|\*-runtime|xargs|find tools/.test(ciWf),
     'CI-HARDEN-1: no other runtime harness, glob or discovery loop in ci.yml (full suite not wired; Q10 not wired)');
   check(CI_RUNTIME_HARNESSES.every((f) => fs.existsSync(path.join(root, 'tools', f))), 'CI-HARDEN-1: every allowlisted harness exists');
@@ -8428,12 +8454,12 @@ console.log('== AFI-5b — IDENTITY TRANSITION ==');
   // v3.0.0 (Owner decision 2026-11-05): re-pinned for the release identity only — APP_VERSION 3.0.0, APP_RELEASE_NAME
   // "Core SESSION Foundation", the <title> and the 3.0.0 in-app Release Notes entry. Prior pin was
   // f6fa99b15c57bc56c4a9c31c35d0809ec7d0f5c25f5c540203a45440340fa430 (WP-1).
-  check(jsFiles.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES
+  check(jsFiles.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && jsFiles.length === new Set(jsFiles).size && pkg5.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES
     && !pkg5.files.some((e) => /identity-selector/.test(e.path))
     // Phase 1 authorized revision: the three Ledger modules and the from/to query keys changed the
     // package (its digest: PHASE1_PACKAGE_DIGEST, pinned in the Phase 1 section). Prior pin was
     // 819f74acb9c22f0a3a88ece162fa60612f23f3ecf409932aa6561e728884b2c5 (v3.0.0).
-    && pkg5.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    && pkg5.packageDigest === ISO_PACKAGE_DIGEST /* U-ISO (was CODEQL25_PACKAGE_DIGEST); CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
     'AFI-5b/U1/U2-WP1/U2-WP1b/RR-4/R4-4/D-1/WP-1/v3.0.0: 88 modules; the package holds 102 files (the selector module removed) at the v3.0.0 digest 819f74ac… (f6fa99b1… at WP-1; 568e654d… at D-1; b640785b… at R4-4; 5ce6716e… at RR-4; 3738fce6… at U2-WP1b; be06880d… at U2-WP1; 85022e40… at U1 r4; 3167ab82… at U1 r3; fe483375… at U1 r2; f98e48f8… at AFI-5b with O-2; 1cd8b4e5… before it)');
   check(fs.existsSync(path.join(root, 'tools', 'verify-afi5-runtime.js')),
     'AFI-5b: runtime harness present — tools/verify-afi5-runtime.js (T3/T4/T5 and the D-01/D-02/R-3 mutation register)');
@@ -8496,7 +8522,7 @@ console.log('== U1 — SESSION GRADUATED SHELL ==');
     'U1: About and Release notes are not SESSION destinations (deferred to U2); the LOCAL variants are unreachable from the SESSION views');
   check(jsFiles.filter((f) => /\brenderShell\(\)/.test(code(rd(f)))).join() === 'ui/shell-render.js',
     'U1: renderShell() (the LOCAL shell) is still called only inside shell-render.js');
-  check(!/allowsWorkspace/.test(code(rd('ui/global-search-ui.js'))) && !/allowsWorkspace/.test(code(rd('ui/shell-render.js'))),
+  check(!/allowsWorkspace/.test(code(rd('ui/global-search-ui.js'))) && !/allowsWorkspace/.test(code(readShell())),
     'U1: neither render() nor Global Search consults allowsWorkspace() (both are closed outside LOCAL)');
   const chromeTool = path.join(root, 'tools', 'session-shell-chrome.js');
   check(fs.existsSync(chromeTool) && fs.existsSync(path.join(root, 'tools', 'verify-session-shell-runtime.js'))
@@ -8716,7 +8742,7 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
     'Phase 1: migrations 0036–0038 are the head (38 files), ACTIONS stay 21 (the existing finance.manage), AUTH_MODE SESSION');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const iAudit = order.indexOf('ui/session-audit-view.js');
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && iAudit !== -1 && order.slice(iAudit + 1, iAudit + 4).join() === PHASE1_MODULES.join()
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && iAudit !== -1 && order.slice(iAudit + 1, iAudit + 4).join() === PHASE1_MODULES.join()
     && order.indexOf('core/payroll-api.js') < order.indexOf('core/transaction-api.js'),
     'Phase 1: exactly three new production modules (91), directly after the Audit modules and after payroll-api.js (payrollIdempotencyKey)');
   const DENY = /\b(State|StorageAdapter|loadState|saveState|persist[A-Za-z]*|localStorage|sessionStorage|indexedDB|EmployeeRepository|TransportAdapter|ApplicationGateway|renderShell|renderView|renderViewContent|LocalIdentityProvider|openGlobalSearch|renderTransactions|renderDashboard|renderExecutiveDashboard|renderExecutionCenter|renderCashflow|renderBudget|addTransaction|saveTxn|State\.txns|KNOWN_CATEGORIES|XMLHttpRequest)\b|document\s*\.\s*cookie|\bfetch\s*\(/;
@@ -8754,9 +8780,9 @@ console.log('== Phase 1 — FINANCIAL POSTS, GENERAL TRANSACTIONS AND THE FINANC
   check(['A. ', 'B. ', 'C. ', 'D. ', 'E. ', 'F. ', 'G. '].every((s) => h.includes("'" + s)) && /require\('\.\/session-shell-chrome\.js'\)/.test(h),
     'Phase 1: the SESSION Finance runtime harness covers sections A–G against the exact SESSION shell oracle');
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
-    && pkg.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
-    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
+  check(pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && PHASE1_MODULES.every((f) => pkg.files.some((x) => x.path === 'js/' + f)) && pkg.actions - PHASE2_ACTIONS.length === 21
+    && pkg.packageDigest === ISO_PACKAGE_DIGEST /* U-ISO (was CODEQL25_PACKAGE_DIGEST); CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 (was I4F01_PACKAGE_DIGEST; I4-F01 was I4_PACKAGE_DIGEST; I4 was INTEGRATION_PACKAGE_DIGEST; UX-1 + AWP-01 was UX1_PACKAGE_DIGEST / AWP01_PACKAGE_DIGEST; UIINT1_PACKAGE_DIGEST before)
+    'Phase 1/UX-1/I4: the package holds ' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES) + ' files, the three Ledger modules, session-home.js and the three I4 modules included, at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '… at I4-F01; ' + I4_PACKAGE_DIGEST.slice(0, 8) + '… at I4; ' + INTEGRATION_PACKAGE_DIGEST.slice(0, 8) + '… at the integration; ' + UX1_PACKAGE_DIGEST.slice(0, 8) + '… at UX-1; ' + AWP01_PACKAGE_DIGEST.slice(0, 8) + '… at AWP-01; ' + UIINT1_PACKAGE_DIGEST.slice(0, 8) + '… at UI-INT-1; ' + PHASE1_PACKAGE_DIGEST.slice(0, 8) + '… at Phase 1; 819f74ac… at v3.0.0)');
 }
 
 // ===== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS, BACKEND S1–S5 (ADR-016, Owner 2026-11-17) =====
@@ -8785,8 +8811,8 @@ console.log('== AWP-01 — FINANCE PAYMENT REQUESTS AND REIMBURSEMENTS (BACKEND 
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
   // UX-1 + AWP-01 integration: UX-1's session-home.js is the one module and package file added (92, 106); AWP-01 adds none.
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.actions === 24 && pkg.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
-    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.actions === 24 && pkg.packageDigest === ISO_PACKAGE_DIGEST /* U-ISO (was CODEQL25_PACKAGE_DIGEST); CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,   // CR-01 (was CR02_PACKAGE_DIGEST); CR-02 and I4-F01: no module added (was I4_PACKAGE_DIGEST; I4: three modules added, was INTEGRATION_PACKAGE_DIGEST)
+    'AWP-01: no new frontend module (' + (88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES) + ' with UX-1) or package file (' + (102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES) + ' with UX-1 and I4); the package records ACTIONS 24 at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '…; I4-F01 ' + I4F01_PACKAGE_DIGEST.slice(0, 8) + '…)');
 }
 
 
@@ -8866,7 +8892,7 @@ console.log('== CR-01 — CEO-ASSIGNED REIMBURSEMENT FINANCIAL POST (ADR-017) ==
     'CR-01: the view shows "Not yet assigned by the CEO", "Not recorded (approved before CR-01)" and the approval post selector; the runtime harness covers section L (T-V1 … T-V4)');
   const order = require(path.join(root, 'tools', 'module-order.js'));
   const pkg = JSON.parse(read(path.join(root, 'dist', 'package-manifest.json')));
-  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === CODEQL25_PACKAGE_DIGEST /* CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
+  check(order.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && pkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && pkg.schemaVersion === 6 && pkg.actions === 24 && pkg.packageDigest === ISO_PACKAGE_DIGEST /* U-ISO (was CODEQL25_PACKAGE_DIGEST); CODEQL-2-5 (was AWP05_PACKAGE_DIGEST); AWP-05 (was ARCHOT1_PACKAGE_DIGEST); ARCH-OT-1 (was PAYDRIFT1_PACKAGE_DIGEST); PAY-DRIFT-1 (was CR01_PACKAGE_DIGEST) */,
     'CR-01: no frontend module or package file added; SCHEMA_VERSION 6 and ACTIONS 24; the package at the CR-01 digest ' + CR01_PACKAGE_DIGEST.slice(0, 8) + '… (CR-02 ' + CR02_PACKAGE_DIGEST.slice(0, 8) + '… kept as the baseline)');
 }
 
@@ -9076,6 +9102,77 @@ console.log('== LEGACY CODEQL #2–#5 — SECURE RECORD IDS + PLAIN-TEXT MARKDOW
   const round = ['', 'plain', 'a & b', '<>', '"\'', '&amp;', '&lt;script&gt;', '&#39;', 'a&b;c', '&&;;'];
   check(round.every((s) => r.plain(r.escapeHtml(s)) === s) && r.plain(null) === '' && r.mdText(undefined) === '' && r.plain('&amp;lt;') === '&lt;',
     'CodeQL #2: reportPlainText() is the exact inverse of escapeHtml() and decodes in a single pass ("&amp;lt;" gives "&lt;", never "<")');
+}
+
+// U-ISO SESSION-only production package (Owner GO 2026-11-23, ADR-0005). tools/module-order.js stays the one
+// canonical order and classifies its LOCAL-only modules; index.html lists productionOrder (the order without
+// them) and the package holds nothing else. LOCAL development adds them in memory (tools/serve-local-dev.js).
+// js/ui/shell-core.js is the shell part SESSION shares; js/ui/shell-render.js is the LOCAL shell. CodeQL alert
+// #1 (js/ui/activity-log.js) is NOT closed by this: its source stays in the repository and is still analysed.
+console.log('== U-ISO — SESSION-ONLY PRODUCTION PACKAGE (ADR-0005) ==');
+{
+  const rd = (f) => read(path.join(root, 'js', f));
+  const L = jsFiles.localOnly, P = jsFiles.productionOrder;
+  check(Array.isArray(L) && L.length === ISO_LOCAL_ONLY && new Set(L).size === L.length && L.every((m) => jsFiles.includes(m))
+    && jsFiles.length === 88 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_MODULES && jsFiles.indexOf('ui/shell-core.js') === jsFiles.indexOf('ui/shell-render.js') - 1,
+    'U-ISO: one canonical order (' + jsFiles.length + ' modules, ui/shell-core.js directly before ui/shell-render.js) classifies exactly ' + ISO_LOCAL_ONLY + ' LOCAL-only modules, each in it once');
+  check(JSON.stringify(P) === JSON.stringify(jsFiles.filter((m) => !L.includes(m))) && P.length === jsFiles.length - ISO_LOCAL_ONLY
+    && Object.keys(jsFiles).length === jsFiles.length && JSON.stringify(jsFiles) === JSON.stringify(jsFiles.slice()),
+    'U-ISO: productionOrder is derived (the canonical order without the LOCAL-only modules, same relative order: ' + P.length + ' modules); the export is still a plain array');
+  const mustLocal = ['core/state.js', 'core/storage-adapter.js', 'core/state-load-migrations.js', 'ui/activity-log.js', 'ui/shell-render.js',
+    'core/onboarding-reset.js', 'core/hr-persistence-portability.js', 'import/smart-import-commit.js', 'people/payroll-ops-engine.js', 'core/global-search.js'];
+  const mustShip = ['core/constants.js', 'core/utils.js', 'transport/api-client.js', 'ui/shell-core.js', 'core/session-csv.js', 'core/auth-boot.js',
+    'ui/auth-view.js', 'ui/session-workspace-view.js', 'core/app-bootstrap.js'];
+  check(mustLocal.every((m) => L.includes(m)) && mustShip.every((m) => P.includes(m)),
+    'U-ISO: State, its storage and migrations, the activity log, the LOCAL shell and the LOCAL data writers are LOCAL-only; the SESSION boot, shell core, API client and CSV writer ship');
+  const idxSrcs = (indexHtml.match(/<script\b[^>]*\ssrc="([^"]+)"/g) || []).map((t) => /\ssrc="([^"]+)"/.exec(t)[1]);
+  check(idxSrcs.filter((s) => s.startsWith('js/') && !s.startsWith('js/boot/')).join() === P.map((m) => 'js/' + m).join() && !idxSrcs.some((s) => s.startsWith('js/') && jsFiles.isLocalOnly(s.slice(3))),
+    'U-ISO: index.html references every production module once, in order, and no LOCAL-only module anywhere');
+  const isoPkg = pkgTool.assemblePackage();
+  const isoJs = isoPkg.files.map((f) => f.path).filter((p) => p.startsWith('js/'));
+  check(isoPkg.files.length === 102 + PHASE1_FILES + UX1_FILES + I4_FILES + AWP05_FILES + ISO_FILES && isoJs.length === P.length + 1
+    && !isoJs.some((p) => jsFiles.isLocalOnly(p.slice(3))) && isoPkg.manifest.packageDigest === ISO_PACKAGE_DIGEST,
+    'U-ISO: the package holds ' + isoPkg.files.length + ' files — ' + P.length + ' production modules + the theme boot, no LOCAL-only module — at the U-ISO digest ' + ISO_PACKAGE_DIGEST.slice(0, 8) + '…');
+  const bpSrc = read(path.join(root, 'tools', 'build-package.js'));
+  check(/if \(f\.startsWith\('js\/'\) && MODULE_ORDER\.isLocalOnly\(f\.slice\(3\)\)\) fail\('index\.html references a LOCAL-only module: ' \+ f\);/.test(bpSrc),
+    'U-ISO: tools/build-package.js refuses (fails loudly on) a LOCAL-only module in the package');
+  // No production module reaches the LOCAL application, except the two guarded hand-overs.
+  const topDefs = (list) => { const d = new Set(); list.forEach((m) => { const s = rd(m);
+    [/^(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/gm, /^(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm].forEach((re) => { let x; while((x = re.exec(s))) d.add(x[1]); }); }); return d; };
+  const LD = topDefs(L), PD = topDefs(P);
+  const strs = (t) => stripComments(t).replace(/`(?:\\[\s\S]|[^`\\])*`/g, (m) => m.replace(/[^${}\w]/g, ' ')).replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g, '""');
+  const reach = {};
+  // An object key (`name:`) or a method shorthand (`name(){`) is not a reference.
+  P.forEach((m) => { const ids = new Set(strs(rd(m)).match(/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$]|\s*:|\s*\([^()]*\)\s*\{)/g) || []);
+    const hit = [...ids].filter((i) => LD.has(i) && !PD.has(i)); if(hit.length) reach[m] = hit.sort().join(','); });
+  check(JSON.stringify(reach) === JSON.stringify({ 'ui/shell-core.js': 'renderLocalShell', 'core/app-bootstrap.js': 'applyTheme,installGlobalUIHandlers,loadState,maybeShowFirstRunChoice' }),
+    'U-ISO: production code names no LOCAL-only symbol except render() -> renderLocalShell() and the LOCAL boot branch of app-bootstrap.js >> ' + JSON.stringify(reach));
+  const coreCode = stripComments(rd('ui/shell-core.js')).replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1');
+  const coreDefs = [...topDefs(['ui/shell-core.js'])].sort().join();
+  check(coreDefs === 'NAV_GROUPS,__floatMenu,closeFloatingMenu,isFloatingMenuOpenFor,openFloatingMenu,positionFloatingMenu,render,sidebarFocusables,sidebarIsDrawerMode'
+    && !/\bState\b|localStorage|sessionStorage|indexedDB|\blogActivity\b/.test(coreCode)
+    && /function render\(\)\{\s*closeFloatingMenu\(\);\s*if\(AUTH_MODE !== AUTH_MODES\.LOCAL\)\{\s*if\(typeof renderAuthView === 'function'\) renderAuthView\(\);\s*return;\s*\}\s*renderLocalShell\(\);\s*\}/.test(coreCode),
+    'U-ISO: shell-core.js defines only the shared shell (floating menu, NAV_GROUPS, drawer helpers, render), reads no State or storage, and reaches renderLocalShell() only past the LOCAL gate');
+  check(/^function renderLocalShell\(\)\{\s*captureSidebarScroll\(\);[^\n]*\n\s*if\(!shellIsMounted\(\)\) renderShell\(\);\s*syncShellState\(\);\s*restoreSidebarScroll\(\);\s*renderView\(document\.getElementById\('main'\)\);\s*\}/m.test(stripComments(rd('ui/shell-render.js')))
+    && !/^function render\(\)|^const NAV_GROUPS|^let __floatMenu/m.test(rd('ui/shell-render.js')),
+    'U-ISO: shell-render.js keeps the LOCAL mount verbatim in renderLocalShell() and no longer defines render(), NAV_GROUPS or the floating menu');
+  check(crypto.createHash('sha256').update(read(path.join(root, 'js', 'boot', 'theme-boot.js')), 'utf8').digest('hex') === '5e1ddde21ccd0ce04c021d09136dfa85d7424b7c602c380d344ae175da973bd7',
+    'U-ISO: js/boot/theme-boot.js (the one appearance-only tam_settings_v1 read) is byte-identical to main c6453f6');
+  const sld = require('./serve-local-dev.js');
+  const devPage = sld.localDevIndexHtml(indexHtml) || '';
+  const devSrcs = (devPage.match(/<script\b[^>]*\ssrc="([^"]+)"/g) || []).map((t) => /\ssrc="([^"]+)"/.exec(t)[1]);
+  const sldSrc = read(path.join(root, 'tools', 'serve-local-dev.js'));
+  check(devSrcs.filter((s) => s.startsWith('js/') && !s.startsWith('js/boot/')).join() === jsFiles.map((m) => 'js/' + m).join()
+    && devSrcs[devSrcs.indexOf('js/core/identity.js') + 1] === 'dev/local-identity-fixture.js'
+    && /const localModule = rel\.startsWith\('js\/'\) && ORDER\.isLocalOnly\(rel\.slice\(3\)\);\s*const base = localModule \? srcRoot : pkgRoot;/.test(sldSrc),
+    'U-ISO: LOCAL development (serve-local-dev.js) serves the full canonical order, persona after identity.js, and the LOCAL-only modules from js/ in the source tree');
+  const ciYmlIso = read(path.join(root, '.github', 'workflows', 'ci.yml'));
+  const isoH = read(path.join(root, 'tools', 'verify-session-package-runtime.js'));
+  check(/run: node tools\/verify-session-package-runtime\.js/.test(ciYmlIso) && /RUNTIME VERIFICATION PASSED/.test(isoH) && /process\.exit\(1\)/.test(isoH) && /assemblePackage\(\)/.test(isoH),
+    'U-ISO: CI runs the SESSION-only package harness (the built package boots with no LOCAL global), which fails non-zero');
+  const codeqlCfg = read(path.join(root, '.github', 'codeql', 'codeql-config.yml'));
+  check(!/activity-log|ui\/|js\//.test(codeqlCfg.replace(/^\s*#.*$/gm, '')) && fs.existsSync(path.join(root, 'js', 'ui', 'activity-log.js')),
+    'U-ISO: CodeQL still analyses every js/ module (no source path excluded); js/ui/activity-log.js stays in the repository, so alert #1 stays open');
 }
 console.log('');
 if (fails.length === 0) { console.log('VERIFICATION PASSED -- ' + passes + ' checks OK.'); process.exit(0); }
