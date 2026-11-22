@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { readAppMeta } = require('./app-version.js');
+const MODULE_ORDER = require('./module-order.js');
 
 const root = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(p, 'utf8');
@@ -83,6 +84,8 @@ function packageFiles() {
   if (unique.length !== files.length) fail('duplicate file reference in the package set.');
   for (const f of unique) {
     if (!fs.existsSync(path.join(root, f))) fail('referenced file does not exist: ' + f);
+    // U-ISO (ADR-0005): the package is SESSION-only — a LOCAL-only module never ships.
+    if (f.startsWith('js/') && MODULE_ORDER.isLocalOnly(f.slice(3))) fail('index.html references a LOCAL-only module: ' + f);
   }
   return unique.sort();
 }

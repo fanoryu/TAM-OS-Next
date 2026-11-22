@@ -33,7 +33,7 @@ identity** — the canonical tag's source/docs checkpoint is newer than the pred
 while the portable artifact is unchanged. `fanoryu/TAM-OS-Next` is canonical going forward.
 **Current distributable — Distribution-1 (ADR-0002 Model B):** the **deployment package** built by
 `tools/build-package.js` — the static document root (`index.html`, 6 stylesheets, `js/boot/theme-boot.js`,
-the module-order scripts, vendored SheetJS 0.18.5, licence texts), each file byte-identical to its source,
+the production module-order scripts, vendored SheetJS 0.18.5, licence texts), each file byte-identical to its source,
 recorded by the committed `dist/package-manifest.json`. The page has no inline executable script and makes
 no third-party request, so it runs under a strict Content-Security-Policy (header contract:
 `tools/package-headers.js`; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §8). It is **unreleased** until the
@@ -3439,6 +3439,16 @@ the old concatenation before writing anything. Runtime behavior is therefore unc
 Still classic ordered `<script>` tags, one shared global scope — no ES modules, no
 `import`/`export`, no bundler. **Load order is behavior-critical** (top-level `const`
 initializations depend on it) and lives in exactly one place: `tools/module-order.js`.
+
+> **SESSION-only package (ADR-0005, 2026-11-23).** `module-order.js` also classifies its LOCAL-only
+> modules (`localOnly`: `State`, its storage, the LOCAL shell `ui/shell-render.js`, the activity log and
+> the LOCAL business pages) and derives `productionOrder` (the order without them). `index.html` lists
+> only `productionOrder` (30 modules), so the package carries 44 files and no LOCAL-only module.
+> `ui/shell-core.js` holds the shell part SESSION shares (floating menu, `NAV_GROUPS`, drawer helpers,
+> `render()`). LOCAL development (`tools/serve-local-dev.js`) restores the full order in memory and serves
+> the LOCAL-only modules from source; the LOCAL harnesses keep loading the full order. The text below
+> predates this and describes the full canonical order.
+
 `index.html` mirrors it as `<script src>` tags; `build-single-file.js`/`verify-build.js`
 `require()` it; `verify-build.js` asserts `index.html` matches the manifest.
 

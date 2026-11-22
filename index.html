@@ -28,80 +28,16 @@
 
 <script id="seed-data" type="application/json">[]</script>
 
-<!-- JS load order = tools/module-order.js (classic ordered scripts, one shared global scope).
-     Keep this list identical to that manifest; verify-build.js asserts they match. -->
+<!-- JS load order = tools/module-order.js productionOrder (classic ordered scripts, one shared global
+     scope): the canonical order without its LOCAL-only modules (ADR-0005, SESSION-only package).
+     Keep this list identical to it; verify-build.js asserts they match. LOCAL development adds the
+     LOCAL-only modules in memory (tools/serve-local-dev.js). -->
 <script src="js/core/constants.js"></script>
 <script src="js/core/utils.js"></script>
 <script src="js/core/identity.js"></script>
 <script src="js/transport/api-client.js"></script>
 <script src="js/core/session-identity.js"></script>
-<script src="js/core/workspace.js"></script>
-<script src="js/core/authz.js"></script>
-<script src="js/core/data-grid.js"></script>
-<script src="js/core/global-search.js"></script>
-<script src="js/core/storage-adapter.js"></script>
-<script src="js/ui/charts.js"></script>
-<script src="js/core/state.js"></script>
-<script src="js/core/state-load-migrations.js"></script>
-<script src="js/core/domain-services.js"></script>
-<script src="js/import/parser.js"></script>
-<script src="js/ui/shell-render.js"></script>
-<script src="js/ui/global-search-ui.js"></script>
-<script src="js/finance/dashboard.js"></script>
-<script src="js/finance/execution-center.js"></script>
-<script src="js/finance/transaction-modals.js"></script>
-<script src="js/finance/transactions.js"></script>
-<script src="js/finance/add-upload.js"></script>
-<script src="js/core/hr-persistence-portability.js"></script>
-<script src="js/repository/employee-repository.js"></script>
-<script src="js/repository/contract-repository.js"></script>
-<script src="js/repository/payroll-repository.js"></script>
-<script src="js/import/import-preview.js"></script>
-<script src="js/analytics/plan-vs-actual.js"></script>
-<script src="js/analytics/compare.js"></script>
-<script src="js/analytics/trends.js"></script>
-<script src="js/analytics/executive-dashboard.js"></script>
-<script src="js/finance/cashflow.js"></script>
-<script src="js/finance/budget.js"></script>
-<script src="js/analytics/executive-insights.js"></script>
-<script src="js/ui/settings-about.js"></script>
-<script src="js/ui/activity-log.js"></script>
-<script src="js/analytics/reports.js"></script>
-<script src="js/people/people-core.js"></script>
-<script src="js/people/employees.js"></script>
-<script src="js/people/contracts.js"></script>
-<script src="js/people/payroll-planning.js"></script>
-<script src="js/people/recurring-expenses.js"></script>
-<script src="js/people/monthly-plan.js"></script>
-<script src="js/people/legacy-mapping.js"></script>
-<script src="js/people/hr-dashboard-reports.js"></script>
-<script src="js/core/stabilization.js"></script>
-<script src="js/people/overtime.js"></script>
-<script src="js/core/onboarding-reset.js"></script>
-<script src="js/import/smart-import-extract.js"></script>
-<script src="js/import/smart-import-commit.js"></script>
-<script src="js/people/employee-dedup.js"></script>
-<script src="js/import/smart-import-ui.js"></script>
-<script src="js/people/payroll-ops-engine.js"></script>
-<script src="js/people/payroll-workspace.js"></script>
-<script src="js/people/supplemental-engine.js"></script>
-<script src="js/domain/aggregates.js"></script>
-<script src="js/domain/commands.js"></script>
-<script src="js/domain/queries.js"></script>
-<script src="js/domain/events.js"></script>
-<script src="js/domain/aggregate-helpers.js"></script>
-<script src="js/domain/employee-contact-aggregate.js"></script>
-<script src="js/domain/employee-employment-aggregate.js"></script>
-<script src="js/domain/employee-lifecycle-aggregate.js"></script>
-<script src="js/domain/employee-compensation-aggregate.js"></script>
-<script src="js/domain/contract-date-aggregate.js"></script>
-<script src="js/domain/payroll-lifecycle-aggregate.js"></script>
-<script src="js/domain/contract-status-aggregate.js"></script>
-<script src="js/domain/contract-renewal-aggregate.js"></script>
-<script src="js/domain/contract-core-aggregate.js"></script>
-<script src="js/domain/domain-layer.js"></script>
-<script src="js/platform/application-gateway.js"></script>
-<script src="js/transport/transport-adapter.js"></script>
+<script src="js/ui/shell-core.js"></script>
 <script src="js/core/overtime-api.js"></script>
 <script src="js/core/session-overtime.js"></script>
 <script src="js/ui/session-overtime-view.js"></script>
