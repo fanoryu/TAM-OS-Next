@@ -7,7 +7,8 @@
 
      List      the requests whose date is in the range (From / To, Apply), a status filter, "New
                payment request" and (CR-01) "New reimbursement" (CEO) or "New reimbursement"
-               (Employee), and one row per request:
+               (Employee), for the CEO a request-type filter (all, payment requests,
+               reimbursements) composed with the status filter, and one row per request:
                date, type, for (the payee, or the employee), Financial Post, category, amount, status
      Detail    every field the server returned, the status with its reason, the payment when Paid,
                the operations this principal is offered for its status (sessionRequestsOffered), an
@@ -71,6 +72,9 @@ const SESSION_REQUESTS_TEXT = Object.freeze({
 // A request's post as shown: its name, or the neutral status while the CEO has not assigned one (CR-01).
 function sessionRequestsPostText(post){ return post === null ? SESSION_REQUESTS_TEXT.postUnassigned : transactionPostName(post); }
 const SESSION_REQUESTS_KIND_LABELS = Object.freeze({ paymentRequest: 'Payment request', reimbursement: 'Reimbursement' });
+// The CEO's request-type filter: the option labels and the nouns of the count and the empty state.
+const SESSION_REQUESTS_KIND_FILTER = Object.freeze({ paymentRequest: Object.freeze({ option: 'Payment requests', one: 'payment request', many: 'payment requests' }),
+  reimbursement: Object.freeze({ option: 'Reimbursements', one: 'reimbursement', many: 'reimbursements' }) });
 const SESSION_REQUESTS_STATUS_TONES = Object.freeze({ Draft: 'neutral', Submitted: 'info', Approved: 'attention', Paid: 'done', Rejected: 'stop', Cancelled: 'stop' });
 const SESSION_REQUESTS_STATUS_TEXT = Object.freeze({ Draft: 'Draft', Submitted: 'Submitted', Approved: 'Approved — not paid', Paid: 'Paid', Rejected: 'Rejected', Cancelled: 'Cancelled' });
 const SESSION_REQUESTS_METHOD_TEXT = Object.freeze({ cash: 'Cash', bankTransfer: 'Bank transfer', qris: 'QRIS', virtualAccount: 'Virtual account', creditCard: 'Credit card', other: 'Other' });
@@ -208,25 +212,31 @@ function sessionRequestsListHTML(w, principal){
   const d = w.rangeDraft || { from: '', to: '' };
   const kind = sessionRequestsCreateKind(principal);
   const statusOption = function(v, label){ return '<option value="' + escapeHtml(v) + '"' + (v === w.filter ? ' selected' : '') + '>' + escapeHtml(label) + '</option>'; };
+  const ceo = sessionRequestsIsCeo(principal);
+  const kindFilter = ceo ? w.kindFilter : '';
+  const kindOption = function(v, label){ return '<option value="' + escapeHtml(v) + '"' + (v === kindFilter ? ' selected' : '') + '>' + escapeHtml(label) + '</option>'; };
   const controls = '<form class="head-controls" id="frRangeForm" role="group" aria-label="Date range" novalidate>'
     + '<label for="frFrom">From</label><input class="input" type="date" id="frFrom" name="from" autocomplete="off" value="' + escapeHtml(d.from) + '"' + dis + '>'
     + '<label for="frTo">To</label><input class="input" type="date" id="frTo" name="to" autocomplete="off" value="' + escapeHtml(d.to) + '"' + dis + '>'
     + '<button class="btn" type="submit" id="frApplyBtn"' + dis + '>Apply</button>'
     + '<label for="frFilter">Status</label><select class="input" id="frFilter" name="status"' + dis + '>' + statusOption('', 'All statuses')
-    + FINANCE_REQUEST_STATUSES.map(function(s){ return statusOption(s, SESSION_REQUESTS_STATUS_TEXT[s]); }).join('') + '</select></form>'
+    + FINANCE_REQUEST_STATUSES.map(function(s){ return statusOption(s, SESSION_REQUESTS_STATUS_TEXT[s]); }).join('') + '</select>'
+    + (ceo ? '<label for="frKind">Type</label><select class="input" id="frKind" name="kind"' + dis + '>' + kindOption('', 'All types')
+      + FINANCE_REQUEST_KINDS.map(function(k){ return kindOption(k, SESSION_REQUESTS_KIND_FILTER[k].option); }).join('') + '</select>' : '') + '</form>'
     + '<div class="auth-actions"><button class="btn btn-accent" type="button" id="frNewBtn"' + dis + '>' + (kind === 'paymentRequest' ? 'New payment request' : 'New reimbursement') + '</button>'
     + (sessionRequestsIsCeo(principal) ? '<button class="btn" type="button" id="frNewRbBtn"' + dis + '>New reimbursement</button>' : '') + '</div>';   // CR-01: the CEO files a reimbursement for an employee
   const head = '<h2 class="section-title" id="frListTitle" tabindex="-1">Requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '</h2>';
   if(w.listStatus === SESSION_REQUESTS_STATUS.ERROR && w.errors.list) return controls + head + sessionRequestsErrorHTML(w.errors.list, 'frReadError', 'list');
   if(w.listStatus !== SESSION_REQUESTS_STATUS.READY || !w.list) return controls + head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_REQUESTS_TEXT.loadingList) + '</p>';
-  const rows = w.list.filter(function(r){ return !w.filter || r.status === w.filter; });
-  if(!rows.length) return controls + head + '<div class="empty" role="status">' + (w.list.length ? 'No ' + escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) + ' requests in this range.' : 'No requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '.') + '</div>';
+  const rows = sessionRequestsVisibleRows(w, principal);
+  const noun = kindFilter ? SESSION_REQUESTS_KIND_FILTER[kindFilter] : { one: 'request', many: 'requests' };
+  if(!rows.length) return controls + head + '<div class="empty" role="status">' + (w.list.length ? 'No ' + (w.filter ? escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) + ' ' : '') + escapeHtml(noun.many) + ' in this range.' : 'No requests dated ' + escapeHtml(sessionRequestsRangeLabel(w.range)) + '.') + '</div>';
   const body = rows.map(function(r, i){
     return '<tr><td>' + escapeHtml(r.documentDate) + '</td><td>' + escapeHtml(SESSION_REQUESTS_KIND_LABELS[r.kind]) + '</td><td>' + escapeHtml(sessionRequestsForText(w, principal, r)) + '</td>'
       + '<td>' + escapeHtml(sessionRequestsPostText(r.financialPost)) + '</td><td>' + escapeHtml(r.category) + '</td><td>' + moneyHTML(r.amount) + '</td>'
       + '<td>' + sessionRequestsStatusHTML(r) + '</td><td><button class="btn" type="button" data-fr-open="' + i + '"' + dis + '>Open</button></td></tr>';
   }).join('');
-  return controls + head + '<p class="hint">' + rows.length + (rows.length === 1 ? ' request' : ' requests') + (w.filter ? ' ' + escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) : '') + ', by date.</p>'
+  return controls + head + '<p class="hint">' + rows.length + ' ' + escapeHtml(rows.length === 1 ? noun.one : noun.many) + (w.filter ? ' ' + escapeHtml(SESSION_REQUESTS_STATUS_TEXT[w.filter]) : '') + ', by date.</p>'
     + '<div class="table-wrap" id="frList"><table><thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">For</th><th scope="col">Financial Post</th>'
     + '<th scope="col">Category</th><th scope="col">Amount (Rp)</th><th scope="col">Status</th><th scope="col" aria-label="Open"></th></tr></thead><tbody>' + body + '</tbody></table></div>';
 }
@@ -342,6 +352,7 @@ function bindSessionRequests(app){
     SessionRequests.applyRange();
   });
   on('frFilter', 'change', function(){ SessionRequests.setFilter(this.value); });
+  on('frKind', 'change', function(){ SessionRequests.setKindFilter(this.value); });   // CEO only
   on('frRetryBtn', 'click', function(){ SessionRequests.retry(this.getAttribute('data-fr-retry')); });   // the read whose error it is shown with
   on('frNewBtn', 'click', function(){ SessionRequests.openCreate(); });
   on('frNewRbBtn', 'click', function(){ SessionRequests.openCreate('reimbursement'); });

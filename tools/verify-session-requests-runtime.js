@@ -41,6 +41,10 @@
    a reimbursement for an active employee with an optional post (unassigned when omitted); the
    Employee can never name another employee; malformed shapes are refused before sending; the
    payment request create is unchanged.
+
+   KIND-FILTER (Owner GO Sprint 1, 2026-11-23), section N: the CEO's request-type filter over the list
+   already read — composed with the status filter and the date range, the count, the empty state and
+   Open on the filtered rows, no request when it changes, reset with the principal; no Employee filter.
    ============================================================ */
 
 const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
@@ -1112,6 +1116,99 @@ function firewall(rt, label){
     const forged = rt.FinanceRequestRequests.create('reimbursement', { employeeId: 'emp_other_2', financialPost: 'GA', category: 'Transport', description: 'Fabricated', amount: '1.00', documentDate: '2031-04-14' }, 'f'.repeat(32), '2031-04-15', false);
     check(forged.ok && !('employeeId' in forged.body) && !('financialPost' in forged.body), 'CR-01 C-2. without the CEO flag a reimbursement body names neither an employee nor a post');
     firewall(rt, 'CR-01 M Employee');
+  }
+
+  /* ---------- N. KIND-FILTER: the CEO's request-type filter (Owner GO Sprint 1, 2026-11-23) ---------- */
+  {
+    const rows = (rt) => card(rt).match(/<tr><td>\d{4}-\d{2}-\d{2}<\/td>[\s\S]*?<\/tr>/g) || [];
+    const kinds = (rt) => rows(rt).map((r) => (/<td>(Payment request|Reimbursement)<\/td>/.exec(r) || [])[1]);
+    const rt = await openCeo();
+    const netBefore = rt.net.calls.length;
+    let html = card(rt);
+    check(rt.rq().kindFilter === '' && /<label for="frKind">Type<\/label><select class="input" id="frKind" name="kind">/.test(html)
+      && /<option value="" selected>All types<\/option><option value="paymentRequest">Payment requests<\/option><option value="reimbursement">Reimbursements<\/option><\/select>/.test(html),
+      'N. the CEO\'s list offers a Type filter — All types (the default, selected), Payment requests, Reimbursements');
+    check(rows(rt).length === 6 && /6 requests, by date\./.test(html), 'N. All types keeps the existing queue: six rows, "6 requests, by date."');
+    rt.app.type('frKind', 'paymentRequest');
+    html = card(rt);
+    check(rt.rq().kindFilter === 'paymentRequest' && rows(rt).length === 3 && kinds(rt).every((k) => k === 'Payment request') && /3 payment requests, by date\./.test(html)
+      && /<option value="paymentRequest" selected>Payment requests<\/option>/.test(html),
+      'N. Payment requests shows only the three payment requests, counted as "3 payment requests"');
+    rt.app.type('frKind', 'reimbursement');
+    html = card(rt);
+    check(rt.rq().kindFilter === 'reimbursement' && rows(rt).length === 3 && kinds(rt).every((k) => k === 'Reimbursement') && /3 reimbursements, by date\./.test(html),
+      'N. Reimbursements shows only the three reimbursements, counted as "3 reimbursements"');
+    check(rt.net.calls.length === netBefore, 'N. switching the type issues no request at all (the list already read is filtered)');
+    rt.app.type('frFilter', 'Draft');
+    html = card(rt);
+    check(rows(rt).length === 1 && /<td>2031-04-10<\/td><td>Reimbursement<\/td>/.test(rows(rt)[0]) && /1 reimbursement Draft, by date\./.test(html),
+      'N. status and type compose: Draft + Reimbursements is the one Draft reimbursement ("1 reimbursement Draft")');
+    rt.app.type('frKind', 'paymentRequest'); rt.app.type('frFilter', 'Paid');
+    html = card(rt);
+    check(rows(rt).length === 0 && /<div class="empty" role="status">No Paid payment requests in this range\.<\/div>/.test(html),
+      'N. an empty combination says so: "No Paid payment requests in this range."');
+    rt.app.type('frKind', 'reimbursement');
+    check(rows(rt).length === 1 && /1 reimbursement Paid, by date\./.test(card(rt)), 'N. Paid + Reimbursements is the one Paid reimbursement');
+    rt.app.type('frKind', '');
+    check(rows(rt).length === 1 && /1 request Paid, by date\./.test(card(rt)), 'N. back to All types, Paid keeps the existing wording ("1 request Paid")');
+    rt.app.type('frFilter', '');
+    rt.app.type('frKind', 'Bogus');
+    check(rt.rq().kindFilter === '' && rows(rt).length === 6, 'N. a type outside the two kinds is no type filter');
+    check(rt.net.calls.length === netBefore, 'N. no status or type change read the server');
+    // Open names the row of the filtered list: Reimbursements, row 2 is the Draft reimbursement.
+    rt.app.type('frKind', 'reimbursement');
+    await openRow(rt, 2, RB_DRAFT);
+    check(rt.rq().detailId === RB_DRAFT.id && rt.net.calls.filter((c) => c.url === ONE(RB_DRAFT.id)).length === 1 && /id="frDetail"/.test(card(rt)),
+      'N. Open on the third filtered row opens that reimbursement (its own id read), not the third row of the whole list');
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    check(rt.rq().kindFilter === 'reimbursement' && rows(rt).length === 3 && /<option value="reimbursement" selected>/.test(card(rt)), 'N. back to the list, the type filter is kept');
+    const calls = rt.net.calls.length;
+    rt.app.openRow(3); await flush();
+    check(rt.rq().detailId === null && rt.net.calls.length === calls, 'N. an index past the filtered rows opens nothing and reads nothing');
+    rt.app.type('frKind', 'paymentRequest');
+    await openRow(rt, 0, PR_DRAFT);
+    check(rt.rq().detailId === PR_DRAFT.id, 'N. Open on the first payment-request row opens that payment request');
+    rt.app.fire('frBackBtn', 'click'); await flush();
+    // The date range composes: a new range is read; the type and status filters apply to it.
+    const APRIL = '/api/finance-requests?from=2031-04-01&to=2031-04-30';
+    rt.net.routes[APRIL] = [ok({ financeRequests: [PR_APP, RB_PAID, RB_REJ, RB_DRAFT] })];
+    rt.app.type('frFrom', '2031-04-01'); rt.app.type('frTo', '2031-04-30');
+    rt.app.fire('frRangeForm', 'submit'); await flush();
+    html = card(rt);
+    check(rt.net.calls.filter((c) => c.url === APRIL).length === 1 && rt.rq().kindFilter === 'paymentRequest' && rows(rt).length === 1 && /<td>2031-04-01<\/td><td>Payment request<\/td>/.test(rows(rt)[0])
+      && /1 payment request, by date\./.test(html), 'N. date range and type compose: April read once, Payment requests shows its one payment request');
+    rt.app.type('frKind', 'reimbursement'); rt.app.type('frFilter', 'Rejected');
+    check(rows(rt).length === 1 && /<td>2031-04-03<\/td><td>Reimbursement<\/td>/.test(rows(rt)[0]) && rt.net.calls.filter((c) => c.url === APRIL).length === 1,
+      'N. date range, status and type compose: April + Rejected + Reimbursements is the one rejected reimbursement, still one read');
+    firewall(rt, 'N. CEO');
+    // A principal change resets the type.
+    const other = Object.assign({}, rt.AuthBoot.snapshot().principal, { id: 'u_other_9' });
+    check(rt.rq().kindFilter === 'reimbursement' && rt.SessionRequestsStore.bindPrincipal(other) === true && rt.rq().kindFilter === '' && rt.rq().filter === '',
+      'N. a different principal resets the type (and status) filter to All');
+  }
+  {
+    // Session end then a new sign-in: the type starts at All types.
+    const rt = await openCeo();
+    rt.app.type('frKind', 'paymentRequest');
+    rt.AuthBoot.sessionLost(); await flush();
+    check(rt.rq().kindFilter === '', 'N. the session ending resets the type filter');
+  }
+  {
+    // The Employee: no type filter, and none can be forced.
+    const rt = await openEmp();
+    const netBefore = rt.net.calls.length;
+    let html = card(rt);
+    check(!/id="frKind"|All types/.test(html) && (html.match(/<tr><td>\d{4}/g) || []).length === 3 && /3 requests, by date\./.test(html),
+      'N. an Employee has no Type filter; their list and count are unchanged');
+    rt.SessionRequests.setKindFilter('paymentRequest');
+    check(rt.rq().kindFilter === '' && rt.net.calls.length === netBefore, 'N. a forged type change by an Employee is refused and reads nothing');
+    rt.SessionRequestsStore.setKindFilter('paymentRequest'); rt.SessionRequests.setFilter('');
+    html = card(rt);
+    check((html.match(/<tr><td>\d{4}/g) || []).length === 3 && /3 requests, by date\./.test(html) && !/id="frKind"/.test(html), 'N. even a type set in the store directly never filters an Employee\'s list');
+    await openRow(rt, 2, RB_DRAFT);
+    check(rt.rq().detailId === RB_DRAFT.id && /id="frEditBtn"/.test(card(rt)) && /id="frSubmitBtn"/.test(card(rt)) && !/id="frApproveBtn"|id="frPayBtn"|id="frCancelBtn"/.test(card(rt)),
+      'N. the Employee\'s Open still names their own row; their Draft offers Edit and Submit only');
+    firewall(rt, 'N. Employee');
   }
 
   console.log('');
