@@ -29,6 +29,8 @@
      range, rangeDraft          the documentDate range listed — the current company-calendar year
                                 when first shown, then the user's Apply
      filter                     '' or one status: the list shown (the server list is not re-read)
+     kindFilter                 CEO only: '' or one request kind, composed with `filter` over the same
+                                list (never re-read); reset with every principal change
      list, listStatus           the requests of `range`, in documentDate order
      detailId, detail, detailStatus   the request opened, read from the server
      history, historyStatus     the CEO's activity history of the request opened
@@ -92,11 +94,18 @@ function sessionRequestsValuesOf(r){
 }
 // CR-01 (ADR-017 R-3): the CEO receives the approval snapshot, an Employee never does.
 function sessionRequestsShapeFits(p, r){ return sessionRequestsIsCeo(p) ? financeRequestHasSnapshot(r) : !financeRequestHasSnapshot(r); }
+// The rows of the list as filtered and rendered: the status filter and, for the CEO only, the
+// request-type filter, over the list already read. The view renders these and Open names one by its index.
+function sessionRequestsVisibleRows(s, p){
+  if(s.listStatus !== SESSION_REQUESTS_STATUS.READY || !s.list) return [];
+  const kind = sessionRequestsIsCeo(p) ? s.kindFilter : '';
+  return s.list.filter(function(r){ return (!s.filter || r.status === s.filter) && (!kind || r.kind === kind); });
+}
 
 const SessionRequestsStore = (function(){
   const IDLE_MUTATION = Object.freeze({ kind: null, status: SESSION_REQUESTS_MUTATION_STATUS.IDLE, error: null, fields: null });
   let principalKey = null, generation = 0;
-  let open = false, range = null, rangeDraft = null, filter = '';
+  let open = false, range = null, rangeDraft = null, filter = '', kindFilter = '';
   let list = null, listSeq = 0, listStatus = SESSION_REQUESTS_STATUS.IDLE;
   let detailId = null, detail = null, detailSeq = 0, detailStatus = SESSION_REQUESTS_STATUS.IDLE;
   let history = null, historySeq = 0, historyStatus = SESSION_REQUESTS_STATUS.IDLE;
@@ -115,7 +124,7 @@ const SessionRequestsStore = (function(){
     historySeq++; history = null; historyStatus = SESSION_REQUESTS_STATUS.IDLE; clearError('history');
   }
   function clear(){
-    open = false; range = null; rangeDraft = null; filter = '';
+    open = false; range = null; rangeDraft = null; filter = ''; kindFilter = '';
     dropList(); detailId = null; dropDetail(); employeesSeq++; employees = null; employeeOptions = null;
     form = null; action = null; mutation = IDLE_MUTATION;
     errors = { list: null, detail: null, history: null }; notice = null; focus = null;
@@ -151,6 +160,7 @@ const SessionRequestsStore = (function(){
     setRangeDraft(name, value){ if(rangeDraft && (name === 'from' || name === 'to')) rangeDraft[name] = typeof value === 'string' ? value : ''; },
     setRange(next){ range = Object.freeze({ from: next.from, to: next.to }); rangeDraft = { from: next.from, to: next.to }; notice = null; dropList(); },
     setFilter(v){ filter = v === '' || FINANCE_REQUEST_STATUSES.indexOf(v) !== -1 ? v : ''; },
+    setKindFilter(v){ kindFilter = v === '' || FINANCE_REQUEST_KINDS.indexOf(v) !== -1 ? v : ''; },
     openDetail(id){ detailId = id; dropDetail(); form = null; action = null; notice = null; mutation = IDLE_MUTATION; },
     closeDetail(){ detailId = null; dropDetail(); form = null; action = null; notice = null; mutation = IDLE_MUTATION; },
     begin(kind){
@@ -217,7 +227,7 @@ const SessionRequestsStore = (function(){
     takeFocus(){ const f = focus; focus = null; return f; },
     snapshot(){
       return Object.freeze({
-        principalKey: principalKey, generation: generation, open: open, range: range, filter: filter,
+        principalKey: principalKey, generation: generation, open: open, range: range, filter: filter, kindFilter: kindFilter,
         rangeDraft: rangeDraft ? Object.freeze({ from: rangeDraft.from, to: rangeDraft.to }) : null,
         list: list, listStatus: listStatus, detailId: detailId, detail: detail, detailStatus: detailStatus,
         history: history, historyStatus: historyStatus, employees: employees, employeeOptions: employeeOptions,
@@ -347,6 +357,8 @@ const SessionRequests = (function(){
       return loading;
     },
     setFilter(v){ if(!canRead()) return; SessionRequestsStore.setFilter(v); paint(); },
+    // CEO only: the request type shown, over the list already read (nothing is read again).
+    setKindFilter(v){ if(!canRead() || !sessionRequestsIsCeo(principalNow())) return; SessionRequestsStore.setKindFilter(v); paint(); },
     // Retry the read named by the Retry shown with its error (I4-F01): that read only, and only while it failed.
     retry(scope){
       if(!canAct() || ['list', 'detail', 'history'].indexOf(scope) === -1) return;
@@ -359,7 +371,7 @@ const SessionRequests = (function(){
     openDetail(index){
       if(!canAct()) return;
       const s = SessionRequestsStore.snapshot();
-      const rows = s.listStatus === SESSION_REQUESTS_STATUS.READY ? s.list.filter(function(r){ return !s.filter || r.status === s.filter; }) : [];
+      const rows = sessionRequestsVisibleRows(s, principalNow());
       const r = Number.isInteger(index) && index >= 0 ? rows[index] : undefined;
       if(!r) return;
       SessionRequestsStore.openDetail(r.id);

@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "e19cbcf589f9305a2d3722713d2589140c0de26bd4c48a4411b63f76f7a95922",
+  "packageDigest": "91549abed1dcb91730b6a43383a0fe5ec9babd4fde5aa9427909a477b906d659",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 2272349,
-    "sha256": "de883b1b555196ee3deab939c43b3771ece7323834c75bcdff5cb0e7e0ccdd9b"
+    "bytes": 2274616,
+    "sha256": "bd1c8e2fbb972934df45cbda822a95c608f16881b9641df30b3417e300e1d0f7"
   },
   "files": [
     {
@@ -164,8 +164,8 @@
     },
     {
       "path": "js/core/session-requests.js",
-      "bytes": 28751,
-      "sha256": "9a52ea46b07fc3f064ffcef353133257ab2bda6fb556fb01f89a19c796a825bd"
+      "bytes": 29747,
+      "sha256": "c6ae539b459f6d2b314469a9150d7413611b6c5c40bbb426b1c96edd301e368f"
     },
     {
       "path": "js/core/transaction-api.js",
@@ -209,8 +209,8 @@
     },
     {
       "path": "js/ui/session-requests-view.js",
-      "bytes": 36306,
-      "sha256": "0673ccb51365906b6612dded26f8f2080a8205df2625038891cb446b036e6b65"
+      "bytes": 37577,
+      "sha256": "d7f53bf8797566455632a04a819890ba01909f7c3e2153afcbec19072242f6f8"
     },
     {
       "path": "js/ui/session-workspace-view.js",
