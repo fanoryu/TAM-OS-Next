@@ -199,8 +199,12 @@ function bqaSelfCheck(badge, esc) {
       check('real Voided markup with reason passes (' + name + ')', v.label === 'Voided' && v.reason === r);
     }
   }
-  // The earlier defect: the visible text of a Voided cell starts with the mark, not with 'Voided'.
-  check('old prefix rule was defeated by the mark', !voidedCell(reasons[0]).replace(/<[^>]*>/g, '').startsWith('Voided'));
+  // The earlier defect: in the real Voided badge the decorative mark's text comes before the visible
+  // label, so a visible-text rule "starts with Voided" could never match. Checked by position in the
+  // application's own markup (already equal to BQA_VOIDED_BADGE above); no tag stripping.
+  const VOIDED_MARK = '<span class="ux-badge-mark" aria-hidden="true">✕</span>';
+  check('decorative mark precedes the visible Voided label',
+    VOIDED.indexOf(VOIDED_MARK) > 0 && VOIDED.indexOf(VOIDED_MARK + 'Voided</span>') === VOIDED.indexOf(VOIDED_MARK));
   // Malformed, contradictory, duplicated or ambiguous cells: every one must be rejected.
   const malformed = {
     'Voided without a reason': VOIDED,
