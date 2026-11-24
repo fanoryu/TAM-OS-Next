@@ -18,6 +18,10 @@
      rangeDraft                 the two date fields as typed (memory only)
      report, reportStatus       the report of `range`
      list, listStatus           the transactions of `range`, oldest first
+     postFilter                 Sprint 3: '' (all Financial Posts) or one FINANCIAL_POSTS code — the
+                                Transactions rows shown and exported, over the list already read (never
+                                re-read; the report and its totals are never filtered); reset with every
+                                principal change and when a drill-through opens
      form                       null, or the Record transaction draft { values, key } — the
                                 idempotency key is made once when the form opens, so a resubmit
                                 after an ambiguous answer replays the same write
@@ -48,6 +52,12 @@ const SESSION_LEDGER_VIEWS = Object.freeze(['dashboard', 'transactions']);
 const SESSION_LEDGER_FIELDS = Object.freeze(['kind', 'financialPost', 'category', 'description', 'amount', 'transactionDate']);
 
 function sessionLedgerIsCeo(p){ return !!p && p.principalType === PRINCIPAL_TYPES.CEO; }
+// Sprint 3: the Transactions rows shown — the list read, filtered by the Financial Post chosen. The view
+// renders them, Void names one by its index and Export CSV writes exactly them.
+function sessionLedgerVisibleRows(s){
+  if(s.listStatus !== SESSION_LEDGER_STATUS.READY || !s.list) return [];
+  return s.postFilter ? s.list.filter(function(t){ return t.financialPost === s.postFilter; }) : s.list;
+}
 function sessionLedgerEmptyValues(today){
   return Object.freeze({ kind: 'expense', financialPost: '', category: '', description: '', amount: '', transactionDate: today });
 }
@@ -60,7 +70,7 @@ const SessionLedgerStore = (function(){
   let report = null, reportSeq = 0, reportStatus = SESSION_LEDGER_STATUS.IDLE;
   let list = null, listSeq = 0, listStatus = SESSION_LEDGER_STATUS.IDLE;
   let form = null, voidTarget = null, mutation = IDLE_MUTATION;
-  let error = null, notice = null, focus = null, drill = null;
+  let error = null, notice = null, focus = null, drill = null, postFilter = '';
 
   function keyOf(p){ return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null; }
   function seqOf(kind){ return kind === 'report' ? reportSeq : kind === 'list' ? listSeq : -1; }
@@ -75,7 +85,7 @@ const SessionLedgerStore = (function(){
     open = false; view = 'dashboard'; range = null; rangeDraft = null;
     dropReads();
     form = null; voidTarget = null; mutation = IDLE_MUTATION;
-    error = null; notice = null; focus = null; drill = null;
+    error = null; notice = null; focus = null; drill = null; postFilter = '';
     principalKey = null;
     generation++;
   }
@@ -105,12 +115,13 @@ const SessionLedgerStore = (function(){
     },
     setView(v){ if(SESSION_LEDGER_VIEWS.indexOf(v) !== -1){ view = v; notice = null; drill = null; } },
     setRangeDraft(name, value){ if(rangeDraft && (name === 'from' || name === 'to')) rangeDraft[name] = typeof value === 'string' ? value : ''; },
+    setPostFilter(v){ postFilter = v === '' || transactionIsPost(v) ? v : ''; notice = null; },
     setRange(next){ range = Object.freeze({ from: next.from, to: next.to }); rangeDraft = { from: next.from, to: next.to }; notice = null; voidTarget = null; drill = null; dropReads(); },
     // Sprint 2: the Transactions of the payment date, with the transaction to show. Nothing else kept.
     openDrill(target){
       open = true; view = 'transactions';
       range = Object.freeze({ from: target.date, to: target.date }); rangeDraft = { from: target.date, to: target.date };
-      dropReads(); form = null; voidTarget = null; notice = null;
+      dropReads(); form = null; voidTarget = null; notice = null; postFilter = '';   // the linked row is never filtered out
       if(mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING) mutation = IDLE_MUTATION;
       drill = Object.freeze({ transactionId: target.transactionId, date: target.date, requestId: target.requestId });
     },
@@ -168,7 +179,7 @@ const SessionLedgerStore = (function(){
         report: report, reportStatus: reportStatus, list: list, listStatus: listStatus,
         form: form ? Object.freeze({ values: Object.freeze(Object.assign({}, form.values)), key: form.key }) : null,
         voidTarget: voidTarget ? Object.freeze({ transaction: voidTarget.transaction, reason: voidTarget.reason, key: voidTarget.key }) : null,
-        mutation: mutation, error: error, notice: notice, drill: drill
+        mutation: mutation, error: error, notice: notice, drill: drill, postFilter: postFilter
       });
     }
   });
@@ -246,6 +257,15 @@ const SessionLedger = (function(){
       return loading;
     },
     setRangeDraft(name, value){ if(canRead()) SessionLedgerStore.setRangeDraft(name, value); },
+    // Sprint 3 (CEO only): the Financial Post of the Transactions rows shown and exported — over the
+    // list already read, nothing is read again. Never while a write, the Record form or a void is open.
+    setPostFilter(v){
+      if(!canAct()) return;
+      const s = SessionLedgerStore.snapshot();
+      if(s.form || s.voidTarget) return;
+      SessionLedgerStore.setPostFilter(v);
+      paint();
+    },
     // Sprint 2: the CEO's drill-through from a paid finance request to the general transaction its
     // payment recorded. Read-only: the Transactions of the payment date are read through the same
     // authorized range read (the server decides scope); the row shown is the one whose id is exactly
@@ -321,7 +341,7 @@ const SessionLedger = (function(){
     openVoid(index){
       if(!canAct()) return;
       const s = SessionLedgerStore.snapshot();
-      const t = s.listStatus === SESSION_LEDGER_STATUS.READY && Number.isInteger(index) && index >= 0 ? s.list[index] : undefined;
+      const t = Number.isInteger(index) && index >= 0 ? sessionLedgerVisibleRows(s)[index] : undefined;   // Sprint 3: the row rendered at `index`
       if(!t || t.status !== 'Active') return;
       const key = payrollIdempotencyKey();
       if(key === null){ SessionLedgerStore.setNotice('noCrypto'); SessionLedgerStore.setFocus('message'); paint(); return; }

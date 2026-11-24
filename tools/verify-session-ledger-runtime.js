@@ -653,6 +653,147 @@ function firewall(rt, label){
       'X. CEO guard: nothing of the planted data, no export notice and no file name reaches the Employee page');
   }
 
+  /* ---------- P. Sprint 3: the CEO's Financial Post filter and its CSV (Owner GO 2026-11-24) ---------- */
+  {
+    const BOM = String.fromCharCode(0xFEFF), CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+    const blob = (rt) => rt.dl.blobs[rt.dl.blobs.length - 1];
+    const csvOf = (rt) => blob(rt).parts.join('');
+    const rowsOf = (rt) => card(rt).match(/<tr( aria-current="true")?><td>\d{4}-\d{2}-\d{2}<\/td>[\s\S]*?<\/tr>/g) || [];
+    const P1 = tx('4'.repeat(32), '2031-04-03', { category: '@cmd', description: '=HYPERLINK("http://fabricated.invalid")', amount: '100000.00' });
+    const P2 = tx('5'.repeat(32), '2031-04-05', { kind: 'income', financialPost: 'NPIP', category: 'Hibah', description: 'Fabricated, grant', amount: '300000.00' });
+    const P3 = tx('6'.repeat(32), '2031-04-12', { category: 'Transport', description: 'Fabricated "taxi", fare', amount: '75000.00' });
+    const FL = { generalTransactions: [T1, P1, P2, T2, T3, P3] };            // GA: T1, P1, T3 (Voided), P3; NPIP: P2; DRONE: T2; TJB: none
+    const openTx = async (routes) => {
+      const rt = await open(Object.assign({ [RANGE(...APRIL)]: [ok(FL)] }, routes || {}));
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      return rt;
+    };
+    // P1. the selector: CEO only, Transactions only, All Financial Posts by default, from FINANCIAL_POSTS.
+    {
+      const rt = await open();
+      check(!/id="sfPostFilter"/.test(card(rt)), 'P. the Financial dashboard has no Financial Post filter (its totals are never filtered)');
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      const html = card(rt);
+      check(rt.sf().postFilter === '' && /<label for="sfPostFilter">Financial Post<\/label><select class="input" id="sfPostFilter" name="financialPost"><option value="" selected>All Financial Posts<\/option><option value="GA">GA<\/option><option value="NPIP">NP &amp; IP<\/option><option value="TJB">TJB<\/option><option value="DRONE">RnD — Research &amp; Development<\/option><\/select>/.test(html),
+        'P. Transactions offers a Financial Post filter: All Financial Posts (default, selected) and the four posts, labelled as everywhere else');
+      check(rowsOf(rt).length === 3 && /3 transactions, oldest first\./.test(html), 'P. All Financial Posts keeps the existing list and count');
+    }
+    // P2. filtering over the list read: rows, order, count, no request.
+    {
+      const rt = await openTx();
+      const calls = ledgerCalls(rt).length;
+      rt.app.type('sfPostFilter', 'GA');
+      let html = card(rt);
+      const r = rowsOf(rt);
+      check(rt.sf().postFilter === 'GA' && r.length === 4 && r.every((x) => /<td>GA<\/td>/.test(x)) && /2031-04-02[\s\S]*2031-04-03[\s\S]*2031-04-11[\s\S]*2031-04-12/.test(r.join(''))
+        && /4 transactions in GA, oldest first\./.test(html) && /Voided/.test(r[2]),
+        'P. GA shows only its four rows (the Voided one included), oldest first, counted "4 transactions in GA"');
+      rt.app.type('sfPostFilter', 'NPIP');
+      html = card(rt);
+      check(rowsOf(rt).length === 1 && /<td>NP &amp; IP<\/td>/.test(rowsOf(rt)[0]) && /1 transaction in NP &amp; IP, oldest first\./.test(html), 'P. NP & IP shows its one row, "1 transaction in NP & IP"');
+      rt.app.type('sfPostFilter', 'TJB');
+      html = card(rt);
+      check(rowsOf(rt).length === 0 && /<div class="empty" role="status">No transactions in TJB dated 2031-04-01 to 2031-04-30\.<\/div>/.test(html) && /id="sfExportBtn"/.test(html),
+        'P. a post with no rows says so ("No transactions in TJB dated …"), Export CSV still offered');
+      check(ledgerCalls(rt).length === calls, 'P. switching the Financial Post reads nothing from the server');
+      // The empty result exports the header only, named for the post.
+      rt.app.fire('sfExportBtn', 'click'); await flush();
+      check(rt.dl.clicks.length === 1 && rt.dl.clicks[0].download === 'tam-os-transactions-tjb-2031-04-01-to-2031-04-30.csv'
+        && csvOf(rt) === BOM + 'Date,Type,Financial Post,Category,Description,Amount (Rp),Status,Void reason' + CRLF,
+        'P. an empty filtered result exports the header row only, in a file named for the post');
+      rt.app.type('sfPostFilter', 'Bogus');
+      check(rt.sf().postFilter === '' && rowsOf(rt).length === 6, 'P. a post outside the four is no filter (unknown codes such as RND or markup are ignored)');
+      rt.SessionLedger.setPostFilter('RND'); rt.SessionLedger.setPostFilter('<b>');
+      check(rt.sf().postFilter === '' && ledgerCalls(rt).length === calls, 'P. direct calls with an unknown post change nothing and read nothing');
+      firewall(rt, 'P filter');
+    }
+    // P3. the CSV of the filtered rows: exactly them, escaped and formula-safe, no hidden metadata.
+    {
+      const rt = await openTx();
+      rt.app.type('sfPostFilter', 'GA');
+      rt.app.fire('sfExportBtn', 'click'); await flush();
+      const GA_CSV = BOM + ['Date,Type,Financial Post,Category,Description,Amount (Rp),Status,Void reason',
+        '2031-04-02,Expense,GA,Operasional Rutin,Fabricated <b>rent</b>,2500000.00,Active,',
+        "2031-04-03,Expense,GA,'@cmd,\"'=HYPERLINK(\"\"http://fabricated.invalid\"\")\",100000.00,Active,",
+        '2031-04-11,Expense,GA,Operasional Rutin,Fabricated <b>rent</b>,2500000.00,Voided,Fabricated duplicate',
+        '2031-04-12,Expense,GA,Transport,"Fabricated ""taxi"", fare",75000.00,Active,'].join(CRLF) + CRLF;
+      check(rt.dl.clicks.length === 1 && rt.dl.clicks[0].download === 'tam-os-transactions-ga-2031-04-01-to-2031-04-30.csv' && csvOf(rt) === GA_CSV,
+        'P. the GA CSV is exactly the four GA rows shown, in order: quotes doubled, commas quoted, formula starts (= @) neutralised with an apostrophe, the voided reason kept');
+      check(!/NP & IP|RnD|Hibah|survey|grant/.test(csvOf(rt)) && !new RegExp(['4'.repeat(32), '1'.repeat(32), U, 'createdAt', 'voidedBy', CSRF].join('|')).test(csvOf(rt)),
+        'P. no row of another post, no id, user id, timestamp or token is in the file');
+      rt.app.type('sfPostFilter', '');
+      rt.app.fire('sfExportBtn', 'click'); await flush();
+      check(rt.dl.clicks[1].download === 'tam-os-transactions-2031-04-01-to-2031-04-30.csv' && (csvOf(rt).match(/\r\n/g) || []).length === 7,
+        'P. back to All Financial Posts, the export is the whole list under the existing file name (header + six rows)');
+    }
+    // P4. composition with the date range; Void on the filtered row; the report never filtered.
+    {
+      const MAY = ['2031-05-01', '2031-05-31'];
+      const M1 = tx('7'.repeat(32), '2031-05-02', { financialPost: 'DRONE', category: 'Drone', description: 'Fabricated May drone', amount: '50000.00' });
+      const M2 = tx('8'.repeat(32), '2031-05-03', { description: 'Fabricated May rent' });
+      const rt = await openTx({ [RANGE(...MAY)]: [ok({ generalTransactions: [M1, M2] })] });
+      rt.app.type('sfPostFilter', 'DRONE');
+      rt.app.type('sfFrom', MAY[0]); rt.app.type('sfTo', MAY[1]); rt.app.fire('sfRangeForm', 'submit'); await flush();
+      check(rt.sf().postFilter === 'DRONE' && rt.net.calls.filter((c) => c.url === RANGE(...MAY)).length === 1 && rowsOf(rt).length === 1 && /Fabricated May drone/.test(rowsOf(rt)[0])
+        && /1 transaction in RnD — Research &amp; Development, oldest first\./.test(card(rt)),
+        'P. the filter composes with the date range: May is read once and shows only its RnD row');
+      rt.app.type('sfFrom', APRIL[0]); rt.app.type('sfTo', APRIL[1]); rt.net.routes[RANGE(...APRIL)] = [ok(FL)]; rt.app.fire('sfRangeForm', 'submit'); await flush();
+      rt.app.type('sfPostFilter', 'GA');
+      rt.app.voidRow(3); await flush();
+      check(rt.sf().voidTarget && rt.sf().voidTarget.transaction.id === P3.id && /id="sfVoidForm"[\s\S]*Fabricated &quot;taxi&quot;, fare|id="sfVoidForm"[\s\S]*Fabricated "taxi", fare/.test(card(rt)),
+        'P. Void on the fourth GA row opens that GA transaction (P3), not the fourth row of the whole list (an RnD income)');
+      check(/id="sfPostFilter"[^>]* disabled/.test(card(rt)), 'P. while the void panel is open the filter is disabled');
+      rt.SessionLedger.setPostFilter('DRONE');
+      check(rt.sf().postFilter === 'GA', 'P. and a direct change is refused while the void panel is open');
+      rt.app.fire('sfVoidCancel', 'click'); await flush();
+      // The dashboard: the server's totals, unchanged by the filter.
+      rt.app.fire('swSectionFinance', 'click'); await flush();
+      const dash = card(rt);
+      const posts = (dash.match(/<div class="table-wrap" id="sfPosts">[\s\S]*?<\/table><\/div>/) || [''])[0];
+      const plain = await open();
+      const plainPosts = (card(plain).match(/<div class="table-wrap" id="sfPosts">[\s\S]*?<\/table><\/div>/) || ['-'])[0];
+      check(rt.sf().postFilter === 'GA' && posts !== '' && posts === plainPosts && /<th scope="row">All Financial Posts<\/th><td>12000000\.00<\/td><td>2500000\.00<\/td><td>9500000\.00<\/td>/.test(posts)
+        && /<th scope="row">GA<\/th><td>0\.00<\/td><td>2500000\.00<\/td><td>-2500000\.00<\/td>/.test(posts) && !/sfPostFilter/.test(dash),
+        'P. with GA chosen, the dashboard still shows every post and the server totals (general 12,000,000 / 2,500,000 / 9,500,000) exactly as returned');
+      rt.app.fire('sfExportBtn', 'click'); await flush();
+      check(/All Financial Posts,12000000\.00,2500000\.00,9500000\.00/.test(csvOf(rt)) && /RnD — Research & Development,12000000\.00/.test(csvOf(rt)),
+        'P. the report CSV is unfiltered too: every post and the server total line');
+    }
+    // P5. malformed data, the drill-through, principal change, Employee.
+    {
+      const rt = await open({ [RANGE(...APRIL)]: [ok({ generalTransactions: [tx('9'.repeat(32), '2031-04-02', { financialPost: 'RND' })] })] });
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      check(rt.sf().listStatus === 'error' && !/id="sfExportBtn"/.test(card(rt)) && rt.SessionLedger.exportCsv() === false && !/<tr><td>2031/.test(card(rt)),
+        'P. a list naming an unknown post (RND) is refused whole by the decoder: no row, no export');
+    }
+    {
+      const rt = await openTx();
+      rt.app.type('sfPostFilter', 'NPIP');
+      check(rt.SessionLedger.drill({ transactionId: T1.id, date: '2031-04-02', requestId: 'b'.repeat(32) }) === true && rt.sf().postFilter === '' && rt.sf().drill !== null,
+        'P. opening a ledger drill-through resets the filter, so the linked row is never filtered out');
+    }
+    {
+      const rt = await openTx();
+      rt.app.type('sfPostFilter', 'GA');
+      const other = Object.assign({}, rt.AuthBoot.snapshot().principal, { id: 'u_other_9' });
+      check(rt.SessionLedgerStore.bindPrincipal(other) === true && rt.sf().postFilter === '', 'P. a different principal resets the filter to All Financial Posts');
+    }
+    {
+      const rt = await openTx();
+      rt.app.type('sfPostFilter', 'GA');
+      rt.AuthBoot.sessionLost(); await flush();
+      check(rt.sf().postFilter === '' && !/sfPostFilter/.test(rt.appHTML()), 'P. the session ending resets the filter and removes it from the page');
+    }
+    {
+      const emp = await boot(ME_EMP);
+      const calls = emp.net.calls.length;
+      emp.SessionLedger.setPostFilter('GA');
+      check(!/sfPostFilter|Financial Post filter/.test(emp.appHTML()) && emp.sf().postFilter === '' && emp.net.calls.length === calls && ledgerCalls(emp).length === 0,
+        'P. an Employee has no Financial Post filter; a direct call changes nothing and reads nothing');
+      firewall(emp, 'P Employee');
+    }
+  }
+
   /* ---------- G. session end ---------- */
   {
     const rt = await open({ [REP(...APRIL)]: [err(401, 'unauthenticated')], '/api/auth/me': [ok(ME_CEO)] });
