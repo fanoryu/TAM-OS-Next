@@ -381,6 +381,25 @@ const SessionRequests = (function(){
       return loading;
     },
     back(){ if(!canAct()) return; SessionRequestsStore.closeDetail(); SessionRequestsStore.setFocus('list'); paint(); },
+    // Sprint 2 (CEO only): the ledger link of the Paid request shown — its payment's transaction id, the
+    // payment date and the request id — or null. Read from the decoded request; nothing is sent.
+    ledgerTarget(){
+      if(!canAct() || !sessionRequestsIsCeo(principalNow())) return null;
+      const s = SessionRequestsStore.snapshot();
+      const r = s.detailStatus === SESSION_REQUESTS_STATUS.READY ? s.detail : null;
+      if(!r || r.status !== 'Paid' || !r.payment || r.id !== s.detailId) return null;
+      return Object.freeze({ transactionId: r.payment.financeTransactionId, date: r.payment.paidOn, requestId: r.id });
+    },
+    // Sprint 2 (CEO only): back from the ledger to the request it came from, read again from the
+    // server (which decides whether it is still in scope).
+    reopen(id){
+      if(!canAct() || !sessionRequestsIsCeo(principalNow()) || typeof id !== 'string' || !/^[0-9a-f]{32}$/.test(id)) return;
+      SessionRequestsStore.openDetail(id);
+      SessionRequestsStore.setFocus('detail');
+      const loading = loadVisible();
+      paint();
+      return loading;
+    },
     // `kind` (CR-01): the CEO's choice — a payment request (the default) or a reimbursement for an
     // employee; an Employee always creates their own reimbursement and names no one.
     openCreate(kind){

@@ -626,6 +626,9 @@ function renderSessionWorkspace(app, auth){
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   const kept = (active && active !== app && typeof active.id === 'string' && /^(sw|auth)[A-Za-z-]+$/.test(active.id) && typeof app.contains === 'function' && app.contains(active))
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+  // Sprint 2: the Finance control that had focus during a drill-through, to keep it across this repaint.
+  const drillKept = SessionLedgerStore.snapshot().drill && active && active !== app && typeof active.id === 'string' && /^sf[A-Za-z-]+$/.test(active.id)
+    && typeof app.contains === 'function' && app.contains(active) ? active.id : null;
   app.innerHTML = sessionWorkspaceHTML(auth, SessionEmployeeStore.snapshot());
   const model = AuthBoot.allowsWorkspace() ? sessionNavModel(auth.principal) : null;
   if(model) bindSessionShell(app, model);                      // U1: before the section buttons' own listeners
@@ -655,7 +658,14 @@ function renderSessionWorkspace(app, auth){
     return sessionWorkspaceFocus(app, auHint ? 'heading' : null, kept);
   }
   if(SessionLedgerStore.snapshot().open){
-    const el = sessionLedgerFocusTarget(app, fiHint);
+    let el = sessionLedgerFocusTarget(app, fiHint);
+    // Sprint 2 drill, no focus request: a workspace control (sidebar, account) or a Finance control that
+    // had focus keeps it while still rendered and enabled; else the drill heading — never the page heading.
+    if(!el && !fiHint && SessionLedgerStore.snapshot().drill){
+      const live = function(id){ const x = id ? app.querySelector('#' + id) : null; return x && !x.disabled ? x : null; };
+      if(kept && live(kept.id)) return sessionWorkspaceFocus(app, null, kept);
+      el = sessionLedgerDrillFocusTarget(app, live(drillKept) ? drillKept : null);
+    }
     if(el && typeof el.focus === 'function'){ el.focus(); return; }
     return sessionWorkspaceFocus(app, fiHint ? 'heading' : null, kept);
   }
@@ -912,6 +922,27 @@ function sessionGoTo(id){
     }
   } finally { SessionRouter.switching = false; }
   if(typeof render === 'function') render();
+  return true;
+}
+
+// Sprint 2: the CEO's drill-through from a paid finance request to its ledger transaction, as a user
+// navigation (a new history entry), under the same idle rule and nav model as a sidebar click. The
+// Transactions route opens on the payment date with that transaction shown; nothing is written.
+function sessionOpenLedgerTransaction(target){
+  if(!target || !sessionWorkspaceIdle() || !SessionLedger.drill(target)) return false;
+  SessionRouter.push = true;
+  if(sessionGoTo('transactions')) return true;
+  SessionRouter.push = false;
+  SessionLedger.show(false);                                   // not admitted: nothing of the drill is kept
+  return false;
+}
+// Back from the drill-through: Finance Requests, with the request it came from read again.
+function sessionReturnToFinanceRequest(){
+  const d = SessionLedgerStore.snapshot().drill;
+  if(!d) return false;
+  SessionRouter.push = true;
+  if(!sessionGoTo('requests')){ SessionRouter.push = false; return false; }
+  SessionRequests.reopen(d.requestId);
   return true;
 }
 

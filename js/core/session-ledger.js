@@ -24,6 +24,10 @@
      voidTarget                 null, or { transaction, reason, key } for the inline void panel
      mutation                   { kind: 'create' | 'void', status, error, fields }
      error, notice, focus       the last failed read, a fixed message key, a focus hint
+     drill                      null, or { transactionId, date, requestId }: the CEO arrived from a paid
+                                finance request (Sprint 2) — the Transactions of its payment date are
+                                read and the row whose id is exactly transactionId is shown; dropped by
+                                any other range, view, leaving the section or a principal change
 
    A read takes a token { gen, kind, seq } and is applied only while it is the latest of its kind
    in the current generation. A write takes { gen } and is dropped when the principal changed.
@@ -56,7 +60,7 @@ const SessionLedgerStore = (function(){
   let report = null, reportSeq = 0, reportStatus = SESSION_LEDGER_STATUS.IDLE;
   let list = null, listSeq = 0, listStatus = SESSION_LEDGER_STATUS.IDLE;
   let form = null, voidTarget = null, mutation = IDLE_MUTATION;
-  let error = null, notice = null, focus = null;
+  let error = null, notice = null, focus = null, drill = null;
 
   function keyOf(p){ return p ? [p.id, p.principalType, p.employeeId || ''].join('|') : null; }
   function seqOf(kind){ return kind === 'report' ? reportSeq : kind === 'list' ? listSeq : -1; }
@@ -71,7 +75,7 @@ const SessionLedgerStore = (function(){
     open = false; view = 'dashboard'; range = null; rangeDraft = null;
     dropReads();
     form = null; voidTarget = null; mutation = IDLE_MUTATION;
-    error = null; notice = null; focus = null;
+    error = null; notice = null; focus = null; drill = null;
     principalKey = null;
     generation++;
   }
@@ -95,13 +99,21 @@ const SessionLedgerStore = (function(){
     // section forgets what was read and any unsent draft.
     setOpen(value, initialRange){
       const next = value === true;
-      if(open !== next){ dropReads(); form = null; voidTarget = null; notice = null; if(mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING) mutation = IDLE_MUTATION; }
+      if(open !== next){ dropReads(); form = null; voidTarget = null; notice = null; drill = null; if(mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING) mutation = IDLE_MUTATION; }
       open = next;
       if(open && range === null){ range = initialRange; rangeDraft = { from: initialRange.from, to: initialRange.to }; }
     },
-    setView(v){ if(SESSION_LEDGER_VIEWS.indexOf(v) !== -1){ view = v; notice = null; } },
+    setView(v){ if(SESSION_LEDGER_VIEWS.indexOf(v) !== -1){ view = v; notice = null; drill = null; } },
     setRangeDraft(name, value){ if(rangeDraft && (name === 'from' || name === 'to')) rangeDraft[name] = typeof value === 'string' ? value : ''; },
-    setRange(next){ range = Object.freeze({ from: next.from, to: next.to }); rangeDraft = { from: next.from, to: next.to }; notice = null; voidTarget = null; dropReads(); },
+    setRange(next){ range = Object.freeze({ from: next.from, to: next.to }); rangeDraft = { from: next.from, to: next.to }; notice = null; voidTarget = null; drill = null; dropReads(); },
+    // Sprint 2: the Transactions of the payment date, with the transaction to show. Nothing else kept.
+    openDrill(target){
+      open = true; view = 'transactions';
+      range = Object.freeze({ from: target.date, to: target.date }); rangeDraft = { from: target.date, to: target.date };
+      dropReads(); form = null; voidTarget = null; notice = null;
+      if(mutation.status !== SESSION_LEDGER_MUTATION_STATUS.PENDING) mutation = IDLE_MUTATION;
+      drill = Object.freeze({ transactionId: target.transactionId, date: target.date, requestId: target.requestId });
+    },
     begin(kind){
       if(kind === 'report'){ reportSeq++; report = null; reportStatus = SESSION_LEDGER_STATUS.LOADING; clearError('report'); return Object.freeze({ gen: generation, kind: kind, seq: reportSeq }); }
       if(kind === 'list'){ listSeq++; list = null; listStatus = SESSION_LEDGER_STATUS.LOADING; clearError('list'); return Object.freeze({ gen: generation, kind: kind, seq: listSeq }); }
@@ -156,7 +168,7 @@ const SessionLedgerStore = (function(){
         report: report, reportStatus: reportStatus, list: list, listStatus: listStatus,
         form: form ? Object.freeze({ values: Object.freeze(Object.assign({}, form.values)), key: form.key }) : null,
         voidTarget: voidTarget ? Object.freeze({ transaction: voidTarget.transaction, reason: voidTarget.reason, key: voidTarget.key }) : null,
-        mutation: mutation, error: error, notice: notice
+        mutation: mutation, error: error, notice: notice, drill: drill
       });
     }
   });
@@ -234,6 +246,19 @@ const SessionLedger = (function(){
       return loading;
     },
     setRangeDraft(name, value){ if(canRead()) SessionLedgerStore.setRangeDraft(name, value); },
+    // Sprint 2: the CEO's drill-through from a paid finance request to the general transaction its
+    // payment recorded. Read-only: the Transactions of the payment date are read through the same
+    // authorized range read (the server decides scope); the row shown is the one whose id is exactly
+    // the payment's financeTransactionId, never another. The id is only a lookup key, never proof of
+    // access. True when the section now shows the drill; the caller then opens the route.
+    drill(target){
+      if(!sessionLedgerIsCeo(principalNow()) || pending() || !target) return false;
+      if(typeof target.transactionId !== 'string' || !TRANSACTION_HEX32.test(target.transactionId) || typeof target.requestId !== 'string' || !TRANSACTION_HEX32.test(target.requestId)
+        || !transactionIsRange(target.date, target.date)) return false;
+      SessionLedgerStore.openDrill(target);
+      SessionLedgerStore.setFocus('drill');
+      return true;
+    },
     // AWP-05 (OD-13 = A): the view shown — the Transactions list or the Financial dashboard of the
     // range shown — exported in the browser from the answer already read, only once that read
     // succeeded. A read above its cap fails closed, so a ready view is the whole range. Nothing is

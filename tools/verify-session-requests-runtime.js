@@ -45,6 +45,14 @@
    KIND-FILTER (Owner GO Sprint 1, 2026-11-23), section N: the CEO's request-type filter over the list
    already read — composed with the status filter and the date range, the count, the empty state and
    Open on the filtered rows, no request when it changes, reset with the principal; no Employee filter.
+
+   LEDGER-DRILL (Owner GO Sprint 2, 2026-11-23), section O: the CEO's "View ledger transaction" on a
+   Paid request — the Transactions route on the payment date read once through the authorized range
+   read, only the row whose id is exactly the payment's financeTransactionId shown and marked; not
+   found, denied and unavailable handled without showing another row; back to the request; a
+   principal change or session end during the read drops it; no Employee link; nothing written.
+   Correction 2026-11-24 (C-1..C-3): focus stays inside the drill across a held read's repaint; a 500
+   on the one-day read is not advised as "shorten the range"; no claim of a visual mark.
    ============================================================ */
 
 const ROUTE_ONLY = (u) => /^#\/[a-z]+$/.test(u);
@@ -161,7 +169,7 @@ function mkApp(mkEl, dom){
       elements[id] = { id: id, name: attr('name'), value: unescapeHtml(initial), listeners: listeners,
         disabled: /\sdisabled(\s|>|=)/.test(tag[0]),
         addEventListener: (t, fn) => { (listeners[t] = listeners[t] || []).push(fn); },
-        focus: () => { dom.focused.push(id); }, setSelectionRange: () => {}, querySelector: find, getAttribute: attr };
+        focus: () => { dom.focused.push(id); dom.active = elements[id]; }, setSelectionRange: () => {}, querySelector: find, getAttribute: attr };
     }
     return elements[id];
   }
@@ -169,7 +177,8 @@ function mkApp(mkEl, dom){
   app.querySelector = find;
   app.querySelectorAll = () => [];
   app.contains = () => true;
-  Object.defineProperty(app, 'innerHTML', { get: () => html, set: (v) => { html = String(v); elements = {}; } });
+  // A repaint detaches every element; focus on one of them falls back to body, as in a browser.
+  Object.defineProperty(app, 'innerHTML', { get: () => html, set: (v) => { if(dom.active && elements[dom.active.id] === dom.active) dom.active = null; html = String(v); elements = {}; } });
   app.fire = (id, type, ev) => {
     const el = find('#' + id);
     if(!el) return 'absent';
@@ -200,7 +209,8 @@ function loadRuntime(routes, hash){
   });
   const src = parts.join('\n')
     + '\n;window.__TAM__ = { State: State, AuthBoot: AuthBoot, SessionRequestsStore: SessionRequestsStore, SessionRequests: SessionRequests,'
-    + ' FinanceRequestDecoders: FinanceRequestDecoders, FinanceRequestRequests: FinanceRequestRequests, render: render, parse: function(j){ return JSON.parse(j); } };';
+    + ' FinanceRequestDecoders: FinanceRequestDecoders, FinanceRequestRequests: FinanceRequestRequests, render: render, parse: function(j){ return JSON.parse(j); },'
+    + ' SessionLedgerStore: SessionLedgerStore, SessionLedger: SessionLedger, sessionOpenLedgerTransaction: sessionOpenLedgerTransaction };';
   const noop = function(){};
   const access = { local: [], session: [], url: [], cookie: [] };
   const storageOf = (log) => ({ getItem: (k) => { log.push('get:' + k); return null; }, setItem: (k) => { log.push('set:' + k); }, removeItem: (k) => { log.push('remove:' + k); },
@@ -236,7 +246,8 @@ function loadRuntime(routes, hash){
   FixedDate.prototype = RealDate.prototype;
   const document = { addEventListener:noop, removeEventListener:noop, getElementById: (id) => (els[id] = els[id] || mkEl()),
     querySelector:()=>null, querySelectorAll:()=>[], createElement:()=>mkEl(), contains:()=>false,
-    body: mkEl(), documentElement: { dataset:{}, style:{} }, activeElement: null };
+    body: mkEl(), documentElement: { dataset:{}, style:{} } };
+  Object.defineProperty(document, 'activeElement', { get: () => dom.active || null });   // the element last focused, until a repaint detaches it
   Object.defineProperty(document, 'cookie', { get: () => { access.cookie.push('get'); return ''; }, set: () => { access.cookie.push('set'); } });
   const h = hash || '#/employees';
   const sandbox = {
@@ -1209,6 +1220,272 @@ function firewall(rt, label){
     check(rt.rq().detailId === RB_DRAFT.id && /id="frEditBtn"/.test(card(rt)) && /id="frSubmitBtn"/.test(card(rt)) && !/id="frApproveBtn"|id="frPayBtn"|id="frCancelBtn"/.test(card(rt)),
       'N. the Employee\'s Open still names their own row; their Draft offers Edit and Submit only');
     firewall(rt, 'N. Employee');
+  }
+
+  /* ---------- O. LEDGER-DRILL: paid request → ledger transaction (Owner GO Sprint 2, 2026-11-23) ---------- */
+  {
+    const DAY = '/api/general-transactions?from=2031-04-12&to=2031-04-12';
+    const tx = (id, extra) => Object.assign({ id: id, kind: 'expense', financialPost: 'GA', category: 'Transport', description: 'Fabricated <i>other</i> expense',
+      amount: '125000.00', transactionDate: '2031-04-12', createdByUserId: U, createdAt: '2031-04-12T03:00:00.000000Z', status: 'Active', void: null }, extra || {});
+    const OTHER = tx('a'.repeat(32));                                                      // same day, same amount: never the link
+    const LINKED = tx(PAYMENT.financeTransactionId, { description: 'Fabricated <b>taxi</b> reimbursement paid' });
+    const ledgerReads = (rt) => rt.net.calls.filter((c) => /^\/api\/general-transactions|^\/api\/reports\//.test(c.url));
+    const anyWrite = (rt) => rt.net.calls.filter((c) => c.init && c.init.method === 'POST' && !/^\/api\/auth\//.test(c.url));
+    const current = (h) => (h.match(/<tr aria-current="true">[\s\S]*?<\/tr>/g) || []);
+    const gate = () => { let release; const p = new Promise((r) => { release = r; }); return { route: () => p, release: (v) => release(v) }; };
+    // The CEO with the Paid reimbursement (row 3 of All types) open.
+    async function paidOpen(dayRoute){
+      const rt = await openCeo(dayRoute ? { [DAY]: [dayRoute] } : {});
+      await openRow(rt, 3, RB_PAID);
+      return rt;
+    }
+
+    // 1/5/9. A valid link: the exact transaction, one read, nothing written.
+    {
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER, LINKED] }));
+      let html = card(rt);
+      check(/<button class="btn" type="button" id="frLedgerBtn">View ledger transaction<\/button>/.test(html) && ledgerReads(rt).length === 0,
+        'O. a Paid request offers the CEO "View ledger transaction"; nothing of the ledger is read before it is chosen');
+      const reqReads = frCalls(rt).length;
+      const focusMark = rt.dom.focused.length;
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      html = card(rt);
+      const l = rt.SessionLedgerStore.snapshot();
+      check(rt.loc.hash === '#/transactions' && (parseSessionShell(rt.appHTML()) || {}).active === 'transactions' && !rt.rq().open && l.open && l.view === 'transactions'
+        && l.range.from === '2031-04-12' && l.range.to === '2031-04-12' && l.drill && l.drill.transactionId === PAYMENT.financeTransactionId && l.drill.requestId === RB_PAID.id,
+        'O. it opens Transactions (#/transactions) on the payment date 2031-04-12 with the payment\'s transaction as the target');
+      check(ledgerReads(rt).length === 1 && ledgerReads(rt)[0].url === DAY && frCalls(rt).length === reqReads,
+        'O. exactly one ledger read (the payment date, through the authorized range read); no report read; the request is not read again');
+      check(/id="sfDrillTxn"/.test(html) && /Fabricated &lt;b&gt;taxi&lt;\/b&gt; reimbursement paid/.test(html.slice(html.indexOf('id="sfDrillTxn"'), html.indexOf('</dl>', html.indexOf('id="sfDrillTxn"'))))
+        && !/other/.test(html.slice(html.indexOf('id="sfDrillTxn"'), html.indexOf('</dl>', html.indexOf('id="sfDrillTxn"')))),
+        'O. the panel shows the linked transaction (escaped), never the other expense of the same day and amount');
+      check(current(html).length === 1 && /reimbursement paid/.test(current(html)[0]) && (html.match(/<tr[ >]/g) || []).length === 3,
+        'O. in the list of that day, only the linked row is marked (aria-current); the other row stays unmarked');
+      check(rt.dom.focused.slice(focusMark).indexOf('sfDrillTitle') !== -1, 'O. focus moves to the linked-transaction panel when the route opens');
+      check(anyWrite(rt).length === 0, 'O. nothing is written: no finance request, transaction or any other POST');
+      firewall(rt, 'O. drill');
+      // Back to the request.
+      const before = rt.net.calls.filter((c) => c.url === ONE(RB_PAID.id)).length;
+      rt.net.routes[ONE(RB_PAID.id)] = [one(RB_PAID)];
+      rt.app.fire('sfDrillBack', 'click'); await flush();
+      check(rt.loc.hash === '#/requests' && rt.rq().open && rt.rq().detailId === RB_PAID.id && /id="frDetail"/.test(card(rt)) && /id="frLedgerBtn"/.test(card(rt))
+        && rt.net.calls.filter((c) => c.url === ONE(RB_PAID.id)).length === before + 1 && !rt.SessionLedgerStore.snapshot().open && rt.SessionLedgerStore.snapshot().drill === null,
+        'O. "Back to the finance request" returns to Finance Requests with that request read again from the server; the drill is forgotten');
+      check(anyWrite(rt).length === 0, 'O. the round trip wrote nothing');
+    }
+    // 3. Linked transaction not found: no other row is offered in its place.
+    {
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const html = card(rt);
+      check(/id="sfDrillMissing"/.test(html) && /not among the transactions shown for its payment date/.test(html) && !/id="sfDrillTxn"/.test(html) && current(html).length === 0
+        && /id="sfDrillBack"/.test(html), 'O. not found: a clear message, no transaction shown or marked in its place, and the way back');
+    }
+    {
+      const rt = await paidOpen(ok({ generalTransactions: [] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      check(/id="sfDrillMissing"/.test(card(rt)) && /No transactions dated 2031-04-12/.test(card(rt)), 'O. an empty payment date: not found, with the existing empty state');
+    }
+    // A voided linked transaction is still the exact one, shown Voided.
+    {
+      const V = Object.assign({}, LINKED, { status: 'Voided', void: { reason: 'Fabricated correction', voidedByUserId: U, voidedAt: '2031-04-13T01:00:00.000000Z' } });
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER, V] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const html = card(rt);
+      check(/id="sfDrillTxn"[\s\S]*Voided[\s\S]*Fabricated correction/.test(html) && current(html).length === 1, 'O. a voided linked transaction is shown as Voided, with its reason');
+    }
+    // 4. Access denied and unavailable: the existing ledger error, no transaction shown.
+    {
+      const rt = await paidOpen(err(403, 'forbidden'));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const html = card(rt);
+      check(/You do not have access to the company finances\./.test(html) && /could not be loaded/.test(html) && !/id="sfDrillTxn"|id="sfDrillMissing"/.test(html) && current(html).length === 0
+        && !/sfRetryBtn/.test(html) && /id="sfDrillBack"/.test(html) && (html.match(/id="sfReadError"/g) || []).length === 1,
+        'O. denied (403): the server\'s refusal is shown once, in the drill panel; nothing of the ledger is shown; no Retry; Back stays');
+    }
+    {
+      const rt = await paidOpen(NETFAIL());
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const html = card(rt);
+      check(/could not be loaded/.test(html) && /Check your connection/.test(html) && /id="sfRetryBtn"/.test(html) && !/id="sfDrillTxn"/.test(html) && !/shorter/.test(html),
+        'O. unavailable: the existing connection message with Retry; no transaction shown');
+      rt.net.routes[DAY] = [ok({ generalTransactions: [OTHER, LINKED] })];
+      rt.app.fire('sfRetryBtn', 'click'); await flush();
+      check(/id="sfDrillTxn"/.test(card(rt)) && current(card(rt)).length === 1, 'O. Retry reads the payment date again and then shows the linked transaction');
+    }
+    // C-2 (correction 2026-11-24): a server error on the one-day read is not diagnosed as too many rows.
+    {
+      const rt = await paidOpen(err(500, 'internal_error'));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const html = card(rt);
+      check(/The transaction linked to this finance request could not be loaded\./.test(html) && /could not read the transactions of this payment date\. Try again later\./.test(html)
+        && !/shorter|too many/i.test(html) && /id="sfRetryBtn"/.test(html) && /id="sfDrillBack"/.test(html) && !/id="sfDrillTxn"|id="sfDrillMissing"/.test(html) && current(html).length === 0
+        && (html.match(/id="sfReadError"/g) || []).length === 1,
+        'C-2. a 500 on the payment date says the linked transaction could not be loaded — no "shorter range" advice, no capacity diagnosis; Retry and Back stay; no other row shown');
+      rt.net.routes[DAY] = [ok({ generalTransactions: [OTHER, LINKED] })];
+      rt.app.fire('sfRetryBtn', 'click'); await flush();
+      check(/id="sfDrillTxn"/.test(card(rt)) && ledgerReads(rt).length === 2 && !/sfReadError/.test(card(rt)), 'C-2. Retry reads the payment date once more and shows the linked transaction');
+    }
+    {
+      // Outside a drill, the Transactions list keeps its existing range advice on a 500.
+      const rt = await boot(ME_CEO, { '/api/general-transactions?from=2031-04-01&to=2031-04-30': [err(500, 'internal_error')] });
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      check(rt.SessionLedgerStore.snapshot().drill === null && /choose a shorter From and To range/.test(card(rt)) && !/sfDrill/.test(card(rt)),
+        'C-2. without a drill, a 500 on the Transactions list keeps the existing range advice (unchanged)');
+    }
+    // C-3: the panel claims no visual mark; the row carries aria-current only.
+    {
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER, LINKED] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      check(!/marked/i.test(card(rt)) && current(card(rt)).length === 1, 'C-3. no "marked in the list" claim; the linked row keeps aria-current');
+    }
+    // C-1 (correction 2026-11-24): focus stays inside the drill through a held read and its repaint.
+    {
+      const g = gate();
+      const rt = await paidOpen(g.route);
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const back = rt.app.querySelector('#sfDrillBack');
+      back.focus();
+      const mark = rt.dom.focused.length;
+      g.release(ok({ generalTransactions: [OTHER, LINKED] })); await flush();
+      const after = rt.dom.focused.slice(mark);
+      const active = rt.app.querySelector('#sfDrillBack');
+      check(/id="sfDrillTxn"/.test(card(rt)) && after.length >= 1 && after[after.length - 1] === 'sfDrillBack' && after.indexOf('authTitle') === -1
+        && active && rt.loc && rt.dom.active === active,
+        'C-1. Back focused while the read is held keeps focus after the answer repaints (final focus sfDrillBack, never authTitle)');
+    }
+    {
+      const g = gate();
+      const rt = await paidOpen(g.route);
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const mark = rt.dom.focused.length;
+      g.release(ok({ generalTransactions: [OTHER] })); await flush();
+      const after = rt.dom.focused.slice(mark);
+      check(after.length >= 1 && after[after.length - 1] === 'sfDrillTitle' && after.indexOf('authTitle') === -1 && rt.dom.active && rt.dom.active.id === 'sfDrillTitle',
+        'C-1. with focus on the drill heading, the not-found repaint keeps it there (final focus sfDrillTitle, never authTitle)');
+    }
+    {
+      const g = gate();
+      const rt = await paidOpen(NETFAIL());
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      rt.app.querySelector('#sfRetryBtn').focus();
+      rt.net.routes[DAY] = [g.route];
+      const mark = rt.dom.focused.length;
+      rt.app.fire('sfRetryBtn', 'click'); await flush();
+      g.release(ok({ generalTransactions: [OTHER, LINKED] })); await flush();
+      const after = rt.dom.focused.slice(mark);
+      check(/id="sfDrillTxn"/.test(card(rt)) && after.length >= 1 && after[after.length - 1] === 'sfDrillTitle' && after.indexOf('authTitle') === -1,
+        'C-1. Retry focused: when Retry is gone after the held answer, focus moves to the drill heading, never the page heading');
+    }
+    {
+      // C-1 final (2026-11-24): a sidebar control focused while the read is held keeps focus after the repaint.
+      const g = gate();
+      const rt = await paidOpen(g.route);
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      const home = rt.app.querySelector('#swSectionHome');
+      const enabled = !!home && !home.disabled;
+      if(home) home.focus();
+      const mark = rt.dom.focused.length;
+      g.release(ok({ generalTransactions: [OTHER, LINKED] })); await flush();
+      const after = rt.dom.focused.slice(mark);
+      const now = rt.app.querySelector('#swSectionHome');
+      check(enabled && /id="sfDrillTxn"/.test(card(rt)) && after.length >= 1 && after[after.length - 1] === 'swSectionHome' && after.indexOf('sfDrillTitle') === -1 && after.indexOf('authTitle') === -1
+        && !!now && rt.dom.active === now && rt.SessionLedgerStore.snapshot().drill !== null && rt.loc.hash === '#/transactions',
+        'C-1. the enabled Home sidebar button focused while the read is held keeps final focus after the answer repaints (not the drill heading, not the page heading); the drill stays');
+    }
+    {
+      // C-1 final: a focused control that becomes disabled is not kept (Back, while a write the CEO started is held).
+      const w = gate();
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER, LINKED] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      rt.app.fire('sfAddBtn', 'click');
+      rt.app.type('sff-kind', 'expense'); rt.app.type('sff-financialPost', 'GA'); rt.app.type('sff-category', 'Transport');
+      rt.app.type('sff-description', 'Fabricated'); rt.app.type('sff-amount', '1000.00'); rt.app.type('sff-transactionDate', '2031-04-12');
+      rt.net.routes['/api/general-transactions/create'] = [w.route];
+      rt.app.querySelector('#sfDrillBack').focus();
+      const mark = rt.dom.focused.length;
+      rt.app.fire('sfForm', 'submit'); await flush();
+      const back = rt.app.querySelector('#sfDrillBack');
+      const after = rt.dom.focused.slice(mark);
+      check(rt.SessionLedgerStore.snapshot().mutation.status === 'pending' && !!back && back.disabled && after.length >= 1 && after[after.length - 1] === 'sfDrillTitle'
+        && !(rt.dom.active && rt.dom.active.disabled),
+        'C-1. a focused Back that is disabled by the repaint (a write in flight) is not kept: focus falls back to the drill heading');
+      w.release(err(409, 'conflict')); await flush();
+    }
+    {
+      // Outside a drill, the existing focus behaviour is unchanged: the page heading.
+      const rt = await boot(ME_CEO, { '/api/general-transactions?from=2031-04-01&to=2031-04-30': [ok({ generalTransactions: [OTHER] })] });
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      check(rt.SessionLedgerStore.snapshot().drill === null && rt.dom.focused[rt.dom.focused.length - 1] === 'authTitle', 'C-1. outside a drill, Transactions focus is unchanged (the page heading)');
+    }
+    {
+      // Leaving the drill: Back hands focus to the request; the drill is cleared.
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER, LINKED] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      rt.app.querySelector('#sfDrillBack').focus();
+      rt.net.routes[ONE(RB_PAID.id)] = [one(RB_PAID)];
+      const mark = rt.dom.focused.length;
+      rt.app.fire('sfDrillBack', 'click'); await flush();
+      const after = rt.dom.focused.slice(mark);
+      const lastSf = after.reduce((n, id, i) => (/^sf/.test(id) ? i : n), -1);
+      const firstFr = after.findIndex((id) => /^frDetailTitle$|^frBackBtn$/.test(id));
+      check(rt.SessionLedgerStore.snapshot().drill === null && rt.rq().detailId === RB_PAID.id && firstFr !== -1 && lastSf < firstFr && !/^sf/.test(after[after.length - 1])
+        && !(rt.dom.active && /^sf/.test(rt.dom.active.id)) && !/id="sfDrill/.test(rt.appHTML()),
+        'C-1. Back leaves the drill: the drill is cleared and focus moves to the request (no drill control kept)');
+    }
+    // 6. A principal change, or the session ending, while the read is in flight.
+    {
+      const g = gate();
+      const rt = await paidOpen(g.route);
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      check(/Looking for the transaction recorded by this payment/.test(card(rt)), 'O. while the read is in flight the panel says it is looking');
+      const other = Object.assign({}, rt.AuthBoot.snapshot().principal, { id: 'u_other_9' });
+      check(rt.SessionLedgerStore.bindPrincipal(other) === true, 'O. a different principal rebinds the Finance data');
+      g.release(ok({ generalTransactions: [OTHER, LINKED] })); await flush();
+      const l = rt.SessionLedgerStore.snapshot();
+      check(l.drill === null && l.list === null && !l.open, 'O. the late answer of the first principal is dropped: no drill target, no list, the section closed');
+    }
+    {
+      const g = gate();
+      const rt = await paidOpen(g.route);
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      rt.AuthBoot.sessionLost(); await flush();
+      g.release(ok({ generalTransactions: [OTHER, LINKED] })); await flush();
+      check(rt.SessionLedgerStore.snapshot().drill === null && rt.SessionLedgerStore.snapshot().list === null && !/reimbursement paid/.test(rt.appHTML()),
+        'O. after the session ends, the late answer is dropped and nothing of it is shown');
+    }
+    // The drill is dropped by any other range or view.
+    {
+      const rt = await paidOpen(ok({ generalTransactions: [OTHER, LINKED] }));
+      rt.app.fire('frLedgerBtn', 'click'); await flush();
+      rt.net.routes['/api/general-transactions?from=2031-04-01&to=2031-04-30'] = [ok({ generalTransactions: [OTHER, LINKED] })];
+      rt.app.type('sfFrom', '2031-04-01'); rt.app.type('sfTo', '2031-04-30'); rt.app.fire('sfRangeForm', 'submit'); await flush();
+      check(rt.SessionLedgerStore.snapshot().drill === null && !/id="sfDrill"/.test(card(rt)) && current(card(rt)).length === 0, 'O. applying another range ends the drill: no panel, no row marked');
+    }
+    // 2. No link: only a Paid request carries one; other statuses offer nothing and forged targets are refused.
+    {
+      const rt = await openCeo();
+      await openRow(rt, 2, PR_APP);
+      check(!/id="frLedgerBtn"/.test(card(rt)) && rt.SessionRequests.ledgerTarget() === null, 'O. an Approved (unpaid) request has no ledger link');
+      rt.app.fire('frBackBtn', 'click'); await flush();
+      await openRow(rt, 0, PR_DRAFT);
+      check(!/id="frLedgerBtn"/.test(card(rt)) && rt.SessionRequests.ledgerTarget() === null, 'O. a Draft request has no ledger link');
+      const bad = [{ transactionId: 'RND', date: '2031-04-12', requestId: RB_PAID.id }, { transactionId: PAYMENT.financeTransactionId, date: '2031-13-40', requestId: RB_PAID.id },
+        { transactionId: PAYMENT.financeTransactionId, date: '2031-04-12', requestId: '<x>' }, null];
+      check(bad.every((t) => rt.sessionOpenLedgerTransaction(t) === false) && !rt.SessionLedgerStore.snapshot().open && ledgerReads(rt).length === 0 && rt.rq().open,
+        'O. malformed targets (bad id, bad date, bad request id, none) open nothing and read nothing');
+    }
+    // 7. The Employee: no link, and none can be forged.
+    {
+      const rt = await openEmp();
+      await openRow(rt, 0, RB_PAID);
+      check(!/id="frLedgerBtn"|View ledger transaction/.test(card(rt)) && rt.SessionRequests.ledgerTarget() === null, 'O. an Employee\'s Paid reimbursement offers no ledger link');
+      const forged = { transactionId: PAYMENT.financeTransactionId, date: '2031-04-12', requestId: RB_PAID.id };
+      check(rt.sessionOpenLedgerTransaction(forged) === false && rt.SessionLedger.drill(forged) === false && !rt.SessionLedgerStore.snapshot().open
+        && ledgerReads(rt).length === 0 && rt.loc.hash === '#/reimbursements' && anyWrite(rt).length === 0,
+        'O. a forged drill by an Employee opens nothing, reads no ledger route and writes nothing');
+      firewall(rt, 'O. Employee');
+    }
   }
 
   console.log('');

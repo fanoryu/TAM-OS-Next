@@ -5,11 +5,11 @@
   "schemaVersion": 6,
   "actions": 24,
   "entry": "index.html",
-  "packageDigest": "91549abed1dcb91730b6a43383a0fe5ec9babd4fde5aa9427909a477b906d659",
+  "packageDigest": "2792ff404cb0cb18e064eadcc85d67263d28c9dcab1fd2912685464a7172785c",
   "zip": {
     "name": "tam-os-v3.0.0-package.zip",
-    "bytes": 2274616,
-    "sha256": "bd1c8e2fbb972934df45cbda822a95c608f16881b9641df30b3417e300e1d0f7"
+    "bytes": 2284290,
+    "sha256": "8d5c0f348a5efb0b0c8a8c0250874e485466e1924e3b5190cd12a1fe64b199a8"
   },
   "files": [
     {
@@ -149,8 +149,8 @@
     },
     {
       "path": "js/core/session-ledger.js",
-      "bytes": 17493,
-      "sha256": "212d691f94a0051d16ccb478d020619ad5d330a21637c18e440dae75005802df"
+      "bytes": 19531,
+      "sha256": "0c3476384cc68073cfad418388192255681aee27985915a9f588fc5ed3605f26"
     },
     {
       "path": "js/core/session-overtime.js",
@@ -164,8 +164,8 @@
     },
     {
       "path": "js/core/session-requests.js",
-      "bytes": 29747,
-      "sha256": "c6ae539b459f6d2b314469a9150d7413611b6c5c40bbb426b1c96edd301e368f"
+      "bytes": 30865,
+      "sha256": "93c8b903c1eb4177cac9fc7a6607a8ab16e79c9f1a84a249828dfc9428e96544"
     },
     {
       "path": "js/core/transaction-api.js",
@@ -194,8 +194,8 @@
     },
     {
       "path": "js/ui/session-ledger-view.js",
-      "bytes": 28314,
-      "sha256": "fe4737e7e6c92609e73f77ae012a7575e859542a6419b35002b1b20cd093f191"
+      "bytes": 32411,
+      "sha256": "1d8533af6653670ec4754b6f113f13cedbd3ad7179d8d29b9f3c5c5e10fe7de9"
     },
     {
       "path": "js/ui/session-overtime-view.js",
@@ -209,13 +209,13 @@
     },
     {
       "path": "js/ui/session-requests-view.js",
-      "bytes": 37577,
-      "sha256": "d7f53bf8797566455632a04a819890ba01909f7c3e2153afcbec19072242f6f8"
+      "bytes": 38050,
+      "sha256": "f6a3e87967838663e3931029465b86097214624929de0b8348a59834f30a5261"
     },
     {
       "path": "js/ui/session-workspace-view.js",
-      "bytes": 88920,
-      "sha256": "4853a57d35ae3e7920ceb2e7023168d023007c6d58694e630202024ad5faa43d"
+      "bytes": 90868,
+      "sha256": "c087f832a86689b932c77c7cbf78af24bb7f2848d679c42163ce32d435fc3419"
     },
     {
       "path": "js/ui/shell-core.js",
