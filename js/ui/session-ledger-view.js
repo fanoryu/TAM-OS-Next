@@ -111,14 +111,15 @@ function sessionLedgerRangeLabel(r){
 // GP-03: the Payroll line and the consolidated total (which counts payroll) are never exported.
 const SESSION_LEDGER_CSV_TRANSACTIONS = Object.freeze(['Date', 'Type', 'Financial Post', 'Category', 'Description', 'Amount (Rp)', 'Status', 'Void reason']);
 const SESSION_LEDGER_CSV_REPORT = Object.freeze(['From', 'To', 'Section', 'Financial Post', 'Income (Rp)', 'Expenses (Rp)', 'Net (Rp)', 'Amount (Rp)', 'Count']);
+// Sprint 3: exactly the rows shown — the Financial Post filter applied; the file name names the post.
 function sessionLedgerTransactionsCsv(w){
   if(w.listStatus !== SESSION_LEDGER_STATUS.READY || !w.list || !w.range) return null;
   const c = SessionCsv;
-  const rows = w.list.map(function(t){
+  const rows = sessionLedgerVisibleRows(w).map(function(t){
     return [c.text(t.transactionDate), c.text(SESSION_LEDGER_KIND_LABELS[t.kind]), c.text(transactionPostName(t.financialPost)), c.text(t.category),
       c.text(t.description), c.money(t.amount), c.text(t.status), c.text(t.void ? t.void.reason : null)];
   });
-  return { content: c.document(SESSION_LEDGER_CSV_TRANSACTIONS, rows), filename: c.filename(['transactions', w.range.from, 'to', w.range.to]) };
+  return { content: c.document(SESSION_LEDGER_CSV_TRANSACTIONS, rows), filename: c.filename(['transactions'].concat(w.postFilter ? [w.postFilter] : [], [w.range.from, 'to', w.range.to])) };
 }
 function sessionLedgerReportCsv(w){
   if(w.reportStatus !== SESSION_LEDGER_STATUS.READY || !w.report || !w.range) return null;
@@ -268,25 +269,35 @@ function sessionLedgerDrillHTML(w){
     + '<div class="auth-actions"><button class="btn" type="button" id="sfDrillBack"' + (busy ? ' disabled' : '') + '>Back to the finance request</button></div></section>';
 }
 
+// Sprint 3: the CEO's Financial Post filter of the Transactions rows (the dashboard is never filtered).
+function sessionLedgerPostFilterHTML(w, dis){
+  const option = function(v, label){ return '<option value="' + escapeHtml(v) + '"' + (v === w.postFilter ? ' selected' : '') + '>' + escapeHtml(label) + '</option>'; };
+  return '<div class="head-controls" role="group" aria-label="Financial Post filter"><label for="sfPostFilter">Financial Post</label><select class="input" id="sfPostFilter" name="financialPost"' + dis + '>'
+    + option('', 'All Financial Posts') + FINANCIAL_POSTS.map(function(p){ return option(p.code, p.name); }).join('') + '</select></div>';
+}
+
 function sessionLedgerTransactionsHTML(w){
   const busy = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING;
   const dis = busy || w.form || w.voidTarget ? ' disabled' : '';
   const head = '<h2 class="section-title" id="sfViewTitle" tabindex="-1">Transactions, ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '</h2>'
     + (w.drill ? sessionLedgerDrillHTML(w) : '')
     + (w.form ? sessionLedgerFormHTML(w) : (w.voidTarget ? sessionLedgerVoidHTML(w)
-      : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="sfAddBtn"' + dis + '>Record transaction</button></div>'));
+      : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="sfAddBtn"' + dis + '>Record transaction</button></div>'))
+    + sessionLedgerPostFilterHTML(w, dis);
   if(w.listStatus === SESSION_LEDGER_STATUS.ERROR && w.error && w.error.scope === 'list') return head + (w.drill ? '' : sessionLedgerErrorHTML(w.error, 'sfReadError'));   // a drill shows it in its panel
   if(w.listStatus !== SESSION_LEDGER_STATUS.READY || !w.list) return head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_LEDGER_TEXT.loadingList) + '</p>';
-  if(!w.list.length) return head + '<div class="empty" role="status">No transactions dated ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '.</div>' + sessionLedgerExportHTML(w, null);
+  const rows = sessionLedgerVisibleRows(w);
+  const inPost = w.postFilter ? ' in ' + transactionPostName(w.postFilter) : '';
+  if(!rows.length) return head + '<div class="empty" role="status">No transactions' + escapeHtml(inPost) + ' dated ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '.</div>' + sessionLedgerExportHTML(w, null);
   const match = sessionLedgerDrillMatch(w);
-  const body = w.list.map(function(t, i){
+  const body = rows.map(function(t, i){
     const voided = t.status === 'Voided';
     return '<tr' + (t === match ? ' aria-current="true"' : '') + '><td>' + escapeHtml(t.transactionDate) + '</td><td>' + escapeHtml(SESSION_LEDGER_KIND_LABELS[t.kind]) + '</td><td>' + escapeHtml(transactionPostName(t.financialPost)) + '</td>'
       + '<td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + moneyHTML(t.amount) + '</td>'
       + '<td>' + (voided ? statusBadgeHTML('Voided', 'stop') + ' ' + escapeHtml(t.void.reason) : statusBadgeHTML('Active', 'done')) + '</td>'
       + '<td>' + (voided ? '' : '<button class="btn" type="button" data-sf-void="' + i + '"' + dis + '>Void</button>') + '</td></tr>';
   }).join('');
-  return head + '<p class="hint">' + w.list.length + (w.list.length === 1 ? ' transaction' : ' transactions') + ', oldest first.</p>' + sessionLedgerExportHTML(w, null)
+  return head + '<p class="hint">' + rows.length + (rows.length === 1 ? ' transaction' : ' transactions') + escapeHtml(inPost) + ', oldest first.</p>' + sessionLedgerExportHTML(w, null)
     + '<div class="table-wrap" id="sfList"><table><thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Financial Post</th><th scope="col">Category</th>'
     + '<th scope="col">Description</th><th scope="col">Amount (Rp)</th><th scope="col">Status</th><th scope="col" aria-label="Void"></th></tr></thead><tbody>' + body + '</tbody></table></div>';
 }
@@ -320,6 +331,7 @@ function bindSessionLedger(app){
   on('sfFormCancel', 'click', function(){ SessionLedger.cancelCreate(); });
   on('sfVoidCancel', 'click', function(){ SessionLedger.cancelVoid(); });
   on('sfDrillBack', 'click', function(){ sessionReturnToFinanceRequest(); });   // Sprint 2
+  on('sfPostFilter', 'change', function(){ SessionLedger.setPostFilter(this.value); });   // Sprint 3
   const form = app.querySelector('#sfForm');
   if(form){
     const keep = function(){ SessionLedger.setDraft(this.name, this.value); };
