@@ -62,7 +62,14 @@ const SESSION_LEDGER_TEXT = Object.freeze({
   // I4: the Approved-not-paid line of the report.
   approvedNote: 'An approved request is a commitment, not a payment. It becomes an expense only when its payment is recorded, on the payment date, and is then counted once in the expenses above.',
   noEdit: 'A recorded transaction cannot be edited or deleted. To correct one, void it with a reason and record it again.',
-  voidLead: 'Voiding keeps the transaction in the history, marked Voided, and removes it from every total. It cannot be undone.'
+  voidLead: 'Voiding keeps the transaction in the history, marked Voided, and removes it from every total. It cannot be undone.',
+  // Sprint 2: the drill-through from a paid finance request.
+  drillLoading: 'Looking for the transaction recorded by this payment…',
+  drillFound: 'The general transaction recorded when this finance request was paid.',
+  drillMissing: 'The transaction recorded by this payment is not among the transactions shown for its payment date. It may have been removed, or be outside your access. No other transaction is shown in its place.',
+  drillError: 'The transaction linked to this finance request could not be loaded.',
+  // A server error while reading the one payment date: not diagnosed, and never "choose a shorter range".
+  drillServerError: 'TAM OS could not read the transactions of this payment date. Try again later.'
 });
 const SESSION_LEDGER_KIND_LABELS = Object.freeze({ income: 'Income', expense: 'Expense' });
 const SESSION_LEDGER_FORM = Object.freeze([
@@ -74,8 +81,9 @@ const SESSION_LEDGER_FORM = Object.freeze([
   Object.freeze({ name: 'transactionDate', label: 'Date', type: 'date', error: 'Enter a date from 1900 up to today.' })
 ]);
 
-function sessionLedgerErrorHTML(error, id){
-  let msg = SESSION_LEDGER_ERRORS[error.kind] || SESSION_LEDGER_ERRORS.UNAVAILABLE;
+// `message` (Sprint 2 drill): a fixed message replacing the default one for this error kind.
+function sessionLedgerErrorHTML(error, id, message){
+  let msg = message || SESSION_LEDGER_ERRORS[error.kind] || SESSION_LEDGER_ERRORS.UNAVAILABLE;
   if(error.kind === 'RATE_LIMITED' && typeof authWaitText === 'function') msg += authWaitText(error.retryAfter);
   if(error.requestId) msg += ' Reference: ' + error.requestId + '.';
   const final = error.kind === 'DENIED' || error.kind === 'VALIDATION' || error.kind === 'CLIENT_FAULT';
@@ -234,18 +242,46 @@ function sessionLedgerVoidHTML(w){
     + '<button class="btn" type="button" id="sfVoidCancel"' + (busy ? ' disabled' : '') + '>Cancel</button></div></form>';
 }
 
+// Sprint 2: the panel for the transaction a paid finance request links to — only the row whose id
+// is exactly the payment's financeTransactionId; no id is ever rendered.
+function sessionLedgerDrillMatch(w){
+  return w.drill && w.listStatus === SESSION_LEDGER_STATUS.READY && w.list ? (w.list.find(function(t){ return t.id === w.drill.transactionId; }) || null) : null;
+}
+function sessionLedgerDrillHTML(w){
+  const d = w.drill;
+  let body;
+  // The read's own error inside the panel (Retry when retryable; 403 unchanged), never the list's range advice.
+  if(w.listStatus === SESSION_LEDGER_STATUS.ERROR) body = '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.drillError) + '</p>'
+    + (w.error && w.error.scope === 'list' ? sessionLedgerErrorHTML(w.error, 'sfReadError', w.error.kind === 'SERVER_ERROR' ? SESSION_LEDGER_TEXT.drillServerError : null) : '');
+  else if(w.listStatus !== SESSION_LEDGER_STATUS.READY || !w.list) body = '<p class="hint" role="status" aria-busy="true">' + escapeHtml(SESSION_LEDGER_TEXT.drillLoading) + '</p>';
+  else {
+    const t = sessionLedgerDrillMatch(w);
+    body = t ? '<p class="hint">' + escapeHtml(SESSION_LEDGER_TEXT.drillFound) + '</p><dl class="ux-kv" id="sfDrillTxn">' + [
+        ['Date', escapeHtml(t.transactionDate)], ['Type', escapeHtml(SESSION_LEDGER_KIND_LABELS[t.kind])], ['Financial Post', escapeHtml(transactionPostName(t.financialPost))],
+        ['Category', escapeHtml(t.category)], ['Description', escapeHtml(t.description)], ['Amount (Rp)', moneyHTML(t.amount)],
+        ['Status', t.status === 'Voided' ? statusBadgeHTML('Voided', 'stop') + ' ' + escapeHtml(t.void.reason) : statusBadgeHTML('Active', 'done')]
+      ].map(function(x){ return '<dt>' + escapeHtml(x[0]) + '</dt><dd>' + x[1] + '</dd>'; }).join('') + '</dl>'
+      : '<p class="auth-message auth-message-warn" id="sfDrillMissing" role="alert" tabindex="-1">' + escapeHtml(SESSION_LEDGER_TEXT.drillMissing) + '</p>';
+  }
+  const busy = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING;
+  return '<section class="card" id="sfDrill" aria-labelledby="sfDrillTitle"><h3 class="section-title" id="sfDrillTitle" tabindex="-1">Payment of a finance request, ' + escapeHtml(d.date) + '</h3>' + body
+    + '<div class="auth-actions"><button class="btn" type="button" id="sfDrillBack"' + (busy ? ' disabled' : '') + '>Back to the finance request</button></div></section>';
+}
+
 function sessionLedgerTransactionsHTML(w){
   const busy = w.mutation.status === SESSION_LEDGER_MUTATION_STATUS.PENDING;
   const dis = busy || w.form || w.voidTarget ? ' disabled' : '';
   const head = '<h2 class="section-title" id="sfViewTitle" tabindex="-1">Transactions, ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '</h2>'
+    + (w.drill ? sessionLedgerDrillHTML(w) : '')
     + (w.form ? sessionLedgerFormHTML(w) : (w.voidTarget ? sessionLedgerVoidHTML(w)
       : '<div class="auth-actions"><button class="btn btn-accent" type="button" id="sfAddBtn"' + dis + '>Record transaction</button></div>'));
-  if(w.listStatus === SESSION_LEDGER_STATUS.ERROR && w.error && w.error.scope === 'list') return head + sessionLedgerErrorHTML(w.error, 'sfReadError');
+  if(w.listStatus === SESSION_LEDGER_STATUS.ERROR && w.error && w.error.scope === 'list') return head + (w.drill ? '' : sessionLedgerErrorHTML(w.error, 'sfReadError'));   // a drill shows it in its panel
   if(w.listStatus !== SESSION_LEDGER_STATUS.READY || !w.list) return head + '<p class="auth-lead" role="status" aria-busy="true">' + escapeHtml(SESSION_LEDGER_TEXT.loadingList) + '</p>';
   if(!w.list.length) return head + '<div class="empty" role="status">No transactions dated ' + escapeHtml(sessionLedgerRangeLabel(w.range)) + '.</div>' + sessionLedgerExportHTML(w, null);
+  const match = sessionLedgerDrillMatch(w);
   const body = w.list.map(function(t, i){
     const voided = t.status === 'Voided';
-    return '<tr><td>' + escapeHtml(t.transactionDate) + '</td><td>' + escapeHtml(SESSION_LEDGER_KIND_LABELS[t.kind]) + '</td><td>' + escapeHtml(transactionPostName(t.financialPost)) + '</td>'
+    return '<tr' + (t === match ? ' aria-current="true"' : '') + '><td>' + escapeHtml(t.transactionDate) + '</td><td>' + escapeHtml(SESSION_LEDGER_KIND_LABELS[t.kind]) + '</td><td>' + escapeHtml(transactionPostName(t.financialPost)) + '</td>'
       + '<td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + moneyHTML(t.amount) + '</td>'
       + '<td>' + (voided ? statusBadgeHTML('Voided', 'stop') + ' ' + escapeHtml(t.void.reason) : statusBadgeHTML('Active', 'done')) + '</td>'
       + '<td>' + (voided ? '' : '<button class="btn" type="button" data-sf-void="' + i + '"' + dis + '>Void</button>') + '</td></tr>';
@@ -283,6 +319,7 @@ function bindSessionLedger(app){
   on('sfAddBtn', 'click', function(){ SessionLedger.openCreate(); });
   on('sfFormCancel', 'click', function(){ SessionLedger.cancelCreate(); });
   on('sfVoidCancel', 'click', function(){ SessionLedger.cancelVoid(); });
+  on('sfDrillBack', 'click', function(){ sessionReturnToFinanceRequest(); });   // Sprint 2
   const form = app.querySelector('#sfForm');
   if(form){
     const keep = function(){ SessionLedger.setDraft(this.name, this.value); };
@@ -315,10 +352,19 @@ function bindSessionLedger(app){
   });
 }
 
+// Sprint 2: with no focus request during a drill-through, the Finance control that had focus keeps
+// it when it is still rendered (Back, Retry, a range field), else the drill panel's heading — never
+// the page heading. Null outside a drill (the workspace decides, as before).
+function sessionLedgerDrillFocusTarget(app, keptId){
+  if(!SessionLedgerStore.snapshot().drill) return null;
+  return (keptId ? app.querySelector('#' + keptId) : null) || app.querySelector('#sfDrillTitle');
+}
+
 // After a render: the element the section asked for, else null (the workspace decides).
 function sessionLedgerFocusTarget(app, hint){
   if(hint === 'section') return app.querySelector('#authTitle');
   if(hint === 'view') return app.querySelector('#sfViewTitle');
+  if(hint === 'drill') return app.querySelector('#sfDrillTitle');
   if(hint === 'form') return app.querySelector('#sff-kind');
   if(hint === 'void') return app.querySelector('#sfVoidReason');
   if(hint === 'message') return app.querySelector('#sfMutationMessage') || app.querySelector('#sfMessage') || app.querySelector('#sfReadError');

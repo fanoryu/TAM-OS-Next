@@ -316,6 +316,9 @@ function sessionRequestsDetailHTML(w, principal){
   const note = r.status === 'Approved' ? '<p class="hint">Approved, not paid: the amount is committed but not yet an expense. It counts in no income, expense or net total until the payment is recorded.</p>'
     : (r.status === 'Paid' ? '<p class="hint">The payment is recorded as an expense in Transactions on the payment date.</p>' : '');
   const offered = sessionRequestsOffered(principal, r);
+  // Sprint 2: the CEO's link from a Paid request to the transaction its payment recorded (read-only).
+  const ledger = sessionRequestsIsCeo(principal) && r.status === 'Paid' && r.payment
+    ? '<div class="auth-actions" id="frLedger"><button class="btn" type="button" id="frLedgerBtn"' + dis + '>View ledger transaction</button></div>' : '';
   const buttons = offered.length && !w.action
     ? '<div class="auth-actions" id="frOps">' + offered.map(function(op){ const b = SESSION_REQUESTS_OP_BUTTONS[op]; return '<button class="' + b.cls + '" type="button" id="' + b.id + '"' + dis + '>' + escapeHtml(b.label) + '</button>'; }).join('') + '</div>'
     : '';
@@ -323,7 +326,7 @@ function sessionRequestsDetailHTML(w, principal){
   return back + (w.action ? '' : sessionRequestsMessageHTML(w)) + reloading
     + '<h2 class="section-title" id="frDetailTitle" tabindex="-1">' + escapeHtml(SESSION_REQUESTS_KIND_LABELS[r.kind] + ', ' + r.documentDate) + '</h2>'
     + '<dl class="ux-kv" id="frDetail">' + rows.map(function(x){ return '<dt>' + escapeHtml(x[0]) + '</dt><dd>' + x[1] + '</dd>'; }).join('') + '</dl>' + note
-    + buttons + (w.action ? sessionRequestsActionHTML(w, r) : '')
+    + buttons + ledger + (w.action ? sessionRequestsActionHTML(w, r) : '')
     + (sessionRequestsIsCeo(principal) ? sessionRequestsHistoryHTML(w) : '');
 }
 
@@ -357,6 +360,7 @@ function bindSessionRequests(app){
   on('frNewBtn', 'click', function(){ SessionRequests.openCreate(); });
   on('frNewRbBtn', 'click', function(){ SessionRequests.openCreate('reimbursement'); });
   on('frBackBtn', 'click', function(){ SessionRequests.back(); });
+  on('frLedgerBtn', 'click', function(){ sessionOpenLedgerTransaction(SessionRequests.ledgerTarget()); });   // Sprint 2
   on('frEditBtn', 'click', function(){ SessionRequests.openEdit(); });
   ['submit', 'approve', 'reject', 'pay', 'cancel'].forEach(function(op){ on(SESSION_REQUESTS_OP_BUTTONS[op].id, 'click', function(){ SessionRequests.openAction(op); }); });
   on('frFormCancel', 'click', function(){ SessionRequests.cancelForm(); });
