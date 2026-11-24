@@ -1,0 +1,434 @@
+name: Browser QA
+
+# TEST-ONLY browser end-to-end check of the SESSION package against the real PHP backend, on a
+# disposable GitHub-hosted runner. Manually dispatched only, from the default branch, for ONE
+# application commit that this reviewed file names in APPROVED_APP_SHA.
+#
+# Trust boundary (two checkouts, never mixed):
+#   harness/  this workflow's own default-branch revision (github.sha). Only harness/tools/browser-qa
+#             is executed from it: the guard/fixture (seed.php) and the Playwright suite.
+#   app/      the approved application commit, verified byte-for-byte by SHA before ANY of its PHP
+#             or Node code runs. It can never supply or replace the workflow, fixture or tests.
+# Approving another commit means changing APPROVED_APP_SHA through a reviewed pull request to the
+# default branch. SHA syntax, branch membership or file presence never authorize a run.
+#
+# Everything it uses is created inside this job and disappears with it: a throw-away MariaDB service
+# container published on 127.0.0.1 only (the same pinned image as backend.yml), a fresh QA schema
+# built by the approved commit's own migration runner — only after a pre-migration identity and
+# freshness guard passes — fabricated records from seed.php, and the PHP built-in server and the
+# TEST-ONLY E2E proxy, both bound to 127.0.0.1. It never reaches Hostinger, staging, production or
+# a public endpoint. The database password below is a disposable CI-only value; account passwords
+# are generated at run time, kept in a 0600 file in a 0700 runner-temp directory, masked, never
+# printed. No artifact is uploaded (no trace, screenshot, cookie, token, configuration or dump).
+on:
+  workflow_dispatch:
+    inputs:
+      app_sha:
+        description: Application commit to test; must equal APPROVED_APP_SHA in this workflow
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-qa
+  cancel-in-progress: false
+
+jobs:
+  browser-qa:
+    # Only a dispatch of the default branch's own revision of this workflow runs at all.
+    if: github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      mariadb:
+        # Official Docker Library image, MariaDB 10.11.19, pinned by tag AND multi-arch index digest
+        # exactly as in backend.yml (resolved 2026-09-29). A CI baseline, not proof of Hostinger
+        # compatibility. Update both files together, deliberately.
+        image: mariadb:10.11.19@sha256:7f22313fc130a377a44999965bcb0a08dd5b21e8502824c1b864f792f9bc66ab
+        env:
+          # Disposable CI-only values for a throw-away container; not secrets, never reused.
+          MARIADB_ROOT_PASSWORD: browser-qa-root-not-a-secret
+          MARIADB_DATABASE: tamos_browser_qa
+          MARIADB_USER: tamos_bqa
+          MARIADB_PASSWORD: browser-qa-only-not-a-secret
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=24
+    env:
+      # The ONE application commit this reviewed revision approves for browser QA.
+      APPROVED_APP_SHA: c272cf12e1c04bc6b46e2a279fb509e1dce28944
+      APP_SHA: ${{ inputs.app_sha }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      EXPECTED_WORKFLOW_PATH: .github/workflows/browser-qa.yml
+      EXPECTED_MIGRATION_HEAD: '0042'
+      EXPECTED_IMAGE_DIGEST: sha256:7f22313fc130a377a44999965bcb0a08dd5b21e8502824c1b864f792f9bc66ab
+      BQA_DB_NAME: tamos_browser_qa
+      BQA_PORT: '8768'
+      BQA_API_PORT: '8769'
+    steps:
+      - name: Gate — default-branch workflow revision and the approved application commit only
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || { echo "::error::Dispatch only."; exit 1; }
+          [ "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH" ] || { echo "::error::Run only from the default branch."; exit 1; }
+          [ "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/$EXPECTED_WORKFLOW_PATH@refs/heads/$DEFAULT_BRANCH" ] || { echo "::error::Unexpected workflow revision."; exit 1; }
+          [[ "$APPROVED_APP_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::APPROVED_APP_SHA is malformed."; exit 1; }
+          [ "$APP_SHA" = "$APPROVED_APP_SHA" ] || { echo "::error::app_sha is not the commit this workflow revision approves."; exit 1; }
+          # Private QA directory outside both checkouts: configuration, state and logs, mode 0700.
+          umask 077
+          mkdir -m 700 "$RUNNER_TEMP/browser-qa"
+          mkdir -m 700 "$RUNNER_TEMP/browser-qa/logs"
+          echo "BQA_DIR=$RUNNER_TEMP/browser-qa" >> "$GITHUB_ENV"
+          echo "approved application commit: $APPROVED_APP_SHA; harness revision: $GITHUB_SHA"
+
+      - name: Checkout the trusted QA harness (this workflow's default-branch revision)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify the harness revision
+        run: |
+          set -euo pipefail
+          [ "$(git -C harness rev-parse HEAD)" = "$GITHUB_SHA" ] || { echo "::error::Harness is not the dispatched revision."; exit 1; }
+          test -z "$(git -C harness status --porcelain)" || { echo "::error::Harness tree is not clean."; exit 1; }
+          for f in tools/browser-qa/seed.php tools/browser-qa/session.spec.js tools/browser-qa/package.json tools/browser-qa/package-lock.json "$EXPECTED_WORKFLOW_PATH"; do
+            test -f "harness/$f" || { echo "::error::harness/$f is missing."; exit 1; }
+          done
+
+      - name: Checkout the approved application commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.APPROVED_APP_SHA }}
+          path: app
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify the application checkout is exactly the approved commit (before running any of it)
+        run: |
+          set -euo pipefail
+          head=$(git -C app rev-parse HEAD)
+          [ "$head" = "$APPROVED_APP_SHA" ] || { echo "::error::Checked out $head, approved $APPROVED_APP_SHA."; exit 1; }
+          [ "$(git -C app cat-file -t "$APPROVED_APP_SHA")" = "commit" ] || { echo "::error::Approved object is not a commit."; exit 1; }
+          test -z "$(git -C app status --porcelain)" || { echo "::error::Application tree is not clean."; exit 1; }
+          for f in server/bin/migrate.php server/dev/router.php server/src/bootstrap.php tools/serve-e2e-proxy.js tools/build-package.js; do
+            test -f "app/$f" || { echo "::error::app/$f is missing at the approved commit."; exit 1; }
+          done
+          latest=$(ls app/server/migrations | grep -E '^[0-9]{4}_.*\.sql$' | sort | tail -1)
+          [ "${latest:0:4}" = "$EXPECTED_MIGRATION_HEAD" ] || { echo "::error::Latest migration is $latest; this suite is reviewed through $EXPECTED_MIGRATION_HEAD."; exit 1; }
+          echo "application: $head; migration head: $latest"
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Require the runner's PHP to be 8.3.x with pdo_mysql
+        run: |
+          php -v
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 3 ? 0 : 1);' || {
+            echo "::error::Runner PHP is not 8.3.x. Stop: adding a PHP setup action needs owner approval (CLAUDE.md §20)."
+            exit 1
+          }
+          php -r 'exit(extension_loaded("pdo_mysql") ? 0 : 1);' || { echo "::error::Runner PHP has no pdo_mysql."; exit 1; }
+
+      - name: Verify the disposable MariaDB service container (image digest, loopback-only port)
+        env:
+          SERVICE_ID: ${{ job.services.mariadb.id }}
+        run: |
+          set -euo pipefail
+          [[ "$SERVICE_ID" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::No MariaDB service container id."; exit 1; }
+          image=$(docker inspect --format '{{.Config.Image}}' "$SERVICE_ID")
+          [[ "$image" == *"@$EXPECTED_IMAGE_DIGEST" ]] || { echo "::error::Service container image is not the pinned digest."; exit 1; }
+          [ "$(docker inspect --format '{{.State.Health.Status}}' "$SERVICE_ID")" = "healthy" ] || { echo "::error::Service container is not healthy."; exit 1; }
+          published=$(docker port "$SERVICE_ID" 3306/tcp | sort -u)
+          [ "$published" = "127.0.0.1:3306" ] || { echo "::error::MariaDB is published on [$published], expected 127.0.0.1:3306 only."; exit 1; }
+          [ "$(docker port "$SERVICE_ID" | wc -l)" = "1" ] || { echo "::error::The service container publishes more than one port."; exit 1; }
+          echo "service container: pinned image, healthy, published on 127.0.0.1:3306 only"
+
+      - name: Write the disposable QA backend configuration (private directory, outside both checkouts)
+        run: |
+          set -euo pipefail
+          umask 077
+          cat > "$BQA_DIR/config.php" <<PHP
+          <?php
+          declare(strict_types=1);
+          return [
+              'env' => 'test',
+              'origin' => 'http://localhost:${BQA_PORT}',
+              'log_path' => '${BQA_DIR}/logs/api.log',
+              'body_limit_bytes' => 65536,
+              'db' => ['host' => '127.0.0.1', 'port' => 3306, 'name' => '${BQA_DB_NAME}', 'user' => 'tamos_bqa', 'pass' => 'browser-qa-only-not-a-secret'],
+          ];
+          PHP
+          php -l "$BQA_DIR/config.php" > /dev/null
+          echo "TAMOS_CONFIG=$BQA_DIR/config.php" >> "$GITHUB_ENV"
+
+      - name: Pre-migration guard — QA target identity and an empty database (harness code only)
+        env:
+          SERVICE_ID: ${{ job.services.mariadb.id }}
+        run: |
+          php -l harness/tools/browser-qa/seed.php > /dev/null
+          php harness/tools/browser-qa/seed.php preflight --app="$GITHUB_WORKSPACE/app"
+
+      - name: Build the fresh QA schema with the approved commit's migration runner
+        working-directory: app
+        run: |
+          set -euo pipefail
+          php server/bin/migrate.php apply
+          php server/bin/migrate.php status | tee "$BQA_DIR/migrate-status.txt"
+          grep -qx 'migrations: current' "$BQA_DIR/migrate-status.txt"
+
+      - name: Seed fabricated QA companies, accounts and finance records (guards re-checked first)
+        env:
+          SERVICE_ID: ${{ job.services.mariadb.id }}
+        run: php harness/tools/browser-qa/seed.php seed --app="$GITHUB_WORKSPACE/app" --state="$BQA_DIR/state.json"
+
+      - name: Build and verify the deployment package of the approved commit
+        working-directory: app
+        run: |
+          node tools/build-package.js
+          node tools/verify-build.js
+
+      - name: Start the PHP backend and the E2E proxy on loopback
+        working-directory: app
+        run: |
+          set -euo pipefail
+          nohup php -S "127.0.0.1:${BQA_API_PORT}" server/dev/router.php > "$BQA_DIR/logs/php-server.log" 2>&1 &
+          echo $! > "$BQA_DIR/php.pid"
+          nohup node tools/serve-e2e-proxy.js "$BQA_PORT" "$BQA_API_PORT" > "$BQA_DIR/logs/proxy.log" 2>&1 &
+          echo $! > "$BQA_DIR/proxy.pid"
+
+      - name: Diagnose backend readiness (health, ready, session check, Origin guard, CSP)
+        run: |
+          # Output: fixed outcome words and numeric HTTP codes only. curl runs silent (no error text,
+          # no URL); response bodies are read privately, reduced to ready / not-ready, then deleted.
+          set -uo pipefail
+          base="http://localhost:${BQA_PORT}"
+          code_of() { local c; c=$(curl -s -o /dev/null -w '%{http_code}' "$@" 2>/dev/null) || true; [[ "$c" =~ ^[0-9]{3}$ ]] && echo "$c" || echo "000"; }
+          for i in $(seq 1 30); do
+            [ "$(code_of "$base/api/health")" = "200" ] && break
+            sleep 1
+          done
+          health=$(code_of "$base/api/health")
+          ready_code=$(curl -s -o "$BQA_DIR/ready.json" -w '%{http_code}' "$base/api/ready" 2>/dev/null) || true
+          [[ "$ready_code" =~ ^[0-9]{3}$ ]] || ready_code=000
+          ready=$(php -n -r '$j = json_decode((string) @file_get_contents($argv[1]), true); echo is_array($j) && ($j["ok"] ?? null) === true && ($j["data"]["status"] ?? null) === "ready" ? "ready" : "not-ready";' "$BQA_DIR/ready.json" 2>/dev/null) || ready=not-ready
+          [ "$ready" = "ready" ] || ready=not-ready
+          rm -f "$BQA_DIR/ready.json"
+          me=$(code_of "$base/api/auth/me")
+          cross=$(code_of -X POST -H 'Origin: http://attacker.invalid' -H 'Content-Type: application/json' --data '{}' "$base/api/auth/login")
+          headers=$(curl -s -D - -o /dev/null "$base/" 2>/dev/null) || true
+          if grep -qi '^content-security-policy:' <<< "$headers"; then csp=present; else csp=absent; fi
+          echo "readiness: health HTTP $health; ready HTTP $ready_code $ready; session check HTTP $me; cross-origin write HTTP $cross; CSP $csp"
+          fail=0
+          [ "$health" = "200" ] || { echo "::error::readiness: health check failed"; fail=1; }
+          [ "$ready_code" = "200" ] && [ "$ready" = "ready" ] || { echo "::error::readiness: backend not ready"; fail=1; }
+          [ "$me" = "401" ] || { echo "::error::readiness: session check is not 401"; fail=1; }
+          [ "$cross" = "403" ] || { echo "::error::readiness: Origin guard is not 403"; fail=1; }
+          [ "$csp" = "present" ] || { echo "::error::readiness: Content-Security-Policy absent"; fail=1; }
+          exit "$fail"
+
+      - name: Install the lockfile-pinned Playwright and its Chromium (harness)
+        working-directory: harness/tools/browser-qa
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install playwright --version
+          npx --no-install playwright install --with-deps chromium
+
+      - name: Run the browser QA suite (harness, one worker, Chromium)
+        env:
+          SERVICE_ID: ${{ job.services.mariadb.id }}
+        working-directory: harness/tools/browser-qa
+        run: |
+          # Playwright's stdout/stderr (assertion diffs, test console lines) go ONLY to the private
+          # directory, removed by the cleanup step. The log shows the real exit status, counts, and per
+          # registered test (00-12) its fixed id, a fixed failure category and a validated spec line.
+          # Success only when Playwright exits 0 AND the report shows exactly 13 passing registered tests.
+          set -uo pipefail
+          export BQA_BASE_URL="http://localhost:${BQA_PORT}" BQA_STATE="$BQA_DIR/state.json" BQA_APP_DIR="$GITHUB_WORKSPACE/app"
+          export PLAYWRIGHT_JSON_OUTPUT_FILE="$BQA_DIR/pw-report.json"
+          rc=0
+          npx --no-install playwright test session.spec.js --workers=1 --retries=0 --reporter=json --output="$BQA_DIR/pw-output" \
+            > "$BQA_DIR/pw-stdout.log" 2> "$BQA_DIR/pw-stderr.log" || rc=$?
+          verdict=0
+          node -e '
+            const fs = require("fs");
+            const [reportPath, stdoutPath, rcText, specPath] = process.argv.slice(1);
+            // The registered suite. PASS requires exactly one passing result for each of these ids, nothing else.
+            const REGISTERED = ["00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+            const RESULT_STATUSES = ["passed", "failed", "timedOut", "skipped", "interrupted"];
+            const OPS = ["probe", "navigate", "read-ledger-rows", "read-money", "read-consolidated", "read-marked-rows", "read-focus", "read-page-text", "expire-sessions", "other"];
+            const rc = /^[0-9]{1,3}$/.test(String(rcText)) ? Number(rcText) : -1;
+            const problems = [];
+            const note = (p) => { if (!problems.includes(p)) problems.push(p); };
+            const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+            const NL = String.fromCharCode(10);
+
+            // The trusted spec, read as data: its line count (for diagnostic lines) and the ids it declares.
+            let specLines = 0;
+            let declared = [];
+            try {
+              const text = fs.readFileSync(specPath, "utf8");
+              const parts = text.split(NL); specLines = parts[parts.length - 1] === "" ? parts.length - 1 : parts.length;
+              declared = [...text.matchAll(new RegExp("^test[(]" + String.fromCharCode(39) + "([0-9]{2}) ", "gm"))].map((m) => m[1]);
+            } catch (e) { note("spec-unreadable"); }
+            if (declared.join(",") !== REGISTERED.join(",")) note("spec-ids-not-the-registered-set");
+
+            // The report: the JSON file; stdout only when no file was written. Empty or unparsable is no report.
+            const readJson = (p) => { try { const t = fs.readFileSync(p, "utf8"); return t.trim() === "" ? null : JSON.parse(t); } catch (e) { return null; } };
+            let report = readJson(reportPath);
+            if (report === null && !fs.existsSync(reportPath)) report = readJson(stdoutPath);
+            const reportOk = isObj(report) && Array.isArray(report.suites) && report.suites.length > 0;
+            if (!reportOk) note("report-missing-empty-or-malformed");
+
+            const category = (e) => {
+              const msg = String((isObj(e) && e.message) || "");
+              const op = /page operation failed: ([a-z-]{1,40})/.exec(msg);
+              if (op) return "page-operation:" + (OPS.includes(op[1]) ? op[1] : "other");
+              if (/problem categories/.test(msg)) return "problem-categories";
+              const isExpect = /expect[(]/.test(msg), isTimeout = /[Tt]imeout|[Tt]imed out/.test(msg);
+              if (isExpect) return isTimeout ? "assertion-timeout" : "assertion";
+              if (isTimeout) return "timeout";
+              if (/net::ERR_|ECONNREFUSED/.test(msg)) return "network";
+              return "other";
+            };
+            const where = (e) => {
+              const l = isObj(e) ? e.location : null;
+              if (!isObj(l)) return "-";
+              const base = String(l.file).split("/").pop().split(String.fromCharCode(92)).pop();
+              if (base === "session.spec.js" && Number.isInteger(l.line) && l.line >= 1 && l.line <= specLines) return "session.spec.js:" + l.line;
+              note("invalid-diagnostic-location");
+              return "invalid-line";
+            };
+
+            // Every spec entry, per registered id; anything else is counted as unknown.
+            const seen = {};
+            let unknown = 0;
+            let executed = 0;
+            const walk = (suite) => {
+              if (!isObj(suite)) { note("report-malformed-suite"); return; }
+              for (const sp of Array.isArray(suite.specs) ? suite.specs : (suite.specs === undefined ? [] : (note("report-malformed-specs"), []))) {
+                if (!isObj(sp)) { note("report-malformed-spec"); continue; }
+                const m = /^([0-9]{2}) /.exec(String(sp.title || ""));
+                const id = m && REGISTERED.includes(m[1]) ? m[1] : null;
+                const tests = Array.isArray(sp.tests) ? sp.tests : [];
+                const results = tests.flatMap((t) => (isObj(t) && Array.isArray(t.results) ? t.results : []));
+                executed += results.length;
+                if (id === null) { unknown++; note("unknown-test"); continue; }
+                const r = results.length === 1 && isObj(results[0]) ? results[0] : null;
+                const errs = r && Array.isArray(r.errors) ? r.errors : [];
+                const shapeOk = tests.length === 1 && isObj(tests[0]) && results.length === 1 && r !== null && Array.isArray(r.errors);
+                const status = r && RESULT_STATUSES.includes(r.status) ? r.status : "other-status";
+                const passed = shapeOk && sp.ok === true && tests[0].status === "expected" && tests[0].expectedStatus === "passed" && r.retry === 0 && status === "passed" && errs.length === 0 && (r.error === undefined || r.error === null);
+                const reason = passed ? "passed" : (!shapeOk ? "inconsistent-shape" : (tests[0].expectedStatus !== "passed" ? "expected-status-not-passed" : (r.retry !== 0 ? "retry-not-0" : (status === "passed" ? "inconsistent-pass" : status))));
+                (seen[id] = seen[id] || []).push({ passed, reason, cats: errs.map(category), at: errs.map(where) });
+              }
+              if (suite.suites !== undefined && !Array.isArray(suite.suites)) { note("report-malformed-suites"); return; }
+              for (const s of suite.suites || []) walk(s);
+            };
+            if (reportOk) report.suites.forEach(walk);
+
+            // Exactly one passing entry per registered id.
+            const lines = [];
+            let passedIds = 0;
+            for (const id of REGISTERED) {
+              const e = seen[id] || [];
+              if (e.length === 0) { note("missing-test"); lines.push("test " + id + ": missing"); continue; }
+              if (e.length > 1) { note("duplicated-test"); lines.push("test " + id + ": duplicated (" + e.length + ")"); continue; }
+              if (e[0].passed) { passedIds++; continue; }
+              note("test-not-passed");
+              lines.push("test " + id + ": " + e[0].reason + " " + (e[0].cats.join(",") || "-") + " at " + (e[0].at.join(",") || "-"));
+            }
+
+            // Summary counts and reported errors must agree with the entries.
+            const st = reportOk && isObj(report.stats) ? report.stats : {};
+            const num = (k) => (Number.isInteger(st[k]) && st[k] >= 0 ? st[k] : -1);
+            if (!(num("expected") === REGISTERED.length && num("unexpected") === 0 && num("flaky") === 0 && num("skipped") === 0)) note("summary-counts-inconsistent");
+            const reportErrors = reportOk && Array.isArray(report.errors) ? report.errors.length : -1;
+            if (reportErrors !== 0) note("report-errors-not-empty");
+            if (executed !== REGISTERED.length) note("executed-count-not-13");
+            if (passedIds !== REGISTERED.length) note("passed-count-not-13");
+            if (rc !== 0) note("playwright-exit-nonzero");
+
+            console.log("playwright exit status: " + rc);
+            console.log("spec: " + specLines + " lines; declared ids " + (problems.includes("spec-ids-not-the-registered-set") ? "differ from" : "equal") + " the registered 00-12");
+            console.log("tests: executed " + executed + ", passed " + passedIds + " of " + REGISTERED.length + "; unknown " + unknown
+              + "; summary expected " + num("expected") + ", unexpected " + num("unexpected") + ", flaky " + num("flaky") + ", skipped " + num("skipped") + "; report errors " + reportErrors);
+            for (const l of lines) console.log(l);
+            const ok = problems.length === 0;
+            if (!ok) console.log("problems: " + problems.join(", "));
+            console.log("result: " + (ok ? "pass" : "fail"));
+            process.exit(ok ? 0 : 1);
+          ' "$BQA_DIR/pw-report.json" "$BQA_DIR/pw-stdout.log" "$rc" "$GITHUB_WORKSPACE/harness/tools/browser-qa/session.spec.js" || verdict=$?
+          echo "private stderr lines: $(wc -l < "$BQA_DIR/pw-stderr.log" 2>/dev/null || echo 0)"
+          if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+          exit "$verdict"
+
+      - name: Sanitized diagnostics (API route/status/reason counts and server error lines only)
+        if: always()
+        run: |
+          echo "## Browser QA diagnostics" >> "$GITHUB_STEP_SUMMARY"
+          echo "Approved application commit: \`$APPROVED_APP_SHA\`; harness revision: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          [ -n "${BQA_DIR:-}" ] || exit 0
+          if [ -f "$BQA_DIR/logs/api.log" ]; then
+            # Fixed categories only. Each field is printed only when it is a member of a fixed list —
+            # routes, error codes and log reasons read as TEXT from the approved app source (never
+            # executed), events and methods listed here — and as "other" otherwise. Request ids,
+            # durations, exception messages, classes and database details are never printed.
+            echo "API requests by event, method, route, status, error and reason:"
+            php -n -r '
+              $src = getenv("GITHUB_WORKSPACE") . "/app/server/src";
+              $q = chr(39);
+              $text = static fn (string $f): string => is_file($f) && !is_link($f) ? (string) file_get_contents($f) : "";
+              preg_match_all("#" . $q . "(/api/[a-z/-]{1,64})" . $q . "#", $text("$src/Http/Routes.php"), $m);
+              $routes = array_fill_keys($m[1], true) + ["-" => true];
+              preg_match_all("#case [A-Za-z]+ = " . $q . "([a-z_]{1,40})" . $q . "#", $text("$src/Http/ErrorCode.php"), $m);
+              $errors = array_fill_keys($m[1], true);
+              $reasons = [];
+              if (is_dir($src) && !is_link($src)) {
+                foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS)) as $f) {
+                  if (substr((string) $f, -4) !== ".php") { continue; }
+                  preg_match_all("#logReason: " . $q . "([a-z][a-z_]{0,31})" . $q . "#", $text((string) $f), $m);
+                  $reasons += array_fill_keys($m[1], true);
+                }
+              }
+              $events = ["request" => true, "db_error" => true, "exception" => true, "backup" => true];
+              $methods = array_fill_keys(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "INVALID"], true);
+              $pick = static fn ($v, array $allow): string => $v === null ? "-" : (is_string($v) && isset($allow[$v]) ? $v : "other");
+              $n = [];
+              foreach (file(getenv("BQA_DIR") . "/logs/api.log", FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+                $r = json_decode($l, true);
+                if (!is_array($r)) { $n["unparsed-line"] = ($n["unparsed-line"] ?? 0) + 1; continue; }
+                $s = $r["status"] ?? null;
+                $k = $pick($r["event"] ?? null, $events) . " " . $pick($r["method"] ?? null, $methods) . " " . $pick($r["route"] ?? null, $routes)
+                  . " " . (is_int($s) && $s >= 100 && $s <= 599 ? (string) $s : "-") . " " . $pick($r["error"] ?? null, $errors) . " " . $pick($r["reason"] ?? null, $reasons);
+                $n[$k] = ($n[$k] ?? 0) + 1;
+              }
+              ksort($n);
+              echo "  (allowlists: ", count($routes), " routes, ", count($errors), " error codes, ", count($reasons), " reasons)\n";
+              foreach ($n as $k => $c) { echo str_pad((string) $c, 5, " ", STR_PAD_LEFT), "  ", $k, "\n"; }
+            '
+          fi
+          for f in php-server.log proxy.log; do
+            [ -f "$BQA_DIR/logs/$f" ] || continue
+            # Counts only: request lines can carry query strings, and nothing else here is needed.
+            echo "$f: $(grep -ciE 'fatal|exception|php (warning|notice|error)' "$BQA_DIR/logs/$f" || true) error-class lines"
+          done
+
+      - name: Stop the servers and remove QA state, configuration and output
+        if: always()
+        run: |
+          [ -n "${BQA_DIR:-}" ] || exit 0
+          for p in proxy php; do
+            [ -f "$BQA_DIR/$p.pid" ] && kill "$(cat "$BQA_DIR/$p.pid")" 2>/dev/null || true
+          done
+          rm -rf "$BQA_DIR"

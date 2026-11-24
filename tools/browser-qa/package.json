@@ -1,0 +1,16 @@
+{
+  "name": "tam-os-browser-qa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TEST-ONLY browser QA for the SESSION package. Run only by .github/workflows/browser-qa.yml; never deployed, never part of the package.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "playwright test session.spec.js --workers=1 --retries=0 --reporter=list"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}
