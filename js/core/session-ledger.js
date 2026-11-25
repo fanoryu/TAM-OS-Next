@@ -77,6 +77,13 @@ const SessionLedgerStore = (function(){
   function isCurrent(token){ return !!token && token.gen === generation && token.seq === seqOf(token.kind); }
   function isLive(token){ return !!token && token.gen === generation; }
   function clearError(scope){ if(error && error.scope === scope) error = null; }
+  // T2.6 (OD-CUT-3 r8): leaving a view drops its read unless it is READY. A read still in flight is
+  // superseded (its late answer is ignored, so it can never take the shared `error` of the view shown);
+  // a failed one is read again when its view is shown. READY data is kept and never read again.
+  function dropRead(kind){
+    if(kind === 'report'){ reportSeq++; if(reportStatus !== SESSION_LEDGER_STATUS.READY){ report = null; reportStatus = SESSION_LEDGER_STATUS.IDLE; } clearError('report'); }
+    else { listSeq++; if(listStatus !== SESSION_LEDGER_STATUS.READY){ list = null; listStatus = SESSION_LEDGER_STATUS.IDLE; } clearError('list'); }
+  }
   function dropReads(){
     reportSeq++; report = null; reportStatus = SESSION_LEDGER_STATUS.IDLE; clearError('report');
     listSeq++; list = null; listStatus = SESSION_LEDGER_STATUS.IDLE; clearError('list');
@@ -113,7 +120,7 @@ const SessionLedgerStore = (function(){
       open = next;
       if(open && range === null){ range = initialRange; rangeDraft = { from: initialRange.from, to: initialRange.to }; }
     },
-    setView(v){ if(SESSION_LEDGER_VIEWS.indexOf(v) !== -1){ view = v; notice = null; drill = null; } },
+    setView(v){ if(SESSION_LEDGER_VIEWS.indexOf(v) !== -1){ if(v !== view) dropRead(v === 'transactions' ? 'report' : 'list'); view = v; notice = null; drill = null; } },
     setRangeDraft(name, value){ if(rangeDraft && (name === 'from' || name === 'to')) rangeDraft[name] = typeof value === 'string' ? value : ''; },
     setPostFilter(v){ postFilter = v === '' || transactionIsPost(v) ? v : ''; notice = null; },
     setRange(next){ range = Object.freeze({ from: next.from, to: next.to }); rangeDraft = { from: next.from, to: next.to }; notice = null; voidTarget = null; drill = null; dropReads(); },

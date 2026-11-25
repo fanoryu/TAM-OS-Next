@@ -794,6 +794,96 @@ function firewall(rt, label){
     }
   }
 
+  /* ---------- R. T2.6 (OD-CUT-3 r8): overlapping reads, answers in a controlled order (Owner GO 2026-11-25) ---------- */
+  // Opening Transactions from another section reads the report (the section opens on Overview) and then the list.
+  // Each answer is held by a deferred route and released in the order a test chooses. A gate answer is the Basic
+  // 401 of the HTTP gate: an HTML body, so UNAVAILABLE (api-client normalize), never UNAUTHENTICATED.
+  {
+    const deferred = () => { let release; const p = new Promise((r) => { release = r; }); return { route: () => p, release: (v) => release(v) }; };
+    const GATE = () => { const h = { 'content-type': 'text/html; charset=iso-8859-1', 'www-authenticate': 'Basic realm="fabricated"' };
+      return { status: 401, headers: { get: (n) => h[String(n).toLowerCase()] === undefined ? null : h[String(n).toLowerCase()] }, text: async () => '<html><body>401</body></html>' }; };
+    const UNAVAILABLE_TEXT = /id="sfReadError" role="alert"[^>]*>The finance information could not be loaded\. Check your connection, then try again\.<\/p>/;
+    const LOADING_LIST = /role="status" aria-busy="true">Loading transactions…</;
+    const reads = (rt) => ledgerCalls(rt).map((c) => (c.url === REP(...APRIL) ? 'report' : c.url === RANGE(...APRIL) ? 'list' : c.url));
+    async function race(first, second, answers){
+      const d = { report: deferred(), list: deferred() };
+      const rt = await boot(ME_CEO, Object.assign({ [REP(...APRIL)]: [d.report.route], [RANGE(...APRIL)]: [d.list.route] }, answers || {}));
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      const sent = reads(rt).join('+');
+      d[first].release(first === 'report' ? (answers && answers.reportAnswer || GATE()) : (answers && answers.listAnswer || GATE())); await flush();
+      d[second].release(second === 'report' ? (answers && answers.reportAnswer || GATE()) : (answers && answers.listAnswer || GATE())); await flush();
+      return { rt, sent };
+    }
+    const shownError = (rt) => rt.state() === 'AUTHENTICATED' && rt.sf().view === 'transactions' && rt.sf().listStatus === 'error' && rt.sf().error && rt.sf().error.scope === 'list'
+      && UNAVAILABLE_TEXT.test(card(rt)) && /id="sfRetryBtn"/.test(card(rt)) && !LOADING_LIST.test(card(rt)) && !/id="sfList"|data-sf-void=/.test(card(rt))
+      && /<h1 class="auth-title" id="authTitle" tabindex="-1">Transactions<\/h1>/.test(card(rt));
+
+    // R1 / R2: both reads denied by the gate, in each arrival order.
+    const r1 = await race('report', 'list');
+    check(r1.sent === 'report+list' && shownError(r1.rt), 'R1. Transactions opened from another section reads report then list; report then list UNAVAILABLE: the Transactions error is shown (alert + Retry), not a loading line');
+    const r2 = await race('list', 'report');
+    check(r2.sent === 'report+list' && shownError(r2.rt) && r2.rt.sf().reportStatus === 'idle',
+      'R2. list then report UNAVAILABLE: the late report answer is ignored, the Transactions error is still shown (was: "Loading transactions…" with no alert)');
+    firewall(r2.rt, 'R2');
+
+    // R3: the list read succeeds first; the superseded report fails late and changes nothing.
+    const r3 = await race('list', 'report', { listAnswer: ok(LIST) });
+    check(r3.rt.sf().listStatus === 'ready' && r3.rt.sf().error === null && r3.rt.sf().reportStatus === 'idle' && /3 transactions, oldest first\./.test(card(r3.rt)) && /id="sfList"/.test(card(r3.rt))
+      && !/id="sfReadError"/.test(card(r3.rt)), 'R3. a late report failure after a successful list read: the list stays shown, no error');
+
+    // R4: Transactions, then Overview while the list is still in flight; the late list answer (data or a gate denial) is ignored.
+    for(const late of [['data', () => ok(LIST)], ['a gate denial', GATE]]){
+      const dl = deferred(); const dr = deferred();
+      const rt = await boot(ME_CEO, { [REP(...APRIL)]: [dr.route, ok(REPORT)], [RANGE(...APRIL)]: [dl.route] });
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      rt.app.fire('swSectionFinance', 'click'); await flush();
+      const sent = reads(rt).join('+');
+      dl.release(late[1]()); await flush();
+      dr.release(GATE()); await flush();
+      check(sent === 'report+list+report' && rt.sf().view === 'dashboard' && rt.sf().reportStatus === 'ready' && rt.sf().listStatus === 'idle' && rt.sf().list === null && rt.sf().error === null
+        && /id="sfPosts"/.test(card(rt)) && !/id="sfReadError"|id="sfList"/.test(card(rt)) && reads(rt).length === 3,
+        'R4. a late list answer (' + late[0] + ') after switching to Overview is ignored: the dashboard shows its own report, no error, no list kept, nothing re-read');
+    }
+
+    // R5: Retry, from the R2 state, reads only the view shown.
+    {
+      const rt = r2.rt;
+      rt.net.routes[REP(...APRIL)] = [ok(REPORT)]; rt.net.routes[RANGE(...APRIL)] = [ok(LIST)];
+      const before = reads(rt).length;
+      check(rt.app.fire('sfRetryBtn', 'click') === 'fired', 'R5. Retry is offered on the Transactions error');
+      await flush();
+      check(reads(rt).slice(before).join('+') === 'list' && rt.sf().listStatus === 'ready' && rt.sf().reportStatus === 'idle' && /3 transactions, oldest first\./.test(card(rt)),
+        'R5. Retry reads the Transactions list only — never the report of the view not shown');
+    }
+
+    // R6: an application 401 (JSON UNAUTHENTICATED) on the active read still ends the session, whatever arrives after it.
+    for(const order of [['list', 'report'], ['report', 'list']]){
+      const r = await race(order[0], order[1], { listAnswer: err(401, 'unauthenticated'), '/api/auth/me': [ok(ME_CEO)] });
+      check(r.rt.state() === 'SIGNED_OUT' && r.rt.sf().open === false && r.rt.sf().list === null && r.rt.sf().report === null && !parseSessionShell(r.rt.appHTML()),
+        'R6. the active list answered UNAUTHENTICATED (' + order.join(' then ') + '): AuthBoot.sessionLost() — SIGNED_OUT, Finance data destroyed, no shell');
+    }
+    {
+      const rt = await open({ [REP(...APRIL)]: [err(401, 'unauthenticated')], '/api/auth/me': [ok(ME_CEO)] });
+      check(rt.state() === 'SIGNED_OUT' && rt.sf().open === false, 'R6. the active report answered UNAUTHENTICATED on Overview: the session still ends');
+    }
+
+    // R7: both views READY; switching between them reads nothing and keeps both answers.
+    {
+      const rt = await open();
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      const before = reads(rt).join('+');
+      rt.app.fire('swSectionFinance', 'click'); await flush();
+      const onOverview = /id="sfPosts"/.test(card(rt));
+      rt.app.fire('swSectionTransactions', 'click'); await flush();
+      const onTx = /3 transactions, oldest first\./.test(card(rt));
+      rt.app.fire('swSectionFinance', 'click'); await flush();
+      check(before === 'report+list' && reads(rt).join('+') === before && onOverview && onTx && /id="sfPosts"/.test(card(rt))
+        && rt.sf().reportStatus === 'ready' && rt.sf().listStatus === 'ready',
+        'R7. switching Overview ↔ Transactions with both views READY sends no request and keeps both answers');
+      firewall(rt, 'R7');
+    }
+  }
+
   /* ---------- G. session end ---------- */
   {
     const rt = await open({ [REP(...APRIL)]: [err(401, 'unauthenticated')], '/api/auth/me': [ok(ME_CEO)] });
