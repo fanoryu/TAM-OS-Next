@@ -38,6 +38,16 @@ return [
         assertSame('+00:00', $row['tz']);
         assertSame('utf8mb4', $row['cs']);
     },
+    'session: every fresh connection pins REPEATABLE READ with innodb_snapshot_isolation OFF, whatever the server default' => static function () use ($second): void {
+        foreach ([testDatabase(), $second(), $second()] as $db) {
+            $rows = $db->select("SELECT VARIABLE_NAME AS n, VARIABLE_VALUE AS v FROM information_schema.SESSION_VARIABLES WHERE VARIABLE_NAME IN ('TX_ISOLATION', 'TRANSACTION_ISOLATION', 'INNODB_SNAPSHOT_ISOLATION')");
+            $session = array_column($rows, 'v', 'n');
+            assertSame('OFF', $session['INNODB_SNAPSHOT_ISOLATION'] ?? null, 'innodb_snapshot_isolation');
+            $isolation = array_values(array_diff_key($session, ['INNODB_SNAPSHOT_ISOLATION' => true]));
+            assertTrue($isolation !== [], 'the session isolation variable is readable');
+            assertSame(array_fill(0, count($isolation), 'REPEATABLE-READ'), $isolation, 'session isolation');
+        }
+    },
     'statements are natively prepared and bound' => static function (): void {
         $db = testDatabase();
         $count = static fn (): int => (int) $db->select("SELECT VARIABLE_VALUE AS v FROM information_schema.SESSION_STATUS WHERE VARIABLE_NAME = 'COM_STMT_PREPARE'")[0]['v'];
@@ -119,6 +129,54 @@ return [
         });
         assertTrue($error instanceof DatabaseError, 'lock wait surfaced');
         assertSame([DatabaseError::TRANSIENT, 1205, 1], [$error->kind, $error->driverCode, $calls]);
+    },
+    'isolation: the default transaction is REPEATABLE READ, a READ COMMITTED request applies to that transaction only, snapshot stays REPEATABLE READ' => static function () use ($probe, $second): void {
+        $a = $probe();
+        $b = $second();
+        $a->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [1, 'a']);
+        $count = static fn (Database $db): int => (int) $db->select('SELECT COUNT(*) AS n FROM bf2a_probe')[0]['n'];
+        $next = 1;
+        $run = static function (callable $wrap) use ($b, $count, &$next): array {
+            return $wrap(static function (Database $tx) use ($b, $count, &$next): array {
+                $before = $count($tx);
+                $b->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [++$next, 'b']);    // commits on its own connection
+                return [$before, $count($tx)];
+            });
+        };
+        assertSame([1, 1], $run(static fn (callable $fn): array => $a->transaction($fn)), 'default: one snapshot (REPEATABLE READ)');
+        assertSame([2, 3], $run(static fn (callable $fn): array => $a->transaction($fn, true)), 'readCommitted: sees the concurrent commit');
+        assertSame([3, 3], $run(static fn (callable $fn): array => $a->transaction($fn)), 'the next default transaction is REPEATABLE READ again');
+        assertSame([4, 4], $run(static fn (callable $fn): array => $a->snapshot($fn)), 'snapshot: one consistent snapshot');
+    },
+    'isolation: a REPEATABLE READ unit may update a row another connection changed after its snapshot (no 1020 with snapshot isolation OFF)' => static function () use ($probe, $second): void {
+        $a = $probe();
+        $a->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [1, 'old']);
+        $b = $second();
+        $seen = $a->transaction(static function (Database $tx) use ($b): array {
+            $first = $tx->select('SELECT v FROM bf2a_probe WHERE id = ?', [1])[0]['v'];
+            $b->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['other', 1]);
+            $changed = $tx->execute('UPDATE bf2a_probe SET v = CONCAT(v, ?) WHERE id = ?', ['+mine', 1]);
+            return [$first, $changed, $tx->select('SELECT v FROM bf2a_probe WHERE id = ?', [1])[0]['v']];
+        });
+        assertSame(['old', 1, 'other+mine'], $seen, 'the write applies to the latest committed row');
+        assertSame('other+mine', $b->select('SELECT v FROM bf2a_probe WHERE id = ?', [1])[0]['v'], 'committed');
+    },
+    'a 1020 "record has changed" conflict (snapshot isolation forced ON, test-only) is transient, rolls back whole and is not retried' => static function () use ($probe, $second, $ids): void {
+        $a = $probe();
+        $a->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [1, 'old']);
+        $a->execute('SET SESSION innodb_snapshot_isolation = ON');    // this test connection only
+        $b = $second();
+        $calls = 0;
+        $error = assertThrows(DatabaseError::class, static fn () => $a->transaction(static function (Database $tx) use ($b, &$calls): void {
+            $calls++;
+            $tx->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [2, 'mine']);
+            $tx->select('SELECT v FROM bf2a_probe WHERE id = ?', [1]);
+            $b->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['other', 1]);
+            $tx->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['mine', 1]);
+        }));
+        assertSame([DatabaseError::TRANSIENT, 1020, 1], [$error->kind, $error->driverCode, $calls]);
+        assertSame([1], $ids($b), 'the whole unit rolled back');
+        assertSame('other', $b->select('SELECT v FROM bf2a_probe WHERE id = ?', [1])[0]['v'], 'the concurrent commit stands');
     },
     'a wrong password or closed port is unavailable, with no credential in the error' => static function (): void {
         $settings = testDbConfig()->db;

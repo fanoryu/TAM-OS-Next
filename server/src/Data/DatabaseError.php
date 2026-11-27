@@ -11,7 +11,8 @@ namespace TamOs\Data;
  * SQLSTATE / driver code survive, which is all the kernel needs to answer and log.
  *
  *   unavailable  the database cannot be reached or is not configured      → 503
- *   transient    deadlock (1213) or lock-wait timeout (1205); retry later  → 503
+ *   transient    deadlock (1213), lock-wait timeout (1205) or a row changed
+ *                since the transaction's snapshot (1020); retry later        → 503
  *   failure      anything else                                             → 500
  */
 final class DatabaseError extends \RuntimeException
@@ -20,7 +21,9 @@ final class DatabaseError extends \RuntimeException
     public const TRANSIENT = 'transient';
     public const FAILURE = 'failure';
 
-    private const TRANSIENT_CODES = [1205, 1213];
+    // 1020 (ER_CHECKREAD) is a concurrent-change conflict: the unit rolled back whole, like a
+    // deadlock. Nothing here retries it; 503 only tells the client the request may be resent.
+    private const TRANSIENT_CODES = [1020, 1205, 1213];
     // Server gone away / lost connection / cannot connect / too many connections.
     private const UNAVAILABLE_CODES = [1040, 2002, 2003, 2006, 2013];
 

@@ -12,11 +12,21 @@ use TamOs\Config\Config;
  * never stops the API from booting or /api/health from answering. The password never leaves
  * this class: it is #[\SensitiveParameter] in every signature, masked in __debugInfo, and
  * handed to PDO directly.
+ *
+ * Every connection pins its own transaction semantics instead of inheriting the server's: the
+ * init command switches innodb_snapshot_isolation OFF for the session (MariaDB 11.8, the host, defaults it
+ * ON, which turns a REPEATABLE READ write over a row changed since the snapshot into error 1020),
+ * and ISOLATION_SQL then sets the session default to REPEATABLE READ (a host may default to READ
+ * COMMITTED). Both are session-scoped, need no privilege, and change no global setting. Either
+ * statement failing — an unknown variable on an unsupported server included — fails the connect,
+ * so the application never runs under transaction semantics it was not tested with. A per-
+ * transaction SET TRANSACTION (Database::transaction / snapshot) still overrides the default.
  */
 final class DatabaseConfig
 {
     public const CONNECT_TIMEOUT_SECONDS = 5;
-    public const INIT_COMMAND = "SET time_zone='+00:00', sql_mode='STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,NO_ENGINE_SUBSTITUTION,ERROR_FOR_DIVISION_BY_ZERO'";
+    public const INIT_COMMAND = "SET time_zone='+00:00', sql_mode='STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,NO_ENGINE_SUBSTITUTION,ERROR_FOR_DIVISION_BY_ZERO', innodb_snapshot_isolation=OFF";
+    public const ISOLATION_SQL = 'SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ';
     private const KEYS = ['host', 'port', 'name', 'user', 'pass'];
 
     private function __construct(
@@ -76,7 +86,7 @@ final class DatabaseConfig
             throw DatabaseError::unavailable('connect');
         }
         try {
-            return new \PDO($this->dsn(), $this->user, $this->pass, [
+            $pdo = new \PDO($this->dsn(), $this->user, $this->pass, [
                 \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
                 \PDO::ATTR_EMULATE_PREPARES => false,
                 \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
@@ -85,6 +95,8 @@ final class DatabaseConfig
                 \PDO::MYSQL_ATTR_MULTI_STATEMENTS => false,
                 \PDO::MYSQL_ATTR_INIT_COMMAND => self::INIT_COMMAND,
             ]);
+            $pdo->prepare(self::ISOLATION_SQL)->execute();    // prepared, like every statement
+            return $pdo;
         } catch (\PDOException $e) {
             throw DatabaseError::fromConnect($e);
         }

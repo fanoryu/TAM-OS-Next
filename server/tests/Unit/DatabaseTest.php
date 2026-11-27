@@ -89,6 +89,18 @@ return [
         $wait = DatabaseError::fromPdo($pdoError('SQLSTATE[HY000]: Lock wait timeout', ['HY000', 1205, 'Lock wait timeout exceeded']), 'select');
         assertSame([DatabaseError::TRANSIENT, 1205], [$wait->kind, $wait->driverCode]);
     },
+    'a 1020 changed-record conflict is transient; 1020 never hides another code' => static function () use ($pdoError): void {
+        $changed = DatabaseError::fromPdo($pdoError("SQLSTATE[HY000]: General error: 1020 Record has changed since last read in table 'payroll'", ['HY000', 1020, 'Record has changed']), 'execute');
+        assertSame([DatabaseError::TRANSIENT, 'HY000', 1020, 'execute'], [$changed->kind, $changed->sqlstate, $changed->driverCode, $changed->operation]);
+        assertSame('database transient during execute', $changed->getMessage());
+        assertSame(DatabaseError::FAILURE, DatabaseError::fromPdo($pdoError('1020 in text only', ['HY000', 1021, '1020']), 'execute')->kind, 'classified by driver code, not message');
+        assertSame(DatabaseError::UNAVAILABLE, DatabaseError::fromConnect($pdoError('SQLSTATE[HY000] [1020] x', null))->kind, 'at connect it stays unavailable');
+    },
+    'every connection pins snapshot isolation OFF and REPEATABLE READ as session-scoped statements' => static function (): void {
+        assertTrue(str_ends_with(DatabaseConfig::INIT_COMMAND, ', innodb_snapshot_isolation=OFF'), 'init command');
+        assertTrue(!str_contains(strtoupper(DatabaseConfig::INIT_COMMAND), 'GLOBAL'), 'no global setting');
+        assertSame('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ', DatabaseConfig::ISOLATION_SQL);
+    },
     'lost connections are unavailable; everything else is failure' => static function () use ($pdoError): void {
         foreach ([2006, 2013] as $code) {
             assertSame(DatabaseError::UNAVAILABLE, DatabaseError::fromPdo($pdoError('gone', ['HY000', $code, 'gone']), 'select')->kind);

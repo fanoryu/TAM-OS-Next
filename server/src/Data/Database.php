@@ -15,10 +15,11 @@ namespace TamOs\Data;
  * in a statement.
  *
  * transaction() runs its callback exactly once: nested transactions are refused, any
- * throwable rolls back, and nothing is retried. By default it runs at the server's isolation level
- * (REPEATABLE READ); BF-4c1's payroll generate asks for READ COMMITTED for that one transaction,
- * so each of its plain reads sees what committed before it — after the row locks it has taken —
- * without locking secondary-index ranges.
+ * throwable rolls back, and nothing is retried. By default it runs at the connection's pinned
+ * isolation level (REPEATABLE READ, snapshot isolation OFF; see DatabaseConfig); BF-4c1's
+ * payroll generate asks for READ COMMITTED for that one transaction, so each of its plain reads
+ * sees what committed before it — after the row locks it has taken — without locking
+ * secondary-index ranges.
  */
 final class Database
 {

@@ -77,7 +77,7 @@ final class Kernel
             $reason = $e->logReason;
             $response = Response::error($e->errorCode, $requestId, $e);
         } catch (DatabaseError $e) {
-            // Unreachable or transient (deadlock, lock wait) → 503; any other database failure → 500.
+            // Unreachable or transient (deadlock, lock wait, changed row) → 503; any other database failure → 500.
             $code = $e->kind === DatabaseError::FAILURE ? ErrorCode::InternalError : ErrorCode::ServiceUnavailable;
             $error = $code->value;
             $this->logger->database($requestId, $e);
