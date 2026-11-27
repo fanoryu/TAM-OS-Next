@@ -167,13 +167,19 @@ return [
         $a->execute('SET SESSION innodb_snapshot_isolation = ON');    // this test connection only
         $b = $second();
         $calls = 0;
-        $error = assertThrows(DatabaseError::class, static fn () => $a->transaction(static function (Database $tx) use ($b, &$calls): void {
-            $calls++;
-            $tx->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [2, 'mine']);
-            $tx->select('SELECT v FROM bf2a_probe WHERE id = ?', [1]);
-            $b->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['other', 1]);
-            $tx->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['mine', 1]);
-        }));
+        $error = null;
+        try {
+            $a->transaction(static function (Database $tx) use ($b, &$calls): void {
+                $calls++;
+                $tx->execute('INSERT INTO bf2a_probe (id, v) VALUES (?, ?)', [2, 'mine']);
+                $tx->select('SELECT v FROM bf2a_probe WHERE id = ?', [1]);
+                $b->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['other', 1]);
+                $tx->execute('UPDATE bf2a_probe SET v = ? WHERE id = ?', ['mine', 1]);
+            });
+        } catch (DatabaseError $e) {
+            $error = $e;
+        }
+        assertTrue($error instanceof DatabaseError, 'the conflict surfaced');
         assertSame([DatabaseError::TRANSIENT, 1020, 1], [$error->kind, $error->driverCode, $calls]);
         assertSame([1], $ids($b), 'the whole unit rolled back');
         assertSame('other', $b->select('SELECT v FROM bf2a_probe WHERE id = ?', [1])[0]['v'], 'the concurrent commit stands');

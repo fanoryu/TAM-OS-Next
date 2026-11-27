@@ -512,7 +512,9 @@ final class CommitFaultRelay
     /** @param array{command: string, sql?: string, stmt?: int} $cmd */
     private function response(array $cmd, string $payload): void
     {
-        $ok = MysqlPacket::ok($payload);
+        // A COM_STMT_PREPARE OK also starts with 0x00, but a statement id follows, not an OK packet's
+        // length-encoded integers: parsed as an OK, an id whose low byte is 0xFB–0xFF was refused.
+        $ok = $cmd['command'] === 'prepare' ? null : MysqlPacket::ok($payload);
         $err = MysqlPacket::err($payload);
         switch ($cmd['command']) {
             case 'prepare':

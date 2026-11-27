@@ -245,6 +245,19 @@ return [
             assertSame([], CommitFaultEvidence::transparentProblems($complete($r->result()), 0), 'transparent, chunk ' . $chunk);
         }
     },
+    'unarmed: a prepared statement id whose low byte is 0xFB, 0xFE or 0xFF is relayed, not parsed as an OK packet' => static function () use ($pay, $drive, $bytesOf, $complete, $replace, $prepareOk, $execute, $close, $ok): void {
+        foreach ([0xFB, 0x01FE, 0x02FF] as $id) {
+            $steps = $pay();
+            $steps = $replace($steps, 'rc-p', ['s', $prepareOk($id), 'rc-p']);
+            $steps = $replace($steps, 'rc-x', ['c', $execute($id), 'rc-x']);
+            $steps = $replace($steps, 'rc-c', ['c', $close($id), 'rc-c']);
+            $steps = array_map(static fn (array $s): array => $s[2] === 'rollback-ok' ? ['s', $s[1], 'commit-ok'] : $s, array_values(array_filter($steps, static fn (array $s): bool => $s[2] !== 'rollback')));
+            $r = new CommitFaultRelay(false);
+            [$toServer, $toClient] = $drive($r, $steps, 0);
+            assertSame([null, $bytesOf($steps, 'c'), $bytesOf($steps, 's')], [$r->failure(), $toServer, $toClient], sprintf('statement id 0x%X', $id));
+            assertSame([], CommitFaultEvidence::transparentProblems($complete($r->result()), 0), sprintf('transparent, statement id 0x%X', $id));
+        }
+    },
     'armed: the COMMIT after the five acknowledged writes is intercepted, never forwarded, answered with the injected ERR; ROLLBACK is forwarded and confirmed' => static function () use ($pay, $drive, $bytesOf, $complete, $expected, $query, $injected): void {
         foreach ([0, 2, 5] as $chunk) {
             $steps = $pay();
