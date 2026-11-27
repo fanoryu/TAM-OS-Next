@@ -197,15 +197,24 @@ return [
     },
     'the existing indexes serve both reads: audit_events_company_time (no filesort) and audit_events_entity' => static function () use ($world, $bulk): void {
         $w = $world();
-        $bulk($w, 'ceoA', 1500, '2025-05-01 00:00:00.000000', 'e_bulk');
-        $bulk($w, 'ceoA', 1500, '2025-06-01 00:00:00.000000', 'e_bulk');
+        // GO-1A: the company's 3,000 rows are spread over the twelve months of 2025 (250 a month), so one month
+        // is 1/12 of the company — the shape of a year of audit history. (Before: 1,500 in May and 1,500 in June,
+        // so the May window held half of the company and a third of the table, which MariaDB 11's cost model
+        // answers with a full scan.) Another company still has 1,500 rows in May.
+        for ($month = 1; $month <= 12; $month++) {
+            $bulk($w, 'ceoA', 250, sprintf('2025-%02d-01 00:00:00.000000', $month), 'e_bulk');
+        }
         $bulk($w, 'ceoB', 1500, '2025-05-01 00:00:00.000000', 'e_bulk');
         $w['db']->select('ANALYZE TABLE audit_events');
         $explain = static fn (string $sql, array $p): array => $w['db']->select('EXPLAIN ' . $sql, $p)[0];
-        // Any month: audit_events_company_time, whose order serves ORDER BY occurred_at, id (no filesort). With
-        // half of the company's rows in the window the optimizer may scan it by company_id (ref) or by range.
+        $total = (int) $w['db']->select('SELECT COUNT(*) AS n FROM audit_events')[0]['n'];
+        $company = (int) $w['db']->select('SELECT COUNT(*) AS n FROM audit_events WHERE company_id = ?', [$w['a']])[0]['n'];
+        // Any month: audit_events_company_time, whose order serves ORDER BY occurred_at, id (no filesort).
         foreach ([['2025-04-30 17:00:00.000000', '2025-05-31 17:00:00.000000'], ['2025-03-31 17:00:00.000000', '2025-04-30 17:00:00.000000']] as [$from, $to]) {
             $m = $explain(AuditEventStore::MONTH_SQL, ['company_id' => $w['a'], 'from' => $from, 'to' => $to]);
+            $inWindow = count($w['db']->select(AuditEventStore::MONTH_SQL, ['company_id' => $w['a'], 'from' => $from, 'to' => $to]));
+            assertSame(250, $inWindow, 'the month returns exactly its 250 rows');
+            echo '    F-03 plan ' . $w['db']->select('SELECT VERSION() AS v')[0]['v'] . ' window ' . $from . ': ' . $inWindow . '/' . $company . ' company rows, ' . $total . ' table rows; ' . json_encode($m) . "\n";
             assertSame(['audit_events', 'audit_events_company_time'], [$m['table'], $m['key']], 'month: ' . json_encode($m));
             assertTrue(!str_contains((string) $m['Extra'], 'filesort'), 'month: ordered by the index (' . $m['Extra'] . ')');
         }

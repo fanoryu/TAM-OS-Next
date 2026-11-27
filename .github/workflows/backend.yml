@@ -7,6 +7,10 @@ name: Backend
 #
 # backend-db (BF-2A) runs the database suite against a disposable MariaDB service container.
 # It is the authoritative database integration environment; it never reaches Hostinger.
+# GO-1 (2026-11-27): it runs twice — MariaDB 10.11.19 (the control, check name `backend-db`) and
+# MariaDB 11.8.9 (the production target, with the Hostinger defaults observed in H-1:
+# innodb_snapshot_isolation=ON, global isolation READ-COMMITTED), each in its own throw-away
+# container.
 on:
   push:
     branches: [main]
@@ -61,15 +65,34 @@ jobs:
         run: php server/tests/run.php
 
   backend-db:
+    name: ${{ matrix.check }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Official Docker Library images, each pinned by tag AND by the multi-arch index digest.
+          # Update deliberately: resolve the new digest, record it here, and review the MariaDB
+          # release notes.
+          # 10.11 LTS control: digest resolved from registry-1.docker.io on 2026-09-29
+          # (library/mariadb:10.11 = 10.11.19 = 10.11.19-jammy); server defaults left untouched
+          # (REPEATABLE-READ, innodb_snapshot_isolation OFF).
+          - check: backend-db
+            image: mariadb:10.11.19@sha256:7f22313fc130a377a44999965bcb0a08dd5b21e8502824c1b864f792f9bc66ab
+            version: 10.11.19
+            global_isolation: REPEATABLE-READ
+            global_snapshot: 'OFF'
+          # 11.8 production target: digest resolved from registry-1.docker.io on 2026-11-27
+          # (library/mariadb:11.8.9 index). Its default innodb_snapshot_isolation is ON, as on
+          # Hostinger; the global isolation is set to READ-COMMITTED below to match H-1.
+          - check: backend-db (MariaDB 11.8.9)
+            image: mariadb:11.8.9@sha256:e1d5495f445654134f226f55a41ce0da227116f6f27f283101f405c794d841fc
+            version: 11.8.9
+            global_isolation: READ-COMMITTED
+            global_snapshot: 'ON'
     services:
       mariadb:
-        # Official Docker Library image, MariaDB 10.11 LTS — a CI baseline, NOT proof of
-        # compatibility with the (unverified) Hostinger server version. Pinned by tag AND by
-        # the multi-arch index digest, resolved from registry-1.docker.io on 2026-09-29
-        # (library/mariadb:10.11 = 10.11.19 = 10.11.19-jammy). Update deliberately: resolve the
-        # new digest, record it here, and review the MariaDB release notes.
-        image: mariadb:10.11.19@sha256:7f22313fc130a377a44999965bcb0a08dd5b21e8502824c1b864f792f9bc66ab
+        image: ${{ matrix.image }}
         env:
           # Disposable CI-only values for a throw-away container; not secrets, never reused.
           MARIADB_ROOT_PASSWORD: ci-only-root-not-a-secret
@@ -125,6 +148,60 @@ jobs:
           echo "GRANT PROCESS ON *.* TO '$TAMOS_TEST_DB_USER'@'%';" | root_sql
           echo "SHOW GRANTS FOR '$TAMOS_TEST_DB_USER'@'%';" | root_sql | sed -E 's/PASSWORD .*/PASSWORD <hash>/'
 
+      # GO-1: reproduce the observed Hostinger server defaults inside this job's throw-away
+      # container only (SET GLOBAL applies to connections opened afterwards), then refuse to run
+      # the suite unless the server is the pinned version with exactly those globals.
+      - name: Apply and check the server defaults for MariaDB ${{ matrix.version }} (test-only)
+        shell: bash
+        env:
+          SERVICE_ID: ${{ job.services.mariadb.id }}
+          EXPECT_VERSION: ${{ matrix.version }}
+          EXPECT_ISOLATION: ${{ matrix.global_isolation }}
+          EXPECT_SNAPSHOT: ${{ matrix.global_snapshot }}
+        run: |
+          set -euo pipefail
+          root_sql() { docker exec -i "$SERVICE_ID" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot --batch --skip-column-names'; }
+          if [ "$EXPECT_ISOLATION" = "READ-COMMITTED" ]; then
+            echo "SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED;" | root_sql
+          fi
+          got=$(root_sql <<'SQL'
+          SELECT CONCAT_WS('|', VERSION(),
+            (SELECT GROUP_CONCAT(DISTINCT VARIABLE_VALUE) FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME IN ('TX_ISOLATION', 'TRANSACTION_ISOLATION')),
+            (SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME = 'INNODB_SNAPSHOT_ISOLATION'));
+          SQL
+          )
+          echo "server globals: $got"
+          case "$got" in
+            "$EXPECT_VERSION"-MariaDB*"|$EXPECT_ISOLATION|$EXPECT_SNAPSHOT") ;;
+            *) echo "::error::Expected $EXPECT_VERSION|$EXPECT_ISOLATION|$EXPECT_SNAPSHOT, got [$got]. Not running the suite."; exit 1 ;;
+          esac
+
+      # The application's own DatabaseConfig::connect() — the production code path, under the CI
+      # test account — must pin REPEATABLE-READ and innodb_snapshot_isolation OFF on fresh
+      # connections despite those globals.
+      - name: Verify the application connection's effective session settings
+        shell: bash
+        run: |
+          php <<'PHP'
+          <?php
+          require 'server/src/bootstrap.php';
+          $cfg = TamOs\Data\DatabaseConfig::fromArray(['host' => getenv('TAMOS_TEST_DB_HOST'), 'port' => (int) getenv('TAMOS_TEST_DB_PORT'),
+              'name' => getenv('TAMOS_TEST_DB_NAME'), 'user' => getenv('TAMOS_TEST_DB_USER'), 'pass' => getenv('TAMOS_TEST_DB_PASS')]);
+          for ($i = 1; $i <= 2; $i++) {
+              $s = $cfg->connect()->prepare("SELECT CURRENT_USER() AS account, VARIABLE_NAME AS name, VARIABLE_VALUE AS value FROM information_schema.SESSION_VARIABLES
+                  WHERE VARIABLE_NAME IN ('TX_ISOLATION', 'TRANSACTION_ISOLATION', 'INNODB_SNAPSHOT_ISOLATION', 'TIME_ZONE') ORDER BY VARIABLE_NAME");
+              $s->execute();
+              $rows = $s->fetchAll();
+              $session = array_column($rows, 'value', 'name');
+              echo "fresh connection $i (", $rows[0]['account'] ?? '?', "): ", json_encode($session), "\n";
+              $isolation = array_unique(array_values(array_intersect_key($session, ['TX_ISOLATION' => 1, 'TRANSACTION_ISOLATION' => 1])));
+              if ($isolation !== ['REPEATABLE-READ'] || ($session['INNODB_SNAPSHOT_ISOLATION'] ?? null) !== 'OFF' || ($session['TIME_ZONE'] ?? null) !== '+00:00') {
+                  fwrite(STDERR, "::error::session settings are not pinned\n");
+                  exit(1);
+              }
+          }
+          PHP
+
       - name: Verify the test account itself can read INNODB_TRX (the B1 observer connection)
         run: |
           php -r '
@@ -152,7 +229,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: backend-db-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          name: backend-db-evidence-${{ matrix.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/backend-db/backend-tests.log
             ${{ runner.temp }}/b1-evidence/
